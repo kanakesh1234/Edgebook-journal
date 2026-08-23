@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDownIcon } from "./icons";
 
 const controlBase =
-  "w-full rounded-xl border border-line bg-raised/80 px-3.5 py-2.5 text-[15px] text-ink placeholder:text-faint " +
+  "w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink placeholder:text-faint " +
   "transition-[border-color,box-shadow] duration-200 hover:border-line-strong " +
   "focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
 

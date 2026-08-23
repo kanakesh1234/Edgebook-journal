@@ -113,8 +113,6 @@ function LoginView() {
       {/* ------------------------------ Brand panel ------------------------------ */}
       <aside className="relative hidden overflow-hidden border-r border-line bg-surface lg:block">
         <div className="grid-backdrop absolute inset-0 opacity-60" aria-hidden />
-        <div className="absolute -left-24 top-1/3 h-96 w-96 rounded-full bg-gold/[0.07] blur-[120px]" aria-hidden />
-        <div className="absolute -right-16 bottom-10 h-80 w-80 rounded-full bg-profit/[0.05] blur-[110px]" aria-hidden />
 
         <div className="relative flex h-full flex-col justify-between p-12">
           <Link href="/" aria-label="Back to home">
@@ -210,7 +208,7 @@ function LoginView() {
             </Link>
           </div>
 
-          <h2 className="font-display text-2xl font-bold tracking-tight text-ink">
+          <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">
             {mode === "signin" ? "Welcome back" : "Create your journal"}
           </h2>
           <p className="mt-1.5 text-sm text-muted">

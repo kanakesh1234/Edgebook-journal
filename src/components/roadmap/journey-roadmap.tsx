@@ -98,7 +98,7 @@ export function JourneyRoadmap() {
           </p>
         </div>
         <div className="text-right">
-          <p className="font-mono text-4xl font-bold tabular leading-none text-gold sm:text-5xl">
+          <p className="kpi text-4xl leading-none text-gold sm:text-5xl">
             {Math.round(frac * 100)}
             <span className="text-lg text-faint">%</span>
           </p>
@@ -354,7 +354,7 @@ export function JourneyRoadmap() {
             label="Current equity"
             value={formatMoney(stats.currentEquity, currency)}
             chip={
-              <span className={cn("font-mono text-[11px] font-semibold", stats.totalPnl >= 0 ? "text-profit" : "text-loss")}>
+              <span className={cn("num text-[11px]", stats.totalPnl >= 0 ? "text-profit" : "text-loss")}>
                 {formatSignedMoney(stats.totalPnl, currency)}
               </span>
             }
@@ -417,7 +417,7 @@ function RailStat({
         {label}
       </p>
       <p className="mt-1.5 flex items-baseline gap-2">
-        <span className="font-mono text-lg font-bold tabular text-ink">{value}</span>
+        <span className="kpi text-lg text-ink">{value}</span>
         {chip}
       </p>
       {sub && <p className="mt-0.5 text-[11px] text-muted">{sub}</p>}

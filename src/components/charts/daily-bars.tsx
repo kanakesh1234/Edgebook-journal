@@ -20,10 +20,10 @@ function BarsTooltip({ active, payload, currency }: TooltipProps<number, string>
   return (
     <div className="rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
       <p className="text-[11px] font-medium text-muted">{formatDateMedium(d.date)}</p>
-      <p className={`mt-0.5 font-mono text-sm font-semibold tabular ${d.pnl > 0 ? "text-profit" : d.pnl < 0 ? "text-loss" : "text-muted"}`}>
+      <p className={`num mt-0.5 text-sm ${d.pnl > 0 ? "text-profit" : d.pnl < 0 ? "text-loss" : "text-muted"}`}>
         {formatSignedMoney(d.pnl, currency)}
       </p>
-      <p className="font-mono text-[11px] text-faint">
+      <p className="text-[11px] tabular text-faint">
         {d.trades} {d.trades === 1 ? "trade" : "trades"}
       </p>
     </div>

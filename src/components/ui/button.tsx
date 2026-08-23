@@ -26,8 +26,8 @@ const variants: Record<Variant, string> = {
 
 const sizes: Record<Size, string> = {
   sm: "h-8 px-3 text-[13px] rounded-lg gap-1.5",
-  md: "h-10 px-4 text-sm rounded-xl gap-2",
-  lg: "h-12 px-6 text-[15px] rounded-xl gap-2.5",
+  md: "h-10 px-4 text-sm rounded-control gap-2",
+  lg: "h-12 px-6 text-[15px] rounded-control gap-2.5",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

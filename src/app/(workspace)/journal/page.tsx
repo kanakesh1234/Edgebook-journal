@@ -109,7 +109,7 @@ export default function JournalPage() {
       {/* Header */}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-ink sm:text-3xl">Journal</h1>
+          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold">Journal</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
             {entries.length} {entries.length === 1 ? "entry" : "entries"} recorded
             {filtered.length !== entries.length && (

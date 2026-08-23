@@ -25,10 +25,10 @@ function EquityTooltip({
   return (
     <div className="rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
       <p className="text-[11px] font-medium text-muted">{formatDateMedium(p.date)}</p>
-      <p className="mt-0.5 font-mono text-sm font-semibold tabular text-ink">
+      <p className="num mt-0.5 text-sm text-ink">
         {formatMoney(p.equity, currency)}
       </p>
-      <p className={`font-mono text-[11px] tabular ${delta >= 0 ? "text-profit" : "text-loss"}`}>
+      <p className={`text-[11px] font-medium tabular ${delta >= 0 ? "text-profit" : "text-loss"}`}>
         {formatSignedMoney(delta, currency)} overall
       </p>
     </div>
@@ -77,11 +77,11 @@ export function EquityCurve({
         />
         <YAxis
           domain={[minY - pad, maxY + pad]}
-          tickFormatter={(v: number) => formatMoney(v, currency, { compact: true })}
+          tickFormatter={(v: number) => formatMoney(Math.round(v), currency, { compact: true, decimals: 0 })}
           tick={{ fill: "var(--color-faint)", fontSize: 10, fontFamily: "var(--font-mono)" }}
           axisLine={false}
           tickLine={false}
-          width={58}
+          width={56}
         />
 
         <ReferenceLine

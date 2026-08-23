@@ -75,7 +75,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       exit={{ opacity: 0, x: 40, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
       className={cn(
-        "pointer-events-auto relative flex w-[340px] max-w-[calc(100vw-2rem)] items-start gap-3 overflow-hidden rounded-xl border bg-overlay/95 py-3 pl-4 pr-9 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)] backdrop-blur-md",
+        "pointer-events-auto relative flex w-[340px] max-w-[calc(100vw-2rem)] items-start gap-3 overflow-hidden rounded-panel border bg-overlay/95 py-3 pl-4 pr-9 shadow-overlay backdrop-blur-md",
         style.ring,
       )}
       role="status"

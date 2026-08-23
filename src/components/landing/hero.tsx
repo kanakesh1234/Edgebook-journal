@@ -69,18 +69,6 @@ export function Hero() {
     >
       {/* Backdrop layers */}
       <div className="grid-backdrop absolute inset-0 [mask-image:radial-gradient(ellipse_75%_65%_at_50%_35%,black_35%,transparent_78%)]" aria-hidden />
-      <motion.div
-        aria-hidden
-        className="absolute -top-40 right-[-10%] h-[480px] w-[480px] rounded-full bg-gold/[0.07] blur-[130px]"
-        animate={reduce ? undefined : { opacity: [0.7, 1, 0.7] }}
-        transition={{ duration: 9, repeat: Infinity }}
-      />
-      <motion.div
-        aria-hidden
-        className="absolute bottom-[-30%] left-[-12%] h-[520px] w-[520px] rounded-full bg-profit/[0.06] blur-[140px]"
-        animate={reduce ? undefined : { opacity: [1, 0.6, 1] }}
-        transition={{ duration: 11, repeat: Infinity }}
-      />
 
       {/* Candlestick field */}
       <svg
@@ -198,9 +186,9 @@ export function Hero() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-faint">Equity curve</p>
-                <p className="mt-1 font-mono text-xl font-semibold tabular text-ink">
+                <p className="kpi mt-1 text-xl text-ink">
                   $14,820{" "}
-                  <span className="text-sm font-semibold text-profit">+48.2%</span>
+                  <span className="num text-sm text-profit">+48.2%</span>
                 </p>
               </div>
               <span className="rounded-lg border border-profit/25 bg-profit/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-profit">
@@ -286,7 +274,7 @@ export function Hero() {
                   className="rounded-xl border border-line bg-raised/70 px-3 py-2.5"
                 >
                   <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">{s.label}</p>
-                  <p className={`mt-0.5 font-mono text-sm font-semibold tabular ${s.tone}`}>{s.value}</p>
+                  <p className={`num mt-0.5 text-sm ${s.tone}`}>{s.value}</p>
                 </motion.div>
               ))}
             </div>
@@ -302,7 +290,7 @@ export function Hero() {
             >
               <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
                 <TrendingUpIcon className="h-4 w-4 text-profit" />
-                <span className="font-mono text-xs font-semibold tabular text-ink">+$420</span>
+                <span className="text-xs font-semibold tabular text-ink">+$420</span>
                 <span className="text-[11px] text-faint">NQ long</span>
               </div>
             </motion.div>
@@ -316,7 +304,7 @@ export function Hero() {
             >
               <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
                 <RouteIcon className="h-4 w-4 text-info" />
-                <span className="font-mono text-xs font-semibold tabular text-ink">48%</span>
+                <span className="text-xs font-semibold tabular text-ink">48%</span>
                 <span className="text-[11px] text-faint">of journey</span>
               </div>
             </motion.div>

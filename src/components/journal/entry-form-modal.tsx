@@ -163,7 +163,7 @@ export function EntryFormModal({
 
             <Field label="Net P&L" error={errors.pnl} htmlFor="entry-pnl">
               <div className="relative">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-sm text-faint">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-faint">
                   $
                 </span>
                 <TextInput
@@ -171,7 +171,7 @@ export function EntryFormModal({
                   inputMode="decimal"
                   autoComplete="off"
                   placeholder="250.00 or −120.50"
-                  className={cn("pl-8 font-mono tabular", pnlNumber > 0 && "text-profit", pnlNumber < 0 && "text-loss")}
+                  className={cn("pl-8 tabular", pnlNumber > 0 && "text-profit", pnlNumber < 0 && "text-loss")}
                   value={pnl}
                   invalid={!!errors.pnl}
                   onChange={(e) => setPnl(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))}
@@ -198,7 +198,7 @@ export function EntryFormModal({
                 inputMode="decimal"
                 autoComplete="off"
                 placeholder="+2.5R"
-                className="font-mono tabular"
+                className="tabular"
                 value={rr}
                 invalid={!!errors.rr}
                 onChange={(e) => setRr(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))}

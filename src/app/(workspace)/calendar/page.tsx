@@ -126,7 +126,7 @@ export default function CalendarPage() {
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-ink sm:text-3xl">Calendar</h1>
+          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold">Calendar</h1>
           <p className="mt-1 text-sm text-muted">Your P&amp;L, one square at a time.</p>
         </div>
 
@@ -303,7 +303,7 @@ export default function CalendarPage() {
                 </span>
                 {e.setup && <span className="mt-0.5 block truncate text-[11px] text-faint">{e.setup}</span>}
               </span>
-              <span className={cn("shrink-0 font-mono text-sm font-bold tabular", e.pnl > 0 ? "text-profit" : e.pnl < 0 ? "text-loss" : "text-muted")}>
+              <span className={cn("num shrink-0 text-sm", e.pnl > 0 ? "text-profit" : e.pnl < 0 ? "text-loss" : "text-muted")}>
                 {formatSignedMoney(e.pnl, settings.currency)}
               </span>
             </button>

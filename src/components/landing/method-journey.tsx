@@ -46,7 +46,7 @@ export function Method() {
                 <motion.div
                   whileHover={{ scale: 1.06 }}
                   transition={{ type: "spring", stiffness: 320, damping: 18 }}
-                  className="relative z-10 mb-6 inline-grid h-14 w-14 place-items-center rounded-2xl border border-gold/30 bg-surface font-mono text-sm font-bold text-gold shadow-[0_0_36px_-8px_rgba(236,192,99,0.4)]"
+                  className="relative z-10 mb-6 inline-grid h-14 w-14 place-items-center rounded-2xl border border-gold/30 bg-surface font-mono text-sm font-bold text-gold"
                 >
                   {s.n}
                 </motion.div>

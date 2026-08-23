@@ -78,13 +78,12 @@ export function EntryCard({
           })
         ) : (
           <div className="dot-backdrop relative flex aspect-[16/7] items-center justify-center">
-            <span
-              className={cn(
-                "font-mono text-3xl font-bold tabular transition-transform duration-500 group-hover:scale-110",
-                entry.pnl >= 0 ? "text-profit/25" : "text-loss/25",
-              )}
-              aria-hidden
-            >
+              <span
+                className={cn(
+                  "kpi text-3xl transition-transform duration-500 group-hover:scale-110",
+                  entry.pnl >= 0 ? "text-profit/25" : "text-loss/25",
+                )}
+              >
               {entry.pnl > 0 ? "+" : ""}
               {Math.abs(Math.round(entry.pnl))}
             </span>
@@ -94,7 +93,7 @@ export function EntryCard({
         {/* P&L badge */}
         <span
           className={cn(
-            "absolute left-3 top-3 rounded-lg border px-2 py-1 font-mono text-xs font-bold tabular backdrop-blur-md",
+            "num absolute left-3 top-3 rounded-lg border px-2 py-1 text-xs backdrop-blur-md",
             entry.pnl > 0
               ? "border-profit/40 bg-canvas/80 text-profit"
               : entry.pnl < 0
@@ -121,12 +120,12 @@ export function EntryCard({
             )}
           </div>
           {entry.rr != null && (
-            <span
-              className={cn(
-                "font-mono text-xs font-semibold tabular",
-                entry.rr > 0 ? "text-info" : "text-faint",
-              )}
-            >
+              <span
+                className={cn(
+                  "num text-xs",
+                  entry.rr > 0 ? "text-info" : "text-faint",
+                )}
+              >
               {entry.rr > 0 ? "+" : ""}
               {entry.rr}R
             </span>

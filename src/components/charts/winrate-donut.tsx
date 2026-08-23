@@ -42,7 +42,7 @@ export function WinRateDonut({
         </defs>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="font-mono text-[26px] font-bold tabular leading-none text-ink">
+        <span className="kpi text-[26px] leading-none text-ink">
           {Math.round(pct * 100)}%
         </span>
         <span className="mt-1 text-[10px] font-medium uppercase tracking-[0.14em] text-faint">win rate</span>
@@ -75,7 +75,7 @@ export function DrawdownMeter({
     <div>
       <div className="flex items-baseline justify-between">
         <p className="text-xs font-medium text-muted">Drawdown budget</p>
-        <p className={`font-mono text-sm font-semibold tabular ${textColor}`}>
+        <p className={`num text-sm ${textColor}`}>
           {Math.round(pct * 100)}%
         </p>
       </div>
@@ -91,7 +91,7 @@ export function DrawdownMeter({
         <span className="absolute left-1/2 top-0 h-full w-px bg-canvas/80" aria-hidden />
         <span className="absolute left-[80%] top-0 h-full w-px bg-canvas/80" aria-hidden />
       </div>
-      <p className="mt-1.5 flex justify-between font-mono text-[10px] tabular text-faint">
+      <p className="mt-1.5 flex justify-between text-[10px] tabular text-faint">
         <span>{amount.toFixed(0)} drawn</span>
         <span>of {budget.toFixed(0)} allowed</span>
       </p>

@@ -185,6 +185,7 @@ body {
   background-color: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -289,6 +290,29 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Large KPI numerals — premium financial treatment.
+   Inter Variable (optical sizing on), semibold, proportional figures,
+   tightened tracking. Proportional punctuation keeps commas/periods
+   refined so they visually belong to the number.
+   JetBrains Mono stays reserved for small tabular/technical data
+   (chart axes, aligned grids, tickers) — never large statistics. */
+.kpi {
+  font-family: var(--font-sans);
+  font-weight: 560;
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+}
+
+/* Small aligned figures inside dense rows/lists keep tabular spacing
+   but use Inter so the numeric voice matches the rest of the UI. */
+.num {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
 }
 
 /* Editorial accent — restrained solid gold (was a gradient) */

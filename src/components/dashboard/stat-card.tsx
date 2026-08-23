@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 
@@ -21,6 +21,7 @@ export function StatCard({
   delay?: number;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
   const toneText =
     tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : tone === "gold" ? "text-gold" : "text-ink";
 
@@ -29,15 +30,15 @@ export function StatCard({
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay, ease: EASE }}
-      whileHover={{ y: -3 }}
+      whileHover={reduce ? undefined : { y: -2 }}
       className={cn("panel panel-hover relative overflow-hidden p-5", className)}
     >
       <div className="relative flex items-start justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">{label}</p>
+        <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">{label}</p>
         {icon && (
           <span
             className={cn(
-              "grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-raised",
+              "grid h-8 w-8 shrink-0 place-items-center rounded-control border border-line bg-raised",
               tone === "profit" && "text-profit",
               tone === "loss" && "text-loss",
               tone === "gold" && "text-gold",
@@ -48,7 +49,7 @@ export function StatCard({
           </span>
         )}
       </div>
-      <p className={cn("relative mt-2.5 font-mono text-[26px] font-bold leading-none tabular", toneText)}>
+      <p className={cn("kpi relative mt-3 text-[27px] leading-none", toneText)}>
         {value}
       </p>
       {sub && <p className="relative mt-2 text-xs text-muted">{sub}</p>}

@@ -96,9 +96,9 @@ export function Sidebar() {
       </nav>
 
       {/* Equity mini-card */}
-      <div className="mx-4 mb-3 rounded-xl border border-line bg-raised/60 p-3.5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">Equity</p>
-        <p className="mt-1 font-mono text-base font-semibold tabular text-ink">
+      <div className="mx-4 mb-3 rounded-control border border-line bg-raised/60 p-3.5">
+        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Equity</p>
+        <p className="num mt-1 text-[15px] text-ink">
           {formatMoney(stats.currentEquity, settings.currency)}
         </p>
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-canvas">
@@ -113,7 +113,7 @@ export function Sidebar() {
       {/* User */}
       <div className="border-t border-line p-4">
         <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line-strong bg-raised font-mono text-xs font-bold text-gold">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line-strong bg-raised text-xs font-semibold text-gold">
             {initials}
           </span>
           <div className="min-w-0 flex-1">

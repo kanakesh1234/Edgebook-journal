@@ -88,7 +88,7 @@ function DetailBody({
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1, type: "spring", stiffness: 300, damping: 20 }}
           className={cn(
-            "rounded-xl border px-3.5 py-2 font-mono text-lg font-bold tabular",
+            "kpi rounded-xl border px-3.5 py-2 text-lg",
             entry.pnl > 0
               ? "border-profit/30 bg-profit/[0.08] text-profit"
               : entry.pnl < 0

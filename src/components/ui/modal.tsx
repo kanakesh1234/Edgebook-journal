@@ -87,8 +87,8 @@ export function Modal({ open, onClose, title, description, size = "md", children
             }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              "relative flex max-h-[92dvh] w-full flex-col overflow-hidden border border-line-strong bg-surface shadow-[0_40px_120px_-20px_rgba(0,0,0,0.8)] outline-none",
-              "rounded-t-2xl sm:rounded-2xl",
+              "relative flex max-h-[92dvh] w-full flex-col overflow-hidden border border-line-strong bg-surface shadow-overlay outline-none",
+              "rounded-t-panel sm:rounded-panel",
               sizes[size],
             )}
           >

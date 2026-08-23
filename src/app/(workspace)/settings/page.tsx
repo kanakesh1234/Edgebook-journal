@@ -146,7 +146,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-ink sm:text-3xl">Settings</h1>
+        <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold">Settings</h1>
         <p className="mt-1 text-sm text-muted">Tune the plan behind your roadmap and manage your data.</p>
       </header>
 
@@ -208,7 +208,7 @@ export default function SettingsPage() {
         <section className="panel p-6" aria-label="Profile">
           <h2 className="font-display text-base font-semibold tracking-tight text-ink">Profile</h2>
           <div className="mt-4 flex items-center gap-4">
-            <span className="grid h-14 w-14 place-items-center rounded-2xl border border-gold/30 bg-gold/[0.07] font-mono text-lg font-bold text-gold">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl border border-gold/30 bg-gold/[0.07] text-lg font-semibold text-gold">
               {(user?.name ?? "?").slice(0, 2).toUpperCase()}
             </span>
             <div className="min-w-0">
@@ -274,12 +274,12 @@ export default function SettingsPage() {
           <div className="mt-4 rounded-xl border border-line bg-raised/50 px-4 py-3 text-[13px] text-muted">
             <ShieldIcon className="mr-1.5 inline h-3.5 w-3.5 text-profit" />
             Journey range{" "}
-            <span className="font-mono text-ink">
+            <span className="num text-ink">
               {formatMoney(Number(start) || 0, currency)} → {formatMoney(Number(target) || 0, currency)}
             </span>{" "}
             · risking{" "}
-            <span className="font-mono text-ink">{formatMoney(Number(maxDd) || 0, currency)}</span> to make{" "}
-            <span className="font-mono text-profit">
+            <span className="num text-ink">{formatMoney(Number(maxDd) || 0, currency)}</span> to make{" "}
+            <span className="num text-profit">
               {formatMoney(Math.max(0, (Number(target) || 0) - (Number(start) || 0)), currency)}
             </span>
           </div>

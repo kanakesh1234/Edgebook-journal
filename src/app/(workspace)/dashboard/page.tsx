@@ -53,7 +53,7 @@ export default function DashboardPage() {
 
   if (entries.length === 0) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-7">
         <Header greeting={greeting} firstName={firstName} />
         <EmptyState
           icon={<BookOpenIcon className="h-7 w-7" />}
@@ -83,7 +83,7 @@ export default function DashboardPage() {
   const improving = stats.avgDayPnl >= 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <Header greeting={greeting} firstName={firstName}>
         <Button variant="gold" size="sm" onClick={openNewEntry} className="hidden lg:inline-flex">
           <PlusIcon className="h-4 w-4" />
@@ -151,14 +151,13 @@ export default function DashboardPage() {
           whileHover={{ y: -3 }}
           className="panel panel-hover relative overflow-hidden p-5"
         >
-          <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-loss/[0.06] blur-3xl" />
           <div className="relative flex items-start justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Drawdown</p>
             <span className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-raised text-loss">
               <ShieldIcon className="h-4 w-4" />
             </span>
           </div>
-          <p className="relative mt-2.5 font-mono text-[26px] font-bold leading-none tabular text-ink">
+          <p className="kpi relative mt-2.5 text-[26px] leading-none text-ink">
             −{formatMoney(stats.drawdown, settings.currency)}
           </p>
           <div className="relative mt-3">
@@ -186,7 +185,7 @@ export default function DashboardPage() {
               <h2 className="font-display text-base font-semibold tracking-tight text-ink">Equity curve</h2>
               <p className="text-xs text-muted">From {formatMoney(settings.startingEquity, settings.currency)} start</p>
             </div>
-            <Pill className="font-mono">
+            <Pill>
               peak {formatMoney(stats.peakEquity, settings.currency, { compact: true })}
             </Pill>
           </div>
@@ -213,20 +212,20 @@ export default function DashboardPage() {
                 <span className="flex items-center gap-2 text-muted">
                   <span className="h-2 w-2 rounded-full bg-profit" /> Winning days
                 </span>
-                <span className="font-mono font-semibold tabular text-ink">{stats.winningDays}</span>
+                <span className="num text-ink">{stats.winningDays}</span>
               </div>
               <div className="flex items-center justify-between gap-6">
                 <span className="flex items-center gap-2 text-muted">
                   <span className="h-2 w-2 rounded-full bg-loss" /> Losing days
                 </span>
-                <span className="font-mono font-semibold tabular text-ink">{stats.losingDays}</span>
+                <span className="num text-ink">{stats.losingDays}</span>
               </div>
               {stats.breakEvenDays > 0 && (
                 <div className="flex items-center justify-between gap-6">
                   <span className="flex items-center gap-2 text-muted">
                     <span className="h-2 w-2 rounded-full bg-faint" /> Flat days
                   </span>
-                  <span className="font-mono font-semibold tabular text-ink">{stats.breakEvenDays}</span>
+                  <span className="num text-ink">{stats.breakEvenDays}</span>
                 </div>
               )}
             </div>
@@ -240,19 +239,19 @@ export default function DashboardPage() {
             className="panel grid grid-cols-2 divide-x divide-line overflow-hidden"
           >
             <div className="p-5">
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
                 <AwardIcon className="h-3.5 w-3.5 text-profit" /> Best day
               </p>
-              <p className="mt-2 font-mono text-lg font-bold tabular text-profit">
+              <p className="kpi mt-2 text-lg text-profit">
                 {stats.bestDay ? formatSignedMoney(stats.bestDay.pnl, settings.currency) : "—"}
               </p>
               <p className="mt-0.5 text-[11px] text-faint">{stats.bestDay ? formatDateMedium(stats.bestDay.date) : ""}</p>
             </div>
             <div className="p-5">
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
                 <TrendingDownIcon className="h-3.5 w-3.5 text-loss" /> Worst day
               </p>
-              <p className="mt-2 font-mono text-lg font-bold tabular text-loss">
+              <p className="kpi mt-2 text-lg text-loss">
                 {stats.worstDay ? formatSignedMoney(stats.worstDay.pnl, settings.currency) : "—"}
               </p>
               <p className="mt-0.5 text-[11px] text-faint">{stats.worstDay ? formatDateMedium(stats.worstDay.date) : ""}</p>
@@ -330,7 +329,7 @@ function Header({ greeting, firstName, children }: { greeting: string; firstName
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45 }}
-          className="font-display text-2xl font-bold tracking-tight text-ink sm:text-3xl"
+          className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold"
         >
           {greeting}, <span className="text-gold">{firstName}</span>.
         </motion.h1>
@@ -356,12 +355,12 @@ function MiniStat({
 }) {
   return (
     <div className="panel panel-hover px-5 py-4">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-faint">
+      <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
         {icon}
         {label}
       </p>
       <p
-        className={`mt-2 truncate font-mono text-xl font-bold tabular ${
+        className={`kpi mt-2 truncate text-xl ${
           tone === "profit" ? "text-profit" : tone === "gold" ? "text-gold" : "text-ink"
         }`}
       >
