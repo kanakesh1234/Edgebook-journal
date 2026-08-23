@@ -96,10 +96,10 @@ export function EntryCard({
           className={cn(
             "absolute left-3 top-3 rounded-lg border px-2 py-1 font-mono text-xs font-bold tabular backdrop-blur-md",
             entry.pnl > 0
-              ? "border-profit/40 bg-[#04120c]/80 text-profit"
+              ? "border-profit/40 bg-canvas/80 text-profit"
               : entry.pnl < 0
-                ? "border-loss/40 bg-[#140508]/80 text-loss"
-                : "border-line bg-black/60 text-muted",
+                ? "border-loss/40 bg-canvas/80 text-loss"
+                : "border-line bg-canvas/70 text-muted",
           )}
         >
           {formatSignedMoney(entry.pnl)}

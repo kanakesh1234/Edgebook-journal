@@ -26,7 +26,7 @@ export const pnlClass = (v: number) =>
   v > 0 ? "text-profit" : v < 0 ? "text-loss" : "text-muted";
 
 export const pnlBgClass = (v: number) =>
-  v > 0 ? "bg-profit/10 text-profit border-profit/20" : v < 0 ? "bg-loss/10 text-loss border-loss/25" : "bg-white/[0.04] text-muted border-line";
+  v > 0 ? "bg-profit/10 text-profit border-profit/20" : v < 0 ? "bg-loss/10 text-loss border-loss/25" : "bg-ink/[0.05] text-muted border-line";
 
 export function EmptyState({
   icon,
@@ -49,9 +49,8 @@ export function EmptyState({
       className={cn("panel flex flex-col items-center justify-center px-8 py-16 text-center", className)}
     >
       {icon && (
-        <div className="relative mb-5">
-          <div className="absolute inset-0 -z-10 rounded-full bg-gold/10 blur-2xl" aria-hidden />
-          <div className="grid h-16 w-16 place-items-center rounded-2xl border border-line-strong bg-raised text-gold shadow-inner">
+        <div className="mb-5">
+          <div className="grid h-16 w-16 place-items-center rounded-2xl border border-line-strong bg-raised text-gold">
             {icon}
           </div>
         </div>

@@ -89,7 +89,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       <button
         onClick={() => dismiss(item.id)}
         aria-label="Dismiss notification"
-        className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-white/5 hover:text-ink"
+        className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-ink/[0.05] hover:text-ink"
       >
         <XIcon className="h-3.5 w-3.5" />
       </button>

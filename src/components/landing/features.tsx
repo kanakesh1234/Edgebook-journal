@@ -145,7 +145,7 @@ export function Features() {
                       viewport={{ once: true }}
                       transition={{ delay: i * 0.02, duration: 0.3 }}
                       className={`aspect-square rounded-[4px] ${
-                        v > 0 ? "bg-profit/50" : v < 0 ? "bg-loss/45" : "bg-white/[0.05]"
+                        v > 0 ? "bg-profit/50" : v < 0 ? "bg-loss/45" : "bg-ink/[0.06]"
                       }`}
                     />
                   ),
@@ -170,7 +170,7 @@ export function Features() {
                 <div className="absolute left-0 top-1 h-14 w-24 rotate-[-5deg] rounded-lg border border-line-strong bg-raised" />
                 <div className="absolute left-10 top-0 h-14 w-28 rotate-[2deg] rounded-lg border border-line-strong bg-overlay shadow-lg">
                   <svg viewBox="0 0 100 30" className="h-full w-full opacity-70">
-                    <path d="M2 26 L25 18 L45 22 L70 8 L97 4" stroke="#35e0a1" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+                    <path d="M2 26 L25 18 L45 22 L70 8 L97 4" stroke="var(--color-profit)" strokeWidth="1.6" fill="none" strokeLinecap="round" />
                   </svg>
                 </div>
               </div>

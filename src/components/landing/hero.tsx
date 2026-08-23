@@ -64,7 +64,7 @@ export function Hero() {
     <section
       ref={sectionRef}
       onMouseMove={onMouseMove}
-      className="noise relative overflow-hidden pb-10 pt-32 sm:pt-40"
+      className="relative overflow-hidden pb-10 pt-32 sm:pt-40"
       aria-label="Edgebook introduction"
     >
       {/* Backdrop layers */}
@@ -155,14 +155,14 @@ export function Hero() {
           >
             <Link
               href="/login?mode=signup"
-              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-ink px-6 text-[15px] font-semibold text-canvas shadow-[0_16px_40px_-16px_rgba(255,255,255,0.45)] transition-all duration-200 hover:bg-white active:scale-[0.97]"
+              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-ink px-6 text-[15px] font-semibold text-canvas shadow-sm transition-all duration-200 hover:opacity-85 active:scale-[0.97]"
             >
               Start your journal
               <ArrowRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
             </Link>
             <a
               href="#method"
-              className="inline-flex h-12 items-center rounded-xl border border-line-strong px-6 text-[15px] font-medium text-ink transition-colors duration-200 hover:border-faint hover:bg-white/[0.03] active:scale-[0.97]"
+              className="inline-flex h-12 items-center rounded-xl border border-line-strong px-6 text-[15px] font-medium text-ink transition-colors duration-200 hover:border-faint hover:bg-ink/[0.04] active:scale-[0.97]"
             >
               See how it works
             </a>
@@ -213,17 +213,17 @@ export function Hero() {
               <svg viewBox="0 0 560 300" className="w-full" role="img" aria-label="Animated equity curve rising toward a target line">
                 <defs>
                   <linearGradient id="hero-area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#35e0a1" stopOpacity="0.28" />
-                    <stop offset="100%" stopColor="#35e0a1" stopOpacity="0" />
+                    <stop offset="0%" stopColor="var(--color-profit)" stopOpacity="0.28" />
+                    <stop offset="100%" stopColor="var(--color-profit)" stopOpacity="0" />
                   </linearGradient>
                   <linearGradient id="hero-line" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#35e0a1" />
-                    <stop offset="100%" stopColor="#ecc063" />
+                    <stop offset="0%" stopColor="var(--color-profit)" />
+                    <stop offset="100%" stopColor="var(--color-gold)" />
                   </linearGradient>
                 </defs>
 
                 {[70, 140, 210].map((y) => (
-                  <line key={y} x1="0" y1={y} x2="560" y2={y} stroke="#1a2333" strokeWidth="1" />
+                  <line key={y} x1="0" y1={y} x2="560" y2={y} stroke="var(--color-line)" strokeWidth="1" />
                 ))}
 
                 {/* Target */}
@@ -232,14 +232,14 @@ export function Hero() {
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1.6, duration: 0.6 }}
                 >
-                  <line x1="0" y1="52" x2="560" y2="52" stroke="#ecc063" strokeWidth="1.2" strokeDasharray="5 7" opacity="0.7" />
-                  <text x="8" y="44" fontSize="11" fill="#ecc063" fontFamily="var(--font-mono)" letterSpacing="2">
+                  <line x1="0" y1="52" x2="560" y2="52" stroke="var(--color-gold)" strokeWidth="1.2" strokeDasharray="5 7" opacity="0.7" />
+                  <text x="8" y="44" fontSize="11" fill="var(--color-gold)" fontFamily="var(--font-mono)" letterSpacing="2">
                     TARGET $20,000
                   </text>
                 </motion.g>
 
                 {/* Start */}
-                <line x1="0" y1="266" x2="560" y2="266" stroke="#2a3750" strokeWidth="1" strokeDasharray="3 6" />
+                <line x1="0" y1="266" x2="560" y2="266" stroke="var(--color-line-strong)" strokeWidth="1" strokeDasharray="3 6" />
 
                 {/* Area + line */}
                 <motion.path
@@ -263,7 +263,7 @@ export function Hero() {
                   cx="552"
                   cy="66"
                   r="5"
-                  fill="#ecc063"
+                  fill="var(--color-gold)"
                   initial={{ scale: 0, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 2.2, type: "spring", stiffness: 300, damping: 14 }}

@@ -1,36 +1,155 @@
 @import "tailwindcss";
 
-@theme {
-  /* ---------- Typography ---------- */
+/* Dark-mode variant bound to the runtime theme attribute */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ============================================================
+   EdgeBook design tokens
+   Warm neutrals · restrained gold · muted trading states
+   Raw variables flip per theme; @theme inline maps them to
+   Tailwind utilities (bg-canvas, text-ink, border-line …).
+   ============================================================ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --canvas: #f7f4ee;          /* warm paper page background   */
+  --surface: #fcfaf5;         /* card / panel                 */
+  --raised: #fffefb;          /* nested chips, inputs         */
+  --overlay: #fffefa;         /* modals, popovers             */
+
+  /* Lines */
+  --line: #e7e1d4;
+  --line-soft: #efeadf;
+  --line-strong: #d6cebd;
+
+  /* Ink */
+  --ink: #26221a;
+  --muted: #6e6657;
+  --faint: #9a9182;
+
+  /* Trading states */
+  --profit: #40795b;
+  --profit-deep: #2f5f46;
+  --loss: #ac5157;
+  --loss-deep: #8f4149;
+
+  /* Restrained gold */
+  --gold: #8c6d2e;            /* accent text / lines          */
+  --gold-deep: #77591f;
+  --gold-strong: #b78e3e;     /* solid fills (buttons)        */
+  --gold-strong-hover: #a88136;
+  --on-gold: #231a09;
+
+  --info: #4c6e9e;
+
+  /* Journey road (SVG layers) */
+  --road-shadow: #e3ddcf;
+  --road-base: #dcd5c4;
+  --road-surface: #f0ebe1;
+
+  /* Depth */
+  --shadow-rest: 0 1px 2px rgb(48 40 24 / 0.05), 0 1px 3px rgb(48 40 24 / 0.04);
+  --shadow-lift: 0 12px 32px -14px rgb(48 40 24 / 0.18);
+  --shadow-overlay: 0 24px 64px -24px rgb(48 40 24 / 0.28);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --canvas: #15120d;
+  --surface: #1c1813;
+  --raised: #272219;
+  --overlay: #2c261d;
+
+  /* Lines */
+  --line: #2e281f;
+  --line-soft: #251f18;
+  --line-strong: #453b2b;
+
+  /* Ink */
+  --ink: #f0eae0;
+  --muted: #a69d8c;
+  --faint: #746c5b;
+
+  /* Trading states */
+  --profit: #74b08c;
+  --profit-deep: #4e8a66;
+  --loss: #cd8484;
+  --loss-deep: #af5f63;
+
+  /* Restrained gold */
+  --gold: #cba76b;
+  --gold-deep: #a88549;
+  --gold-strong: #c09b57;
+  --gold-strong-hover: #cfae71;
+  --on-gold: #231a09;
+
+  --info: #8faed6;
+
+  /* Journey road (SVG layers) */
+  --road-shadow: #100d09;
+  --road-base: #262017;
+  --road-surface: #191510;
+
+  /* Depth */
+  --shadow-rest: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-lift: 0 16px 40px -18px rgb(0 0 0 / 0.55);
+  --shadow-overlay: 0 28px 72px -24px rgb(0 0 0 / 0.65);
+}
+
+/* ---------- Tailwind theme mapping ---------- */
+@theme inline {
+  /* Typography */
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk Variable", var(--font-sans);
+  --font-display: var(--font-sans);
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
   --font-serif: "Instrument Serif", Georgia, serif;
 
-  /* ---------- Canvas & surfaces ---------- */
-  --color-canvas: #05070b;
-  --color-surface: #0a0e16;
-  --color-raised: #0f1520;
-  --color-overlay: #141c29;
-  --color-line: #1a2333;
-  --color-line-soft: #131a27;
-  --color-line-strong: #2a3750;
+  /* Surfaces & lines */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
 
-  /* ---------- Ink ---------- */
-  --color-ink: #eaf0f9;
-  --color-muted: #97a3ba;
-  --color-faint: #5c6b85;
+  /* Ink */
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
 
-  /* ---------- Semantic ---------- */
-  --color-profit: #35e0a1;
-  --color-profit-deep: #0d9d6f;
-  --color-loss: #fb5570;
-  --color-loss-deep: #d92d4d;
-  --color-gold: #ecc063;
-  --color-gold-deep: #c99a37;
-  --color-info: #6aa5ff;
+  /* Semantic */
+  --color-profit: var(--profit);
+  --color-profit-deep: var(--profit-deep);
+  --color-loss: var(--loss);
+  --color-loss-deep: var(--loss-deep);
+  --color-gold: var(--gold);
+  --color-gold-deep: var(--gold-deep);
+  --color-gold-strong: var(--gold-strong);
+  --color-gold-strong-hover: var(--gold-strong-hover);
+  --color-on-gold: var(--on-gold);
+  --color-info: var(--info);
 
-  /* ---------- Motion ---------- */
+  /* Journey road */
+  --color-road-shadow: var(--road-shadow);
+  --color-road-base: var(--road-base);
+  --color-road-surface: var(--road-surface);
+
+  /* Radii */
+  --radius-panel: 14px;
+  --radius-control: 10px;
+
+  /* Shadows */
+  --shadow-panel: var(--shadow-rest);
+  --shadow-lift: var(--shadow-lift);
+  --shadow-overlay: var(--shadow-overlay);
+
+  /* Motion */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --animate-float: float 9s ease-in-out infinite;
   --animate-pulse-soft: pulse-soft 3s ease-in-out infinite;
@@ -57,36 +176,39 @@
 
 /* ============================================================
    Base
-============================================================ */
+=========================================================== */
 html {
   scroll-behavior: smooth;
 }
 
 body {
-  background-color: var(--color-canvas);
-  color: var(--color-ink);
+  background-color: var(--canvas);
+  color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-gold) 30%, transparent);
-  color: #fff;
+  background: color-mix(in srgb, var(--gold) 28%, transparent);
+  color: var(--ink);
 }
 
-/* Slim dark scrollbars */
+/* Theme-aware slim scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #223 transparent;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: color-mix(in srgb, var(--muted) 38%, transparent);
   border-radius: 99px;
 }
 *::-webkit-scrollbar-track {
@@ -95,7 +217,7 @@ body {
 
 /* Focus visibility */
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-gold) 70%, white 10%);
+  outline: 2px solid color-mix(in srgb, var(--gold) 70%, currentColor 15%);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -117,17 +239,24 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
+/* Native date input icon — only needs inverting in dark UI */
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.65);
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
 /* ============================================================
    Reusable surfaces & effects
-============================================================ */
+=========================================================== */
 
 /* Signature panel */
 .panel {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 42%),
-    var(--color-surface);
-  border: 1px solid var(--color-line);
-  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-rest);
 }
 
 .panel-hover {
@@ -137,55 +266,37 @@ input[type="number"] {
     box-shadow 0.25s ease;
 }
 .panel-hover:hover {
-  border-color: var(--color-line-strong);
-  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.65);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-lift);
 }
 
 .hairline {
-  border-color: var(--color-line);
+  border-color: var(--line);
 }
 
-/* Fine engineering grid backdrop */
+/* Subtle engineering backdrops (theme-aware) */
 .grid-backdrop {
   background-image:
-    linear-gradient(to right, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+    linear-gradient(to right, color-mix(in srgb, var(--muted) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--muted) 7%, transparent) 1px, transparent 1px);
   background-size: 56px 56px;
 }
 
 .dot-backdrop {
-  background-image: radial-gradient(rgba(148, 163, 184, 0.13) 1px, transparent 1px);
+  background-image: radial-gradient(color-mix(in srgb, var(--muted) 16%, transparent) 1px, transparent 1px);
   background-size: 26px 26px;
-}
-
-.noise::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.5;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
-}
-
-.text-glow-profit {
-  text-shadow: 0 0 24px color-mix(in srgb, var(--color-profit) 45%, transparent);
-}
-.text-gold-grad {
-  background: linear-gradient(115deg, #f6dfa8 0%, var(--color-gold) 45%, #b98a2e 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.text-ink-grad {
-  background: linear-gradient(180deg, #ffffff 20%, #b9c5da 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* Editorial accent — restrained solid gold (was a gradient) */
+.text-gold-grad {
+  color: var(--gold);
+}
+.text-ink-grad {
+  color: var(--ink);
 }
 
 /* Road dashes flow */
@@ -211,15 +322,9 @@ input[type="number"] {
   mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
 }
 
-/* Native date input icon in dark UI */
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.65);
-  cursor: pointer;
-}
-
 /* ============================================================
    Reduced motion
-============================================================ */
+=========================================================== */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

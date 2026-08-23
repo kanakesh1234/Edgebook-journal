@@ -23,14 +23,6 @@ export function StatCard({
 }) {
   const toneText =
     tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : tone === "gold" ? "text-gold" : "text-ink";
-  const glow =
-    tone === "profit"
-      ? "bg-profit/[0.07]"
-      : tone === "loss"
-        ? "bg-loss/[0.06]"
-        : tone === "gold"
-          ? "bg-gold/[0.07]"
-          : "bg-white/[0.03]";
 
   return (
     <motion.div
@@ -40,7 +32,6 @@ export function StatCard({
       whileHover={{ y: -3 }}
       className={cn("panel panel-hover relative overflow-hidden p-5", className)}
     >
-      <div aria-hidden className={cn("pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full blur-3xl", glow)} />
       <div className="relative flex items-start justify-between gap-3">
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">{label}</p>
         {icon && (

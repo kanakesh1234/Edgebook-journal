@@ -113,11 +113,11 @@ export function JourneyRoadmap() {
         initial={{ opacity: 0, y: 22 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="panel noise relative overflow-hidden"
+        className="panel relative overflow-hidden"
       >
         {/* status banners */}
         {behindStart && !reachedTarget && (
-          <div className="absolute left-4 top-4 z-10 rounded-xl border border-loss/35 bg-[#17060a]/90 px-3.5 py-2 backdrop-blur">
+          <div className="absolute left-4 top-4 z-10 rounded-xl border border-loss/35 bg-canvas/85 px-3.5 py-2 backdrop-blur">
             <p className="flex items-center gap-2 text-xs font-semibold text-loss">
               <ShieldIcon className="h-4 w-4" />
               Rebuilding mode — equity is below the start line
@@ -142,13 +142,13 @@ export function JourneyRoadmap() {
           >
           <defs>
             <linearGradient id="rm-progress" x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%" stopColor="#0d9d6f" />
-              <stop offset="55%" stopColor="#35e0a1" />
-              <stop offset="100%" stopColor="#ecc063" />
+              <stop offset="0%" stopColor="var(--color-profit-deep)" />
+              <stop offset="55%" stopColor="var(--color-profit)" />
+              <stop offset="100%" stopColor="var(--color-gold)" />
             </linearGradient>
             <radialGradient id="rm-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#ecc063" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="#ecc063" stopOpacity="0" />
+              <stop offset="0%" stopColor="var(--color-gold)" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0" />
             </radialGradient>
           </defs>
 
@@ -157,15 +157,15 @@ export function JourneyRoadmap() {
           <ellipse cx={END.x} cy={END.y} rx="150" ry="80" fill="url(#rm-glow)" />
 
           {/* road layers */}
-          <path ref={pathRef} d={ROAD} fill="none" stroke="#141c29" strokeWidth="34" strokeLinecap="round" />
-          <path d={ROAD} fill="none" stroke="#232f45" strokeWidth="30" strokeLinecap="round" />
-          <path d={ROAD} fill="none" stroke="#0b101b" strokeWidth="26" strokeLinecap="round" />
+          <path ref={pathRef} d={ROAD} fill="none" stroke="var(--color-road-shadow)" strokeWidth="34" strokeLinecap="round" />
+          <path d={ROAD} fill="none" stroke="var(--color-road-base)" strokeWidth="30" strokeLinecap="round" />
+          <path d={ROAD} fill="none" stroke="var(--color-road-surface)" strokeWidth="26" strokeLinecap="round" />
           {/* centre line dashes */}
           {!reduce && (
             <path
               d={ROAD}
               fill="none"
-              stroke="#ecc063"
+              stroke="var(--color-gold)"
               strokeOpacity="0.28"
               strokeWidth="1.6"
               strokeDasharray="11 17"
@@ -180,7 +180,7 @@ export function JourneyRoadmap() {
               <path
                 d={ROAD}
                 fill="none"
-                stroke="#fb5570"
+                stroke="var(--color-loss)"
                 strokeOpacity="0.13"
                 strokeWidth="26"
                 strokeLinecap="butt"
@@ -193,7 +193,7 @@ export function JourneyRoadmap() {
                 textAnchor="middle"
                 fontSize="10.5"
                 fontFamily="var(--font-mono)"
-                fill="#fb5570"
+                fill="var(--color-loss)"
                 opacity="0.85"
               >
                 RECOVERY ZONE · PEAK {formatMoney(settings.startingEquity + peakFrac * range, currency, { compact: true })}
@@ -218,12 +218,12 @@ export function JourneyRoadmap() {
 
           {/* start marker */}
           <g>
-            <circle cx={START.x} cy={START.y} r="12" fill="#0f1520" stroke="#97a3ba" strokeWidth="2" />
-            <circle cx={START.x} cy={START.y} r="4" fill="#97a3ba" />
-            <text x={START.x} y={START.y + 34} textAnchor="middle" fontSize="11" fontFamily="var(--font-mono)" letterSpacing="1.5" fill="#97a3ba">
+            <circle cx={START.x} cy={START.y} r="12" fill="var(--color-raised)" stroke="var(--color-muted)" strokeWidth="2" />
+            <circle cx={START.x} cy={START.y} r="4" fill="var(--color-muted)" />
+            <text x={START.x} y={START.y + 34} textAnchor="middle" fontSize="11" fontFamily="var(--font-mono)" letterSpacing="1.5" fill="var(--color-muted)">
               START
             </text>
-            <text x={START.x} y={START.y + 48} textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)" fill="#5c6b85">
+            <text x={START.x} y={START.y + 48} textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)" fill="var(--color-faint)">
               {formatMoney(settings.startingEquity, currency, { compact: true })}
             </text>
           </g>
@@ -233,9 +233,9 @@ export function JourneyRoadmap() {
             <g key={m.f} transform={`translate(${m.pt.x}, ${m.pt.y})`}>
               {m.passed ? (
                 <>
-                  <circle r="10" fill="#0f1520" stroke="#35e0a1" strokeWidth="2" />
-                  <circle r="14.5" fill="none" stroke="#35e0a1" strokeOpacity="0.25" />
-                  <path d="M-4 0 L-1.2 3 L4.5 -3.5" stroke="#35e0a1" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle r="10" fill="var(--color-raised)" stroke="var(--color-profit)" strokeWidth="2" />
+                  <circle r="14.5" fill="none" stroke="var(--color-profit)" strokeOpacity="0.25" />
+                  <path d="M-4 0 L-1.2 3 L4.5 -3.5" stroke="var(--color-profit)" strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
                 </>
               ) : (
                 <>
@@ -244,14 +244,14 @@ export function JourneyRoadmap() {
                       animate={{ scale: [1, 1.9], opacity: [0.7, 0] }}
                       transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
                     >
-                      <circle r="10" fill="none" stroke="#ecc063" strokeWidth="1.5" />
+                      <circle r="10" fill="none" stroke="var(--color-gold)" strokeWidth="1.5" />
                     </motion.g>
                   )}
-                  <circle r="9" fill="#0f1520" stroke="#3a4a68" strokeWidth="2" />
-                  <circle r="3" fill="#3a4a68" />
+                  <circle r="9" fill="var(--color-raised)" stroke="var(--color-line-strong)" strokeWidth="2" />
+                  <circle r="3" fill="var(--color-line-strong)" />
                 </>
               )}
-              <text y="-18" textAnchor="middle" fontSize="11" fontWeight="700" fontFamily="var(--font-mono)" fill={m.passed ? "#35e0a1" : "#97a3ba"}>
+              <text y="-18" textAnchor="middle" fontSize="11" fontWeight="700" fontFamily="var(--font-mono)" fill={m.passed ? "var(--color-profit)" : "var(--color-muted)"}>
                 {formatMoney(m.equity, currency, { compact: true })}
               </text>
             </g>
@@ -259,12 +259,12 @@ export function JourneyRoadmap() {
 
           {/* target gate */}
           <g transform={`translate(${END.x}, ${END.y})`}>
-            <rect x="-2.5" y="-52" width="5" height="56" rx="2.5" fill="#ecc063" />
-            <path d="M2.5 -50 L44 -38 L2.5 -26 Z" fill={reachedTarget ? "#35e0a1" : "#ecc063"} className={reachedTarget ? "" : "drop-shadow-[0_0_10px_rgba(236,192,99,0.45)]"} />
-            <text x="-10" y="34" textAnchor="end" fontSize="11" fontWeight="700" fontFamily="var(--font-mono)" letterSpacing="1.5" fill="#ecc063">
+            <rect x="-2.5" y="-52" width="5" height="56" rx="2.5" fill="var(--color-gold-strong)" />
+            <path d="M2.5 -50 L44 -38 L2.5 -26 Z" fill={reachedTarget ? "var(--color-profit)" : "var(--color-gold-strong)"} />
+            <text x="-10" y="34" textAnchor="end" fontSize="11" fontWeight="700" fontFamily="var(--font-mono)" letterSpacing="1.5" fill="var(--color-gold)">
               TARGET
             </text>
-            <text x="-10" y="48" textAnchor="end" fontSize="10" fontFamily="var(--font-mono)" fill="#c99a37">
+            <text x="-10" y="48" textAnchor="end" fontSize="10" fontFamily="var(--font-mono)" fill="var(--color-gold-deep)">
               {formatMoney(settings.targetEquity, currency, { compact: true })}
             </text>
             {reachedTarget &&
@@ -274,7 +274,7 @@ export function JourneyRoadmap() {
                   key={i}
                   r={3 + i * 1.6}
                   fill="none"
-                  stroke="#ecc063"
+                  stroke="var(--color-gold)"
                   strokeWidth="1"
                   animate={{ scale: [1, 3.2], opacity: [0.8, 0] }}
                   transition={{ duration: 2.4, repeat: Infinity, delay: i * 0.5, ease: "easeOut" }}
@@ -293,12 +293,12 @@ export function JourneyRoadmap() {
               <motion.circle
                 r="20"
                 fill="none"
-                stroke="#ecc063"
+                stroke="var(--color-gold)"
                 strokeWidth="1"
                 animate={reduce ? undefined : { opacity: [0.45, 0.12, 0.45], scale: [1, 1.18, 1] }}
                 transition={{ duration: 2.6, repeat: Infinity }}
               />
-              <circle r="15" fill="#05070b" opacity="0.65" />
+              <circle r="15" fill="var(--color-canvas)" opacity="0.65" />
 
               <motion.g
                 initial={false}
@@ -315,11 +315,11 @@ export function JourneyRoadmap() {
                     {/* wheels */}
                     {[[-12, 8], [11, 8]].map(([wx, wy]) => (
                       <g key={wx} transform={`translate(${wx},${wy})`}>
-                        <circle r="5" fill="#0b0e15" stroke="#3a4a68" strokeWidth="2" />
+                        <circle r="5" fill="var(--color-raised)" stroke="var(--color-line-strong)" strokeWidth="2" />
                         {!reduce && (
                           <g>
                             <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="0.85s" repeatCount="indefinite" />
-                            <path d="M0 -3.4 V3.4 M-3.4 0 H3.4" stroke="#ecc063" strokeWidth="1.1" strokeLinecap="round" opacity="0.85" />
+                            <path d="M0 -3.4 V3.4 M-3.4 0 H3.4" stroke="var(--color-gold)" strokeWidth="1.1" strokeLinecap="round" opacity="0.85" />
                           </g>
                         )}
                       </g>
@@ -328,16 +328,16 @@ export function JourneyRoadmap() {
                     <path
                       d="M-21 5 L-21 1 Q-21 -3 -16 -3.5 L-6 -4.5 Q-2 -8 4 -8 L11 -8 Q16 -8 18.5 -3.5 L21 -2 Q23 -1 22.5 2 L21 5 Z"
                       fill="url(#rm-progress)"
-                      stroke="#0b0e15"
+                      stroke="var(--color-raised)"
                       strokeWidth="1"
                     />
                     {/* cockpit */}
-                    <path d="M0 -6.5 L8 -6.5 Q12 -6.5 14 -3.5 L2 -3.5 Z" fill="#05070b" opacity="0.75" />
+                    <path d="M0 -6.5 L8 -6.5 Q12 -6.5 14 -3.5 L2 -3.5 Z" fill="var(--color-canvas)" opacity="0.75" />
                     {/* headlight beam dot */}
                     <circle cx="21" cy="0.5" r="1.6" fill="#fff" opacity="0.95" />
                     {/* pennant */}
-                    <line x1="-16" y1="-4" x2="-16" y2="-17" stroke="#97a3ba" strokeWidth="1.2" />
-                    <path d="M-16 -17 L-7 -14.5 L-16 -12 Z" fill="#fb5570" />
+                    <line x1="-16" y1="-4" x2="-16" y2="-17" stroke="var(--color-muted)" strokeWidth="1.2" />
+                    <path d="M-16 -17 L-7 -14.5 L-16 -12 Z" fill="var(--color-loss)" />
                   </motion.g>
                 </g>
               </motion.g>

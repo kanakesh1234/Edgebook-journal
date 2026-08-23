@@ -49,16 +49,10 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       {/* Keyboard shortcut: jump straight past navigation */}
       <a
         href="#content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[200] focus:rounded-lg focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#231a05]"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[200] focus:rounded-lg focus:bg-gold-strong focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-gold"
       >
         Skip to content
       </a>
-
-      {/* Ambient background accents */}
-      <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/4 h-96 w-96 rounded-full bg-gold/[0.04] blur-[140px]" />
-        <div className="absolute bottom-0 right-0 h-[420px] w-[420px] rounded-full bg-profit/[0.03] blur-[160px]" />
-      </div>
 
       <Sidebar />
       <MobileTopBar />

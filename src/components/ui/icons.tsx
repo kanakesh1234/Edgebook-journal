@@ -276,3 +276,31 @@ export const FlagIcon = (p: P) => (
     <path d="M5 5h12.5l-3 4.25 3 4.25H5" />
   </Svg>
 );
+
+export const SunIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2.2" />
+    <path d="M12 19.8V22" />
+    <path d="m4.9 4.9 1.6 1.6" />
+    <path d="m17.5 17.5 1.6 1.6" />
+    <path d="M2 12h2.2" />
+    <path d="M19.8 12H22" />
+    <path d="m4.9 19.1 1.6-1.6" />
+    <path d="m17.5 6.5 1.6-1.6" />
+  </Svg>
+);
+
+export const MoonIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+  </Svg>
+);
+
+export const MonitorIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="2.5" y="4" width="19" height="13" rx="2.5" />
+    <path d="M9 21h6" />
+    <path d="M12 17v4" />
+  </Svg>
+);

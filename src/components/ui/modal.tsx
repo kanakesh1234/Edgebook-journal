@@ -101,7 +101,7 @@ export function Modal({ open, onClose, title, description, size = "md", children
                 <button
                   onClick={onClose}
                   aria-label="Close"
-                  className="-mr-2 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-faint transition-colors hover:bg-white/5 hover:text-ink"
+                  className="-mr-2 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg text-faint transition-colors hover:bg-ink/[0.05] hover:text-ink"
                 >
                   <XIcon className="h-4.5 w-4.5" />
                 </button>

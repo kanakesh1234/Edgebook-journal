@@ -58,27 +58,27 @@ export function EquityCurve({
       <AreaChart data={data} margin={{ top: 12, right: 8, bottom: 4, left: 0 }}>
         <defs>
           <linearGradient id="equity-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#35e0a1" stopOpacity={0.25} />
-            <stop offset="100%" stopColor="#35e0a1" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--color-profit)" stopOpacity={0.22} />
+            <stop offset="100%" stopColor="var(--color-profit)" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="equity-line" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#35e0a1" />
-            <stop offset="100%" stopColor="#ecc063" />
+            <stop offset="0%" stopColor="var(--color-profit)" />
+            <stop offset="100%" stopColor="var(--color-gold-strong)" />
           </linearGradient>
         </defs>
 
         <XAxis
           dataKey="date"
           tickFormatter={(d: string) => formatDateMedium(d).slice(4)}
-          tick={{ fill: "#5c6b85", fontSize: 10, fontFamily: "var(--font-mono)" }}
-          axisLine={{ stroke: "#1a2333" }}
+          tick={{ fill: "var(--color-faint)", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          axisLine={{ stroke: "var(--color-line)" }}
           tickLine={false}
           minTickGap={48}
         />
         <YAxis
           domain={[minY - pad, maxY + pad]}
           tickFormatter={(v: number) => formatMoney(v, currency, { compact: true })}
-          tick={{ fill: "#5c6b85", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          tick={{ fill: "var(--color-faint)", fontSize: 10, fontFamily: "var(--font-mono)" }}
           axisLine={false}
           tickLine={false}
           width={58}
@@ -86,25 +86,25 @@ export function EquityCurve({
 
         <ReferenceLine
           y={startingEquity}
-          stroke="#2a3750"
+          stroke="var(--color-line-strong)"
           strokeDasharray="4 6"
           label={{
             value: "START",
             position: "insideBottomLeft",
-            fill: "#5c6b85",
+            fill: "var(--color-faint)",
             fontSize: 9,
             fontFamily: "var(--font-mono)",
           }}
         />
         <ReferenceLine
           y={targetEquity}
-          stroke="#ecc063"
+          stroke="var(--color-gold)"
           strokeDasharray="6 7"
           strokeOpacity={0.75}
           label={{
             value: `TARGET ${formatMoney(targetEquity, currency, { compact: true })}`,
             position: "insideTopLeft",
-            fill: "#ecc063",
+            fill: "var(--color-gold)",
             fontSize: 9,
             fontFamily: "var(--font-mono)",
           }}
@@ -112,7 +112,7 @@ export function EquityCurve({
 
         <Tooltip
           content={<EquityTooltip currency={currency} startingEquity={startingEquity} />}
-          cursor={{ stroke: "#2a3750", strokeDasharray: "3 4" }}
+          cursor={{ stroke: "var(--color-line-strong)", strokeDasharray: "3 4" }}
         />
 
         <Area
@@ -123,7 +123,7 @@ export function EquityCurve({
           fill="url(#equity-fill)"
           animationDuration={1100}
           animationEasing="ease-out"
-          activeDot={{ r: 4, fill: "#ecc063", stroke: "#05070b", strokeWidth: 2 }}
+          activeDot={{ r: 4, fill: "var(--color-gold-strong)", stroke: "var(--color-canvas)", strokeWidth: 2 }}
           dot={false}
         />
       </AreaChart>

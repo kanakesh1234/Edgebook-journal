@@ -153,23 +153,23 @@ function LoginView() {
               <path
                 d="M8 100 C90 100 110 30 200 30 C290 30 310 88 412 88"
                 fill="none"
-                stroke="#2a3750"
+                stroke="var(--color-line-strong)"
                 strokeWidth="14"
                 strokeLinecap="round"
               />
               <path
                 d="M8 100 C90 100 110 30 200 30 C290 30 310 88 412 88"
                 fill="none"
-                stroke="#ecc063"
+                stroke="var(--color-gold)"
                 strokeWidth="1.6"
                 strokeDasharray="6 14"
                 strokeLinecap="round"
                 style={{ animation: "dash-flow 1.4s linear infinite" }}
               />
-              <circle cx="8" cy="100" r="7" fill="#0f1520" stroke="#97a3ba" strokeWidth="2" />
-              <circle cx="412" cy="88" r="7" fill="#35e0a1" />
-              <text x="26" y="118" fontSize="10" fill="#5c6b85" fontFamily="var(--font-mono)">START</text>
-              <text x="392" y="70" fontSize="10" fill="#35e0a1" fontFamily="var(--font-mono)" textAnchor="end">TARGET</text>
+              <circle cx="8" cy="100" r="7" fill="var(--color-raised)" stroke="var(--color-muted)" strokeWidth="2" />
+              <circle cx="412" cy="88" r="7" fill="var(--color-profit)" />
+              <text x="26" y="118" fontSize="10" fill="var(--color-faint)" fontFamily="var(--font-mono)">START</text>
+              <text x="392" y="70" fontSize="10" fill="var(--color-profit)" fontFamily="var(--font-mono)" textAnchor="end">TARGET</text>
             </motion.svg>
           </div>
 
@@ -294,7 +294,7 @@ function LoginView() {
                   type="button"
                   onClick={() => setShowPw((v) => !v)}
                   aria-label={showPw ? "Hide password" : "Show password"}
-                  className="absolute right-2.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-faint hover:bg-white/5 hover:text-ink"
+                  className="absolute right-2.5 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-faint hover:bg-ink/[0.05] hover:text-ink"
                 >
                   <EyeIcon className={cn("h-4 w-4 transition-opacity", !showPw && "opacity-60")} />
                 </button>

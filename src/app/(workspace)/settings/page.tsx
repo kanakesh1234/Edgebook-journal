@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
+import { useTheme, type ThemeChoice } from "@/lib/theme";
 import { CURRENCIES, CURRENCY_SYMBOLS, type CurrencyCode } from "@/lib/types";
 import { dataStore } from "@/lib/services/storage";
 import { formatMoney } from "@/lib/format";
@@ -14,18 +16,29 @@ import { toast } from "@/components/ui/toast";
 import {
   DownloadIcon,
   LogoutIcon,
+  MoonIcon,
+  MonitorIcon,
   ShieldIcon,
   SparklesIcon,
+  SunIcon,
   TargetIcon,
   TrashIcon,
   UploadIcon,
 } from "@/components/ui/icons";
+import { cn } from "@/lib/utils";
+
+const THEME_OPTIONS: { value: ThemeChoice; label: string; icon: typeof SunIcon }[] = [
+  { value: "light", label: "Light", icon: SunIcon },
+  { value: "dark", label: "Dark", icon: MoonIcon },
+  { value: "system", label: "System", icon: MonitorIcon },
+];
 
 export default function SettingsPage() {
   const router = useRouter();
   const user = useApp((s) => s.user);
   const settings = useApp((s) => s.settings);
   const entryCount = useApp((s) => s.entries.length);
+  const { choice: themeChoice, resolved: resolvedTheme, setChoice: setThemeChoice } = useTheme();
 
   // Local draft of the journey plan
   const [start, setStart] = useState(String(settings.startingEquity));
@@ -138,6 +151,59 @@ export default function SettingsPage() {
       </header>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        {/* ---------------------------- Appearance ---------------------------- */}
+        <section className="panel p-6" aria-label="Appearance">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-ink">
+            <SunIcon className="h-4 w-4 text-gold" />
+            Appearance
+          </h2>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted">
+            Warm light for the day, focused dark for the night. Your choice is remembered on this
+            device.
+          </p>
+
+          <div
+            role="radiogroup"
+            aria-label="Theme"
+            className="mt-5 grid grid-cols-3 gap-1 rounded-control border border-line bg-canvas/60 p-1"
+          >
+            {THEME_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const active = themeChoice === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setThemeChoice(opt.value)}
+                  className={cn(
+                    "relative rounded-lg py-2 text-sm font-medium transition-colors",
+                    active ? "text-ink" : "text-faint hover:text-muted",
+                  )}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="theme-choice"
+                      transition={{ type: "spring", stiffness: 480, damping: 38 }}
+                      className="absolute inset-0 rounded-lg border border-line-strong bg-raised shadow-sm"
+                    />
+                  )}
+                  <span className="relative flex items-center justify-center gap-2">
+                    <Icon className="h-4 w-4" />
+                    {opt.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="mt-3 text-xs text-faint" aria-live="polite">
+            {themeChoice === "system"
+              ? `Following your system — currently ${resolvedTheme}.`
+              : `Rendering in ${themeChoice}.`}
+          </p>
+        </section>
+
         {/* ------------------------------ Profile ------------------------------ */}
         <section className="panel p-6" aria-label="Profile">
           <h2 className="font-display text-base font-semibold tracking-tight text-ink">Profile</h2>

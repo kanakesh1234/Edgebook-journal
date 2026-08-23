@@ -37,22 +37,26 @@ export function DailyBars({ data, currency, height = 240 }: { data: DayResult[];
         <XAxis
           dataKey="date"
           tickFormatter={(d: string) => d.slice(8)}
-          tick={{ fill: "#5c6b85", fontSize: 9, fontFamily: "var(--font-mono)" }}
-          axisLine={{ stroke: "#1a2333" }}
+          tick={{ fill: "var(--color-faint)", fontSize: 9, fontFamily: "var(--font-mono)" }}
+          axisLine={{ stroke: "var(--color-line)" }}
           tickLine={false}
           minTickGap={26}
         />
         <YAxis
           tickFormatter={(v: number) => formatSignedMoney(v, currency, { compact: true }).replace("+", "")}
-          tick={{ fill: "#5c6b85", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          tick={{ fill: "var(--color-faint)", fontSize: 10, fontFamily: "var(--font-mono)" }}
           axisLine={false}
           tickLine={false}
           width={52}
         />
-        <Tooltip content={<BarsTooltip currency={currency} />} cursor={{ fill: "rgba(148,163,184,0.05)" }} />
+        <Tooltip content={<BarsTooltip currency={currency} />} cursor={{ fill: "color-mix(in srgb, var(--color-muted) 8%, transparent)" }} />
         <Bar dataKey="pnl" radius={[3, 3, 0, 0]} animationDuration={900} animationEasing="ease-out">
           {data.map((d) => (
-            <Cell key={d.date} fill={d.pnl > 0 ? "#35e0a1" : d.pnl < 0 ? "#fb5570" : "#2a3750"} fillOpacity={0.82} />
+            <Cell
+              key={d.date}
+              fill={d.pnl > 0 ? "var(--color-profit)" : d.pnl < 0 ? "var(--color-loss)" : "var(--color-line-strong)"}
+              fillOpacity={0.82}
+            />
           ))}
         </Bar>
       </BarChart>

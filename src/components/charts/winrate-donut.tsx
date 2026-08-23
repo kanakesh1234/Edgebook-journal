@@ -19,7 +19,7 @@ export function WinRateDonut({
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90" aria-hidden>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#131a27" strokeWidth={strokeWidth} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line-soft)" strokeWidth={strokeWidth} />
         <motion.circle
           cx={size / 2}
           cy={size / 2}
@@ -36,8 +36,8 @@ export function WinRateDonut({
         />
         <defs>
           <linearGradient id="donut-grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#35e0a1" />
-            <stop offset="100%" stopColor="#ecc063" />
+            <stop offset="0%" stopColor="var(--color-profit)" />
+            <stop offset="100%" stopColor="var(--color-gold-strong)" />
           </linearGradient>
         </defs>
       </svg>

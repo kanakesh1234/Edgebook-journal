@@ -16,10 +16,10 @@ export interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children">
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-ink text-canvas font-semibold hover:bg-white shadow-[0_8px_24px_-12px_rgba(255,255,255,0.35)]",
-  gold: "bg-gold text-[#231a05] font-semibold hover:bg-[#f3cd7f] shadow-[0_10px_30px_-12px_rgba(236,192,99,0.55)]",
-  ghost: "text-muted hover:text-ink hover:bg-white/5",
-  outline: "border border-line-strong text-ink bg-white/[0.02] hover:bg-white/[0.06] hover:border-faint",
+    "bg-ink text-canvas font-semibold hover:opacity-85 shadow-sm",
+  gold: "bg-gold-strong text-on-gold font-semibold hover:bg-gold-strong-hover shadow-sm",
+  ghost: "text-muted hover:text-ink hover:bg-ink/[0.05]",
+  outline: "border border-line-strong text-ink bg-transparent hover:bg-ink/[0.04] hover:border-faint",
   danger: "border border-loss/35 text-loss bg-loss/[0.06] hover:bg-loss/[0.14]",
   subtle: "bg-raised border border-line text-muted hover:text-ink hover:border-line-strong",
 };

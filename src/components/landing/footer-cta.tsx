@@ -10,7 +10,7 @@ export function FinalCta() {
     <section className="relative py-24 sm:py-32">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal>
-          <div className="noise panel relative overflow-hidden px-6 py-16 text-center sm:px-12 sm:py-20">
+          <div className="panel relative overflow-hidden px-6 py-16 text-center sm:px-12 sm:py-20">
             <div className="grid-backdrop absolute inset-0 opacity-70 [mask-image:radial-gradient(60%_80%_at_50%_50%,black,transparent)]" aria-hidden />
             <div
               aria-hidden
@@ -28,14 +28,14 @@ export function FinalCta() {
               <div className="mt-9 flex flex-wrap items-center justify-center gap-3.5">
                 <Link
                   href="/login?mode=signup"
-                  className="group inline-flex h-13 items-center gap-2.5 rounded-xl bg-gold px-7 py-3.5 text-base font-semibold text-[#231a05] shadow-[0_18px_44px_-14px_rgba(236,192,99,0.55)] transition-all duration-200 hover:bg-[#f3cd7f] active:scale-[0.97]"
+                  className="group inline-flex h-13 items-center gap-2.5 rounded-xl bg-gold-strong px-7 py-3.5 text-base font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97]"
                 >
                   Create your journal
                   <ArrowRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
                 </Link>
                 <Link
                   href="/login"
-                  className="inline-flex items-center rounded-xl border border-line-strong px-7 py-3.5 text-base font-medium text-ink transition-colors duration-200 hover:border-faint hover:bg-white/[0.03]"
+                  className="inline-flex items-center rounded-xl border border-line-strong px-7 py-3.5 text-base font-medium text-ink transition-colors duration-200 hover:border-faint hover:bg-ink/[0.04]"
                 >
                   Log in
                 </Link>

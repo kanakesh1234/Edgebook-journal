@@ -92,14 +92,14 @@ export function Journey() {
             <svg viewBox="0 0 880 240" className="w-full" role="img" aria-label="Winding road from start equity through milestone flags to target">
               <defs>
                 <linearGradient id="jr-road" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stopColor="#2a3750" />
-                  <stop offset="55%" stopColor="#35e0a1" stopOpacity="0.75" />
-                  <stop offset="100%" stopColor="#ecc063" />
+                  <stop offset="0%" stopColor="var(--color-line-strong)" />
+                  <stop offset="55%" stopColor="var(--color-profit)" stopOpacity="0.75" />
+                  <stop offset="100%" stopColor="var(--color-gold)" />
                 </linearGradient>
               </defs>
 
               {/* base road */}
-              <path d={ROAD} fill="none" stroke="#141c29" strokeWidth="26" strokeLinecap="round" />
+              <path d={ROAD} fill="none" stroke="var(--color-road-shadow)" strokeWidth="26" strokeLinecap="round" />
               <path d={ROAD} fill="none" stroke="url(#jr-road)" strokeWidth="2.5" strokeLinecap="round" />
 
               {/* centre dashes */}
@@ -107,7 +107,7 @@ export function Journey() {
                 <path
                   d={ROAD}
                   fill="none"
-                  stroke="#ecc063"
+                  stroke="var(--color-gold)"
                   strokeWidth="1.4"
                   strokeDasharray="7 16"
                   strokeLinecap="round"
@@ -118,9 +118,9 @@ export function Journey() {
 
               {/* start marker */}
               <g>
-                <circle cx="20" cy="185" r="9" fill="#0f1520" stroke="#97a3ba" strokeWidth="2" />
-                <circle cx="20" cy="185" r="3.2" fill="#97a3ba" />
-                <text x="20" y="216" textAnchor="middle" fontSize="11" fill="#97a3ba" fontFamily="var(--font-mono)" letterSpacing="1.5">
+                <circle cx="20" cy="185" r="9" fill="var(--color-raised)" stroke="var(--color-muted)" strokeWidth="2" />
+                <circle cx="20" cy="185" r="3.2" fill="var(--color-muted)" />
+                <text x="20" y="216" textAnchor="middle" fontSize="11" fill="var(--color-muted)" fontFamily="var(--font-mono)" letterSpacing="1.5">
                   START
                 </text>
               </g>
@@ -136,12 +136,12 @@ export function Journey() {
                     cx={m.x}
                     cy={m.y}
                     r="8"
-                    fill={m.passed ? "#35e0a1" : "#0f1520"}
-                    stroke={m.passed ? "#35e0a1" : "#2a3750"}
+                    fill={m.passed ? "var(--color-profit)" : "var(--color-raised)"}
+                    stroke={m.passed ? "var(--color-profit)" : "var(--color-line-strong)"}
                     strokeWidth="2"
                   />
                   {m.passed && (
-                    <circle cx={m.x} cy={m.y} r="13" fill="none" stroke="#35e0a1" strokeOpacity="0.25" strokeWidth="1" />
+                    <circle cx={m.x} cy={m.y} r="13" fill="none" stroke="var(--color-profit)" strokeOpacity="0.25" strokeWidth="1" />
                   )}
                   <text
                     x={m.x}
@@ -149,7 +149,7 @@ export function Journey() {
                     textAnchor="middle"
                     fontSize="11"
                     fontFamily="var(--font-mono)"
-                    fill={m.passed ? "#35e0a1" : "#5c6b85"}
+                    fill={m.passed ? "var(--color-profit)" : "var(--color-faint)"}
                   >
                     {m.label}
                   </text>
@@ -158,9 +158,9 @@ export function Journey() {
 
               {/* target flag */}
               <g>
-                <rect x="845" y="38" width="3.5" height="52" rx="1.75" fill="#ecc063" />
-                <path d="M848.5 40 L888 50 L848.5 62 Z" fill="#ecc063" />
-                <text x="842" y="112" textAnchor="end" fontSize="11" fill="#ecc063" fontFamily="var(--font-mono)" letterSpacing="1.5">
+                <rect x="845" y="38" width="3.5" height="52" rx="1.75" fill="var(--color-gold)" />
+                <path d="M848.5 40 L888 50 L848.5 62 Z" fill="var(--color-gold)" />
+                <text x="842" y="112" textAnchor="end" fontSize="11" fill="var(--color-gold)" fontFamily="var(--font-mono)" letterSpacing="1.5">
                   TARGET
                 </text>
               </g>
@@ -176,7 +176,7 @@ export function Journey() {
                     </animateMotion>
                     <animate attributeName="opacity" values="1;1;0;0;1;1" dur="9s" repeatCount="indefinite" />
                   </circle>
-                  <circle r="12" fill="none" stroke="#ffffff" strokeOpacity="0.28" strokeWidth="1">
+                  <circle r="12" fill="none" stroke="var(--color-ink)" strokeOpacity="0.28" strokeWidth="1">
                     <animateMotion dur="9s" repeatCount="indefinite" keyPoints="0;0.46;0.46;1;1;0" keyTimes="0;0.34;0.5;0.86;0.93;1" calcMode="linear">
                       <mpath href="#journey-path" />
                     </animateMotion>

@@ -36,7 +36,7 @@ function NavLink({ item, active }: { item: (typeof NAV_ITEMS)[number]; active: b
       aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
-        active ? "text-ink" : "text-faint hover:bg-white/[0.03] hover:text-muted",
+        active ? "text-ink" : "text-faint hover:bg-ink/[0.04] hover:text-muted",
       )}
     >
       {active && (
@@ -82,7 +82,7 @@ export function Sidebar() {
       <div className="px-4 pt-4">
         <button
           onClick={openNewEntry}
-          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-4 py-2.5 text-sm font-semibold text-[#231a05] shadow-[0_10px_30px_-12px_rgba(236,192,99,0.55)] transition-all duration-200 hover:bg-[#f3cd7f] active:scale-[0.97]"
+          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gold-strong px-4 py-2.5 text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97]"
         >
           <PlusIcon className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
           Add trade
@@ -158,7 +158,7 @@ export function MobileAddButton() {
     <button
       onClick={openNewEntry}
       aria-label="Add trade"
-      className="grid h-9 w-9 place-items-center rounded-lg bg-gold text-[#231a05] shadow-[0_8px_20px_-8px_rgba(236,192,99,0.6)] active:scale-90"
+      className="grid h-9 w-9 place-items-center rounded-lg bg-gold-strong text-on-gold shadow-sm active:scale-90"
     >
       <PlusIcon className="h-4.5 w-4.5" />
     </button>
