@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { motion } from "motion/react";
-import { useApp } from "@/lib/store";
-import { computeStats, currentStreak } from "@/lib/stats";
+import { useApp, sortEntriesNewestFirst } from "@/lib/store";
+import { computeStats, currentStreak, groupByDay } from "@/lib/stats";
+import { journeyState } from "@/lib/journey";
 import {
   formatDateFull,
   formatDateMedium,
@@ -18,11 +20,17 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { EquityCurve } from "@/components/charts/equity-curve";
 import { DailyBars } from "@/components/charts/daily-bars";
 import { WinRateDonut, DrawdownMeter } from "@/components/charts/winrate-donut";
+import { JourneyTrack } from "@/components/journey/journey-track";
+import { WeekStrip } from "@/components/cc/week-strip";
 import { EmptyState, Pill } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { EASE } from "@/components/landing/reveal";
 import {
+  ArrowRightIcon,
   AwardIcon,
   BookOpenIcon,
+  CalendarIcon,
   FlameIcon,
   PlusIcon,
   ShieldIcon,
@@ -30,7 +38,6 @@ import {
   TargetIcon,
   TrendingDownIcon,
   TrendingUpIcon,
-  WalletIcon,
 } from "@/components/ui/icons";
 
 export default function DashboardPage() {
@@ -40,7 +47,10 @@ export default function DashboardPage() {
   const openNewEntry = useUi((s) => s.openNewEntry);
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
+  const journey = useMemo(() => journeyState(settings, stats), [settings, stats]);
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
+  const byDay = useMemo(() => groupByDay(entries), [entries]);
+  const recentEntries = useMemo(() => sortEntriesNewestFirst(entries).slice(0, 3), [entries]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -82,14 +92,76 @@ export default function DashboardPage() {
   const pnlTone = stats.totalPnl > 0 ? "profit" : stats.totalPnl < 0 ? "loss" : "neutral";
   const improving = stats.avgDayPnl >= 0;
 
+  // Risk posture from the drawdown budget (Trading Lab rules will refine this)
+  const riskUsed = stats.drawdownBudgetUsed;
+  const risk =
+    riskUsed >= 0.8
+      ? { label: "Risk stretched", dot: "bg-loss", text: "text-loss" }
+      : riskUsed >= 0.5
+        ? { label: "Risk elevated", dot: "bg-gold", text: "text-gold" }
+        : { label: "Risk healthy", dot: "bg-profit", text: "text-profit" };
+
   return (
     <div className="space-y-7">
       <Header greeting={greeting} firstName={firstName}>
-        <Button variant="gold" size="sm" onClick={openNewEntry} className="hidden lg:inline-flex">
-          <PlusIcon className="h-4 w-4" />
-          Add trade
-        </Button>
+        <div className="flex items-center gap-3">
+          <Pill className="gap-2 py-1.5">
+            <span className={cn("h-1.5 w-1.5 rounded-full", risk.dot)} />
+            <span className={risk.text}>{risk.label}</span>
+          </Pill>
+          <Button variant="gold" size="sm" onClick={openNewEntry} className="hidden lg:inline-flex">
+            <PlusIcon className="h-4 w-4" />
+            Add trade
+          </Button>
+        </div>
       </Header>
+
+      {/* ------------------------------ Hero band ------------------------------ */}
+      <motion.section
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: EASE }}
+        className="panel flex flex-col gap-6 p-6 sm:flex-row sm:items-end sm:justify-between sm:p-7"
+        aria-label="Current equity"
+      >
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Current equity</p>
+          <p className="kpi mt-2 text-[34px] leading-none text-ink sm:text-[40px]">
+            {formatMoney(equity, settings.currency)}
+          </p>
+          <p className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <span className={cn("num text-sm", stats.totalPnl >= 0 ? "text-profit" : "text-loss")}>
+              {formatSignedMoney(totalPnl, settings.currency)}
+            </span>
+            <span className="text-faint">·</span>
+            <span className="text-muted">
+              {stats.tradingDays} trading days · {formatPct(Math.abs(stats.totalPnl / Math.max(1, settings.startingEquity)), 0)} of start
+            </span>
+          </p>
+        </div>
+
+        <div className="w-full max-w-[240px]">
+          <div className="flex items-baseline justify-between">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
+              <TargetIcon className="h-3.5 w-3.5 text-gold" />
+              Target
+            </p>
+            <p className="num text-sm text-ink">{Math.round(journey.progress * 100)}%</p>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line-soft">
+            <motion.div
+              className="h-full rounded-full bg-gradient-to-r from-profit-deep via-profit to-gold-strong"
+              initial={{ width: 0 }}
+              animate={{ width: `${journey.progress * 100}%` }}
+              transition={{ duration: 1, delay: 0.3, ease: EASE }}
+            />
+          </div>
+          <p className="mt-1.5 flex justify-between text-[11px] text-muted">
+            <span>{formatMoney(settings.startingEquity, settings.currency, { compact: true })}</span>
+            <span>{formatMoney(stats.remainingToTarget, settings.currency, { compact: true })} to go</span>
+          </p>
+        </div>
+      </motion.section>
 
       {/* ------------------------------ KPI row ------------------------------ */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -107,16 +179,11 @@ export default function DashboardPage() {
         />
 
         <StatCard
-          label="Equity"
-          value={formatMoney(equity, settings.currency)}
-          sub={
-            <span className="flex items-center gap-2">
-              <TargetIcon className="h-3.5 w-3.5 text-gold" />
-              {Math.round(stats.targetProgress * 100)}% of{" "}
-              {formatMoney(settings.targetEquity, settings.currency, { compact: true })} target
-            </span>
-          }
-          icon={<WalletIcon className="h-4 w-4" />}
+          label="Win rate"
+          value={`${Math.round(stats.winRate * 100)}%`}
+          sub={`${stats.winningDays}W · ${stats.losingDays}L${stats.breakEvenDays > 0 ? ` · ${stats.breakEvenDays} flat` : ""}`}
+          icon={<AwardIcon className="h-4 w-4" />}
+          tone={stats.winRate >= 0.5 ? "profit" : "neutral"}
           delay={0.07}
         />
 
@@ -147,17 +214,16 @@ export default function DashboardPage() {
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.17, ease: [0.16, 1, 0.3, 1] }}
-          whileHover={{ y: -3 }}
+          transition={{ duration: 0.5, delay: 0.17, ease: EASE }}
           className="panel panel-hover relative overflow-hidden p-5"
         >
           <div className="relative flex items-start justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Drawdown</p>
-            <span className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-raised text-loss">
+            <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Drawdown</p>
+            <span className="grid h-8 w-8 place-items-center rounded-control border border-line bg-raised text-loss">
               <ShieldIcon className="h-4 w-4" />
             </span>
           </div>
-          <p className="kpi relative mt-2.5 text-[26px] leading-none text-ink">
+          <p className="kpi relative mt-3 text-[27px] leading-none text-ink">
             −{formatMoney(stats.drawdown, settings.currency)}
           </p>
           <div className="relative mt-3">
@@ -176,7 +242,7 @@ export default function DashboardPage() {
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.55, delay: 0.2, ease: EASE }}
           className="panel p-5 sm:p-6 xl:col-span-2"
           aria-label="Equity curve chart"
         >
@@ -202,7 +268,7 @@ export default function DashboardPage() {
           <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.26, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.55, delay: 0.26, ease: EASE }}
             className="panel flex flex-col items-center justify-center gap-4 p-5 sm:flex-row sm:justify-around"
             aria-label="Win rate"
           >
@@ -235,7 +301,7 @@ export default function DashboardPage() {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.55, delay: 0.3, ease: EASE }}
             className="panel grid grid-cols-2 divide-x divide-line overflow-hidden"
           >
             <div className="p-5">
@@ -260,12 +326,15 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* ------------------------------ Journey ------------------------------ */}
+      <JourneyTrack settings={settings} stats={stats} journey={journey} />
+
       {/* ------------------------- Daily bars row -------------------------- */}
       <div className="grid gap-4 xl:grid-cols-3">
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.34, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.55, delay: 0.34, ease: EASE }}
           className="panel p-5 sm:p-6 xl:col-span-2"
           aria-label="Daily profit and loss chart"
         >
@@ -282,11 +351,11 @@ export default function DashboardPage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.38, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.55, delay: 0.38, ease: EASE }}
           className="grid grid-cols-2 gap-4"
         >
           <MiniStat
-            label="Remaining to target"
+            label="To target"
             value={formatMoney(Math.max(0, stats.remainingToTarget), settings.currency, { compact: true })}
             tone={stats.remainingToTarget <= 0 ? "profit" : "gold"}
             note={stats.remainingToTarget <= 0 ? "target reached" : `${Math.round((1 - stats.targetProgress) * 100)}% of journey left`}
@@ -315,6 +384,84 @@ export default function DashboardPage() {
           />
         </motion.div>
       </div>
+
+      {/* --------------------------- Recent days --------------------------- */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.55, delay: 0.4, ease: EASE }}
+        className="panel p-5 sm:p-6"
+        aria-label="Recent trading days"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-base font-semibold tracking-tight text-ink">Recent days</h2>
+            <p className="text-xs text-muted">Your last week at a glance</p>
+          </div>
+          <Link
+            href="/calendar"
+            className="group flex items-center gap-1.5 text-xs font-medium text-gold transition-colors hover:text-gold-deep"
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            Open calendar
+            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
+        </div>
+        <WeekStrip byDay={byDay} currency={settings.currency} />
+      </motion.section>
+
+      {/* -------------------------- Journal memory -------------------------- */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.55, delay: 0.44, ease: EASE }}
+        className="panel p-5 sm:p-6"
+        aria-label="Recent journal entries"
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <h2 className="font-display text-base font-semibold tracking-tight text-ink">Journal memory</h2>
+            <p className="text-xs text-muted">Your latest sessions</p>
+          </div>
+          <Link
+            href="/journal"
+            className="group flex items-center gap-1.5 text-xs font-medium text-gold transition-colors hover:text-gold-deep"
+          >
+            <BookOpenIcon className="h-3.5 w-3.5" />
+            Open journal
+            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </Link>
+        </div>
+        <div className="divide-y divide-line-soft">
+          {recentEntries.map((e) => (
+            <Link
+              key={e.id}
+              href="/journal"
+              className="group flex items-center gap-4 py-3 transition-colors first:pt-1 last:pb-0"
+            >
+              <span className="w-20 shrink-0 text-xs text-muted">{formatDateMedium(e.date)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-ink">
+                    {e.instrument !== "—" ? e.instrument : e.setup || "Session"}
+                  </span>
+                  {e.setup && <span className="hidden truncate text-xs text-faint sm:inline">{e.setup}</span>}
+                </span>
+                {e.notes && <span className="mt-0.5 block truncate text-xs text-muted">{e.notes}</span>}
+              </span>
+              <span
+                className={cn(
+                  "num shrink-0 text-sm",
+                  e.pnl > 0 ? "text-profit" : e.pnl < 0 ? "text-loss" : "text-muted",
+                )}
+              >
+                {formatSignedMoney(e.pnl, settings.currency)}
+              </span>
+              <ArrowRightIcon className="h-3.5 w-3.5 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+            </Link>
+          ))}
+        </div>
+      </motion.section>
     </div>
   );
 }
@@ -360,9 +507,10 @@ function MiniStat({
         {label}
       </p>
       <p
-        className={`kpi mt-2 truncate text-xl ${
-          tone === "profit" ? "text-profit" : tone === "gold" ? "text-gold" : "text-ink"
-        }`}
+        className={cn(
+          "kpi mt-2 truncate text-xl",
+          tone === "profit" ? "text-profit" : tone === "gold" ? "text-gold" : "text-ink",
+        )}
       >
         {value}
       </p>
