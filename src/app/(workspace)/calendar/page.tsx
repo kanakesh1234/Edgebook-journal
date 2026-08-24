@@ -14,6 +14,7 @@ import {
 } from "@/lib/format";
 import {
   CalendarIcon,
+  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   PlusIcon,
@@ -32,6 +33,7 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export default function CalendarPage() {
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
+  const dayLogs = useApp((s) => s.dayLogs);
 
   const [view, setView] = useState(() => {
     const n = new Date();
@@ -47,6 +49,7 @@ export default function CalendarPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const byDay = useMemo(() => groupByDay(entries), [entries]);
+  const noTradeDays = useMemo(() => new Set(dayLogs.map((d) => d.date)), [dayLogs]);
   const cells = useMemo(() => monthGrid(view.year, view.month), [view]);
 
   const monthEntries = useMemo(
@@ -223,6 +226,9 @@ export default function CalendarPage() {
                   <span className={cn("relative text-[11px] font-semibold tabular", pnl != null && pnl !== 0 ? "text-white/85" : "text-muted")}>
                     {cell.day}
                     {isToday && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-gold align-middle" aria-label="Today" />}
+                    {!isToday && pnl === null && noTradeDays.has(cell.key) && (
+                      <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full border border-gold align-middle" aria-label="No-trade day" />
+                    )}
                   </span>
 
                   {pnl !== null && (
@@ -308,6 +314,43 @@ export default function CalendarPage() {
               </span>
             </button>
           ))}
+
+          {/* No-trade discipline record */}
+          {selectedEntries.length === 0 && (
+            <div className="rounded-xl border border-dashed border-line-strong px-4 py-4 text-center">
+              {noTradeDays.has(selectedDay!) ? (
+                <>
+                  <p className="flex items-center justify-center gap-2 text-sm font-medium text-gold">
+                    <CheckIcon className="h-4 w-4" />
+                    No-trade day recorded
+                  </p>
+                  {dayLogs.find((d) => d.date === selectedDay)?.reason && (
+                    <p className="mt-1 text-xs text-muted">“{dayLogs.find((d) => d.date === selectedDay)?.reason}”</p>
+                  )}
+                  <button
+                    onClick={() => void useApp.getState().removeNoTradeDay(selectedDay!)}
+                    className="mt-2 text-xs font-medium text-faint underline-offset-2 transition-colors hover:text-loss hover:underline"
+                  >
+                    Remove record
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted">No trades logged.</p>
+                  <button
+                    onClick={() => {
+                      void useApp.getState().logNoTradeDay(selectedDay!);
+                      toast.success("No-trade day recorded", "+15 XP — a flat day with intent is still discipline.");
+                    }}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-gold/[0.07] px-3 py-1.5 text-xs font-semibold text-gold transition-colors hover:bg-gold/[0.12]"
+                  >
+                    <CheckIcon className="h-3.5 w-3.5" />
+                    Mark as no-trade day
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <button
             onClick={() => {

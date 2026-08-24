@@ -1,5 +1,5 @@
 import { get, set, del } from "idb-keyval";
-import type { JournalEntry, JournalSettings } from "../types";
+import type { JournalEntry, JournalSettings, NoTradeLog } from "../types";
 
 /* ------------------------------------------------------------------ */
 /*  Persistence layer                                                  */
@@ -13,6 +13,10 @@ import type { JournalEntry, JournalSettings } from "../types";
 export interface JournalPayload {
   entries: JournalEntry[];
   settings: JournalSettings;
+  /** Discipline records for days without trades. Optional for v1 payloads. */
+  dayLogs?: NoTradeLog[];
+  /** Payload schema version. v1 payloads simply omit it. */
+  version?: number;
   exportedAt?: number;
 }
 

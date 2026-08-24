@@ -22,6 +22,7 @@ import { DailyBars } from "@/components/charts/daily-bars";
 import { WinRateDonut, DrawdownMeter } from "@/components/charts/winrate-donut";
 import { JourneyTrack } from "@/components/journey/journey-track";
 import { WeekStrip } from "@/components/cc/week-strip";
+import { DisciplinePanel } from "@/components/cc/discipline-panel";
 import { EmptyState, Pill } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -328,6 +329,9 @@ export default function DashboardPage() {
 
       {/* ------------------------------ Journey ------------------------------ */}
       <JourneyTrack settings={settings} stats={stats} journey={journey} />
+
+      {/* ---------------------------- Discipline ----------------------------- */}
+      <DisciplinePanel delay={0.28} />
 
       {/* ------------------------- Daily bars row -------------------------- */}
       <div className="grid gap-4 xl:grid-cols-3">

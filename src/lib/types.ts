@@ -4,6 +4,25 @@
 
 export type TradeDirection = "long" | "short";
 
+/** Post-trade reflection attached to an entry. All fields optional except stamps. */
+export interface TradeReflection {
+  wentWell?: string;
+  wentPoorly?: string;
+  /** null = not answered; true/false = explicit answer */
+  followedSetup: boolean | null;
+  followedRisk: boolean | null;
+  /** What to do differently / what the market taught. */
+  lesson?: string;
+  updatedAt: number;
+}
+
+/** A day without trading, explicitly recorded (part of the discipline system). */
+export interface NoTradeLog {
+  date: string; // YYYY-MM-DD
+  reason?: string;
+  createdAt: number;
+}
+
 /** Metadata for an uploaded screenshot. Binary lives in the image store. */
 export interface EntryImage {
   id: string;
@@ -26,6 +45,8 @@ export interface JournalEntry {
   setup: string;
   notes: string;
   images: EntryImage[]; // max MAX_IMAGES_PER_ENTRY
+  /** Structured post-trade reflection (optional; older entries may not have one). */
+  reflection?: TradeReflection;
   createdAt: number;
   updatedAt: number;
 }

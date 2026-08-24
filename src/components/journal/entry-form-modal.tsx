@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import {
   MAX_IMAGES_PER_ENTRY,
   type JournalEntry,
   type TradeDirection,
 } from "@/lib/types";
-import { todayKey, formatSignedMoney, weekdayLong } from "@/lib/format";
+import { todayKey, formatDateMedium, formatSignedMoney, weekdayLong } from "@/lib/format";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { toast } from "@/components/ui/toast";
@@ -15,7 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { ImageUploader, type UploadItem } from "./image-uploader";
+import { ReflectionFlow } from "./reflection-flow";
 import { cn } from "@/lib/utils";
+import { UploadIcon, PencilIcon } from "@/components/ui/icons";
 
 const INSTRUMENT_SUGGESTIONS = [
   "NQ", "ES", "MES", "MNQ", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD",
@@ -60,6 +62,9 @@ export function EntryFormModal({
   const [images, setImages] = useState<UploadItem[]>([]);
   const [errors, setErrors] = useState<{ date?: string; pnl?: string; rr?: string }>({});
   const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState<"manual" | "import">("manual");
+  const [importText, setImportText] = useState("");
+  const [reflecting, setReflecting] = useState<JournalEntry | null>(null);
 
   // Hydrate/reset each time the dialog opens
   useEffect(() => {
@@ -82,8 +87,11 @@ export function EntryFormModal({
       setSetup("");
       setNotes("");
       setImages([]);
+      setMode("manual");
+      setImportText("");
     }
     setErrors({});
+    setReflecting(null);
   }, [open, editing, presetDate]);
 
   const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl);
@@ -118,14 +126,17 @@ export function EntryFormModal({
       if (editing) {
         await useApp.getState().updateEntry(editing.id, draft, blobs);
         toast.success("Entry updated");
+        onClose();
       } else {
-        await useApp.getState().createEntry(draft, blobs);
+        const created = await useApp.getState().createEntry(draft, blobs);
         toast.success(
           draft.pnl > 0 ? "Green day logged" : draft.pnl < 0 ? "Red day logged" : "Session logged",
           "Your dashboard and roadmap just updated.",
         );
+        onClose();
+        // The trade is in — now capture the thinking while it's fresh.
+        setReflecting(created);
       }
-      onClose();
     } catch {
       toast.error("Could not save the entry", "Please try again.");
     } finally {
@@ -133,7 +144,73 @@ export function EntryFormModal({
     }
   };
 
+  /* ------------------------------ import ------------------------------ */
+
+  interface ParsedRow {
+    date: string;
+    pnl: number;
+    rr: number | null;
+    instrument: string;
+    direction: TradeDirection | null;
+    setup: string;
+    notes: string;
+  }
+
+  const parsedImport = useMemo<{ rows: ParsedRow[]; bad: number }>(() => {
+    const lines = importText.split("\n").map((l) => l.trim()).filter(Boolean);
+    const rows: ParsedRow[] = [];
+    let bad = 0;
+    for (const line of lines) {
+      const parts = line.split("|").map((p) => p.trim());
+      if (parts.length < 2) { bad++; continue; }
+      const [d, pnlRaw, rrRaw, instrument, direction, setup, notes] = parts;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { bad++; continue; }
+      const pnl = Number(pnlRaw);
+      if (!Number.isFinite(pnl)) { bad++; continue; }
+      const rr = rrRaw && rrRaw !== "-" ? Number(rrRaw) : null;
+      rows.push({
+        date: d,
+        pnl: Math.round(pnl * 100) / 100,
+        rr: rr != null && Number.isFinite(rr) ? rr : null,
+        instrument: (instrument || "—").toUpperCase(),
+        direction: direction === "long" ? "long" : direction === "short" ? "short" : null,
+        setup: setup || "",
+        notes: notes || "",
+      });
+    }
+    return { rows, bad };
+  }, [importText]);
+
+  const runImport = async () => {
+    if (parsedImport.rows.length === 0 || saving) return;
+    setSaving(true);
+    let ok = 0;
+    try {
+      for (const row of parsedImport.rows) {
+        try {
+          await useApp.getState().createEntry({
+            date: row.date,
+            pnl: row.pnl,
+            rr: row.rr,
+            instrument: row.instrument,
+            direction: row.direction,
+            setup: row.setup,
+            notes: row.notes,
+            images: [],
+          });
+          ok += 1;
+        } catch { /* skip row */ }
+      }
+      toast.success(`Imported ${ok} ${ok === 1 ? "trade" : "trades"}`, "Your dashboard and journey just updated.");
+      setImportText("");
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
+    <>
     <Modal
       open={open}
       onClose={onClose}
@@ -147,6 +224,47 @@ export function EntryFormModal({
       }
     >
       <form onSubmit={submit} noValidate className="px-6 py-6">
+        {/* Mode tabs — only for new entries */}
+        {!editing && (
+          <div
+            role="tablist"
+            aria-label="Entry mode"
+            className="mb-6 grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1"
+          >
+            {([
+              { id: "manual", label: "Manual entry", icon: <PencilIcon className="h-3.5 w-3.5" /> },
+              { id: "import", label: "Import trades", icon: <UploadIcon className="h-3.5 w-3.5" /> },
+            ] as const).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={mode === t.id}
+                onClick={() => setMode(t.id)}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors",
+                  mode === t.id ? "text-ink" : "text-faint hover:text-muted",
+                )}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mode === "import" && !editing ? (
+          <ImportPane
+            text={importText}
+            onChange={(v) => { setImportText(v); }}
+            rows={parsedImport.rows}
+            bad={parsedImport.bad}
+            onImport={() => void runImport()}
+            saving={saving}
+            onClose={onClose}
+          />
+        ) : (
+        <>
         <div className="grid gap-5 sm:grid-cols-2">
           {/* Left column */}
           <div className="space-y-5">
@@ -278,7 +396,10 @@ export function EntryFormModal({
             <ImageUploader items={images} onChange={setImages} />
           </Field>
         </div>
+        </>
+        )}
 
+        {!(mode === "import" && !editing) && (
         <div className="mt-7 flex items-center justify-end gap-2.5 border-t border-line bg-surface pt-5 pb-1 sticky bottom-[-24px] px-0.5 -mx-0.5">
           <Button type="button" variant="subtle" onClick={onClose} disabled={saving}>
             Cancel
@@ -287,7 +408,77 @@ export function EntryFormModal({
             {editing ? "Save changes" : "Add to journal"}
           </Button>
         </div>
+        )}
       </form>
     </Modal>
+
+    {/* Post-save reflection — lives outside the form modal so it survives its close */}
+    <ReflectionFlow open={!!reflecting} entry={reflecting} onClose={() => setReflecting(null)} />
+    </>
+  );
+}
+
+/* ------------------------------ import pane ------------------------------ */
+
+function ImportPane({
+  text,
+  onChange,
+  rows,
+  bad,
+  onImport,
+  saving,
+  onClose,
+}: {
+  text: string;
+  onChange: (v: string) => void;
+  rows: { date: string; pnl: number; instrument: string }[];
+  bad: number;
+  onImport: () => void;
+  saving: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-line bg-raised/50 px-4 py-3 text-[13px] leading-relaxed text-muted">
+        Paste one trade per line, pipe-separated:
+        <code className="mt-1 block whitespace-nowrap overflow-x-auto rounded-md border border-line bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-faint">
+          2026-08-21 | -90 | 1.5 | TSLA | long | Gap fill | chased strength
+        </code>
+        <span className="mt-1.5 block text-[11px] text-faint">date · pnl · R:R · instrument · direction · setup · notes (only date &amp; pnl required)</span>
+      </div>
+
+      <TextArea
+        aria-label="Paste trades to import"
+        placeholder={"2026-08-21 | -90 | 1.5 | TSLA | long | Gap fill | chased strength\n2026-08-20 | +321 | 2.8 | TSLA | long | Trend continuation | held the runner"}
+        className="min-h-36 font-mono text-[12.5px]"
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+      />
+
+      {text.trim() !== "" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-raised/60 px-4 py-3 text-sm">
+          <p className="text-muted">
+            <span className="num text-ink">{rows.length}</span> valid {rows.length === 1 ? "trade" : "trades"}
+            {bad > 0 && <span className="text-loss"> · {bad} unparseable {bad === 1 ? "line" : "lines"}</span>}
+          </p>
+          {rows.length > 0 && (
+            <p className="num text-[12px] text-faint">
+              {formatDateMedium(rows[0].date)} → {formatDateMedium(rows[rows.length - 1].date)} ·{" "}
+              {formatSignedMoney(rows.reduce((s, r) => s + r.pnl, 0))}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2.5 border-t border-line pt-4">
+        <Button variant="subtle" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button variant="gold" onClick={onImport} loading={saving} disabled={saving || rows.length === 0}>
+          <UploadIcon className="h-4 w-4" />
+          Import {rows.length > 0 ? rows.length : ""} {rows.length === 1 ? "trade" : "trades"}
+        </Button>
+      </div>
+    </div>
   );
 }

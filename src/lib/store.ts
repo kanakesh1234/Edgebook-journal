@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { JournalEntry, JournalSettings } from "./types";
+import type { JournalEntry, JournalSettings, NoTradeLog, TradeReflection } from "./types";
 import { defaultSettings } from "./types";
 import { dataStore, type JournalPayload } from "./services/storage";
 import { auth, AuthError, type User } from "./services/auth";
@@ -25,6 +25,8 @@ interface AppState {
   user: User | null;
   entries: JournalEntry[];
   settings: JournalSettings;
+  /** Explicit "no trade" day records (discipline system). */
+  dayLogs: NoTradeLog[];
 
   init(): Promise<void>;
   signUp(name: string, email: string, password: string): Promise<void>;
@@ -35,6 +37,12 @@ interface AppState {
   updateEntry(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   deleteEntry(id: string): Promise<void>;
 
+  /** Attach or update the post-trade reflection on an entry. */
+  saveReflection(entryId: string, reflection: TradeReflection): Promise<void>;
+  /** Record a trading weekday without trades. */
+  logNoTradeDay(date: string, reason?: string): Promise<void>;
+  removeNoTradeDay(date: string): Promise<void>;
+
   updateSettings(patch: Partial<JournalSettings>): Promise<void>;
   replaceJournal(payload: JournalPayload): Promise<void>;
   exportPayload(): JournalPayload;
@@ -42,8 +50,8 @@ interface AppState {
   clearAllEntries(): Promise<void>;
 }
 
-async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings) {
-  await dataStore.saveJournal(userId, { entries, settings });
+async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[]) {
+  await dataStore.saveJournal(userId, { entries, settings, dayLogs, version: 2 });
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -51,11 +59,12 @@ export const useApp = create<AppState>((set, get) => ({
   user: null,
   entries: [],
   settings: defaultSettings(),
+  dayLogs: [],
 
   async init() {
     const user = await auth.getSession();
     if (!user) {
-      set({ status: "guest", user: null, entries: [], settings: defaultSettings() });
+      set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
       return;
     }
     const payload = (await dataStore.loadJournal(user.id)) ?? {
@@ -67,14 +76,15 @@ export const useApp = create<AppState>((set, get) => ({
       user,
       entries: payload.entries ?? [],
       settings: { ...defaultSettings(), ...payload.settings },
+      dayLogs: payload.dayLogs ?? [],
     });
   },
 
   async signUp(name, email, password) {
     try {
       const user = await auth.signUp(name, email, password);
-      await persist(user.id, [], { ...defaultSettings(), traderName: user.name });
-      set({ status: "authenticated", user, entries: [], settings: { ...defaultSettings(), traderName: user.name } });
+      await persist(user.id, [], { ...defaultSettings(), traderName: user.name }, []);
+      set({ status: "authenticated", user, entries: [], settings: { ...defaultSettings(), traderName: user.name }, dayLogs: [] });
     } catch (err) {
       if (err instanceof AuthError) throw err;
       throw new AuthError("storage", "Could not create the account on this device.");
@@ -89,16 +99,17 @@ export const useApp = create<AppState>((set, get) => ({
       user,
       entries: payload.entries ?? [],
       settings: { ...defaultSettings(), ...payload.settings },
+      dayLogs: payload.dayLogs ?? [],
     });
   },
 
   async signOut() {
     await auth.signOut();
-    set({ status: "guest", user: null, entries: [], settings: defaultSettings() });
+    set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
   },
 
   async createEntry(draft, blobs) {
-    const { user, entries, settings } = get();
+    const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
     if (blobs) for (const [id, blob] of blobs) await dataStore.putImage(id, blob);
 
@@ -110,12 +121,17 @@ export const useApp = create<AppState>((set, get) => ({
     };
     const next = [...entries, entry];
     set({ entries: next });
-    await persist(user.id, next, settings);
+    // A traded day supersedes an explicit no-trade record.
+    const nextDayLogs = dayLogs.some((d) => d.date === draft.date)
+      ? dayLogs.filter((d) => d.date !== draft.date)
+      : dayLogs;
+    if (nextDayLogs !== dayLogs) set({ dayLogs: nextDayLogs });
+    await persist(user.id, next, settings, nextDayLogs);
     return entry;
   },
 
   async updateEntry(id, draft, blobs) {
-    const { user, entries, settings } = get();
+    const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
 
     const prev = entries.find((e) => e.id === id);
@@ -133,12 +149,12 @@ export const useApp = create<AppState>((set, get) => ({
     const updated: JournalEntry = { ...prev, ...draft, updatedAt: Date.now() };
     const next = entries.map((e) => (e.id === id ? updated : e));
     set({ entries: next });
-    await persist(user.id, next, settings);
+    await persist(user.id, next, settings, dayLogs);
     return updated;
   },
 
   async deleteEntry(id) {
-    const { user, entries, settings } = get();
+    const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
     const target = entries.find((e) => e.id === id);
     if (target?.images.length) {
@@ -149,49 +165,79 @@ export const useApp = create<AppState>((set, get) => ({
     }
     const next = entries.filter((e) => e.id !== id);
     set({ entries: next });
-    await persist(user.id, next, settings);
+    await persist(user.id, next, settings, dayLogs);
+  },
+
+  async saveReflection(entryId, reflection) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const prev = entries.find((e) => e.id === entryId);
+    if (!prev) throw new Error("Entry not found");
+    const updated: JournalEntry = { ...prev, reflection, updatedAt: Date.now() };
+    const next = entries.map((e) => (e.id === entryId ? updated : e));
+    set({ entries: next });
+    await persist(user.id, next, settings, dayLogs);
+  },
+
+  async logNoTradeDay(date, reason) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    if (entries.some((e) => e.date === date)) return; // traded days are already journaled
+    if (dayLogs.some((d) => d.date === date)) return;
+    const next = [...dayLogs, { date, reason: reason?.trim() || undefined, createdAt: Date.now() }];
+    set({ dayLogs: next });
+    await persist(user.id, entries, settings, next);
+  },
+
+  async removeNoTradeDay(date) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const next = dayLogs.filter((d) => d.date !== date);
+    set({ dayLogs: next });
+    await persist(user.id, entries, settings, next);
   },
 
   async updateSettings(patch) {
-    const { user, entries, settings } = get();
+    const { user, entries, settings, dayLogs } = get();
     if (!user) return;
     const next = { ...settings, ...patch };
     set({ settings: next });
-    await persist(user.id, entries, next);
+    await persist(user.id, entries, next, dayLogs);
   },
 
   async replaceJournal(payload) {
     const { user } = get();
     if (!user) throw new Error("Not signed in");
     const settings = { ...defaultSettings(), ...payload.settings };
-    set({ entries: payload.entries ?? [], settings });
-    await persist(user.id, payload.entries ?? [], settings);
+    const dayLogs = payload.dayLogs ?? [];
+    set({ entries: payload.entries ?? [], settings, dayLogs });
+    await persist(user.id, payload.entries ?? [], settings, dayLogs);
   },
 
   exportPayload() {
-    const { entries, settings } = get();
-    return { entries, settings, exportedAt: Date.now() };
+    const { entries, settings, dayLogs } = get();
+    return { entries, settings, dayLogs, version: 2, exportedAt: Date.now() };
   },
 
   async loadDemoData() {
-    const { user, settings } = get();
+    const { user, settings, dayLogs } = get();
     if (!user) return;
     const demo = generateDemoEntries();
     set({ entries: demo, settings: { ...settings, startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1500 } });
-    await persist(user.id, demo, get().settings);
+    await persist(user.id, demo, get().settings, dayLogs);
   },
 
   async clearAllEntries() {
-    const { user, entries, settings } = get();
+    const { user, settings } = get();
     if (!user) return;
-    for (const e of entries) {
+    for (const e of get().entries) {
       for (const img of e.images) {
         await dataStore.deleteImage(img.id);
         dropImageUrl(img.id);
       }
     }
-    set({ entries: [] });
-    await persist(user.id, [], settings);
+    set({ entries: [], dayLogs: [] });
+    await persist(user.id, [], settings, []);
   },
 }));
 

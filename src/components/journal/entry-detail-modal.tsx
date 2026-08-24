@@ -9,12 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Pill } from "@/components/ui/misc";
+import { ReflectionFlow } from "./reflection-flow";
 import {
+  CheckIcon,
   ImageIcon,
   PencilIcon,
+  SparklesIcon,
   TrashIcon,
   TrendingDownIcon,
   TrendingUpIcon,
+  XIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 
@@ -32,18 +36,25 @@ export function EntryDetailModal({
   onDelete?: (entry: JournalEntry) => void;
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null);
+  const [reflecting, setReflecting] = useState(false);
   const urls = useImageUrls(entry?.images.map((i) => i.id) ?? []);
 
   return (
     <>
       <Modal open={open && !!entry} onClose={onClose} size="lg" label="Journal entry">
-        {entry && <DetailBody entry={entry} urls={urls} onZoom={setZoomed} />}
+        {entry && <DetailBody entry={entry} urls={urls} onZoom={setZoomed} onReflect={() => setReflecting(true)} />}
         {(onEdit || onDelete) && entry && (
           <div className="flex items-center justify-end gap-2.5 border-t border-line bg-surface px-6 py-4">
             {onDelete && (
               <Button variant="ghost" className="text-loss hover:bg-loss/10" onClick={() => onDelete(entry)}>
                 <TrashIcon className="h-4 w-4" />
                 Delete
+              </Button>
+            )}
+            {onEdit && (
+              <Button variant="outline" onClick={() => setReflecting(true)}>
+                <SparklesIcon className="h-3.5 w-3.5" />
+                {entry.reflection ? "Edit reflection" : "Add reflection"}
               </Button>
             )}
             {onEdit && (
@@ -57,6 +68,8 @@ export function EntryDetailModal({
       </Modal>
 
       <Lightbox src={zoomed} onClose={() => setZoomed(null)} alt="Trade screenshot" />
+
+      <ReflectionFlow open={reflecting && !!entry} entry={entry} onClose={() => setReflecting(false)} />
     </>
   );
 }
@@ -65,10 +78,12 @@ function DetailBody({
   entry,
   urls,
   onZoom,
+  onReflect,
 }: {
   entry: JournalEntry;
   urls: Record<string, string | null>;
   onZoom: (url: string) => void;
+  onReflect: () => void;
 }) {
   const rel = relativeDayLabel(entry.date);
   return (
@@ -137,6 +152,42 @@ function DetailBody({
         </blockquote>
       ) : null}
 
+      {/* Reflection */}
+      {entry.reflection ? (
+        <section className="mt-6" aria-label="Reflection">
+          <p className="mb-2.5 text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Reflection</p>
+          <div className="space-y-3 rounded-xl border border-gold/20 bg-gold/[0.04] p-4">
+            {entry.reflection.wentWell && (
+              <ReflectionRow label="Went well" text={entry.reflection.wentWell} tone="text-profit" />
+            )}
+            {entry.reflection.wentPoorly && (
+              <ReflectionRow label="Didn't go well" text={entry.reflection.wentPoorly} tone="text-loss" />
+            )}
+            <div className="flex flex-wrap gap-2">
+              {entry.reflection.followedSetup != null && (
+                <ProcessChip label="Setup followed" ok={entry.reflection.followedSetup} />
+              )}
+              {entry.reflection.followedRisk != null && (
+                <ProcessChip label="Risk respected" ok={entry.reflection.followedRisk} />
+              )}
+            </div>
+            {entry.reflection.lesson && (
+              <ReflectionRow label="Next time" text={entry.reflection.lesson} tone="text-ink" />
+            )}
+          </div>
+        </section>
+      ) : (
+        <button
+          onClick={onReflect}
+          className="group mt-6 flex w-full items-center gap-3 rounded-xl border border-dashed border-line-strong px-4 py-3.5 text-left transition-colors hover:border-gold/50"
+        >
+          <SparklesIcon className="h-4 w-4 shrink-0 text-gold" />
+          <span className="text-sm text-muted transition-colors group-hover:text-ink">
+            Review this trade — what worked, what didn't, and the one change for next time.
+          </span>
+        </button>
+      )}
+
       {/* Screenshots */}
       <section className="mt-6" aria-label="Screenshots">
         <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Screenshots</p>
@@ -190,5 +241,28 @@ function DetailBody({
         )}
       </section>
     </div>
+  );
+}
+
+function ReflectionRow({ label, text, tone }: { label: string; text: string; tone: string }) {
+  return (
+    <div>
+      <p className={cn("text-[11px] font-semibold uppercase tracking-[0.08em]", tone)}>{label}</p>
+      <p className="mt-0.5 text-[13px] leading-relaxed text-muted">{text}</p>
+    </div>
+  );
+}
+
+function ProcessChip({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+        ok ? "border-profit/30 bg-profit/[0.08] text-profit" : "border-loss/30 bg-loss/[0.08] text-loss",
+      )}
+    >
+      {ok ? <CheckIcon className="h-3 w-3" /> : <XIcon className="h-3 w-3" />}
+      {label}
+    </span>
   );
 }

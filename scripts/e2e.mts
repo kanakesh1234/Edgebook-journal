@@ -203,6 +203,9 @@ async function clickByText(page: Page, selector: string, text: string) {
   await clickByText(page, "button[type=submit]", "Add to journal");
   await sleep(900);
   await expectText(page, "Green day logged", "create-entry toast");
+  await expectText(page, "What went well", "reflection flow opens after save");
+  await page.keyboard.press("Escape");
+  await sleep(400);
   drainErrors(page, "journal-create");
 
   // Search for it
