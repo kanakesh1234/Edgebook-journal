@@ -1,6 +1,7 @@
 /* Sanity tests for the stats engine — run with: node scripts/test-stats.ts */
 import { computeStats, currentStreak, groupByDay, monthGrid } from "../src/lib/stats.ts";
 import { disciplineSummary, XP } from "../src/lib/discipline.ts";
+import { parseTradesCsv } from "../src/lib/csv-import.ts";
 import { defaultSettings, type NoTradeLog } from "../src/lib/types.ts";
 
 let failures = 0;
@@ -118,6 +119,32 @@ expect("discipline streak with no-trade", d2.disciplineStreak, 3);
 
 // XP constants sanity (weights are product decisions — pin them)
 expect("xp weights", [XP.tradeLogged, XP.noTradeLogged, XP.missedWeekdayJournal], [20, 15, -20]);
+
+/* ----------------------------- CSV import ----------------------------- */
+const csv = [
+  "Date,P&L,R:R,Instrument,Direction,Setup,Notes",
+  '2026-08-21,-90.50,1.5,TSLA,long,"Gap fill","chased, then stopped"',
+  "08/20/2026,$321,2.8,tsla,Buy,Trend continuation,held the runner",
+  "21.08.2026,150,2,NQ,short,Liquidity sweep,",
+  "2026-08-18,,1,NQ,long,Bad row,missing pnl",
+  "not-a-date,100,,ES,long,,bad date",
+  "2026-08-17,55,abc,MNQ,long,,bad rr",
+  "2026-08-16,60,1.5,CL,sideways,,bad direction",
+].join("\n");
+const c = parseTradesCsv(csv);
+expect("csv valid count", c.rows.length, 3);
+expect("csv invalid count", c.invalid.length, 4);
+expect("csv row1 quoted notes", c.rows[0]?.notes, "chased, then stopped");
+expect("csv row1 pnl", c.rows[0]?.pnl, -90.5);
+expect("csv date mdyyyy", c.rows[1]?.date, "2026-08-20");
+expect("csv direction buy→long", c.rows[1]?.direction, "long");
+expect("csv date dd.mm.yyyy", c.rows[2]?.date, "2026-08-21");
+expect("csv currency symbol stripped", c.rows[1]?.pnl, 321);
+expect("csv invalid reasons", c.invalid.map((r) => r.line), [5, 6, 7, 8]);
+expect("csv empty input", parseTradesCsv("").rows.length, 0);
+// Headerless file assumes canonical order
+const headerless = parseTradesCsv("2026-08-10,120,2,ES,long,ORB,clean");
+expect("csv headerless", headerless.rows[0]?.pnl, 120);
 
 if (failures > 0) {
   console.log(`\n${failures} FAILURES`);

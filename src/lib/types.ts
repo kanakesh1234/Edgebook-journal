@@ -8,10 +8,12 @@ export type TradeDirection = "long" | "short";
 export interface TradeReflection {
   wentWell?: string;
   wentPoorly?: string;
+  /** What caused this outcome — the trigger behind the result. */
+  cause?: string;
   /** null = not answered; true/false = explicit answer */
   followedSetup: boolean | null;
   followedRisk: boolean | null;
-  /** What to do differently / what the market taught. */
+  /** What to improve / do differently next time. */
   lesson?: string;
   updatedAt: number;
 }

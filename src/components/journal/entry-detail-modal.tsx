@@ -163,6 +163,9 @@ function DetailBody({
             {entry.reflection.wentPoorly && (
               <ReflectionRow label="Didn't go well" text={entry.reflection.wentPoorly} tone="text-loss" />
             )}
+            {entry.reflection.cause && (
+              <ReflectionRow label="Cause" text={entry.reflection.cause} tone="text-gold" />
+            )}
             <div className="flex flex-wrap gap-2">
               {entry.reflection.followedSetup != null && (
                 <ProcessChip label="Setup followed" ok={entry.reflection.followedSetup} />

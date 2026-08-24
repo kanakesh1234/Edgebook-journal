@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   MAX_IMAGES_PER_ENTRY,
@@ -8,6 +8,7 @@ import {
   type TradeDirection,
 } from "@/lib/types";
 import { todayKey, formatDateMedium, formatSignedMoney, weekdayLong } from "@/lib/format";
+import { parseTradesCsv, type ParsedTrade } from "@/lib/csv-import";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { toast } from "@/components/ui/toast";
@@ -17,7 +18,7 @@ import { Modal } from "@/components/ui/modal";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { ReflectionFlow } from "./reflection-flow";
 import { cn } from "@/lib/utils";
-import { UploadIcon, PencilIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, CheckCircleIcon, PencilIcon, UploadIcon } from "@/components/ui/icons";
 
 const INSTRUMENT_SUGGESTIONS = [
   "NQ", "ES", "MES", "MNQ", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD",
@@ -63,7 +64,6 @@ export function EntryFormModal({
   const [errors, setErrors] = useState<{ date?: string; pnl?: string; rr?: string }>({});
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<"manual" | "import">("manual");
-  const [importText, setImportText] = useState("");
   const [reflecting, setReflecting] = useState<JournalEntry | null>(null);
 
   // Hydrate/reset each time the dialog opens
@@ -88,7 +88,6 @@ export function EntryFormModal({
       setNotes("");
       setImages([]);
       setMode("manual");
-      setImportText("");
     }
     setErrors({});
     setReflecting(null);
@@ -146,47 +145,12 @@ export function EntryFormModal({
 
   /* ------------------------------ import ------------------------------ */
 
-  interface ParsedRow {
-    date: string;
-    pnl: number;
-    rr: number | null;
-    instrument: string;
-    direction: TradeDirection | null;
-    setup: string;
-    notes: string;
-  }
-
-  const parsedImport = useMemo<{ rows: ParsedRow[]; bad: number }>(() => {
-    const lines = importText.split("\n").map((l) => l.trim()).filter(Boolean);
-    const rows: ParsedRow[] = [];
-    let bad = 0;
-    for (const line of lines) {
-      const parts = line.split("|").map((p) => p.trim());
-      if (parts.length < 2) { bad++; continue; }
-      const [d, pnlRaw, rrRaw, instrument, direction, setup, notes] = parts;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { bad++; continue; }
-      const pnl = Number(pnlRaw);
-      if (!Number.isFinite(pnl)) { bad++; continue; }
-      const rr = rrRaw && rrRaw !== "-" ? Number(rrRaw) : null;
-      rows.push({
-        date: d,
-        pnl: Math.round(pnl * 100) / 100,
-        rr: rr != null && Number.isFinite(rr) ? rr : null,
-        instrument: (instrument || "—").toUpperCase(),
-        direction: direction === "long" ? "long" : direction === "short" ? "short" : null,
-        setup: setup || "",
-        notes: notes || "",
-      });
-    }
-    return { rows, bad };
-  }, [importText]);
-
-  const runImport = async () => {
-    if (parsedImport.rows.length === 0 || saving) return;
+  const runImport = async (rows: ParsedTrade[]) => {
+    if (rows.length === 0 || saving) return;
     setSaving(true);
     let ok = 0;
     try {
-      for (const row of parsedImport.rows) {
+      for (const row of rows) {
         try {
           await useApp.getState().createEntry({
             date: row.date,
@@ -202,7 +166,6 @@ export function EntryFormModal({
         } catch { /* skip row */ }
       }
       toast.success(`Imported ${ok} ${ok === 1 ? "trade" : "trades"}`, "Your dashboard and journey just updated.");
-      setImportText("");
       onClose();
     } finally {
       setSaving(false);
@@ -254,15 +217,7 @@ export function EntryFormModal({
         )}
 
         {mode === "import" && !editing ? (
-          <ImportPane
-            text={importText}
-            onChange={(v) => { setImportText(v); }}
-            rows={parsedImport.rows}
-            bad={parsedImport.bad}
-            onImport={() => void runImport()}
-            saving={saving}
-            onClose={onClose}
-          />
+          <ImportPane onImport={(rows) => void runImport(rows)} saving={saving} onClose={onClose} />
         ) : (
         <>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -421,64 +376,173 @@ export function EntryFormModal({
 /* ------------------------------ import pane ------------------------------ */
 
 function ImportPane({
-  text,
-  onChange,
-  rows,
-  bad,
   onImport,
   saving,
   onClose,
 }: {
-  text: string;
-  onChange: (v: string) => void;
-  rows: { date: string; pnl: number; instrument: string }[];
-  bad: number;
-  onImport: () => void;
+  onImport: (rows: ParsedTrade[]) => void;
   saving: boolean;
   onClose: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [result, setResult] = useState<ReturnType<typeof parseTradesCsv> | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const loadFile = async (file: File) => {
+    setFileError(null);
+    if (!/\.(csv|txt|tsv)$/i.test(file.name) && !file.type.includes("csv") && !file.type.includes("text")) {
+      setFileError("Please choose a .csv file (or a plain-text export).");
+      return;
+    }
+    try {
+      const text = await file.text();
+      const parsed = parseTradesCsv(text);
+      setFileName(file.name);
+      setResult(parsed);
+      if (parsed.rows.length === 0 && parsed.invalid.length === 0) {
+        setFileError("No rows found in that file.");
+      }
+    } catch {
+      setFileError("Could not read that file — try re-exporting it.");
+    }
+  };
+
+  const rows = result?.rows ?? [];
+  const invalid = result?.invalid ?? [];
+  const netPnl = rows.reduce((s, r) => s + r.pnl, 0);
+
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-line bg-raised/50 px-4 py-3 text-[13px] leading-relaxed text-muted">
-        Paste one trade per line, pipe-separated:
-        <code className="mt-1 block whitespace-nowrap overflow-x-auto rounded-md border border-line bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-faint">
-          2026-08-21 | -90 | 1.5 | TSLA | long | Gap fill | chased strength
-        </code>
-        <span className="mt-1.5 block text-[11px] text-faint">date · pnl · R:R · instrument · direction · setup · notes (only date &amp; pnl required)</span>
-      </div>
-
-      <TextArea
-        aria-label="Paste trades to import"
-        placeholder={"2026-08-21 | -90 | 1.5 | TSLA | long | Gap fill | chased strength\n2026-08-20 | +321 | 2.8 | TSLA | long | Trend continuation | held the runner"}
-        className="min-h-36 font-mono text-[12.5px]"
-        value={text}
-        onChange={(e) => onChange(e.target.value)}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,.txt,.tsv,text/csv,text/plain"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void loadFile(f);
+          e.target.value = "";
+        }}
       />
 
-      {text.trim() !== "" && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-raised/60 px-4 py-3 text-sm">
-          <p className="text-muted">
-            <span className="num text-ink">{rows.length}</span> valid {rows.length === 1 ? "trade" : "trades"}
-            {bad > 0 && <span className="text-loss"> · {bad} unparseable {bad === 1 ? "line" : "lines"}</span>}
-          </p>
+      {!result ? (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="group flex w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-line-strong bg-raised/40 px-6 py-12 transition-colors hover:border-gold/50"
+        >
+          <span className="grid h-12 w-12 place-items-center rounded-xl border border-line bg-raised text-gold transition-transform duration-200 group-hover:scale-105">
+            <UploadIcon className="h-5 w-5" />
+          </span>
+          <span className="text-sm font-semibold text-ink">Upload a CSV of your trades</span>
+          <span className="max-w-sm text-center text-xs leading-relaxed text-muted">
+            Exported from your broker or a spreadsheet. Columns are detected automatically —
+            date, P&amp;L, R:R, instrument, direction, setup, notes.
+          </span>
+        </button>
+      ) : (
+        <>
+          {/* Summary */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-raised/60 px-4 py-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-ink">{fileName}</p>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                <span className="flex items-center gap-1 text-profit">
+                  <CheckCircleIcon className="h-3.5 w-3.5" />
+                  <span className="num">{rows.length}</span> valid {rows.length === 1 ? "trade" : "trades"}
+                </span>
+                {invalid.length > 0 && (
+                  <span className="flex items-center gap-1 text-loss">
+                    <AlertTriangleIcon className="h-3.5 w-3.5" />
+                    <span className="num">{invalid.length}</span> invalid — listed below, not imported
+                  </span>
+                )}
+              </p>
+            </div>
+            {rows.length > 0 && (
+              <p className="num shrink-0 text-[12px] text-muted">
+                {formatDateMedium(rows[0].date)} → {formatDateMedium(rows[rows.length - 1].date)} ·{" "}
+                <span className={netPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(netPnl)}</span>
+              </p>
+            )}
+          </div>
+
+          {/* Preview table */}
           {rows.length > 0 && (
-            <p className="num text-[12px] text-faint">
-              {formatDateMedium(rows[0].date)} → {formatDateMedium(rows[rows.length - 1].date)} ·{" "}
-              {formatSignedMoney(rows.reduce((s, r) => s + r.pnl, 0))}
-            </p>
+            <div className="overflow-hidden rounded-xl border border-line">
+              <div className="max-h-56 overflow-y-auto">
+                <table className="w-full text-left text-[12.5px]">
+                  <thead className="sticky top-0 bg-raised text-[10px] font-medium uppercase tracking-[0.08em] text-faint">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Date</th>
+                      <th className="px-3 py-2 font-medium">P&amp;L</th>
+                      <th className="px-3 py-2 font-medium">R</th>
+                      <th className="px-3 py-2 font-medium">Instrument</th>
+                      <th className="hidden px-3 py-2 font-medium sm:table-cell">Dir</th>
+                      <th className="hidden px-3 py-2 font-medium md:table-cell">Setup</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line-soft">
+                    {rows.map((r) => (
+                      <tr key={r.line} className="bg-surface">
+                        <td className="whitespace-nowrap px-3 py-2 tabular text-muted">{r.date}</td>
+                        <td className={cn("whitespace-nowrap px-3 py-2 num", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>
+                          {formatSignedMoney(r.pnl)}
+                        </td>
+                        <td className="px-3 py-2 tabular text-muted">{r.rr != null ? `${r.rr}R` : "—"}</td>
+                        <td className="px-3 py-2 font-medium text-ink">{r.instrument}</td>
+                        <td className="hidden px-3 py-2 capitalize text-muted sm:table-cell">{r.direction ?? "—"}</td>
+                        <td className="hidden max-w-40 truncate px-3 py-2 text-muted md:table-cell">{r.setup || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
-        </div>
+
+          {/* Invalid rows — never silently discarded */}
+          {invalid.length > 0 && (
+            <div className="rounded-xl border border-loss/25 bg-loss/[0.05] px-4 py-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-loss">
+                <AlertTriangleIcon className="h-3.5 w-3.5" />
+                {invalid.length} {invalid.length === 1 ? "row" : "rows"} could not be imported
+              </p>
+              <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-[12px] text-muted">
+                {invalid.map((r) => (
+                  <li key={r.line} className="flex items-baseline gap-2">
+                    <span className="num shrink-0 text-faint">line {r.line}</span>
+                    <span className="text-loss">{r.reason}</span>
+                    <span className="truncate font-mono text-[11px] text-faint">{r.raw}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2.5 border-t border-line pt-4">
+            <Button variant="subtle" size="sm" onClick={() => inputRef.current?.click()} disabled={saving}>
+              <UploadIcon className="h-3.5 w-3.5" />
+              Different file
+            </Button>
+            <div className="flex gap-2.5">
+              <Button variant="subtle" onClick={onClose} disabled={saving}>
+                Cancel
+              </Button>
+              <Button variant="gold" onClick={() => onImport(rows)} loading={saving} disabled={saving || rows.length === 0}>
+                Import {rows.length > 0 ? rows.length : ""} {rows.length === 1 ? "trade" : "trades"}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
 
-      <div className="flex justify-end gap-2.5 border-t border-line pt-4">
-        <Button variant="subtle" onClick={onClose} disabled={saving}>
-          Cancel
-        </Button>
-        <Button variant="gold" onClick={onImport} loading={saving} disabled={saving || rows.length === 0}>
-          <UploadIcon className="h-4 w-4" />
-          Import {rows.length > 0 ? rows.length : ""} {rows.length === 1 ? "trade" : "trades"}
-        </Button>
-      </div>
+      {fileError && (
+        <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2.5 text-[13px] text-loss">
+          {fileError}
+        </p>
+      )}
     </div>
   );
 }

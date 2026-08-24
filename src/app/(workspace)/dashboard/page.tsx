@@ -18,7 +18,6 @@ import { useCountUp } from "@/lib/hooks";
 import { useUi } from "@/lib/ui-store";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { EquityCurve } from "@/components/charts/equity-curve";
-import { DailyBars } from "@/components/charts/daily-bars";
 import { WinRateDonut, DrawdownMeter } from "@/components/charts/winrate-donut";
 import { JourneyTrack } from "@/components/journey/journey-track";
 import { WeekStrip } from "@/components/cc/week-strip";
@@ -333,31 +332,13 @@ export default function DashboardPage() {
       {/* ---------------------------- Discipline ----------------------------- */}
       <DisciplinePanel delay={0.28} />
 
-      {/* ------------------------- Daily bars row -------------------------- */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.34, ease: EASE }}
-          className="panel p-5 sm:p-6 xl:col-span-2"
-          aria-label="Daily profit and loss chart"
-        >
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="font-display text-base font-semibold tracking-tight text-ink">Daily results</h2>
-              <p className="text-xs text-muted">Your last 60 sessions, oldest → newest</p>
-            </div>
-          </div>
-          <DailyBars data={stats.daily.slice(-60)} currency={settings.currency} height={252} />
-        </motion.section>
-
-        {/* Secondary stats */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.38, ease: EASE }}
-          className="grid grid-cols-2 gap-4"
-        >
+      {/* ------------------------- Secondary stats ------------------------- */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.55, delay: 0.34, ease: EASE }}
+        className="grid grid-cols-2 gap-4 xl:grid-cols-4"
+      >
           <MiniStat
             label="To target"
             value={formatMoney(Math.max(0, stats.remainingToTarget), settings.currency, { compact: true })}
@@ -386,8 +367,7 @@ export default function DashboardPage() {
             note={`${stats.tradeCount} entries total`}
             icon={<BookOpenIcon className="h-3.5 w-3.5" />}
           />
-        </motion.div>
-      </div>
+      </motion.div>
 
       {/* --------------------------- Recent days --------------------------- */}
       <motion.section

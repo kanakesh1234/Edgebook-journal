@@ -134,7 +134,6 @@ async function clickByText(page: Page, selector: string, text: string) {
   await sleep(1200);
   await expectText(page, "Total P&L", "dashboard KPI cards appear");
   await expectText(page, "Equity curve", "equity curve panel");
-  await expectText(page, "Daily results", "daily bars panel");
   await expectText(page, "Winning days", "win rate panel");
   const hasRecharts = await page.$(".recharts-surface");
   hasRecharts ? ok("charts rendered") : fail("charts rendered");

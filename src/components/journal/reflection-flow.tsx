@@ -26,23 +26,20 @@ interface Step {
 }
 
 function buildSteps(entry: JournalEntry): Step[] {
-  const loss = entry.pnl < 0;
-  const steps: Step[] = loss
-    ? [
-        { key: "wentPoorly", question: "What didn't go well?", hint: "Be specific — the tape forgives nothing." },
-        { key: "wentWell", question: "What went well, even small?", hint: "One thing done right is worth keeping." },
-      ]
-    : [
-        { key: "wentWell", question: "What went well?", hint: "Name it, so you can repeat it." },
-        { key: "wentPoorly", question: "Anything that didn't go well?", hint: "Even green days have leaks." },
-      ];
-  steps.push({ key: "process", question: "Did you follow your process?", hint: "Setup and risk — the two promises you keep." });
-  steps.push({
-    key: "lesson",
-    question: entry.pnl < 0 ? "What will you do differently next time?" : "What should you repeat next time?",
-    hint: "One sentence is enough.",
-  });
-  return steps;
+  const win = entry.pnl > 0;
+  return [
+    { key: "wentWell", question: "What went well?", hint: win ? "Name it, so you can repeat it." : "One thing done right is worth keeping." },
+    { key: "wentPoorly", question: "What didn't go well?", hint: "Be specific — the tape forgives nothing." },
+    {
+      key: "cause",
+      question: "What caused this?",
+      hint: win
+        ? "Repeatable process, or luck? Be honest."
+        : "The trigger behind it — news, impulse, missed confirmation?",
+    },
+    { key: "process", question: "Did you follow your process?", hint: "Setup and risk — the two promises you keep." },
+    { key: "lesson", question: "What will you do differently next time?", hint: "One sentence is enough — this is what you improve." },
+  ];
 }
 
 export function ReflectionFlow({
@@ -57,6 +54,7 @@ export function ReflectionFlow({
   const [step, setStep] = useState(0);
   const [wentWell, setWentWell] = useState("");
   const [wentPoorly, setWentPoorly] = useState("");
+  const [cause, setCause] = useState("");
   const [followedSetup, setFollowedSetup] = useState<boolean | null>(null);
   const [followedRisk, setFollowedRisk] = useState<boolean | null>(null);
   const [lesson, setLesson] = useState("");
@@ -68,6 +66,7 @@ export function ReflectionFlow({
     const r = entry?.reflection;
     setWentWell(r?.wentWell ?? "");
     setWentPoorly(r?.wentPoorly ?? "");
+    setCause(r?.cause ?? "");
     setFollowedSetup(r?.followedSetup ?? null);
     setFollowedRisk(r?.followedRisk ?? null);
     setLesson(r?.lesson ?? "");
@@ -82,6 +81,7 @@ export function ReflectionFlow({
   const answers: Record<string, string> = {
     wentWell,
     wentPoorly,
+    cause,
     lesson,
     process: "",
   };
@@ -100,6 +100,7 @@ export function ReflectionFlow({
       const reflection: TradeReflection = {
         wentWell: wentWell.trim() || undefined,
         wentPoorly: wentPoorly.trim() || undefined,
+        cause: cause.trim() || undefined,
         followedSetup,
         followedRisk,
         lesson: lesson.trim() || undefined,
@@ -136,7 +137,7 @@ export function ReflectionFlow({
               {current?.question}
             </h2>
             <p className="mt-1 text-[13px] text-muted">
-              {step === 0 ? "Four short steps — the review is the edge." : current?.hint}
+              {step === 0 ? "Five short steps — the review is the edge." : current?.hint}
             </p>
           </div>
           <div className="flex items-center gap-1.5 pt-1.5" aria-hidden>
@@ -216,6 +217,7 @@ export function ReflectionFlow({
                         const v = e.target.value;
                         if (current.key === "wentWell") setWentWell(v);
                         else if (current.key === "wentPoorly") setWentPoorly(v);
+                        else if (current.key === "cause") setCause(v);
                         else if (current.key === "lesson") setLesson(v);
                       }}
                     />
