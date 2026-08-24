@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { JournalEntry } from "@/lib/types";
 import { formatDateFull, formatSignedMoney, relativeDayLabel } from "@/lib/format";
 import { useImageUrls } from "@/lib/hooks";
+import { useUi } from "@/lib/ui-store";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -39,6 +40,11 @@ export function EntryDetailModal({
   const [reflecting, setReflecting] = useState(false);
   const urls = useImageUrls(entry?.images.map((i) => i.id) ?? []);
 
+  const onAskMinato = (e: JournalEntry) => {
+    onClose();
+    useUi.getState().openMinatoWithTrade(e.id);
+  };
+
   return (
     <>
       <Modal open={open && !!entry} onClose={onClose} size="lg" label="Journal entry">
@@ -55,6 +61,12 @@ export function EntryDetailModal({
               <Button variant="outline" onClick={() => setReflecting(true)}>
                 <SparklesIcon className="h-3.5 w-3.5" />
                 {entry.reflection ? "Edit reflection" : "Add reflection"}
+              </Button>
+            )}
+            {onEdit && (
+              <Button variant="outline" onClick={() => onAskMinato(entry)}>
+                <SparklesIcon className="h-3.5 w-3.5" />
+                Ask MINATO
               </Button>
             )}
             {onEdit && (

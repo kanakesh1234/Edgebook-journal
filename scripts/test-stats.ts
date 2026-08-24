@@ -3,7 +3,12 @@ import { computeStats, currentStreak, groupByDay, monthGrid } from "../src/lib/s
 import { disciplineSummary, XP } from "../src/lib/discipline.ts";
 import { parseTradesCsv, normalizePnl } from "../src/lib/csv-import.ts";
 import { evaluateRules, adherenceSummary } from "../src/lib/rules.ts";
-import { defaultSettings, defaultRuleSet, type NoTradeLog } from "../src/lib/types.ts";
+import { normalizeImportedTimestamp, formatHistoricalDate } from "../src/lib/tz.ts";
+import { buildContext, findRecurringPatterns, findSimilarTrades, executionVerdict, strategyForEntry } from "../src/lib/minato/context.ts";
+import { computeInsights } from "../src/lib/minato/insights.ts";
+import { respond, greet } from "../src/lib/minato/respond.ts";
+import { DeterministicMinatoProvider } from "../src/lib/services/ai.ts";
+import { defaultSettings, defaultRuleSet, type JournalEntry, type NoTradeLog } from "../src/lib/types.ts";
 
 let failures = 0;
 function expect(name: string, got: unknown, want: unknown) {
@@ -176,8 +181,24 @@ expect("perf symbol → instrument", [perf.rows[0]?.instrument, perf.rows[2]?.in
 expect("perf positive pnl", perf.rows[0]?.pnl, 22.5);
 expect("perf negative pnl", perf.rows[1]?.pnl, -24);
 expect("perf $122 pnl", perf.rows[2]?.pnl, 122);
-expect("perf broker columns in notes", perf.rows[0]?.notes, "Qty 2 · 22525.00 → 22547.50 · 4m 32s");
+expect("perf broker columns in notes", perf.rows[0]?.notes, "Qty 2 · 22525.00 → 22547.50 · 4m 32s · entry 9:53 AM NY");
 expect("perf no direction column → null", perf.rows[0]?.direction, null);
+
+// Timezone normalization: IST timestamps → America/New_York (DST-aware)
+expect("tz IST evening → NY same day", parseTradesCsv(
+  `${perfHeaders}\nMNQ,USD,USD,0.25,f,f,1,1,2,$1,08/05/2026 19:23:29,08/05/2026 19:30:00,1m`,
+).rows[0]?.date, "2026-08-05"); // 19:23 IST = 9:53 AM EDT
+expect("tz IST early morning rolls back a NY day", parseTradesCsv(
+  `${perfHeaders}\nMNQ,USD,USD,0.25,f,f,1,1,2,$1,08/06/2026 03:00:00,08/06/2026 03:05:00,5m`,
+).rows[0]?.date, "2026-08-05"); // 03:00 IST = 17:45 EDT previous day
+expect("tz winter IST → NY EST", parseTradesCsv(
+  `${perfHeaders}\nMNQ,USD,USD,0.25,f,f,1,1,2,$1,01/05/2026 19:23:29,01/05/2026 19:30:00,1m`,
+).rows[0]?.date, "2026-01-05"); // 19:23 IST = 8:53 AM EST
+expect("tz NY entry time preserved", parseTradesCsv(
+  `${perfHeaders}\nMNQ,USD,USD,0.25,f,f,1,1,2,$1,08/05/2026 19:23:29,08/05/2026 19:30:00,1m`,
+).rows[0]?.notes.includes("entry 9:53 AM NY"), true);
+// Plain calendar dates (no time) must not shift
+expect("tz plain date untouched", parseTradesCsv("2026-08-10,120,2,ES,long,ORB,clean").rows[0]?.date, "2026-08-10");
 
 // Genuinely unsupported CSV → clear error, nothing parsed
 const junk = parseTradesCsv("foo,bar\nhello,world\nmore,stuff");
@@ -231,8 +252,99 @@ expect("rules byRule counts", ad.byRule["risk.max-daily-loss"], 1);
 const offSettings = { ...defaultSettings(), rules: { rules: defaultRuleSet().rules.map((r) => ({ ...r, enabled: false })) } };
 expect("rules all off", evaluateRules(rEntries, offSettings).length, 0);
 
-if (failures > 0) {
-  console.log(`\n${failures} FAILURES`);
-  process.exit(1);
-}
-console.log("\nAll stats tests passed");
+/* ------------------------------ MINATO ------------------------------ */
+// Timezone display helpers
+expect("tz import normalize", normalizeImportedTimestamp("08/05/2026 19:23:29"), { date: "2026-08-05", time: "9:53 AM" });
+expect("tz historical format", formatHistoricalDate("2026-08-05"), "05/08/2026");
+
+const mkR = (date: string, pnl: number, reflection?: JournalEntry["reflection"], setup = "Liquidity Sweep"): JournalEntry => ({
+  id: `e-${date}-${pnl}`, date, pnl, rr: null, instrument: "NQ", direction: "long",
+  setup, notes: "", images: [], createdAt: 0, updatedAt: 0, ...(reflection ? { reflection } : {}),
+});
+
+const mEntries = [
+  mkR("2026-08-01", -100, { wentPoorly: "entered early, FOMO", cause: "fomo", followedSetup: false, followedRisk: true, updatedAt: 0 }),
+  mkR("2026-08-05", 200, { wentWell: "clean", followedSetup: true, followedRisk: true, updatedAt: 0 }),
+  mkR("2026-08-08", -80, { wentPoorly: "early entry again", cause: "did not want to miss the move", followedSetup: false, followedRisk: false, updatedAt: 0 }),
+  mkR("2026-08-12", 150),
+];
+const mSettings = { ...defaultSettings() };
+const mStats = computeStats(mEntries, mSettings);
+const mCtx = buildContext({
+  userFirstName: "Test",
+  entries: mEntries,
+  stats: mStats,
+  discipline: disciplineSummary(mEntries, [], "2026-08-12"),
+  adherence: adherenceSummary(mEntries, mSettings, "2026-08-12"),
+  playbook: [{ id: "pb1", name: "Liquidity Sweep", entryConditions: "Wait for sweep\nSMT confirmation", createdAt: 0, updatedAt: 0 }],
+  activeRules: defaultRuleSet().rules.filter((r) => r.enabled),
+  violations: evaluateRules(mEntries, mSettings),
+  focusEntry: mEntries[2],
+  includeNotes: true,
+});
+
+// Strategy isolation: entry matched to its own playbook strategy only
+expect("minato strategy match", strategyForEntry(mEntries[0], mCtx.playbook)?.name, "Liquidity Sweep");
+expect("minato strategy none", strategyForEntry({ ...mEntries[3], setup: "—" }, mCtx.playbook), null);
+
+// Historical retrieval — real records only, DD/MM/YYYY
+expect("minato similar count", findSimilarTrades(mEntries[0], mEntries).length, 3);
+expect("minato no fabrication", respond(mCtx, "find similar trades").includes("No similar trade dorakaledu") === false, true);
+const noneCtx = { ...mCtx, recentTrades: [] };
+expect("minato empty history honest", respond(noneCtx, "find similar trades").includes("dorakaledu"), true);
+
+// Execution verdict quadrants (profit ≠ good execution)
+expect("minato verdict sloppy win", executionVerdict(mEntries[0]), "loss-and-sloppy");
+expect("minato verdict clean win", executionVerdict(mEntries[1]), "clean-win");
+expect("minato verdict unreflected", executionVerdict(mEntries[3]), "unreflected");
+
+// Recurring pattern mining — cautious, from actual reflections
+expect("minato pattern found", findRecurringPatterns(mEntries)[0]?.pattern, "early entry / FOMO");
+expect("minato no pattern when clean", findRecurringPatterns([mEntries[1], mEntries[3]]).length, 0);
+
+// Insights: repeated pattern + missing reflections surface
+const mIns = computeInsights(mCtx);
+expect("minato insight pattern", mIns.some((i) => i.id.startsWith("pattern-")), true);
+expect("minato insight reflection", mIns.some((i) => i.id === "missing-reflection"), true);
+
+// Responses: Telugu-English path, data-grounded
+const reply1 = respond(mCtx, "how am i doing");
+expect("minato how-doing grounded", reply1.includes("Adherence") && reply1.includes("discipline streak"), true);
+const reply2 = respond(mCtx, "review my last trade");
+expect("minato review references actual cause", reply2.includes("did not want to miss the move"), true);
+const reply3 = respond(mCtx, "discipline?");
+expect("minato discipline answer", reply3.includes("Discipline streak"), true);
+const reply4 = respond(mCtx, "random gibberish xyzzy");
+expect("minato honest fallback", reply4.includes("Full brain connect avvaledu"), true);
+expect("minato greeting personal", greet(mCtx).startsWith("Namaste Test"), true);
+
+// Provider seam
+const provider = new DeterministicMinatoProvider();
+void (async () => {
+  const pReply = await provider.reply({ messages: [{ role: "user", text: "discipline?" }] }, mCtx);
+  expect("minato provider reply", pReply.text.includes("Discipline streak"), true);
+  expect("minato provider meta", [pReply.meta.deterministic, pReply.meta.visionSupported], [true, false]);
+
+// Privacy: notes excluded from context when disallowed (context carries the flag)
+const privateCtx = buildContext({
+  userFirstName: "T", entries: mEntries, stats: mStats,
+  discipline: disciplineSummary(mEntries, [], "2026-08-12"),
+  adherence: adherenceSummary(mEntries, mSettings, "2026-08-12"),
+  playbook: [], activeRules: [], violations: [], focusEntry: null, includeNotes: false,
+});
+expect("minato privacy flag", privateCtx.privacy.includeNotes, false);
+
+// User-data isolation is structural: context is built ONLY from passed-in entries
+expect("minato isolation by construction", buildContext({
+  userFirstName: "A", entries: [mEntries[0]], stats: mStats,
+  discipline: disciplineSummary([mEntries[0]], [], "2026-08-12"),
+  adherence: adherenceSummary([mEntries[0]], mSettings, "2026-08-12"),
+  playbook: [], activeRules: [], violations: [], focusEntry: null, includeNotes: true,
+}).recentTrades.length, 1);
+
+  if (failures > 0) {
+    console.log(`\n${failures} FAILURES`);
+    process.exit(1);
+  }
+  console.log("\nAll stats tests passed");
+})();

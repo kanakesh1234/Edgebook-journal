@@ -110,7 +110,7 @@ export function Toaster() {
   if (!mounted || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="pointer-events-none fixed bottom-5 right-5 z-[100] flex flex-col-reverse gap-2.5">
+    <div className="pointer-events-none fixed bottom-24 right-5 z-[100] flex flex-col-reverse gap-2.5">
       <AnimatePresence mode="popLayout">
         {toasts.map((t) => (
           <ToastCard key={t.id} item={t} />

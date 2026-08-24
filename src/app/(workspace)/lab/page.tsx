@@ -6,9 +6,10 @@ import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { activeRules, adherenceSummary } from "@/lib/rules";
-import type { RuleDef, RuleKind } from "@/lib/types";
+import type { PlaybookSetup, RuleDef, RuleKind } from "@/lib/types";
 import { formatDateMedium } from "@/lib/format";
 import { RuleCard } from "@/components/lab/rule-card";
+import { Playbook } from "@/components/lab/playbook";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { FlaskIcon, SparklesIcon } from "@/components/ui/icons";
@@ -34,6 +35,12 @@ export default function LabPage() {
     void useApp.getState().updateSettings({
       rules: { rules: rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) },
     });
+    setSavedAt(Date.now());
+  };
+
+  const playbook = settings.playbook ?? [];
+  const updatePlaybook = (next: PlaybookSetup[]) => {
+    void useApp.getState().updateSettings({ playbook: next });
     setSavedAt(Date.now());
   };
 
@@ -98,6 +105,9 @@ export default function LabPage() {
         />
       </motion.div>
 
+      {/* Playbook */}
+      <Playbook setups={playbook} onChange={updatePlaybook} />
+
       {/* Rule sections */}
       {SECTIONS.map((section) => {
         const sectionRules = rules.filter((r) => r.kind === section.kind);
@@ -115,6 +125,13 @@ export default function LabPage() {
                   rule={r}
                   violations30={adherence.byRule[r.id] ?? 0}
                   onChange={(patch) => updateRule(r.id, patch)}
+                  suggestions={
+                    r.id === "setup.allowed-setups"
+                      ? playbook.map((p) => p.name)
+                      : r.id === "setup.allowed-instruments"
+                        ? [...new Set(playbook.flatMap((p) => p.instruments ?? []))]
+                        : undefined
+                  }
                   delay={0.05 + i * 0.04}
                 />
               ))}

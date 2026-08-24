@@ -8,6 +8,7 @@ import { useBootstrap } from "@/lib/bootstrap";
 import { LogoMark } from "@/components/landing/logo";
 import { BottomTabs, MobileTopBar, Sidebar } from "@/components/shell/nav";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
+import { Minato } from "@/components/ai/minato";
 
 function Splash() {
   return (
@@ -67,6 +68,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
 
       <BottomTabs />
       <EntryFormModal />
+      <Minato />
     </div>
   );
 }

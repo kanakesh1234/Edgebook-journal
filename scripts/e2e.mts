@@ -256,6 +256,19 @@ async function clickByText(page: Page, selector: string, text: string) {
   await sleep(400);
   drainErrors(page, "lab");
 
+  /* ------------------------------- MINATO ------------------------------- */
+  await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle0" });
+  await sleep(600);
+  await page.click('button[aria-label*="MINATO"]');
+  await sleep(700);
+  await expectText(page, "MINATO SENSEI", "minato panel opens");
+  await clickByText(page, "button", "How am I doing?");
+  await sleep(600);
+  await expectText(page, "Adherence", "minato data-grounded reply");
+  await page.click('button[aria-label="Close MINATO"]');
+  await sleep(400);
+  drainErrors(page, "minato");
+
   /* ------------------------------ Mobile view ---------------------------- */
   const mobile = await newPage(browser);
   await mobile.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });

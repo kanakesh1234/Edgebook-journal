@@ -1,4 +1,5 @@
 import type { TradeDirection } from "./types";
+import { hasTimeComponent, normalizeImportedTimestamp, IMPORT_SOURCE_TZ } from "./tz";
 
 /* ------------------------------------------------------------------ */
 /*  CSV trade import — parse & validate, never silently discard        */
@@ -132,12 +133,13 @@ function normalizeDuration(raw: string): string | null {
   return v;
 }
 
-function buildNotes(base: string, qty: string, entry: string, exit: string, duration: string): string {
+function buildNotes(base: string, qty: string, entry: string, exit: string, duration: string, nyTime: string | null): string {
   const parts: string[] = [];
   if (qty) parts.push(`Qty ${qty}`);
   if (entry) parts.push(`${entry} → ${exit || "?"}`);
   const dur = normalizeDuration(duration);
   if (dur) parts.push(dur);
+  if (nyTime) parts.push(`entry ${nyTime} NY`);
   if (parts.length === 0) return base;
   const suffix = parts.join(" · ");
   return base ? `${base} · ${suffix}` : suffix;
@@ -146,8 +148,17 @@ function buildNotes(base: string, qty: string, entry: string, exit: string, dura
 /**
  * Parse a CSV of trades. The first non-empty line must be a header row;
  * columns are mapped flexibly (date/pnl/rr/instrument/direction/setup/notes).
+ *
+ * Timestamp cells (date + time) are normalized from `opts.timestampSourceTz`
+ * (default IST — broker exports) into the trading timezone (America/New_York)
+ * immediately at this seam; the derived NY date becomes the journal date and
+ * the NY entry time is preserved in notes. Plain calendar dates pass through.
  */
-export function parseTradesCsv(text: string): CsvParseResult {
+export function parseTradesCsv(
+  text: string,
+  opts?: { timestampSourceTz?: string | null },
+): CsvParseResult {
+  const sourceTz = opts?.timestampSourceTz === null ? null : opts?.timestampSourceTz ?? IMPORT_SOURCE_TZ;
   const lines = text.split(/\r\n|\n|\r/);
   const rows: ParsedTrade[] = [];
   const invalid: InvalidRow[] = [];
@@ -203,7 +214,16 @@ export function parseTradesCsv(text: string): CsvParseResult {
 
     const fail = (reason: string) => invalid.push({ line: i + 1, reason, raw: raw.trim().slice(0, 120) });
 
-    const date = normalizeDate(get("date"));
+    // Timestamp cells normalize IST → New York at the import seam.
+    let date = normalizeDate(get("date"));
+    let nyEntryTime: string | null = null;
+    if (date && hasTimeComponent(get("date")) && sourceTz) {
+      const ny = normalizeImportedTimestamp(get("date"), sourceTz);
+      if (ny) {
+        date = ny.date;
+        nyEntryTime = ny.time;
+      }
+    }
     if (!date) { fail(`Unrecognised date "${get("date").slice(0, 24)}" — use MM/DD/YYYY or YYYY-MM-DD`); continue; }
 
     const pnl = normalizePnl(get("pnl"));
@@ -227,7 +247,7 @@ export function parseTradesCsv(text: string): CsvParseResult {
       instrument: get("instrument") || "—",
       direction: direction ?? null,
       setup: get("setup"),
-      notes: buildNotes(get("notes"), get("quantity"), get("entry"), get("exit"), get("duration")),
+      notes: buildNotes(get("notes"), get("quantity"), get("entry"), get("exit"), get("duration"), nyEntryTime),
     });
   }
 

@@ -61,6 +61,38 @@ export interface JournalSettings {
   currency: CurrencyCode;
   /** Trading Lab rule set. Optional so v1 payloads import cleanly. */
   rules?: RuleSet;
+  /** The trader's playbook — fully defined setups with entry/exit logic. */
+  playbook?: PlaybookSetup[];
+  /** AI companion preferences. */
+  aiPrefs?: AiPrefs;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Playbook — the trader's defined setups and strategy                */
+/* ------------------------------------------------------------------ */
+
+export interface PlaybookSetup {
+  id: string;
+  name: string;
+  /** The idea behind the setup — where the edge comes from. */
+  strategy?: string;
+  /** Conditions that must be true before entering (one per line). */
+  entryConditions?: string;
+  /** What kills the trade / the idea. */
+  invalidation?: string;
+  /** Targets, stop placement, management rules. */
+  exitRules?: string;
+  minRR?: number | null;
+  /** Preferred sessions, e.g. "London open", "NY". */
+  sessions?: string[];
+  instruments?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AiPrefs {
+  /** May the companion read journal notes/reflections when building context? */
+  includeNotes: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,6 +215,8 @@ export function defaultSettings(): JournalSettings {
     maxDrawdown: 2000,
     currency: "USD",
     rules: defaultRuleSet(),
+    playbook: [],
+    aiPrefs: { includeNotes: true },
   };
 }
 

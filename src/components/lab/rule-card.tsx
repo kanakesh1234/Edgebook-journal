@@ -14,11 +14,14 @@ export function RuleCard({
   rule,
   violations30,
   onChange,
+  suggestions,
   delay = 0,
 }: {
   rule: RuleDef;
   violations30: number;
   onChange: (patch: Partial<RuleDef>) => void;
+  /** Autocomplete suggestions (e.g. playbook setup names). */
+  suggestions?: string[];
   delay?: number;
 }) {
   const numberParams = Object.entries(rule.params).filter(([, v]) => typeof v === "number") as [string, number][];
@@ -96,6 +99,7 @@ export function RuleCard({
               label={key === "instruments" ? "Symbols (e.g. NQ, ES, BTCUSD)" : "Setups from your playbook"}
               values={values}
               placeholder={key === "instruments" ? "Add symbol…" : "Add setup…"}
+              suggestions={suggestions}
               onChange={(next) => onChange({ params: { ...rule.params, [key]: next } })}
             />
           ))}
@@ -109,13 +113,16 @@ function TagInput({
   label,
   values,
   placeholder,
+  suggestions,
   onChange,
 }: {
   label: string;
   values: string[];
   placeholder: string;
+  suggestions?: string[];
   onChange: (next: string[]) => void;
 }) {
+  const listId = `tags-${label.replace(/[^a-z]/gi, "-")}`;
   return (
     <div>
       <p className="text-[13px] text-muted">{label}</p>
@@ -139,6 +146,7 @@ function TagInput({
         <input
           aria-label={label}
           placeholder={placeholder}
+          list={suggestions?.length ? listId : undefined}
           className="w-28 rounded-lg border border-transparent bg-transparent px-1.5 py-1 text-xs text-ink placeholder:text-faint focus:border-gold/60 focus:bg-surface focus:outline-none"
           onKeyDown={(e) => {
             const el = e.currentTarget;
@@ -159,6 +167,13 @@ function TagInput({
             }
           }}
         />
+        {suggestions?.length ? (
+          <datalist id={listId}>
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        ) : null}
       </div>
     </div>
   );

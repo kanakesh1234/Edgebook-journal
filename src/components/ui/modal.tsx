@@ -28,8 +28,12 @@ export interface ModalProps {
 export function Modal({ open, onClose, title, description, size = "md", children, bodyClassName, label }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const lastActive = useRef<HTMLElement | null>(null);
+  // Keep the latest onClose without re-running the focus/scroll-lock effect
+  // when callers pass a fresh closure each render (they usually do).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  // Scroll lock + escape + focus management
+  // Scroll lock + escape + focus management — keyed on `open` only.
   useEffect(() => {
     if (!open) return;
     lastActive.current = document.activeElement as HTMLElement;
@@ -40,7 +44,7 @@ export function Modal({ open, onClose, title, description, size = "md", children
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -50,7 +54,7 @@ export function Modal({ open, onClose, title, description, size = "md", children
       document.body.style.overflow = prevOverflow;
       lastActive.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (typeof document === "undefined") return null;
 
