@@ -59,6 +59,107 @@ export interface JournalSettings {
   targetEquity: number;
   maxDrawdown: number;
   currency: CurrencyCode;
+  /** Trading Lab rule set. Optional so v1 payloads import cleanly. */
+  rules?: RuleSet;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Trading Lab — the trader's personal operating manual               */
+/* ------------------------------------------------------------------ */
+
+export type RuleKind = "risk" | "setup" | "behavior";
+
+export interface RuleDef {
+  /** Stable id, e.g. "risk.max-daily-loss". */
+  id: string;
+  kind: RuleKind;
+  label: string;
+  description: string;
+  enabled: boolean;
+  params: Record<string, number | string | string[]>;
+}
+
+export interface RuleSet {
+  rules: RuleDef[];
+}
+
+export function defaultRuleSet(): RuleSet {
+  return {
+    rules: [
+      {
+        id: "risk.max-daily-loss",
+        kind: "risk",
+        label: "Maximum daily loss",
+        description: "Stop trading for the day when the net loss reaches this amount.",
+        enabled: true,
+        params: { limit: 300 },
+      },
+      {
+        id: "risk.max-trades-per-day",
+        kind: "risk",
+        label: "Maximum trades per day",
+        description: "Overtrading is the most expensive habit there is. Cap the count.",
+        enabled: true,
+        params: { maxTrades: 5 },
+      },
+      {
+        id: "risk.max-consecutive-losses",
+        kind: "risk",
+        label: "Consecutive-loss stop",
+        description: "After this many losing days in a row, step away and review.",
+        enabled: true,
+        params: { max: 3 },
+      },
+      {
+        id: "risk.min-rr",
+        kind: "risk",
+        label: "Minimum R:R",
+        description: "Trades recorded below this R multiple break the plan (checked when R is tracked).",
+        enabled: false,
+        params: { min: 2 },
+      },
+      {
+        id: "setup.allowed-instruments",
+        kind: "setup",
+        label: "Allowed instruments",
+        description: "Only trade these symbols. Leave empty to allow anything.",
+        enabled: false,
+        params: { instruments: [] as string[] },
+      },
+      {
+        id: "setup.allowed-setups",
+        kind: "setup",
+        label: "Allowed setups",
+        description: "Only take setups from your playbook. Leave empty to allow anything.",
+        enabled: false,
+        params: { setups: [] as string[] },
+      },
+      {
+        id: "behavior.trade-your-setup",
+        kind: "behavior",
+        label: "Trade your setup",
+        description: "Broken when one of your reflections marks the setup as not followed.",
+        enabled: true,
+        params: {},
+      },
+      {
+        id: "behavior.respect-risk-rules",
+        kind: "behavior",
+        label: "Respect your risk rules",
+        description: "Broken when one of your reflections marks risk as not respected.",
+        enabled: true,
+        params: {},
+      },
+      {
+        id: "behavior.name-your-setups",
+        kind: "behavior",
+        label: "Name every setup",
+        description: "Every trade should carry a named setup — no anonymous trades.",
+        enabled: false,
+        params: {},
+      },
+    ],
+  };
 }
 
 export const CURRENCIES = ["USD", "EUR", "GBP", "INR", "JPY"] as const;
@@ -81,6 +182,7 @@ export function defaultSettings(): JournalSettings {
     targetEquity: 20000,
     maxDrawdown: 2000,
     currency: "USD",
+    rules: defaultRuleSet(),
   };
 }
 

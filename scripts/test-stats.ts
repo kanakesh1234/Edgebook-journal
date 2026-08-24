@@ -2,7 +2,8 @@
 import { computeStats, currentStreak, groupByDay, monthGrid } from "../src/lib/stats.ts";
 import { disciplineSummary, XP } from "../src/lib/discipline.ts";
 import { parseTradesCsv, normalizePnl } from "../src/lib/csv-import.ts";
-import { defaultSettings, type NoTradeLog } from "../src/lib/types.ts";
+import { evaluateRules, adherenceSummary } from "../src/lib/rules.ts";
+import { defaultSettings, defaultRuleSet, type NoTradeLog } from "../src/lib/types.ts";
 
 let failures = 0;
 function expect(name: string, got: unknown, want: unknown) {
@@ -182,6 +183,53 @@ expect("perf no direction column → null", perf.rows[0]?.direction, null);
 const junk = parseTradesCsv("foo,bar\nhello,world\nmore,stuff");
 expect("junk unsupported error", typeof junk.error === "string" && junk.error.length > 10, true);
 expect("junk no rows", junk.rows.length, 0);
+
+/* ----------------------------- rule engine ----------------------------- */
+const labSettings = {
+  ...defaultSettings(),
+  rules: defaultRuleSet(),
+};
+// defaults: max-daily-loss 300, max-trades 5, max-consecutive 3 enabled; min-rr off
+const rEntries = [
+  mk("2026-06-01", -400),            // breach: daily loss > 300
+  mk("2026-06-02", -100),
+  mk("2026-06-03", -150),            // 3rd consecutive loss → stop rule
+  mk("2026-06-04", 200, 1),          // rr 1 < min 2 — but min-rr disabled by default
+  { ...mk("2026-06-04", 300), instrument: "AAPL", setup: "", reflection: { followedSetup: false, followedRisk: false, updatedAt: 0 } },
+];
+const rv = evaluateRules(rEntries, labSettings);
+expect("rules daily-loss breach", rv.some((v) => v.ruleId === "risk.max-daily-loss" && v.date === "2026-06-01"), true);
+expect("rules daily-loss detail", rv.find((v) => v.ruleId === "risk.max-daily-loss")?.detail, "Daily loss −$400 exceeded the −$300 limit by $100.");
+expect("rules consecutive-loss fires on 3rd", rv.some((v) => v.ruleId === "risk.max-consecutive-losses" && v.date === "2026-06-03"), true);
+expect("rules min-rr off by default", rv.some((v) => v.ruleId === "risk.min-rr"), false);
+expect("rules reflection setup breach", rv.some((v) => v.ruleId === "behavior.trade-your-setup" && v.date === "2026-06-04"), true);
+expect("rules reflection risk breach", rv.some((v) => v.ruleId === "behavior.respect-risk-rules" && v.date === "2026-06-04"), true);
+expect("rules newest first", rv[0]?.date >= rv[rv.length - 1]?.date, true);
+
+// enabled min-rr + allowed instruments
+const strictSettings = {
+  ...defaultSettings(),
+  rules: {
+    rules: defaultRuleSet().rules.map((r) => {
+      if (r.id === "risk.min-rr") return { ...r, enabled: true, params: { min: 2 } };
+      if (r.id === "setup.allowed-instruments") return { ...r, enabled: true, params: { instruments: ["NQ", "ES"] } };
+      return r;
+    }),
+  },
+};
+const rv2 = evaluateRules(rEntries, strictSettings);
+expect("rules min-rr enabled fires", rv2.some((v) => v.ruleId === "risk.min-rr" && v.entryId?.includes("2026-06-04")), true);
+expect("rules instrument not allowed", rv2.some((v) => v.ruleId === "setup.allowed-instruments" && v.detail.includes("AAPL")), true);
+
+// adherence window math
+const ad = adherenceSummary(rEntries, labSettings, "2026-06-30");
+expect("rules adherence violations30", ad.violations30, rv.length);
+expect("rules adherence clean rate < 1", ad.cleanDayRate < 1, true);
+expect("rules byRule counts", ad.byRule["risk.max-daily-loss"], 1);
+
+// disabled rules never fire
+const offSettings = { ...defaultSettings(), rules: { rules: defaultRuleSet().rules.map((r) => ({ ...r, enabled: false })) } };
+expect("rules all off", evaluateRules(rEntries, offSettings).length, 0);
 
 if (failures > 0) {
   console.log(`\n${failures} FAILURES`);

@@ -244,6 +244,18 @@ async function clickByText(page: Page, selector: string, text: string) {
   await expectText(page, "Journey plan updated", "settings save toast");
   drainErrors(page, "settings");
 
+  /* ------------------------------ Trading Lab ---------------------------- */
+  await page.goto(`${BASE}/lab`, { waitUntil: "networkidle0" });
+  await expectText(page, "Trading Lab", "lab header");
+  await expectText(page, "Risk rules", "lab risk section");
+  await expectText(page, "Personal rules", "lab behavior section");
+  await expectText(page, "Violation log", "lab violation log");
+  await expectText(page, "Maximum daily loss", "lab default rule present");
+  // toggle a rule off and back on (autosave)
+  await clickByText(page, "button[role=switch]", "");
+  await sleep(400);
+  drainErrors(page, "lab");
+
   /* ------------------------------ Mobile view ---------------------------- */
   const mobile = await newPage(browser);
   await mobile.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });

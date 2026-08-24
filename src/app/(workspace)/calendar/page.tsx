@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { groupByDay, monthGrid } from "@/lib/stats";
+import { evaluateRules } from "@/lib/rules";
 import type { JournalEntry } from "@/lib/types";
 import {
   formatDateFull,
@@ -50,6 +51,7 @@ export default function CalendarPage() {
 
   const byDay = useMemo(() => groupByDay(entries), [entries]);
   const noTradeDays = useMemo(() => new Set(dayLogs.map((d) => d.date)), [dayLogs]);
+  const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
   const cells = useMemo(() => monthGrid(view.year, view.month), [view]);
 
   const monthEntries = useMemo(
@@ -314,6 +316,24 @@ export default function CalendarPage() {
               </span>
             </button>
           ))}
+
+          {/* Rule violations that day */}
+          {selectedDay && violations.filter((v) => v.date === selectedDay).length > 0 && (
+            <div className="rounded-xl border border-loss/25 bg-loss/[0.05] px-3.5 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-loss">
+                {violations.filter((v) => v.date === selectedDay).length} rule {violations.filter((v) => v.date === selectedDay).length === 1 ? "violation" : "violations"}
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {violations
+                  .filter((v) => v.date === selectedDay)
+                  .map((v) => (
+                    <li key={v.id} className="text-[12px] leading-relaxed text-muted">
+                      <span className="font-medium text-loss">{v.ruleLabel}:</span> {v.detail}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
 
           {/* No-trade discipline record */}
           {selectedEntries.length === 0 && (

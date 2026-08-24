@@ -10,21 +10,19 @@ import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
   BookOpenIcon,
-  CalendarIcon,
   ChartLineIcon,
+  FlaskIcon,
   LogoutIcon,
   PlusIcon,
-  RouteIcon,
   SettingsIcon,
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: ChartLineIcon },
-  { href: "/roadmap", label: "Roadmap", icon: RouteIcon },
-  { href: "/calendar", label: "Calendar", icon: CalendarIcon },
+  { href: "/dashboard", label: "Home", icon: ChartLineIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
+  { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 

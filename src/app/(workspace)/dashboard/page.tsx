@@ -6,6 +6,7 @@ import { motion } from "motion/react";
 import { useApp, sortEntriesNewestFirst } from "@/lib/store";
 import { computeStats, currentStreak, groupByDay } from "@/lib/stats";
 import { journeyState } from "@/lib/journey";
+import { evaluateRules } from "@/lib/rules";
 import {
   formatDateFull,
   formatDateMedium,
@@ -51,6 +52,7 @@ export default function DashboardPage() {
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
   const byDay = useMemo(() => groupByDay(entries), [entries]);
   const recentEntries = useMemo(() => sortEntriesNewestFirst(entries).slice(0, 3), [entries]);
+  const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -92,14 +94,24 @@ export default function DashboardPage() {
   const pnlTone = stats.totalPnl > 0 ? "profit" : stats.totalPnl < 0 ? "loss" : "neutral";
   const improving = stats.avgDayPnl >= 0;
 
-  // Risk posture from the drawdown budget (Trading Lab rules will refine this)
+  // Risk posture from the Trading Lab rule engine (drawdown as fallback signal)
+  const todayStr = todayKey();
+  const brokenToday = violations.filter((v) => v.date === todayStr).length;
+  const weekCutoff = (() => {
+    const d = new Date(todayStr + "T00:00:00");
+    d.setDate(d.getDate() - 7);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const brokenWeek = violations.filter((v) => v.date >= weekCutoff).length;
   const riskUsed = stats.drawdownBudgetUsed;
   const risk =
-    riskUsed >= 0.8
-      ? { label: "Risk stretched", dot: "bg-loss", text: "text-loss" }
-      : riskUsed >= 0.5
-        ? { label: "Risk elevated", dot: "bg-gold", text: "text-gold" }
-        : { label: "Risk healthy", dot: "bg-profit", text: "text-profit" };
+    brokenToday > 0
+      ? { label: `Rule broken today${brokenToday > 1 ? ` ×${brokenToday}` : ""}`, dot: "bg-loss", text: "text-loss" }
+      : brokenWeek > 0
+        ? { label: "Rules under watch", dot: "bg-gold", text: "text-gold" }
+        : riskUsed >= 0.8
+          ? { label: "Drawdown stretched", dot: "bg-loss", text: "text-loss" }
+          : { label: "Risk healthy", dot: "bg-profit", text: "text-profit" };
 
   return (
     <div className="space-y-7">
