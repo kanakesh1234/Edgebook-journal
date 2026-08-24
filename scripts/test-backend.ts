@@ -68,6 +68,8 @@ function mockDriveFetch(created: Map<string, string>, content = new Map<string, 
   let idCounter = 100;
   return (async (url: string | URL | Request, init?: RequestInit) => {
     const u = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+    // Each access token is a different user's Drive — namespace by token.
+    const token = ((init?.headers as Record<string, string> | undefined)?.Authorization ?? "").replace("Bearer ", "") || "me";
 
     // Media download: /files/{id}?alt=media
     if (u.includes("alt=media")) {
@@ -81,7 +83,7 @@ function mockDriveFetch(created: Map<string, string>, content = new Map<string, 
       const q = decodeURIComponent(u.match(/q=([^&]+)/)?.[1] ?? "");
       const name = q.match(/name = '([^']+)'/)?.[1] ?? "";
       const parent = q.match(/'([^']+)' in parents/)?.[1] ?? (q.includes("'me' in parents") ? "me" : "");
-      const key = `${parent}/${name}`;
+      const key = `${token}:${parent}/${name}`;
       const existing = created.get(key);
       return new Response(JSON.stringify({ files: existing ? [{ id: existing }] : [] }));
     }
@@ -92,7 +94,7 @@ function mockDriveFetch(created: Map<string, string>, content = new Map<string, 
       const fileBlob = init.body.get("file") as Blob | null;
       const meta = metaBlob ? (JSON.parse(await metaBlob.text()) as { name: string; parents: string[] }) : null;
       if (meta) {
-        const key = `${meta.parents[0]}/${meta.name}`;
+        const key = `${token}:${meta.parents[0]}/${meta.name}`;
         let id = created.get(key);
         if (!id) {
           id = `id-${idCounter++}`;
@@ -108,7 +110,7 @@ function mockDriveFetch(created: Map<string, string>, content = new Map<string, 
     if ((init?.method === "POST" || init?.method === "PATCH") && typeof init.body === "string") {
       const meta = JSON.parse(init.body) as { name?: string; mimeType?: string; parents?: string[] };
       if (meta.name && meta.mimeType?.includes("folder")) {
-        const key = `${meta.parents?.[0] ?? "me"}/${meta.name}`;
+        const key = `${token}:${meta.parents?.[0] ?? "me"}/${meta.name}`;
         if (!created.has(key)) created.set(key, `id-${idCounter++}`);
         return new Response(JSON.stringify({ id: created.get(key) }), { status: 200 });
       }
@@ -131,17 +133,46 @@ expect("folders reused (no duplicates)", created.size === before && foldersA2?.r
 expect("folder tree complete", [foldersA?.root, foldersA?.trades, foldersA?.journals, foldersA?.screenshots, foldersA?.challenges, foldersA?.exports].every(Boolean), true);
 expect("folder names namespaced per user tree", typeof foldersA?.journals, "string");
 
-// Persistence read/write
-const payload = { entries: [{ id: "e1", date: "2026-08-05", pnl: 22.5 }], settings: { currency: "USD" }, version: 2 };
+// Persistence read/write — full payload deep round-trip
+const payload = {
+  entries: [{ id: "e1", date: "2026-08-05", pnl: 22.5, rr: 2, instrument: "NQ", direction: "long", setup: "Sweep", notes: "clean", images: [], createdAt: 1, updatedAt: 1 }],
+  settings: { currency: "USD", startingEquity: 10000 },
+  dayLogs: [{ date: "2026-08-06", createdAt: 2 }],
+  version: 2,
+};
 expect("journal write ok", await writeJournalDoc("token-a", foldersA!, payload, f), true);
-const readBack = await readJournalDoc("token-a", foldersA!, f);
-expect("journal read matches", (readBack as typeof payload)?.entries?.[0]?.pnl, 22.5);
+const readBack = (await readJournalDoc("token-a", foldersA!, f)) as typeof payload;
+expect("journal read matches", readBack?.entries?.[0]?.pnl, 22.5);
+expect("journal deep round-trip", {
+  entry: readBack?.entries?.[0],
+  settings: readBack?.settings,
+  dayLogs: readBack?.dayLogs,
+  version: readBack?.version,
+}, { entry: payload.entries[0], settings: payload.settings, dayLogs: payload.dayLogs, version: 2 });
+
+// Overwrite cycle — second write must fully replace first content
+const payload2 = { ...payload, entries: [{ ...payload.entries[0], pnl: 99 }] };
+expect("journal overwrite ok", await writeJournalDoc("token-a", foldersA!, payload2, f), true);
+const readBack2 = (await readJournalDoc("token-a", foldersA!, f)) as typeof payload;
+expect("journal overwrite read", readBack2?.entries?.[0]?.pnl, 99);
+
+// Cross-user read isolation: user B's folder never sees user A's journal
+const foldersB = await ensureAppFolders("token-b", f);
+expect("user B folders distinct", foldersB?.journals !== foldersA?.journals, true);
+expect("user B cannot read user A journal", await readJournalDoc("token-b", foldersB!, f), null);
+expect("user B cannot read user A screenshot", await getFile("token-b", foldersB!.screenshots, "img-1.jpg", f), null);
+
+// Absent file → null (never fabricated)
 expect("journal absent → null", await readJournalDoc("token-a", { root: "r", trades: "t", journals: "j-empty", screenshots: "s", challenges: "c", exports: "e" }, f), null);
 
-// Screenshot binary round-trip
+// Screenshot binary round-trip — exact bytes
 expect("screenshot write ok", await putFile("token-a", foldersA!.screenshots, "img-1.jpg", Buffer.from("jpegdata"), "image/jpeg", f), true);
 const blob = await getFile("token-a", foldersA!.screenshots, "img-1.jpg", f);
 expect("screenshot read ok", blob ? await blob.text() : null, "jpegdata");
+// Overwrite with different bytes → read returns new bytes
+await putFile("token-a", foldersA!.screenshots, "img-1.jpg", Buffer.from("bytes-v2"), "image/jpeg", f);
+const blob2 = await getFile("token-a", foldersA!.screenshots, "img-1.jpg", f);
+expect("screenshot overwrite read", blob2 ? await blob2.text() : null, "bytes-v2");
 
 // ensureFolder reuse on a single folder
 const r1 = await ensureFolder("token-a", "EdgeBook", null, f);
