@@ -1,7 +1,7 @@
 /* Sanity tests for the stats engine — run with: node scripts/test-stats.ts */
 import { computeStats, currentStreak, groupByDay, monthGrid } from "../src/lib/stats.ts";
 import { disciplineSummary, XP } from "../src/lib/discipline.ts";
-import { parseTradesCsv } from "../src/lib/csv-import.ts";
+import { parseTradesCsv, normalizePnl } from "../src/lib/csv-import.ts";
 import { defaultSettings, type NoTradeLog } from "../src/lib/types.ts";
 
 let failures = 0;
@@ -145,6 +145,43 @@ expect("csv empty input", parseTradesCsv("").rows.length, 0);
 // Headerless file assumes canonical order
 const headerless = parseTradesCsv("2026-08-10,120,2,ES,long,ORB,clean");
 expect("csv headerless", headerless.rows[0]?.pnl, 120);
+
+/* -------------------- broker format (Performance.csv) -------------------- */
+// P&L normalisation
+expect("pnl $22.50", normalizePnl("$22.50"), 22.5);
+expect("pnl $(24.00)", normalizePnl("$(24.00)"), -24);
+expect("pnl $122.00", normalizePnl("$122.00"), 122);
+expect("pnl $4.50", normalizePnl("$4.50"), 4.5);
+expect("pnl $(1,234.56)", normalizePnl("$(1,234.56)"), -1234.56);
+expect("pnl $0.00", normalizePnl("$0.00"), 0);
+
+// Timestamps: MM/DD/YYYY HH:mm:ss → journal date
+const perfHeaders =
+  "symbol,_priceFormat,_priceFormatType,_tickSize,buyFillId,sellFillId,qty,buyPrice,sellPrice,pnl,boughtTimestamp,soldTimestamp,duration";
+const perf = parseTradesCsv(
+  [
+    perfHeaders,
+    "MNQ,USD,USD,0.25,f1,f2,2,22525.00,22547.50,$22.50,08/05/2026 19:23:29,08/05/2026 19:28:01,4m 32s",
+    "MNQ,USD,USD,0.25,f3,f4,2,22540.00,22516.00,$(24.00),08/11/2026 19:04:49,08/11/2026 19:09:12,4m 23s",
+    "NQ,USD,USD,0.25,f5,f6,1,23010.00,23132.00,$122.00,08/20/2026 19:15:32,08/20/2026 19:31:00,15m 28s",
+  ].join("\n"),
+);
+expect("perf no error", perf.error ?? "", "");
+expect("perf row count", perf.rows.length, 3);
+expect("perf 08/05/2026 → 2026-08-05", perf.rows[0]?.date, "2026-08-05");
+expect("perf 08/11/2026 → 2026-08-11", perf.rows[1]?.date, "2026-08-11");
+expect("perf 08/20/2026 → 2026-08-20", perf.rows[2]?.date, "2026-08-20");
+expect("perf symbol → instrument", [perf.rows[0]?.instrument, perf.rows[2]?.instrument], ["MNQ", "NQ"]);
+expect("perf positive pnl", perf.rows[0]?.pnl, 22.5);
+expect("perf negative pnl", perf.rows[1]?.pnl, -24);
+expect("perf $122 pnl", perf.rows[2]?.pnl, 122);
+expect("perf broker columns in notes", perf.rows[0]?.notes, "Qty 2 · 22525.00 → 22547.50 · 4m 32s");
+expect("perf no direction column → null", perf.rows[0]?.direction, null);
+
+// Genuinely unsupported CSV → clear error, nothing parsed
+const junk = parseTradesCsv("foo,bar\nhello,world\nmore,stuff");
+expect("junk unsupported error", typeof junk.error === "string" && junk.error.length > 10, true);
+expect("junk no rows", junk.rows.length, 0);
 
 if (failures > 0) {
   console.log(`\n${failures} FAILURES`);

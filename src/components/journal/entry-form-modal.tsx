@@ -398,6 +398,12 @@ function ImportPane({
     try {
       const text = await file.text();
       const parsed = parseTradesCsv(text);
+      if (parsed.error) {
+        setFileError(parsed.error);
+        setResult(null);
+        setFileName(null);
+        return;
+      }
       setFileName(file.name);
       setResult(parsed);
       if (parsed.rows.length === 0 && parsed.invalid.length === 0) {

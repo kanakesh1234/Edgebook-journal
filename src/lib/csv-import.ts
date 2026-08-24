@@ -25,6 +25,8 @@ export interface CsvParseResult {
   rows: ParsedTrade[];
   invalid: InvalidRow[];
   headers: string[];
+  /** Set when the CSV shape is genuinely unsupported (no date / no P&L column). */
+  error?: string;
 }
 
 /** Split one CSV line into cells, honouring double-quoted fields. */
@@ -52,27 +54,41 @@ function splitCsvLine(line: string): string[] {
   return cells;
 }
 
-/** Normalise a header cell to a canonical field name. */
+/**
+ * Normalise a header cell to a canonical field name.
+ * Covers common broker/spreadsheet vocabulary; unknown columns are ignored.
+ */
 function mapHeader(h: string): string | null {
   const key = h.toLowerCase().replace(/[^a-z]/g, "");
-  if (["date", "tradedate", "day", "closedate", "entrydate"].includes(key)) return "date";
+  if (["date", "tradedate", "day", "closedate", "entrydate", "datetime"].includes(key)) return "date";
+  // Broker timestamps — open/entry preferred over close/exit for the trade date.
+  if (["boughttimestamp", "boughttime", "opentime", "opendatetime", "entrytime", "opendate"].includes(key)) return "date";
+  if (["soldtimestamp", "soldtime", "closetime", "closedatetime", "exittime", "closedate2", "selldate"].includes(key)) return "date";
+  if (["timestamp", "time"].includes(key)) return "date";
   if (["pnl", "profit", "profitloss", "pnlusd", "netpnl", "pl", "net", "result", "pnlcurrency"].includes(key)) return "pnl";
-  if (["rr", "r", "rmultiple", "rmultiple", "riskreward", "riskrewardratio"].includes(key)) return "rr";
+  if (["rr", "r", "rmultiple", "riskreward", "riskrewardratio"].includes(key)) return "rr";
   if (["instrument", "symbol", "ticker", "market", "pair", "asset"].includes(key)) return "instrument";
   if (["direction", "side", "position", "type", "longshort"].includes(key)) return "direction";
   if (["setup", "strategy", "playbook", "pattern"].includes(key)) return "setup";
   if (["notes", "note", "comments", "comment", "journal", "remarks"].includes(key)) return "notes";
+  // Extra context columns — folded into notes, not stored as model fields.
+  if (["qty", "quantity", "shares", "contracts", "size", "positionsize"].includes(key)) return "quantity";
+  if (["buyprice", "entryprice", "openprice", "pricein"].includes(key)) return "entry";
+  if (["sellprice", "exitprice", "closeprice", "priceout"].includes(key)) return "exit";
+  if (["duration", "holdingtime", "tradeduration", "timedintrade"].includes(key)) return "duration";
   return null;
 }
 
-/** Accept common date shapes; return YYYY-MM-DD or null. */
+/** Accept common date shapes (optionally followed by a time); return YYYY-MM-DD or null. */
 function normalizeDate(raw: string): string | null {
   const v = raw.trim();
-  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(v);
+  let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s].*)?$/.exec(v);
   if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(v);
+  // US style: MM/DD/YYYY (with optional HH:mm:ss)
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/.exec(v);
   if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-  m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(v);
+  // European style: DD.MM.YYYY
+  m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+.*)?$/.exec(v);
   if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
   return null;
 }
@@ -85,8 +101,46 @@ function normalizeDirection(raw: string): TradeDirection | null | undefined {
   return null; // provided but unrecognised
 }
 
-function cleanNumber(raw: string): string {
-  return raw.replace(/[$,\s]/g, "").replace(/^\(−?(.*)\)$/, "-$1").replace("−", "-");
+/**
+ * Normalise a currency P&L cell:
+ *   "$22.50" → 22.5    "$(24.00)" → -24    "$1,234.56" → 1234.56    "−12" → -12
+ */
+export function normalizePnl(raw: string): number | null {
+  let v = raw.trim();
+  if (!v) return null;
+  v = v.replace(/[$\s,]/g, "");
+  const negParens = /^\((.*)\)$/.test(v);
+  if (negParens) v = v.slice(1, -1);
+  v = v.replace(/[−–]/g, "-");
+  if (v.endsWith("-")) v = "-" + v.slice(0, -1); // trailing-minus style
+  if (v === "" || v === "-") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return negParens ? -Math.abs(n) : n;
+}
+
+/** Format a raw duration cell for the notes suffix ("272" → "4m 32s", text kept as-is). */
+function normalizeDuration(raw: string): string | null {
+  const v = raw.trim();
+  if (!v || v === "-") return null;
+  if (/^\d+$/.test(v)) {
+    const secs = Number(v);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+  return v;
+}
+
+function buildNotes(base: string, qty: string, entry: string, exit: string, duration: string): string {
+  const parts: string[] = [];
+  if (qty) parts.push(`Qty ${qty}`);
+  if (entry) parts.push(`${entry} → ${exit || "?"}`);
+  const dur = normalizeDuration(duration);
+  if (dur) parts.push(dur);
+  if (parts.length === 0) return base;
+  const suffix = parts.join(" · ");
+  return base ? `${base} · ${suffix}` : suffix;
 }
 
 /**
@@ -107,10 +161,38 @@ export function parseTradesCsv(text: string): CsvParseResult {
     if (headers.length === 0) {
       const mapped = cells.map(mapHeader);
       if (mapped.some(Boolean)) {
-        headers = mapped.map((m) => m ?? "");
+        // First occurrence wins (e.g. boughtTimestamp beats soldTimestamp for date).
+        const taken = new Set<string>();
+        headers = mapped.map((m) => {
+          if (!m || taken.has(m)) return "";
+          taken.add(m);
+          return m;
+        });
+        // A recognised file still needs the two essentials.
+        if (!taken.has("date") || !taken.has("pnl")) {
+          return {
+            rows: [],
+            invalid: [],
+            headers: cells,
+            error:
+              "This CSV doesn't contain recognisable date and P&L columns, so trades can't be mapped. " +
+              "Expected columns like Date/Time, P&L, Symbol — or the canonical order date, pnl, rr, instrument, direction, setup, notes.",
+          };
+        }
         continue; // header row consumed
       }
-      // No recognisable header — assume canonical column order.
+      // No recognisable header — probe whether this line fits the canonical order
+      // (date, pnl, …). If not, the format is genuinely unsupported.
+      if (!normalizeDate(cells[0] ?? "") || normalizePnl(cells[1] ?? "") === null) {
+        return {
+          rows: [],
+          invalid: [],
+          headers: cells,
+          error:
+            "Unrecognised CSV format — couldn't find date and P&L columns. " +
+            "Expected a header row (Date, P&L, Symbol, …) or rows starting with date and P&L.",
+        };
+      }
       headers = ["date", "pnl", "rr", "instrument", "direction", "setup", "notes"];
     }
 
@@ -122,13 +204,12 @@ export function parseTradesCsv(text: string): CsvParseResult {
     const fail = (reason: string) => invalid.push({ line: i + 1, reason, raw: raw.trim().slice(0, 120) });
 
     const date = normalizeDate(get("date"));
-    if (!date) { fail("Unrecognised date — use YYYY-MM-DD"); continue; }
+    if (!date) { fail(`Unrecognised date "${get("date").slice(0, 24)}" — use MM/DD/YYYY or YYYY-MM-DD`); continue; }
 
-    const pnlRaw = cleanNumber(get("pnl"));
-    const pnl = Number(pnlRaw);
-    if (pnlRaw === "" || !Number.isFinite(pnl)) { fail("Missing or non-numeric P&L"); continue; }
+    const pnl = normalizePnl(get("pnl"));
+    if (pnl === null) { fail("Missing or non-numeric P&L"); continue; }
 
-    const rrRaw = cleanNumber(get("rr"));
+    const rrRaw = get("rr").replace(/[$,\s]/g, "").replace(/[−–]/g, "-");
     let rr: number | null = null;
     if (rrRaw !== "" && rrRaw !== "-") {
       rr = Number(rrRaw.replace(/[rR]$/, ""));
@@ -138,7 +219,7 @@ export function parseTradesCsv(text: string): CsvParseResult {
     const direction = normalizeDirection(get("direction"));
     if (direction === null) { fail(`Unrecognised direction "${get("direction")}" — use long/short`); continue; }
 
-      rows.push({
+    rows.push({
       line: i + 1,
       date,
       pnl: Math.round(pnl * 100) / 100,
@@ -146,8 +227,12 @@ export function parseTradesCsv(text: string): CsvParseResult {
       instrument: get("instrument") || "—",
       direction: direction ?? null,
       setup: get("setup"),
-      notes: get("notes"),
+      notes: buildNotes(get("notes"), get("quantity"), get("entry"), get("exit"), get("duration")),
     });
+  }
+
+  if (headers.length === 0) {
+    return { rows: [], invalid: [], headers: [], error: "No rows found in that file." };
   }
 
   return { rows, invalid, headers };
