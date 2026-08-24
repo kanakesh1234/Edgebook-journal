@@ -277,6 +277,12 @@ export const FlagIcon = (p: P) => (
   </Svg>
 );
 
+export const CloudIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M7 18a4.5 4.5 0 1 1 .9-8.9 5.5 5.5 0 0 1 10.7 1.6A3.7 3.7 0 0 1 17.8 18Z" />
+  </Svg>
+);
+
 export const FlaskIcon = (p: P) => (
   <Svg {...p}>
     <path d="M9.5 3h5" />

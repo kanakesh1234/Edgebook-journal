@@ -72,46 +72,74 @@ export class IdbDataStore implements DataStore {
   }
 }
 
-/* -------------------- Cloud placeholder (Google Drive) -------------------- */
-/* eslint-disable @typescript-eslint/no-unused-vars */
+/* -------------------- Cloud persistence (Google Drive) -------------------- */
 
 /**
- * Shape of a future Google Drive–backed store. Intentionally unimplemented:
- * wiring it up requires an OAuth token flow on a trusted backend
- * (e.g. NextAuth route handlers + Drive REST API). The rest of the app
- * already speaks this interface, so enabling it is an isolated task.
- *
- * Suggested approach when ready:
- *   1. Add an OAuth provider server-side; expose /api/drive/token.
- *   2. Store journal JSON as a single appDataFolder file per user.
- *   3. Upload screenshots to a Drive folder; keep file ids in entry.images.
+ * Drive-backed DataStore — talks exclusively to this app's own server
+ * route handlers. The browser never sees tokens; the server resolves the
+ * caller's session-bound EdgeBook folder, so user isolation is enforced
+ * server-side. When no Drive session exists the routes return 401 and the
+ * bootstrap falls back to the local IndexedDB store.
  */
 export class GoogleDriveDataStore implements DataStore {
   readonly kind = "cloud" as const;
 
-  constructor(private readonly getAccessToken: () => Promise<string>) {}
-
   async loadJournal(_userId: string): Promise<JournalPayload | null> {
-    throw new Error("GoogleDriveDataStore is not configured yet. See src/lib/services/storage.ts.");
+    const res = await fetch("/api/drive/data", { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { payload: JournalPayload | null };
+    return json.payload ?? null;
   }
-  async saveJournal(_userId: string, _payload: JournalPayload): Promise<void> {
-    throw new Error("GoogleDriveDataStore is not configured yet.");
+
+  async saveJournal(_userId: string, payload: JournalPayload): Promise<void> {
+    const res = await fetch("/api/drive/data", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`drive_write_failed:${res.status}`);
   }
-  async putImage(_imageId: string, _blob: Blob): Promise<void> {
-    throw new Error("GoogleDriveDataStore is not configured yet.");
+
+  async putImage(imageId: string, blob: Blob): Promise<void> {
+    const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/jpeg" },
+      body: blob,
+    });
+    if (!res.ok) throw new Error(`drive_image_write_failed:${res.status}`);
   }
-  async getImage(_imageId: string): Promise<Blob | undefined> {
-    throw new Error("GoogleDriveDataStore is not configured yet.");
+
+  async getImage(imageId: string): Promise<Blob | undefined> {
+    const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, { cache: "no-store" });
+    if (!res.ok) return undefined;
+    return await res.blob();
   }
-  async deleteImage(_imageId: string): Promise<void> {
-    throw new Error("GoogleDriveDataStore is not configured yet.");
+
+  async deleteImage(imageId: string): Promise<void> {
+    await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, { method: "DELETE" });
   }
+
   async estimateUsage(): Promise<number | null> {
-    return null;
+    return null; // Drive quota is not surfaced per-app; the Settings meter stays local.
   }
 }
 
-/* eslint-enable @typescript-eslint/no-unused-vars */
+/* ------------------------------ store switch ------------------------------ */
+
+/**
+ * Active store with a contract-preserving delegate. Defaults to local
+ * IndexedDB; the bootstrap switches to the Drive store when a Google
+ * session is present. All existing `dataStore.*` call sites keep working.
+ */
+let impl: DataStore = new IdbDataStore();
+
+export function setActiveStore(store: DataStore): void {
+  impl = store;
+}
+
+export function getActiveStore(): DataStore {
+  return impl;
+}
 
 /** Single switch point between backends. */
 export function resolveStore(): DataStore {
@@ -120,4 +148,14 @@ export function resolveStore(): DataStore {
   return new IdbDataStore();
 }
 
-export const dataStore: DataStore = resolveStore();
+export const dataStore: DataStore = {
+  get kind() {
+    return impl.kind;
+  },
+  loadJournal: (userId) => impl.loadJournal(userId),
+  saveJournal: (userId, payload) => impl.saveJournal(userId, payload),
+  putImage: (imageId, blob) => impl.putImage(imageId, blob),
+  getImage: (imageId) => impl.getImage(imageId),
+  deleteImage: (imageId) => impl.deleteImage(imageId),
+  estimateUsage: () => impl.estimateUsage(),
+};
