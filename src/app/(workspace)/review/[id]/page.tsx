@@ -40,7 +40,6 @@ export default function TradeReviewPage() {
 
   const [zoomed, setZoomed] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
-  const [comparing, setComparing] = useState(false);
 
   if (!entry) {
     return (
@@ -275,9 +274,11 @@ export default function TradeReviewPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setComparing(true)}
+          onClick={() => router.push(`/compare/${entry.id}`)}
+          disabled={entry.images.length === 0}
+          title="Compare this trade's own charts"
         >
-          Compare with…
+          Compare
         </Button>
         <div className="flex gap-2.5">
           <Button variant="outline" size="sm" onClick={() => setReviewing(true)}>
@@ -287,11 +288,6 @@ export default function TradeReviewPage() {
           <Button variant="subtle" size="sm" onClick={() => router.push("/calendar")}>Done</Button>
         </div>
       </div>
-
-      {/* Compare picker */}
-      {comparing && (
-        <ComparePicker current={entry} onClose={() => setComparing(false)} />
-      )}
 
       {/* Full-screen screenshot viewer */}
       <Lightbox src={zoomed} onClose={() => setZoomed(null)} alt="Trade screenshot" />
@@ -320,64 +316,6 @@ function ReviewRows({ title, rows }: { title: string; rows: [string, string | un
           </div>
         ))}
       </dl>
-    </div>
-  );
-}
-
-/** Pick a second trade to compare against. */
-function ComparePicker({ current, onClose }: { current: { id: string; setup: string; instrument: string }; onClose: () => void }) {
-  const entries = useApp((s) => s.entries);
-  const settings = useApp((s) => s.settings);
-  const [q, setQ] = useState("");
-  const candidates = entries
-    .filter((e) => e.id !== current.id)
-    .filter((e) => (q ? (e.setup + e.instrument).toLowerCase().includes(q.toLowerCase()) : true))
-    .sort((a, b) => {
-      const sameA = a.setup === current.setup ? 0 : 1;
-      const sameB = b.setup === current.setup ? 0 : 1;
-      return sameA - sameB || b.date.localeCompare(a.date);
-    })
-    .slice(0, 12);
-
-  return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="panel w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <p className="font-display text-base font-semibold text-ink">Compare with…</p>
-          <button onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-faint hover:bg-ink/[0.05] hover:text-ink">
-            <XIcon className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mt-1 text-xs text-muted">
-          Same-setup trades first — process comparison is the point.
-        </p>
-        <input
-          aria-label="Filter trades"
-          placeholder="Filter by setup or instrument…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="mt-3 w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-gold/60 focus:outline-none"
-        />
-        <ul className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
-          {candidates.length === 0 && <li className="py-6 text-center text-sm text-faint">No other trades yet.</li>}
-          {candidates.map((e) => (
-            <li key={e.id}>
-              <Link
-                href={`/compare?a=${current.id}&b=${e.id}`}
-                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-raised/60 px-3.5 py-2.5 text-sm transition-colors hover:border-line-strong"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-ink">{e.setup || e.instrument}</span>
-                  <span className="text-xs text-faint">{e.date} · {e.instrument}</span>
-                </span>
-                <span className={cn("num shrink-0 text-sm", e.pnl > 0 ? "text-profit" : e.pnl < 0 ? "text-loss" : "text-muted")}>
-                  {formatSignedMoney(e.pnl, settings.currency)}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </div>
     </div>
   );
 }

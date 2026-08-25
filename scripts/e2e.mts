@@ -237,12 +237,13 @@ async function clickByText(page: Page, selector: string, text: string) {
 
   /* ------------------------------- Settings ------------------------------ */
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle0" });
-  await expectText(page, "Journey plan", "settings journey plan panel");
+  await expectText(page, "Appearance", "settings appearance section");
   await expectText(page, "Export journal", "settings export tile");
-  await fill(page, "#set-target", "24000");
-  await clickByText(page, "button", "Save plan");
-  await sleep(800);
-  await expectText(page, "Journey plan updated", "settings save toast");
+  await expectText(page, "Profile", "settings profile section");
+  const hasDeleteAll = await page.evaluate(() => document.body.innerText.includes("Remove all entries"));
+  hasDeleteAll ? fail("settings delete-all removed") : ok("settings delete-all removed");
+  const hasConnectDrive = await page.evaluate(() => document.body.innerText.includes("Connect Google Drive"));
+  hasConnectDrive ? fail("settings connect-drive removed") : ok("settings connect-drive removed");
   drainErrors(page, "settings");
 
   /* ------------------------------ Trading Lab ---------------------------- */

@@ -74,7 +74,7 @@ export function Minato() {
         activeRules: (settings.rules?.rules ?? []).filter((r) => r.enabled),
         violations,
         focusEntry,
-        includeNotes: settings.aiPrefs?.includeNotes ?? true,
+        includeNotes: true, // MINATO has full access to the authenticated user's recorded context
       }),
     [entries, settings, user, focusEntry, stats, discipline, adherence, violations],
   );

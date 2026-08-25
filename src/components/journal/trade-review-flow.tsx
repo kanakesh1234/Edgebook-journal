@@ -35,7 +35,7 @@ export function TradeReviewFlow({
   entry: JournalEntry | null;
   onClose: () => void;
 }) {
-  const totalSteps = 6;
+  const totalSteps = 7;
   const [step, setStep] = useState(0);
 
   // Checklist state
@@ -64,6 +64,11 @@ export function TradeReviewFlow({
   const [fearExit, setFearExit] = useState<boolean | null>(null);
   const [makeItBack, setMakeItBack] = useState<boolean | null>(null);
   const [psychNotes, setPsychNotes] = useState("");
+  // Concepts
+  const CONCEPT_SUGGESTIONS = ["Liquidity Sweep", "SMT", "PD Array", "Displacement", "Market Structure", "Fair Value Gap", "Breaker Block", "Optimal Trade Entry"];
+  const [conceptsUsed, setConceptsUsed] = useState<string[]>([]);
+  const [conceptLearned, setConceptLearned] = useState("");
+  const [conceptImprove, setConceptImprove] = useState("");
   // Outcome
   const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
   const [goodTradeDespiteLoss, setGoodTradeDespiteLoss] = useState<boolean | null>(null);
@@ -75,6 +80,11 @@ export function TradeReviewFlow({
   const [lesson, setLesson] = useState("");
   const [followedSetup, setFollowedSetup] = useState<boolean | null>(null);
   const [followedRisk, setFollowedRisk] = useState<boolean | null>(null);
+  const [strongestEvidence, setStrongestEvidence] = useState("");
+  const [biggestMistake, setBiggestMistake] = useState("");
+  const [conceptApplied, setConceptApplied] = useState("");
+  const [conceptMisunderstood, setConceptMisunderstood] = useState("");
+  const [watchNext, setWatchNext] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Hydrate from the entry (existing review data or legacy reflection)
@@ -107,6 +117,14 @@ export function TradeReviewFlow({
     setGoodTradeDespiteLoss(r?.outcome?.goodTradeDespiteLoss ?? null);
     setBadTradeDespiteWin(r?.outcome?.badTradeDespiteWin ?? null);
     setProcessNotes(r?.outcome?.notes ?? "");
+    setConceptsUsed(entry.review?.concepts?.used ?? []);
+    setConceptLearned(entry.review?.concepts?.learned ?? "");
+    setConceptImprove(entry.review?.concepts?.improve ?? "");
+    setStrongestEvidence(entry.review?.followUp?.strongestEvidence ?? "");
+    setBiggestMistake(entry.review?.followUp?.biggestMistake ?? "");
+    setConceptApplied(entry.review?.followUp?.conceptApplied ?? "");
+    setConceptMisunderstood(entry.review?.followUp?.conceptMisunderstood ?? "");
+    setWatchNext(entry.review?.followUp?.watchNext ?? "");
     const legacy = entry.reflection;
     setWentWell(legacy?.wentWell ?? "");
     setWentPoorly(legacy?.wentPoorly ?? "");
@@ -117,9 +135,10 @@ export function TradeReviewFlow({
     setStep(0);
   }, [open, entry]);
 
+  const conceptSuggestions = ["Liquidity Sweep", "SMT", "PD Array", "Displacement", "Market Structure", "Fair Value Gap", "Breaker Block", "Optimal Trade Entry"];
   const items = useMemo(() => (entry?.checklist ?? checklist), [entry?.checklist, checklist]);
   const score = checklistScore(entry?.checklist ?? checklist);
-  const stepLabels = ["Checklist", "Setup", "Execution", "Psychology", "Outcome", "Complete"];
+  const stepLabels = ["Checklist", "Setup", "Execution", "Psychology", "Concepts", "Outcome", "Complete"];
 
   if (!entry) return null;
 
@@ -161,6 +180,18 @@ export function TradeReviewFlow({
           fearExit,
           makeItBack,
           notes: psychNotes.trim() || undefined,
+        },
+        concepts: {
+          used: conceptsUsed,
+          learned: conceptLearned.trim() || undefined,
+          improve: conceptImprove.trim() || undefined,
+        },
+        followUp: {
+          strongestEvidence: strongestEvidence.trim() || undefined,
+          biggestMistake: biggestMistake.trim() || undefined,
+          conceptApplied: conceptApplied.trim() || undefined,
+          conceptMisunderstood: conceptMisunderstood.trim() || undefined,
+          watchNext: watchNext.trim() || undefined,
         },
         outcome: {
           followedPlan,
@@ -373,8 +404,58 @@ export function TradeReviewFlow({
               </StepShell>
             )}
 
-            {/* STEP 4 — outcome / process */}
+            {/* STEP 4 — concepts */}
             {step === 4 && (
+              <StepShell key="concepts" title="Concepts used" subtitle="Tag what you used, learned, and what needs work — this becomes MINATO data.">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[13px] text-muted">Concepts applied in this trade:</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {conceptSuggestions.concat(conceptsUsed.filter((c) => !conceptSuggestions.includes(c))).map((c) => {
+                        const on = conceptsUsed.includes(c);
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => setConceptsUsed(on ? conceptsUsed.filter((x) => x !== c) : [...conceptsUsed, c])}
+                            className={cn(
+                              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                              on ? "border-gold/50 bg-gold/[0.1] text-gold" : "border-line bg-raised/60 text-faint hover:text-muted",
+                            )}
+                          >
+                            {c}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <TextInput
+                      aria-label="Add custom concept"
+                      placeholder="Add a custom concept and press Enter…"
+                      className="mt-2"
+                      onKeyDown={(e) => {
+                        const el = e.currentTarget;
+                        if (e.key === "Enter" && el.value.trim()) {
+                          e.preventDefault();
+                          const v = el.value.trim();
+                          if (!conceptsUsed.includes(v)) setConceptsUsed([...conceptsUsed, v]);
+                          el.value = "";
+                        }
+                      }}
+                    />
+                  </div>
+                  <Field label="New concept learned" hint="optional" htmlFor="tr-concept-learned">
+                    <TextInput id="tr-concept-learned" placeholder="What clicked for the first time?" value={conceptLearned} onChange={(e) => setConceptLearned(e.target.value)} />
+                  </Field>
+                  <Field label="Concept to improve" hint="optional" htmlFor="tr-concept-improve">
+                    <TextInput id="tr-concept-improve" placeholder="What needs more study?" value={conceptImprove} onChange={(e) => setConceptImprove(e.target.value)} />
+                  </Field>
+                </div>
+              </StepShell>
+            )}
+
+            {/* STEP 5 — outcome / process */}
+            {step === 5 && (
               <StepShell key="outcome" title="Outcome vs process" subtitle="A winning trade can be a process failure. A losing trade can be a process success.">
                 <div className="space-y-4">
                   <div className={cn(
@@ -398,12 +479,17 @@ export function TradeReviewFlow({
                     <YesNoRow label="Setup rules followed?" value={followedSetup} onChange={setFollowedSetup} />
                     <YesNoRow label="Risk rules followed?" value={followedRisk} onChange={setFollowedRisk} />
                   </div>
+                  <LabeledArea label="What was the strongest evidence for the entry?" placeholder="The exact thing that justified the trade." value={strongestEvidence} onChange={setStrongestEvidence} />
+                  <LabeledArea label="What was the biggest mistake?" placeholder="If any — be specific." value={biggestMistake} onChange={setBiggestMistake} />
+                  <LabeledArea label="What concept did you apply correctly?" placeholder="Name it." value={conceptApplied} onChange={setConceptApplied} />
+                  <LabeledArea label="What concept did you misunderstand?" placeholder="Name it — this becomes a study target." value={conceptMisunderstood} onChange={setConceptMisunderstood} />
+                  <LabeledArea label="What should you watch for next session?" placeholder="One concrete thing." value={watchNext} onChange={setWatchNext} />
                 </div>
               </StepShell>
             )}
 
-            {/* STEP 5 — complete */}
-            {step === 5 && (
+            {/* STEP 6 — complete */}
+            {step === 6 && (
               <StepShell key="complete" title="Complete review" subtitle="Check the summary and finish. Screenshots are required for a full review.">
                 <div className="space-y-3 text-sm">
                   <SummaryRow label="Checklist" value={`${score.confirmed} / ${score.required} confirmed`} tone={score.confirmed === score.required ? "text-profit" : "text-gold"} />
@@ -411,6 +497,7 @@ export function TradeReviewFlow({
                   <SummaryRow label="Execution" value={planned != null || whyEntered ? "Recorded" : "Not provided"} />
                   <SummaryRow label="Psychology" value={emotionBefore || fomo != null ? "Recorded" : "Not provided"} />
                   <SummaryRow label="Outcome assessment" value={followedPlan != null ? "Recorded" : "Not provided"} />
+                  <SummaryRow label="Concepts" value={conceptsUsed.length > 0 ? conceptsUsed.join(", ") : "Not tagged"} />
                   <SummaryRow label="Screenshots" value={entry.images.length > 0 ? `${entry.images.length} attached` : "None — review will be marked INCOMPLETE"} tone={entry.images.length > 0 ? "text-profit" : "text-loss"} />
                   <div className="rounded-xl border border-line bg-raised/60 p-4">
                     <p className="text-[13px] leading-relaxed text-muted">

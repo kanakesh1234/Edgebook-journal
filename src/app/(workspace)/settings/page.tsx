@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
-import { CURRENCIES, CURRENCY_SYMBOLS, type CurrencyCode } from "@/lib/types";
+
 import { dataStore } from "@/lib/services/storage";
 import { formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,6 @@ export default function SettingsPage() {
   const settings = useApp((s) => s.settings);
   const entryCount = useApp((s) => s.entries.length);
   const { choice: themeChoice, resolved: resolvedTheme, setChoice: setThemeChoice } = useTheme();
-  const includeNotes = settings.aiPrefs?.includeNotes ?? true;
 
   // Google Drive connection state — server-verified (real token refresh)
   const [driveState, setDriveState] = useState<{ configured: boolean; loggedIn: boolean; email: string | null; driveConnected: boolean } | null>(null);
@@ -49,13 +48,6 @@ export default function SettingsPage() {
       .catch(() => setDriveState({ configured: false, loggedIn: false, email: null, driveConnected: false }));
   }, []);
 
-  // Local draft of the journey plan
-  const [start, setStart] = useState(String(settings.startingEquity));
-  const [target, setTarget] = useState(String(settings.targetEquity));
-  const [maxDd, setMaxDd] = useState(String(settings.maxDrawdown));
-  const [currency, setCurrency] = useState<CurrencyCode>(settings.currency);
-  const [planErrors, setPlanErrors] = useState<Record<string, string>>({});
-  const [savingPlan, setSavingPlan] = useState(false);
 
   const [usage, setUsage] = useState<number | null>(null);
   const [demoBusy, setDemoBusy] = useState(false);
@@ -67,29 +59,6 @@ export default function SettingsPage() {
   }, [entryCount]);
 
   /* ------------------------------ actions ------------------------------ */
-
-  const savePlan = async () => {
-    const s = Number(start);
-    const t = Number(target);
-    const m = Number(maxDd);
-    const errs: Record<string, string> = {};
-    if (!Number.isFinite(s) || s <= 0) errs.start = "Enter your starting balance.";
-    if (!Number.isFinite(t) || t <= 0) errs.target = "Enter a target balance.";
-    else if (Number.isFinite(s) && t <= s) errs.target = "Target must be above the start.";
-    if (!Number.isFinite(m) || m <= 0) errs.maxDd = "Set your risk budget.";
-    setPlanErrors(errs);
-    if (Object.keys(errs).length) return;
-
-    setSavingPlan(true);
-    await useApp.getState().updateSettings({
-      startingEquity: s,
-      targetEquity: t,
-      maxDrawdown: m,
-      currency,
-    });
-    setSavingPlan(false);
-    toast.success("Journey plan updated", "The roadmap recalculated instantly.");
-  };
 
   const exportJson = () => {
     const payload = useApp.getState().exportPayload();
@@ -203,50 +172,6 @@ export default function SettingsPage() {
           </p>
         </section>
 
-        {/* ------------------------- AI Buddy privacy ------------------------- */}
-        <section className="panel p-6" aria-label="AI Buddy">
-          <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-ink">
-            <SparklesIcon className="h-4 w-4 text-gold" />
-            MINATO
-          </h2>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted">
-            Your companion reads only your recorded EdgeBook data — never invents trades. Control
-            how much context he may see.
-          </p>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={includeNotes}
-            onClick={() => {
-              void useApp.getState().updateSettings({ aiPrefs: { includeNotes: !includeNotes } });
-            }}
-            className="mt-4 flex w-full items-center justify-between gap-3 rounded-control border border-line bg-raised/60 px-4 py-3 text-left transition-colors hover:border-line-strong"
-          >
-            <span>
-              <span className="block text-sm font-medium text-ink">Include journal notes &amp; reflections</span>
-              <span className="mt-0.5 block text-xs text-muted">
-                {includeNotes
-                  ? "MINATO can reference what you wrote in reviews."
-                  : "MINATO sees numbers and rules only — your words stay private."}
-              </span>
-            </span>
-            <span
-              className={cn(
-                "relative h-5.5 w-9 shrink-0 rounded-full border transition-colors duration-200",
-                includeNotes ? "border-gold/50 bg-gold/25" : "border-line-strong bg-canvas",
-              )}
-              aria-hidden
-            >
-              <span
-                className={cn(
-                  "absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full transition-all duration-200",
-                  includeNotes ? "left-[18px] bg-gold-strong" : "left-[3px] bg-line-strong",
-                )}
-              />
-            </span>
-          </button>
-        </section>
-
         {/* ------------------------------ Profile ------------------------------ */}
         <section className="panel p-6" aria-label="Profile">
           <h2 className="font-display text-base font-semibold tracking-tight text-ink">Profile</h2>
@@ -268,73 +193,6 @@ export default function SettingsPage() {
           <Button variant="subtle" size="sm" onClick={() => void signOut()} className="mt-5">
             <LogoutIcon className="h-3.5 w-3.5" />
             Sign out
-          </Button>
-        </section>
-
-        {/* ---------------------------- Journey plan ---------------------------- */}
-        <section className="panel p-6" aria-label="Journey plan">
-          <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-ink">
-            <TargetIcon className="h-4 w-4 text-gold" />
-            Journey plan
-          </h2>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted">
-            These values power the roadmap, drawdown meter and target tracking.
-          </p>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <Field label="Starting equity" error={planErrors.start} htmlFor="set-start">
-              <TextInput
-                id="set-start"
-                inputMode="decimal"
-                value={start}
-                invalid={!!planErrors.start}
-                onChange={(e) => setStart(e.target.value.replace(/[^\d.]/g, ""))}
-              />
-            </Field>
-            <Field label="Target equity" error={planErrors.target} htmlFor="set-target">
-              <TextInput
-                id="set-target"
-                inputMode="decimal"
-                value={target}
-                invalid={!!planErrors.target}
-                onChange={(e) => setTarget(e.target.value.replace(/[^\d.]/g, ""))}
-              />
-            </Field>
-            <Field label="Max drawdown budget" error={planErrors.maxDd} htmlFor="set-dd">
-              <TextInput
-                id="set-dd"
-                inputMode="decimal"
-                value={maxDd}
-                invalid={!!planErrors.maxDd}
-                onChange={(e) => setMaxDd(e.target.value.replace(/[^\d.]/g, ""))}
-              />
-            </Field>
-            <Field label="Currency" htmlFor="set-currency">
-              <Select id="set-currency" value={currency} onChange={(e) => setCurrency(e.target.value as CurrencyCode)}>
-                {CURRENCIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c} — {CURRENCY_SYMBOLS[c]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-line bg-raised/50 px-4 py-3 text-[13px] text-muted">
-            <ShieldIcon className="mr-1.5 inline h-3.5 w-3.5 text-profit" />
-            Journey range{" "}
-            <span className="num text-ink">
-              {formatMoney(Number(start) || 0, currency)} → {formatMoney(Number(target) || 0, currency)}
-            </span>{" "}
-            · risking{" "}
-            <span className="num text-ink">{formatMoney(Number(maxDd) || 0, currency)}</span> to make{" "}
-            <span className="num text-profit">
-              {formatMoney(Math.max(0, (Number(target) || 0) - (Number(start) || 0)), currency)}
-            </span>
-          </div>
-
-          <Button variant="gold" onClick={() => void savePlan()} loading={savingPlan} className="mt-4 w-full sm:w-auto">
-            Save plan
           </Button>
         </section>
 

@@ -6,7 +6,7 @@ import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { checklistItems, checklistScore, type PlaybookSetup } from "@/lib/types";
-import { formatDateMedium } from "@/lib/format";
+import { formatDateMedium, formatSignedMoney } from "@/lib/format";
 import { Playbook } from "@/components/lab/playbook";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -178,19 +178,43 @@ export default function LabPage() {
           </p>
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
-            {playbook.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setOpenSetup(p)}
-                className="rounded-control border border-line bg-raised/60 p-4 text-left transition-colors hover:border-line-strong"
-              >
-                <p className="text-sm font-semibold text-ink">{p.name}</p>
-                {p.strategy && <p className="mt-0.5 line-clamp-2 text-xs text-muted">{p.strategy}</p>}
-                <p className="mt-2 text-[11px] text-faint">
-                  {[p.minRR != null ? `≥ ${p.minRR}R` : null, p.instruments?.join(", "), p.sessions?.join(" · ")].filter(Boolean).join(" · ") || "Tap for details"}
-                </p>
-              </button>
-            ))}
+            {playbook.map((p) => {
+              const trades = entries.filter((e) => e.setup.toLowerCase() === p.name.toLowerCase());
+              const wins = trades.filter((e) => e.pnl > 0).length;
+              const losses = trades.filter((e) => e.pnl < 0).length;
+              const pnl = trades.reduce((s, e) => s + e.pnl, 0);
+              const rrList = trades.filter((e) => e.rr != null);
+              const avgR = rrList.length > 0 ? rrList.reduce((s, e) => s + (e.rr ?? 0), 0) / rrList.length : null;
+              const decided = wins + losses;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setOpenSetup(p)}
+                  className="rounded-control border border-line bg-raised/60 p-4 text-left transition-colors hover:border-line-strong"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
+                    <span className="shrink-0 rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-medium text-faint">
+                      v{p.version ?? 1}{p.active === false ? " · inactive" : ""}
+                    </span>
+                  </div>
+                  {p.strategy && <p className="mt-0.5 line-clamp-2 text-xs text-muted">{p.strategy}</p>}
+                  {trades.length > 0 ? (
+                    <p className="num mt-2 text-[11px] text-muted">
+                      {trades.length} {trades.length === 1 ? "trade" : "trades"} ·{" "}
+                      <span className={pnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(pnl)}</span>
+                      {decided > 0 && <> · {Math.round((wins / decided) * 100)}% win</>}
+                      {avgR != null && <> · {avgR >= 0 ? "+" : ""}{avgR.toFixed(1)}R avg</>}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[11px] text-faint">No trades recorded against this playbook yet.</p>
+                  )}
+                  <p className="mt-1.5 text-[11px] text-faint">
+                    {[p.minRR != null ? `≥ ${p.minRR}R` : null, p.instruments?.join(", "), p.sessions?.join(" · ")].filter(Boolean).join(" · ") || "Tap for details"}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         )}
         <p className="mt-3 text-xs text-faint">
@@ -260,7 +284,7 @@ export default function LabPage() {
             </div>
             {openSetup.strategy && <p className="mt-2 text-sm leading-relaxed text-muted">{openSetup.strategy}</p>}
             {openSetup.entryConditions && (
-              <DetailList title="Entry conditions" lines={openSetup.entryConditions.split("\n").filter(Boolean)} />
+              <DetailList title="Entry rules (structured)" lines={openSetup.entryConditions.split("\n").filter(Boolean).map((l, i) => `Rule ${i + 1}: ${l}`)} />
             )}
             {openSetup.invalidation && <DetailList title="Invalidation" lines={[openSetup.invalidation]} />}
             {openSetup.exitRules && <DetailList title="Target & exit" lines={[openSetup.exitRules]} />}

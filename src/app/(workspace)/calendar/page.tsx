@@ -214,11 +214,11 @@ export default function CalendarPage() {
                   {pnl !== null && pnl !== 0 && (
                     <span
                       className={cn(
-                        "num w-fit rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                        pnl > 0 ? "border-profit/25 bg-profit/[0.08] text-profit" : "border-loss/25 bg-loss/[0.08] text-loss",
+                        "num w-fit rounded-md border px-1.5 py-0.5 text-[13px] font-bold leading-tight",
+                        pnl > 0 ? "border-profit/30 bg-profit/[0.1] text-profit" : "border-loss/30 bg-loss/[0.1] text-loss",
                       )}
                     >
-                      {formatSignedMoney(pnl, settings.currency, { compact: true })}
+                      {pnl > 0 ? "+" : "−"}${Math.abs(pnl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                     </span>
                   )}
                 </motion.button>

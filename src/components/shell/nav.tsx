@@ -16,6 +16,7 @@ import {
   LogoutIcon,
   PlusIcon,
   SettingsIcon,
+  TargetIcon,
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", icon: ChartLineIcon },
   { href: "/calendar", label: "Calendar", icon: CalendarIcon },
+  { href: "/challenges", label: "Challenges", icon: TargetIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
   { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
   { href: "/ranking", label: "Ranking", icon: TrophyIcon },

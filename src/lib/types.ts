@@ -90,12 +90,23 @@ export interface JournalSettings {
 /*  Challenges — distinct trading periods/objectives                   */
 /* ------------------------------------------------------------------ */
 
+export type DrawdownMode = "static" | "dynamic";
+
 export interface Challenge {
   id: string;
   name: string;
   notes?: string;
   startingBalance?: number | null;
   targetBalance?: number | null;
+  /** STATIC: measured from starting balance. DYNAMIC: trailing high-water mark. */
+  drawdownMode?: DrawdownMode;
+  maxDrawdown?: number | null;
+  startDate?: string;
+  endDate?: string;
+  dailyProfitTarget?: number | null;
+  dailyLossLimit?: number | null;
+  tradeLimit?: number | null;
+  instruments?: string[];
   createdAt: number;
 }
 
@@ -185,6 +196,20 @@ export interface OutcomeReview {
 }
 
 export interface TradeReviewData {
+  playbookRef?: { name: string; version: number };
+  concepts?: {
+    used: string[];
+    learned?: string;
+    improve?: string;
+  };
+  compareInsight?: string;
+  followUp?: {
+    strongestEvidence?: string;
+    biggestMistake?: string;
+    conceptApplied?: string;
+    conceptMisunderstood?: string;
+    watchNext?: string;
+  };
   setup?: {
     liquiditySwept?: string;
     sweepTimestamp?: string;
@@ -231,9 +256,10 @@ export function reviewStatusOf(entry: Pick<JournalEntry, "review" | "reflection"
 export interface PlaybookSetup {
   id: string;
   name: string;
+  purpose?: string;
   /** The idea behind the setup — where the edge comes from. */
   strategy?: string;
-  /** Conditions that must be true before entering (one per line). */
+  /** Conditions that must be true before entering (one per line = one rule). */
   entryConditions?: string;
   /** What kills the trade / the idea. */
   invalidation?: string;
@@ -243,6 +269,13 @@ export interface PlaybookSetup {
   /** Preferred sessions, e.g. "London open", "NY". */
   sessions?: string[];
   instruments?: string[];
+  notes?: string;
+  active?: boolean;
+  /**
+   * Version safety: bumped on every edit. Trades reference the version that
+   * applied at execution time so historical interpretation never shifts.
+   */
+  version: number;
   createdAt: number;
   updatedAt: number;
 }

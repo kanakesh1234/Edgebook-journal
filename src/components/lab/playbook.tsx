@@ -141,7 +141,7 @@ export function Playbook({ setups, onChange }: { setups: PlaybookSetup[]; onChan
             onSubmit={(e) => {
               e.preventDefault();
               if (!editing.name.trim()) return;
-              save({ ...editing, name: editing.name.trim(), updatedAt: Date.now() });
+              save({ ...editing, name: editing.name.trim(), version: (editing.version ?? 1) + (creating ? 0 : 1), active: editing.active ?? true, updatedAt: Date.now() });
               setEditing(null);
             }}
           >
@@ -252,7 +252,7 @@ export function Playbook({ setups, onChange }: { setups: PlaybookSetup[]; onChan
 }
 
 function blankSetup(): PlaybookSetup {
-  return { id: uid("pb"), name: "", createdAt: Date.now(), updatedAt: Date.now() };
+  return { id: uid("pb"), name: "", version: 1, active: true, createdAt: Date.now(), updatedAt: Date.now() };
 }
 
 function DetailRow({ term, text, tone }: { term: string; text: string; tone?: string }) {
