@@ -1,31 +1,29 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
-import { decryptToken } from "@/lib/server/tokens";
-import { SESSION_COOKIE, openSession, sessionCookieOptions } from "@/lib/server/session";
+import { APP_SESSION_COOKIE, openAppSession, readCookie, sessionCookieOptions } from "@/lib/server/session";
+import { accountRefreshToken, clearDriveAuth, getAccount } from "@/lib/server/accounts";
 import { revokeToken } from "@/lib/server/drive";
 
 export const dynamic = "force-dynamic";
 
-/** Step 8: disconnect — revoke the refresh token at Google and clear the session. */
+/**
+ * Explicit Drive disconnect: revokes the token at Google and deletes the
+ * stored authorization. The app session remains; Drive requires a fresh
+ * authorization afterward.
+ */
 export async function POST(request: Request) {
   const config = getGoogleConfig();
-  const cookie = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((c) => c.trim())
-    .find((c) => c.startsWith(`${SESSION_COOKIE}=`))
-    ?.split("=")
-    .slice(1)
-    .join("=");
-
-  const session = config && cookie ? openSession(decodeURIComponent(cookie), config.tokenSecret) : null;
+  const sessionCookie = readCookie(request, APP_SESSION_COOKIE);
+  const session = config && sessionCookie ? openAppSession(sessionCookie, config.tokenSecret) : null;
 
   if (config && session) {
-    const refreshToken = decryptToken(session.encRefreshToken, config.tokenSecret);
+    const account = getAccount(session.email);
+    const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
+    const refreshToken = account ? accountRefreshToken(account, secret) : null;
     if (refreshToken) await revokeToken(refreshToken);
+    clearDriveAuth(session.email);
   }
 
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 });
   return res;
 }

@@ -2,16 +2,18 @@
 
 import { useEffect } from "react";
 import { useApp } from "./store";
+import type { User } from "./services/auth";
 import { GoogleDriveDataStore, IdbDataStore, setActiveStore } from "./services/storage";
 
 /**
  * Runs the auth/session hydration exactly once per page load.
  *
- * Backend Phase A: before hydrating the journal, ask the server whether a
- * Google Drive session exists. Connected → persist through the user's
- * Drive (server-resolved, session-bound). Not connected or not configured
- * → local IndexedDB, exactly as before. Failure to reach the server
- * (offline dev) also falls back to local.
+ * Session precedence:
+ *   1. Google session (server-verified) → user identity from Google;
+ *      Drive store when the server confirms a working authorization,
+ *      local store otherwise.
+ *   2. Local account (email/password, dev path) → IndexedDB.
+ *   3. Guest → login screen.
  */
 let bootstrapped = false;
 
@@ -22,21 +24,39 @@ export function useBootstrap() {
     bootstrapped = true;
 
     const boot = async () => {
+      let googleUser: User | null = null;
+      let driveConnected = false;
       try {
         const res = await fetch("/api/auth/google/session", { cache: "no-store" });
         if (res.ok) {
-          const session = (await res.json()) as { configured: boolean; connected: boolean };
-          if (session.configured && session.connected) {
-            setActiveStore(new GoogleDriveDataStore());
-          } else {
-            setActiveStore(new IdbDataStore());
+          const s = (await res.json()) as {
+            loggedIn: boolean;
+            user: User | null;
+            drive: { connected: boolean };
+          };
+          if (s.loggedIn && s.user) {
+            googleUser = s.user;
+            driveConnected = s.drive.connected;
           }
-        } else {
-          setActiveStore(new IdbDataStore());
         }
       } catch {
-        setActiveStore(new IdbDataStore());
+        /* server unreachable → local path */
       }
+
+      if (googleUser) {
+        setActiveStore(driveConnected ? new GoogleDriveDataStore() : new IdbDataStore());
+        await init(googleUser);
+        return;
+      }
+
+      const localUser = await useApp.getState().localSession();
+      if (localUser) {
+        setActiveStore(new IdbDataStore());
+        await init(localUser);
+        return;
+      }
+
+      setActiveStore(new IdbDataStore());
       await init();
     };
 

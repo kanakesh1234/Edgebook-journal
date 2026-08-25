@@ -7,22 +7,33 @@ import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { AuthError } from "@/lib/services/auth";
 import { useBootstrap } from "@/lib/bootstrap";
-import { Button, Spinner } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Field, TextInput } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { Wordmark } from "@/components/landing/logo";
-import { ArrowRightIcon, CheckIcon, EyeIcon, SparklesIcon } from "@/components/ui/icons";
+import { ArrowRightIcon, CheckIcon, EyeIcon, GoogleIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 
-const DEMO_EMAIL = "demo@edgebook.app";
-const DEMO_PASSWORD = "edgebook-demo-2026";
-
 type Mode = "signin" | "signup";
+
+const DRIVE_MESSAGES: Record<string, { tone: "error" | "info"; text: string }> = {
+  not_allowed: {
+    tone: "error",
+    text: "This Google account isn't on the Edge Book access list yet. Ask the administrator to add your email.",
+  },
+  not_configured: { tone: "error", text: "Google sign-in isn't configured on this server yet." },
+  state_mismatch: { tone: "error", text: "The sign-in attempt expired. Please try again." },
+  token_exchange_failed: { tone: "error", text: "Google sign-in couldn't be completed. Please try again." },
+  folder_setup_failed: { tone: "error", text: "Your Edge Book Drive folder couldn't be prepared. Please try again." },
+  no_email: { tone: "error", text: "Your Google account doesn't share an email address. Please try a different account." },
+  access_denied: { tone: "info", text: "Sign-in was cancelled." },
+  connected: { tone: "info", text: "Google Drive connected — welcome back." },
+};
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="grid min-h-dvh place-items-center"><Spinner className="h-6 w-6 text-gold" /></div>}>
+    <Suspense fallback={<div className="grid min-h-dvh place-items-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-line-strong border-t-gold" /></div>}>
       <LoginView />
     </Suspense>
   );
@@ -40,7 +51,11 @@ function LoginView() {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; form?: string }>({});
-  const [busy, setBusy] = useState<"form" | "demo" | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Drive flow feedback (connected / errors surfaced by the callback)
+  const driveParam = params.get("drive");
+  const driveMessage = driveParam ? DRIVE_MESSAGES[driveParam] : undefined;
 
   // Already signed in → straight to the journal
   useEffect(() => {
@@ -49,8 +64,6 @@ function LoginView() {
 
   const validate = (): boolean => {
     const next: typeof errors = {};
-    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-    if (!emailOk) next.email = mode === "signup" ? "Enter a valid email." : undefined;
     if (!email.trim()) next.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) next.email = "That email doesn't look right.";
     if (!password) next.password = "Password is required.";
@@ -63,12 +76,12 @@ function LoginView() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate() || busy) return;
-    setBusy("form");
+    setBusy(true);
     setErrors({});
     try {
       if (mode === "signup") {
         await useApp.getState().signUp(name, email, password);
-        toast.celebrate("Welcome to Edgebook", "Your journal is ready — add your first trade.");
+        toast.success("Welcome to Edgebook", "Your journal is ready — add your first trade.");
       } else {
         await useApp.getState().signIn(email, password);
         toast.success("Welcome back", "Good to see you again.");
@@ -83,28 +96,7 @@ function LoginView() {
         setErrors({ form: "Something went wrong. Please try again." });
       }
     } finally {
-      setBusy(null);
-    }
-  };
-
-  const enterDemo = async () => {
-    if (busy) return;
-    setBusy("demo");
-    try {
-      try {
-        await useApp.getState().signIn(DEMO_EMAIL, DEMO_PASSWORD);
-      } catch {
-        await useApp.getState().signUp("Demo Trader", DEMO_EMAIL, DEMO_PASSWORD);
-      }
-      if (useApp.getState().entries.length === 0) {
-        await useApp.getState().loadDemoData();
-      }
-      toast.info("Demo journal loaded", "Four months of sample trades. Clear them anytime in Settings.");
-      router.replace("/dashboard");
-    } catch {
-      toast.error("Could not start the demo", "Please try again.");
-    } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -124,10 +116,10 @@ function LoginView() {
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, ease: EASE }}
-              className="max-w-md font-display text-5xl font-bold leading-[1.06] tracking-[-0.03em] text-ink"
+              className="max-w-md font-serif text-5xl font-normal leading-[1.06] tracking-[-0.02em] text-ink"
             >
               The review is{" "}
-              <span className="font-serif font-normal italic text-gold-grad">the edge.</span>
+              <span className="italic text-gold-grad">the edge.</span>
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -173,8 +165,8 @@ function LoginView() {
 
           <ul className="space-y-3 text-sm text-muted">
             {[
-              "Local-first — entries never leave this device",
-              "Screenshots, analytics, roadmap & calendar",
+              "Journal stays private in your own Google Drive",
+              "Screenshots, analytics, playbook & calendar",
               "Export everything as JSON anytime",
             ].map((t, i) => (
               <motion.li
@@ -194,8 +186,6 @@ function LoginView() {
 
       {/* ------------------------------- Form panel ------------------------------ */}
       <main className="relative flex items-center justify-center px-5 py-12 sm:px-10">
-        <div className="dot-backdrop absolute inset-0 opacity-40 [mask-image:radial-gradient(60%_60%_at_50%_40%,black,transparent)]" aria-hidden />
-
         <motion.div
           initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
@@ -212,16 +202,49 @@ function LoginView() {
             {mode === "signin" ? "Welcome back" : "Create your journal"}
           </h2>
           <p className="mt-1.5 text-sm text-muted">
-            {mode === "signin"
-              ? "Sign in to continue your streak."
-              : "One account, stored privately on this device."}
+            {mode === "signin" ? "Sign in to continue your streak." : "One account — journal and Drive, together."}
           </p>
+
+          {driveMessage && (
+            <p
+              role="status"
+              className={cn(
+                "mt-5 rounded-lg border px-3 py-2.5 text-[13px]",
+                driveMessage.tone === "error"
+                  ? "border-loss/25 bg-loss/[0.07] text-loss"
+                  : "border-info/25 bg-info/[0.06] text-info",
+              )}
+            >
+              {driveMessage.text}
+            </p>
+          )}
+
+          {/* Primary: Google */}
+          <a
+            href="/api/auth/google/start?next=/dashboard"
+            className="group mt-6 flex h-11 w-full items-center justify-center gap-3 rounded-control border border-line-strong bg-surface text-sm font-medium text-ink shadow-sm transition-all duration-200 hover:bg-raised hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
+            aria-label="Continue with Google"
+          >
+            <GoogleIcon className="h-[18px] w-[18px]" />
+            Continue with Google
+            <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-muted" />
+          </a>
+          <p className="mt-2 text-center text-xs text-faint">
+            Signs you in and connects your private Google Drive — one step.
+          </p>
+
+          {/* Divider */}
+          <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-widest text-faint">
+            <span className="h-px flex-1 bg-line" />
+            or continue with email
+            <span className="h-px flex-1 bg-line" />
+          </div>
 
           {/* Mode tabs */}
           <div
             role="tablist"
             aria-label="Authentication mode"
-            className="mt-7 grid grid-cols-2 gap-1 rounded-xl border border-line bg-canvas/60 p-1"
+            className="grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1"
           >
             {(["signin", "signup"] as const).map((m) => (
               <button
@@ -233,7 +256,7 @@ function LoginView() {
                   setErrors({});
                 }}
                 className={cn(
-                  "relative rounded-lg py-2 text-sm font-medium transition-colors",
+                  "relative rounded-lg py-1.5 text-sm font-medium transition-colors",
                   mode === m ? "text-ink" : "text-faint hover:text-muted",
                 )}
               >
@@ -241,7 +264,7 @@ function LoginView() {
                   <motion.span
                     layoutId="auth-tab"
                     transition={{ type: "spring", stiffness: 480, damping: 38 }}
-                    className="absolute inset-0 rounded-lg border border-line-strong bg-raised shadow-inner"
+                    className="absolute inset-0 rounded-lg border border-line-strong bg-raised"
                   />
                 )}
                 <span className="relative">{m === "signin" ? "Sign in" : "Create account"}</span>
@@ -249,7 +272,7 @@ function LoginView() {
             ))}
           </div>
 
-          <form onSubmit={submit} noValidate className="mt-6 space-y-4">
+          <form onSubmit={submit} noValidate className="mt-5 space-y-4">
             {mode === "signup" && (
               <Field label="Name" error={errors.name} htmlFor="name">
                 <TextInput
@@ -305,26 +328,14 @@ function LoginView() {
               </p>
             )}
 
-            <Button type="submit" size="lg" loading={busy === "form"} disabled={busy !== null} className="w-full">
+            <Button type="submit" variant="gold" loading={busy} disabled={busy} className="h-10 w-full">
               {mode === "signin" ? "Sign in" : "Create journal"}
               {!busy && <ArrowRightIcon className="h-4 w-4" />}
             </Button>
           </form>
 
-          <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-widest text-faint">
-            <span className="h-px flex-1 bg-line" />
-            or
-            <span className="h-px flex-1 bg-line" />
-          </div>
-
-          <Button variant="gold" size="lg" loading={busy === "demo"} disabled={busy !== null} onClick={enterDemo} className="w-full">
-            <SparklesIcon className="h-4 w-4" />
-            Explore with demo data
-          </Button>
-
           <p className="mt-6 text-center text-xs leading-relaxed text-faint">
-            Accounts live only in this browser&apos;s storage.
-            <br className="sm:hidden" /> No servers, no tracking, no spam.
+            Your journal stays private — stored in your own Google Drive, or locally on this device.
           </p>
         </motion.div>
       </main>

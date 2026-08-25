@@ -28,7 +28,9 @@ interface AppState {
   /** Explicit "no trade" day records (discipline system). */
   dayLogs: NoTradeLog[];
 
-  init(): Promise<void>;
+  init(externalUser?: User): Promise<void>;
+  /** Local (dev) session lookup — used by the bootstrap for the email/password path. */
+  localSession(): Promise<User | null>;
   signUp(name: string, email: string, password: string): Promise<void>;
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
@@ -61,8 +63,8 @@ export const useApp = create<AppState>((set, get) => ({
   settings: defaultSettings(),
   dayLogs: [],
 
-  async init() {
-    const user = await auth.getSession();
+  async init(externalUser?: User) {
+    const user = externalUser ?? (await auth.getSession());
     if (!user) {
       set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
       return;
@@ -78,6 +80,10 @@ export const useApp = create<AppState>((set, get) => ({
       settings: { ...defaultSettings(), ...payload.settings },
       dayLogs: payload.dayLogs ?? [],
     });
+  },
+
+  async localSession() {
+    return auth.getSession();
   },
 
   async signUp(name, email, password) {
@@ -104,6 +110,13 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async signOut() {
+    // End any Google app session (server-side Drive authorization is
+    // intentionally preserved and restored on next Google sign-in).
+    try {
+      await fetch("/api/auth/google/signout", { method: "POST" });
+    } catch {
+      /* offline dev — local signout still applies */
+    }
     await auth.signOut();
     set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
   },

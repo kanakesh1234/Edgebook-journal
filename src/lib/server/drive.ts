@@ -74,7 +74,7 @@ export async function revokeToken(token: string, fetchImpl?: typeof fetch): Prom
   return res.ok;
 }
 
-async function driveFetch(accessToken: string, path: string, init?: RequestInit, fetchImpl?: typeof fetch) {
+export async function driveFetch(accessToken: string, path: string, init?: RequestInit, fetchImpl?: typeof fetch) {
   const doFetch = fetchImpl ?? fetch;
   return doFetch(`${API}/drive/v3${path}`, {
     ...init,

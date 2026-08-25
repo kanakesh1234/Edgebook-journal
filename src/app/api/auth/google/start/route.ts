@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig, googleAuthUrl } from "@/lib/server/google-config";
 import { signState, randomNonce } from "@/lib/server/tokens";
-import { SESSION_COOKIE, sessionCookieOptions } from "@/lib/server/session";
+import { OAUTH_STATE_COOKIE, sessionCookieOptions } from "@/lib/server/session";
 
 export const dynamic = "force-dynamic";
 
-/** Step 1–2: begin Google authorization (CSRF-protected state parameter). */
-export async function GET() {
+/**
+ * Begin Google authentication: Edge Book sign-in/sign-up AND first-time
+ * Drive authorization in a single consent. `?next=/path` is carried
+ * through the state cookie and honored by the callback.
+ */
+export async function GET(request: Request) {
   const config = getGoogleConfig();
   if (!config) {
     return NextResponse.json(
@@ -19,14 +23,15 @@ export async function GET() {
     );
   }
 
+  const next = new URL(request.url).searchParams.get("next") ?? "/dashboard";
   const nonce = randomNonce();
   const state = signState(config.tokenSecret, nonce);
+
   const res = NextResponse.redirect(googleAuthUrl(config, state));
-  res.cookies.set(`edgebook.oauth.state`, nonce, {
-    ...sessionCookieOptions(),
-    maxAge: 600, // 10 minutes to complete consent
-  });
-  // Carry the signing context implicitly; state MAC already binds it.
-  res.cookies.set(SESSION_COOKIE, "", { ...sessionCookieOptions(), maxAge: 0 });
+  res.cookies.set(
+    OAUTH_STATE_COOKIE,
+    JSON.stringify({ nonce, next }),
+    { ...sessionCookieOptions(request), maxAge: 600 }, // 10 minutes to complete consent
+  );
   return res;
 }

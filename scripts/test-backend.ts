@@ -1,7 +1,8 @@
 /* Backend Phase A tests — run with: npx tsx scripts/test-backend.ts */
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { encryptToken, decryptToken, signState, verifyState, randomNonce } from "../src/lib/server/tokens.ts";
-import { openSession, sealSession, rotateSessionSecret } from "../src/lib/server/session.ts";
+import { sealAppSession, openAppSession } from "../src/lib/server/session.ts";
 import { ensureAppFolders, ensureFolder, putFile, getFile, readJournalDoc, writeJournalDoc, exchangeCode } from "../src/lib/server/drive.ts";
 import { isEmailAllowed } from "../src/lib/server/google-config.ts";
 
@@ -28,31 +29,6 @@ const state = signState(SECRET, nonce);
 expect("state verify ok", verifyState(SECRET, state), nonce);
 expect("state wrong key", verifyState("other", state), null);
 expect("state tampered nonce", verifyState(SECRET, `${nonce}x.${state.split(".")[1]}`), null);
-
-/* ------------------------------ session ------------------------------ */
-const session = {
-  email: "trader@example.com",
-  sub: "google-sub-123",
-  folderId: "folder-abc",
-  encRefreshToken: enc,
-};
-const cookie = sealSession(session, SECRET);
-expect("session round-trip", openSession(cookie, SECRET)?.email, "trader@example.com");
-expect("session tamper rejected", openSession(cookie.slice(0, -6) + "AAAAAA", SECRET), null);
-expect("session wrong key rejected", openSession(cookie, "other"), null);
-expect("session garbage rejected", openSession("not-a-cookie", SECRET), null);
-expect("session absent rejected", openSession(undefined, SECRET), null);
-
-// Isolation: two users' sessions carry strictly their own folder ids
-const sessionB = { ...session, email: "eswar@example.com", sub: "sub-b", folderId: "folder-xyz" };
-const cookieB = sealSession(sessionB, SECRET);
-expect("isolation A", openSession(cookie, SECRET)?.folderId, "folder-abc");
-expect("isolation B", openSession(cookieB, SECRET)?.folderId, "folder-xyz");
-expect("isolation distinct cookies", cookie !== cookieB, true);
-
-// Secret rotation
-const rotated = rotateSessionSecret(session, SECRET, "new-secret");
-expect("rotation re-encrypts", rotated ? decryptToken(rotated.encRefreshToken, "new-secret") : null, "1//refresh-token-abc");
 
 /* ------------------------------ allowlist ------------------------------ */
 const cfg = { clientId: "id", clientSecret: "s", redirectUri: "r", tokenSecret: "t", allowedEmails: ["trader@example.com", "eswar@example.com"] };

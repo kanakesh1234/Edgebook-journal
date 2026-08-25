@@ -106,7 +106,8 @@ async function clickByText(page: Page, selector: string, text: string) {
   /* ------------------------------- Login -------------------------------- */
   page = await newPage(browser);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle0" });
-  await expectText(page, "Explore with demo data", "login form visible");
+  await expectText(page, "Continue with Google", "login google button visible");
+  await expectText(page, "or continue with email", "login email path visible");
 
   // Sign-up flow validation first (weak password)
   await clickByText(page, "button[role=tab]", "Create account");

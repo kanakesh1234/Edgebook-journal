@@ -42,13 +42,13 @@ export default function SettingsPage() {
   const { choice: themeChoice, resolved: resolvedTheme, setChoice: setThemeChoice } = useTheme();
   const includeNotes = settings.aiPrefs?.includeNotes ?? true;
 
-  // Google Drive connection state
-  const [driveState, setDriveState] = useState<{ configured: boolean; connected: boolean; email: string | null } | null>(null);
+  // Google Drive connection state — server-verified (real token refresh)
+  const [driveState, setDriveState] = useState<{ configured: boolean; loggedIn: boolean; email: string | null; driveConnected: boolean } | null>(null);
   useEffect(() => {
     void fetch("/api/auth/google/session", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setDriveState(d ?? { configured: false, connected: false, email: null }))
-      .catch(() => setDriveState({ configured: false, connected: false, email: null }));
+      .then((d) => setDriveState(d ? { configured: d.configured, loggedIn: d.loggedIn, email: d.user?.email ?? null, driveConnected: d.drive.connected } : { configured: false, loggedIn: false, email: null, driveConnected: false }))
+      .catch(() => setDriveState({ configured: false, loggedIn: false, email: null, driveConnected: false }));
   }, []);
 
   // Local draft of the journey plan
@@ -235,18 +235,19 @@ export default function SettingsPage() {
                 <code className="font-mono text-xs text-ink">GOOGLE_CLIENT_SECRET</code> in{" "}
                 <code className="font-mono text-xs text-ink">.env.local</code> to enable Drive persistence.
               </p>
-            ) : driveState.connected ? (
+            ) : driveState.driveConnected ? (
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="flex items-center gap-2 text-sm text-ink">
                   <span className="h-2 w-2 rounded-full bg-profit" />
                   Connected as <span className="font-medium">{driveState.email}</span>
+                  <span className="text-xs text-faint">· verified just now</span>
                 </p>
                 <Button
                   variant="subtle"
                   size="sm"
                   onClick={() => {
                     void fetch("/api/auth/google/disconnect", { method: "POST" }).then(() =>
-                      setDriveState({ configured: true, connected: false, email: null }),
+                      setDriveState({ ...driveState, driveConnected: false }),
                     );
                   }}
                 >
@@ -255,8 +256,12 @@ export default function SettingsPage() {
               </div>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted">Connect to sync your journal to your Drive.</p>
-                <Button variant="outline" size="sm" onClick={() => window.location.assign("/api/auth/google/start")}>
+                <p className="text-sm text-muted">
+                  {driveState.loggedIn
+                    ? "Authorize Drive to sync your journal to your own Google Drive."
+                    : "Sign in with Google to enable Drive persistence for your account."}
+                </p>
+                <Button variant="outline" size="sm" onClick={() => window.location.assign("/api/auth/google/start?next=/settings")}>
                   Connect Google Drive
                 </Button>
               </div>
