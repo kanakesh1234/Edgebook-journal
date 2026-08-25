@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   MAX_IMAGES_PER_ENTRY,
+  reviewStatusOf,
   type JournalEntry,
   type TradeDirection,
 } from "@/lib/types";
 import { todayKey, formatDateMedium, formatSignedMoney, weekdayLong } from "@/lib/format";
-import { parseTradesCsv, type ParsedTrade } from "@/lib/csv-import";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { toast } from "@/components/ui/toast";
@@ -16,23 +16,18 @@ import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { ImageUploader, type UploadItem } from "./image-uploader";
-import { ReflectionFlow } from "./reflection-flow";
+import { TradeReviewFlow } from "./trade-review-flow";
 import { cn } from "@/lib/utils";
-import { AlertTriangleIcon, CheckCircleIcon, PencilIcon, UploadIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, PencilIcon, ShieldIcon, UploadIcon } from "@/components/ui/icons";
 
 const INSTRUMENT_SUGGESTIONS = [
   "NQ", "ES", "MES", "MNQ", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD",
   "XAUUSD", "CL", "SPY", "QQQ", "AAPL", "TSLA", "NVDA",
 ];
-const SETUP_SUGGESTIONS = [
-  "Opening range breakout", "VWAP reclaim", "Order block retest", "Trend continuation",
-  "Liquidity sweep", "Failed breakdown", "Gap fill", "News fade",
-];
 
 /**
- * Create/edit composer.
- * - Controlled usage: <EntryFormModal open onClose entry={editing} />
- * - Global usage: rendered once in the shell; opens via the UI store.
+ * Create/edit composer — challenge-aware, with execution guard rails:
+ * premature-entry warning, third-trade lockout gate, post-loss gate.
  */
 export function EntryFormModal({
   open: openProp,
@@ -43,11 +38,13 @@ export function EntryFormModal({
   open?: boolean;
   onClose?: () => void;
   entry?: JournalEntry | null;
-  /** Pre-fills the date field (used by the calendar's "add for this day"). */
   presetDate?: string | null;
 } = {}) {
   const globalOpen = useUi((s) => s.newEntryOpen);
   const closeGlobal = useUi((s) => s.closeNewEntry);
+  const entries = useApp((s) => s.entries);
+  const settings = useApp((s) => s.settings);
+  const challenges = useMemo(() => settings.challenges ?? [], [settings]);
 
   const open = openProp ?? globalOpen;
   const onClose = onCloseProp ?? closeGlobal;
@@ -61,14 +58,32 @@ export function EntryFormModal({
   const [setup, setSetup] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<UploadItem[]>([]);
+  const [entryTime, setEntryTime] = useState("");
+  const [exitTime, setExitTime] = useState("");
+  const [entryPrice, setEntryPrice] = useState("");
+  const [exitPrice, setExitPrice] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [takeProfit, setTakeProfit] = useState("");
+  const [challengeId, setChallengeId] = useState("");
+  const [newChallengeName, setNewChallengeName] = useState("");
+  const [tradeNumber, setTradeNumber] = useState<1 | 2>(1);
   const [errors, setErrors] = useState<{ date?: string; pnl?: string; rr?: string }>({});
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<"manual" | "import">("manual");
   const [reflecting, setReflecting] = useState<JournalEntry | null>(null);
 
+  // Guard-rail state
+  const [showPremature, setShowPremature] = useState(false);
+  const [showThirdTradeGate, setShowThirdTradeGate] = useState(false);
+  const [gateAcknowledged, setGateAcknowledged] = useState(false);
+  const [showPostLossGate, setShowPostLossGate] = useState<JournalEntry | null>(null);
+
+  const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(/[^\d.\-−]/g, "").replace("−", "-")));
+
   // Hydrate/reset each time the dialog opens
   useEffect(() => {
     if (!open) return;
+    const firstChallenge = challenges[0]?.id ?? "";
     if (editing) {
       setDate(editing.date);
       setPnl(String(editing.pnl));
@@ -78,6 +93,14 @@ export function EntryFormModal({
       setSetup(editing.setup);
       setNotes(editing.notes);
       setImages(editing.images.map((m) => ({ meta: m, blob: null })));
+      setEntryTime(editing.entryTime ?? "");
+      setExitTime(editing.exitTime ?? "");
+      setEntryPrice(editing.entryPrice != null ? String(editing.entryPrice) : "");
+      setExitPrice(editing.exitPrice != null ? String(editing.exitPrice) : "");
+      setStopLoss(editing.stopLoss != null ? String(editing.stopLoss) : "");
+      setTakeProfit(editing.takeProfit != null ? String(editing.takeProfit) : "");
+      setChallengeId(editing.challengeId ?? firstChallenge);
+      setTradeNumber(editing.tradeNumber ?? 1);
     } else {
       setDate(presetDate && presetDate <= todayKey() ? presetDate : todayKey());
       setPnl("");
@@ -87,15 +110,62 @@ export function EntryFormModal({
       setSetup("");
       setNotes("");
       setImages([]);
+      setEntryTime("");
+      setExitTime("");
+      setEntryPrice("");
+      setExitPrice("");
+      setStopLoss("");
+      setTakeProfit("");
+      setChallengeId(firstChallenge);
+      setTradeNumber(1);
       setMode("manual");
     }
+    setNewChallengeName("");
     setErrors({});
     setReflecting(null);
-  }, [open, editing, presetDate]);
+    setShowPremature(false);
+    setShowThirdTradeGate(false);
+    setGateAcknowledged(false);
+    setShowPostLossGate(null);
+  }, [open, editing, presetDate, challenges]);
 
   const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl);
-  const rrTrimmed = rr.trim();
-  const rrNumber = rrTrimmed === "" ? null : Number(rrTrimmed);
+  const rrNumber = rr.trim() === "" ? null : Number(rr);
+
+  // Losses already recorded for the selected date (third-trade gate)
+  const lossesToday = useMemo(
+    () => entries.filter((e) => e.date === date && e.pnl < 0).length,
+    [entries, date],
+  );
+  const tradesToday = useMemo(() => entries.filter((e) => e.date === date).length, [entries, date]);
+  const gateRequired = !editing && lossesToday >= 2;
+
+  // Premature entry: before 9:33 AM NY trading time
+  const premature = entryTime !== "" && entryTime < "09:33";
+
+  useEffect(() => {
+    if (premature && !editing) setShowPremature(true);
+    else setShowPremature(false);
+  }, [premature, editing]);
+
+  const buildDraft = (): EntryDraft => ({
+    date,
+    pnl: Math.round(pnlNumber * 100) / 100,
+    rr: rrNumber,
+    instrument: instrument.trim() || "—",
+    direction,
+    setup: setup.trim(),
+    notes: notes.trim(),
+    images: images.map((i) => i.meta),
+    challengeId: challengeId || undefined,
+    tradeNumber,
+    entryTime: entryTime || undefined,
+    exitTime: exitTime || undefined,
+    entryPrice: num(entryPrice),
+    exitPrice: num(exitPrice),
+    stopLoss: num(stopLoss),
+    takeProfit: num(takeProfit),
+  });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,16 +177,28 @@ export function EntryFormModal({
     setErrors(next);
     if (Object.keys(next).length > 0 || saving) return;
 
-    const draft: EntryDraft = {
-      date,
-      pnl: Math.round(pnlNumber * 100) / 100,
-      rr: rrNumber,
-      instrument: instrument.trim() || "—",
-      direction,
-      setup: setup.trim(),
-      notes: notes.trim(),
-      images: images.map((i) => i.meta),
-    };
+    // Third-trade lockout gate — genuine friction, not a toast.
+    if (gateRequired && !gateAcknowledged) {
+      setShowThirdTradeGate(true);
+      return;
+    }
+
+    // Create a new challenge inline when requested
+    let effectiveChallengeId = challengeId;
+    if (newChallengeName.trim()) {
+      const id = `ch-${Date.now().toString(36)}`;
+      await useApp.getState().saveChallenge({
+        id,
+        name: newChallengeName.trim(),
+        startingBalance: null,
+        targetBalance: null,
+        createdAt: Date.now(),
+      });
+      effectiveChallengeId = id;
+    }
+
+    const draft = buildDraft();
+    draft.challengeId = effectiveChallengeId || undefined;
     const blobs = new Map<string, Blob>();
     for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
 
@@ -133,40 +215,15 @@ export function EntryFormModal({
           "Your dashboard and roadmap just updated.",
         );
         onClose();
-        // The trade is in — now capture the thinking while it's fresh.
-        setReflecting(created);
+        if (created.pnl < 0) {
+          // Post-loss gate — capture the internal dialogue before anything else.
+          setShowPostLossGate(created);
+        } else {
+          setReflecting(created);
+        }
       }
     } catch {
       toast.error("Could not save the entry", "Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /* ------------------------------ import ------------------------------ */
-
-  const runImport = async (rows: ParsedTrade[]) => {
-    if (rows.length === 0 || saving) return;
-    setSaving(true);
-    let ok = 0;
-    try {
-      for (const row of rows) {
-        try {
-          await useApp.getState().createEntry({
-            date: row.date,
-            pnl: row.pnl,
-            rr: row.rr,
-            instrument: row.instrument,
-            direction: row.direction,
-            setup: row.setup,
-            notes: row.notes,
-            images: [],
-          });
-          ok += 1;
-        } catch { /* skip row */ }
-      }
-      toast.success(`Imported ${ok} ${ok === 1 ? "trade" : "trades"}`, "Your dashboard and journey just updated.");
-      onClose();
     } finally {
       setSaving(false);
     }
@@ -217,7 +274,7 @@ export function EntryFormModal({
         )}
 
         {mode === "import" && !editing ? (
-          <ImportPane onImport={(rows) => void runImport(rows)} saving={saving} onClose={onClose} />
+          <ImportPane onDone={(created) => { onClose(); setReflecting(created); }} saving={saving} setSaving={setSaving} onClose={onClose} />
         ) : (
         <>
         <div className="grid gap-5 sm:grid-cols-2">
@@ -277,6 +334,28 @@ export function EntryFormModal({
                 onChange={(e) => setRr(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))}
               />
             </Field>
+
+            {/* Execution times & prices */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Entry time" hint="NY" htmlFor="entry-time">
+                <TextInput id="entry-time" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
+              </Field>
+              <Field label="Exit time" hint="NY" htmlFor="exit-time">
+                <TextInput id="exit-time" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} />
+              </Field>
+              <Field label="Entry price" hint="optional" htmlFor="entry-price">
+                <TextInput id="entry-price" inputMode="decimal" className="tabular" value={entryPrice} onChange={(e) => setEntryPrice(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+              <Field label="Exit price" hint="optional" htmlFor="exit-price">
+                <TextInput id="exit-price" inputMode="decimal" className="tabular" value={exitPrice} onChange={(e) => setExitPrice(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+              <Field label="Stop loss" hint="optional" htmlFor="stop-loss">
+                <TextInput id="stop-loss" inputMode="decimal" className="tabular" value={stopLoss} onChange={(e) => setStopLoss(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+              <Field label="Take profit" hint="optional" htmlFor="take-profit">
+                <TextInput id="take-profit" inputMode="decimal" className="tabular" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+            </div>
           </div>
 
           {/* Right column */}
@@ -323,15 +402,61 @@ export function EntryFormModal({
               <TextInput
                 id="entry-setup"
                 list="setup-list"
-                placeholder="e.g. VWAP reclaim"
+                placeholder="e.g. Liquidity Sweep + SMT"
                 value={setup}
                 onChange={(e) => setSetup(e.target.value)}
               />
               <datalist id="setup-list">
-                {SETUP_SUGGESTIONS.map((s) => (
-                  <option key={s} value={s} />
+                {(useApp.getState().settings.playbook ?? []).map((p) => (
+                  <option key={p.id} value={p.name} />
                 ))}
               </datalist>
+            </Field>
+
+            {/* Challenge */}
+            <Field label="Challenge" htmlFor="entry-challenge">
+              <select
+                id="entry-challenge"
+                value={challengeId}
+                onChange={(e) => setChallengeId(e.target.value)}
+                className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
+              >
+                <option value="">No challenge</option>
+                {challenges.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Or create a new challenge" hint="optional" htmlFor="entry-new-challenge">
+              <TextInput
+                id="entry-new-challenge"
+                placeholder="e.g. March $25K Challenge"
+                value={newChallengeName}
+                onChange={(e) => setNewChallengeName(e.target.value)}
+              />
+            </Field>
+
+            {/* Trade number */}
+            <Field label="Planned trade number" hint="max 2 per day">
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Trade number">
+                {([1, 2] as const).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={tradeNumber === n}
+                    onClick={() => setTradeNumber(n)}
+                    className={cn(
+                      "rounded-xl border py-2 text-sm font-semibold transition-all duration-150 active:scale-[0.97]",
+                      tradeNumber === n
+                        ? "border-gold/50 bg-gold/[0.1] text-gold"
+                        : "border-line bg-raised/60 text-muted hover:border-line-strong hover:text-ink",
+                    )}
+                  >
+                    Trade #{n}
+                    {n === 2 && <span className="block text-[10px] font-normal text-faint">requires 7/7</span>}
+                  </button>
+                ))}
+              </div>
             </Field>
           </div>
         </div>
@@ -347,12 +472,34 @@ export function EntryFormModal({
             />
           </Field>
 
-          <Field label={`Screenshots (${images.length}/${MAX_IMAGES_PER_ENTRY})`} hint="before / after charts">
+          <Field label={`Screenshots (${images.length}/${MAX_IMAGES_PER_ENTRY})`} hint="entry / setup / execution / exit charts">
             <ImageUploader items={images} onChange={setImages} />
           </Field>
         </div>
         </>
         )}
+
+        {/* Premature-entry inline warning */}
+        <AnimatePresence>
+          {showPremature && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              role="alert"
+              className="mt-4 rounded-xl border border-gold/40 bg-gold/[0.07] p-4"
+            >
+              <p className="flex items-start gap-2.5 text-[13px] leading-relaxed text-ink">
+                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+                <span>
+                  <strong className="text-gold">Premature entry.</strong> Efficiency comes from
+                  process-oriented patience, not impulsive execution. Are you acting out of urgency
+                  or conviction? If all checklist criteria are not confirmed, stay out.
+                </span>
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {!(mode === "import" && !editing) && (
         <div className="mt-7 flex items-center justify-end gap-2.5 border-t border-line bg-surface pt-5 pb-1 sticky bottom-[-24px] px-0.5 -mx-0.5">
@@ -367,27 +514,214 @@ export function EntryFormModal({
       </form>
     </Modal>
 
+    {/* Third-trade lockout gate — genuine friction, requires acknowledgement */}
+    <Modal open={showThirdTradeGate} onClose={() => setShowThirdTradeGate(false)} size="md" label="Third trade lockout">
+      <div className="px-6 py-6 sm:px-8">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
+            <ShieldIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="font-display text-xl font-semibold tracking-[-0.02em] text-ink">
+              Manual lockout required in Tradovate right now
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted">
+              You already have <strong className="text-loss">{lossesToday} losses</strong> today
+              {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a
+              3rd trade winning is only <strong className="text-ink">4%–5%</strong>, whereas
+              tomorrow&apos;s fresh A+ setup holds a <strong className="text-profit">40%–50%</strong> probability.
+              Lock out immediately — preserving mental capital is today&apos;s final win.
+            </p>
+          </div>
+        </div>
+        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-raised/60 p-4">
+          <input
+            type="checkbox"
+            checked={gateAcknowledged}
+            onChange={(e) => setGateAcknowledged(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-[var(--gold-strong)]"
+          />
+          <span className="text-[13px] leading-relaxed text-ink">
+            I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan,
+            and I accept full responsibility for breaking my own rule.
+          </span>
+        </label>
+        <div className="mt-5 flex items-center justify-end gap-2.5">
+          <Button variant="subtle" onClick={() => setShowThirdTradeGate(false)}>
+            Close — I&apos;m done for today
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!gateAcknowledged}
+            onClick={() => {
+              setShowThirdTradeGate(false);
+              // Re-trigger submit with the acknowledgement recorded
+              void (async () => {
+                const gateAcknowledgedRef = true;
+                setGateAcknowledged(gateAcknowledgedRef);
+              })();
+            }}
+          >
+            Proceed anyway
+          </Button>
+        </div>
+      </div>
+    </Modal>
+
+    {/* Post-loss gate — capture the internal dialogue */}
+    <PostLossGate
+      entry={showPostLossGate}
+      onClose={() => setShowPostLossGate(null)}
+      onContinue={(entry) => {
+        setShowPostLossGate(null);
+        setReflecting(entry);
+      }}
+    />
+
     {/* Post-save reflection — lives outside the form modal so it survives its close */}
-    <ReflectionFlow open={!!reflecting} entry={reflecting} onClose={() => setReflecting(null)} />
+    <TradeReviewFlow open={!!reflecting} entry={reflecting} onClose={() => setReflecting(null)} />
     </>
+  );
+}
+
+/* --------------------------- post-loss gate --------------------------- */
+
+function PostLossGate({
+  entry,
+  onClose,
+  onContinue,
+}: {
+  entry: JournalEntry | null;
+  onClose: () => void;
+  onContinue: (entry: JournalEntry) => void;
+}) {
+  const [emotionalState, setEmotionalState] = useState("");
+  const [thoughts, setThoughts] = useState("");
+  const [fomo, setFomo] = useState<boolean | null>(null);
+  const [revenge, setRevenge] = useState<boolean | null>(null);
+  const [urgency, setUrgency] = useState<boolean | null>(null);
+  const [nextAction, setNextAction] = useState("");
+
+  useEffect(() => {
+    if (entry) {
+      setEmotionalState(entry.review?.postLossGate?.emotionalState ?? "");
+      setThoughts("");
+      setFomo(null);
+      setRevenge(null);
+      setUrgency(null);
+      setNextAction("");
+    }
+  }, [entry]);
+
+  if (!entry) return null;
+
+  const save = async () => {
+    await useApp.getState().saveTradeReview(entry.id, {
+      review: {
+        postLossGate: {
+          emotionalState: emotionalState.trim() || undefined,
+          immediateThoughts: thoughts.trim() || undefined,
+          fomo,
+          revenge,
+          urgency,
+          intendedNextAction: nextAction.trim() || undefined,
+          acknowledgedAt: Date.now(),
+        },
+      },
+    });
+    onContinue(entry);
+  };
+
+  return (
+    <Modal open onClose={() => onClose()} size="md" label="Post-loss review gate">
+      <div className="px-6 py-6 sm:px-8">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-gold/30 bg-gold/[0.08] text-gold">
+            <AlertTriangleIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="font-display text-xl font-semibold tracking-[-0.02em] text-ink">Stop.</h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted">
+              Log your immediate internal dialogue and impulse before taking any further action.
+              Did FOMO or revenge dictate this entry?
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <Field label="Emotional state right now" htmlFor="plg-emotion">
+            <TextInput id="plg-emotion" placeholder="e.g. frustrated, anxious, numb…" value={emotionalState} onChange={(e) => setEmotionalState(e.target.value)} />
+          </Field>
+          <Field label="Immediate thoughts" htmlFor="plg-thoughts">
+            <TextArea id="plg-thoughts" className="min-h-16" placeholder="What is the internal dialogue saying?" value={thoughts} onChange={(e) => setThoughts(e.target.value)} />
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {([
+              ["FOMO?", fomo, setFomo],
+              ["Revenge?", revenge, setRevenge],
+              ["Urgency?", urgency, setUrgency],
+            ] as const).map(([label, value, setter]) => (
+              <div key={label} className="flex items-center justify-between gap-2 rounded-xl border border-line bg-raised/60 px-3 py-2">
+                <span className="text-[13px] text-muted">{label}</span>
+                <div className="flex gap-1">
+                  {([["Yes", true], ["No", false]] as const).map(([l, v]) => (
+                    <button
+                      key={l}
+                      type="button"
+                      aria-pressed={value === v}
+                      onClick={() => setter(v)}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                        value === v
+                          ? v ? "bg-profit/[0.14] text-profit" : "bg-loss/[0.12] text-loss"
+                          : "text-faint hover:text-muted",
+                      )}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <Field label="Intended next action" htmlFor="plg-next">
+            <TextInput id="plg-next" placeholder="e.g. close platform, review tomorrow's plan…" value={nextAction} onChange={(e) => setNextAction(e.target.value)} />
+          </Field>
+        </div>
+
+        <div className="mt-5 flex items-center justify-end gap-2.5 border-t border-line pt-4">
+          <Button variant="ghost" size="sm" onClick={onClose}>Skip for now</Button>
+          <Button variant="gold" size="sm" onClick={() => void save()}>
+            <CheckIcon className="h-4 w-4" />
+            Save &amp; continue to review
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
 /* ------------------------------ import pane ------------------------------ */
 
 function ImportPane({
-  onImport,
+  onDone,
   saving,
+  setSaving,
   onClose,
 }: {
-  onImport: (rows: ParsedTrade[]) => void;
+  onDone: (firstCreated: JournalEntry | null) => void;
   saving: boolean;
+  setSaving: (v: boolean) => void;
   onClose: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const settings = useApp((s) => s.settings);
+  const challenges = useMemo(() => settings.challenges ?? [], [settings]);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [result, setResult] = useState<ReturnType<typeof parseTradesCsv> | null>(null);
+  const [parsed, setParsed] = useState<ReturnType<typeof import("@/lib/csv-import").parseTradesCsv> | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [challengeId, setChallengeId] = useState("");
+  const [newChallengeName, setNewChallengeName] = useState("");
 
   const loadFile = async (file: File) => {
     setFileError(null);
@@ -397,26 +731,68 @@ function ImportPane({
     }
     try {
       const text = await file.text();
-      const parsed = parseTradesCsv(text);
-      if (parsed.error) {
-        setFileError(parsed.error);
-        setResult(null);
-        setFileName(null);
+      const { parseTradesCsv } = await import("@/lib/csv-import");
+      const result = parseTradesCsv(text);
+      if (result.error) {
+        setFileError(result.error);
+        setResultNull();
         return;
       }
       setFileName(file.name);
-      setResult(parsed);
-      if (parsed.rows.length === 0 && parsed.invalid.length === 0) {
-        setFileError("No rows found in that file.");
-      }
+      setParsed(result);
+      if (result.rows.length === 0 && result.invalid.length === 0) setFileError("No rows found in that file.");
     } catch {
       setFileError("Could not read that file — try re-exporting it.");
     }
   };
+  const setResultNull = () => { setParsed(null); setFileName(null); };
 
-  const rows = result?.rows ?? [];
-  const invalid = result?.invalid ?? [];
+  const rows = parsed?.rows ?? [];
+  const invalid = parsed?.invalid ?? [];
   const netPnl = rows.reduce((s, r) => s + r.pnl, 0);
+
+  const runImport = async () => {
+    if (rows.length === 0 || saving) return;
+    setSaving(true);
+    let effectiveChallengeId = challengeId;
+    try {
+      if (newChallengeName.trim()) {
+        const id = `ch-${Date.now().toString(36)}`;
+        await useApp.getState().saveChallenge({
+          id, name: newChallengeName.trim(), startingBalance: null, targetBalance: null, createdAt: Date.now(),
+        });
+        effectiveChallengeId = id;
+      }
+      let ok = 0;
+      let first: JournalEntry | null = null;
+      for (const row of rows) {
+        try {
+          const created = await useApp.getState().createEntry({
+            date: row.date,
+            pnl: row.pnl,
+            rr: row.rr,
+            instrument: row.instrument,
+            direction: row.direction,
+            setup: row.setup,
+            notes: row.notes,
+            images: [],
+            challengeId: effectiveChallengeId || undefined,
+            reviewStatus: "not_reviewed",
+          });
+          ok += 1;
+          first = first ?? created;
+        } catch { /* skip row */ }
+      }
+      toast.success(
+        `Imported ${ok} ${ok === 1 ? "trade" : "trades"}`,
+        `${formatDateMedium(rows[0].date)} → ${formatDateMedium(rows[rows.length - 1].date)} · ${formatSignedMoney(netPnl)} — review required.`,
+      );
+      onClose();
+      onDone(first);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -432,24 +808,62 @@ function ImportPane({
         }}
       />
 
-      {!result ? (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="group flex w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-line-strong bg-raised/40 px-6 py-12 transition-colors hover:border-gold/50"
-        >
-          <span className="grid h-12 w-12 place-items-center rounded-xl border border-line bg-raised text-gold transition-transform duration-200 group-hover:scale-105">
-            <UploadIcon className="h-5 w-5" />
-          </span>
-          <span className="text-sm font-semibold text-ink">Upload a CSV of your trades</span>
-          <span className="max-w-sm text-center text-xs leading-relaxed text-muted">
-            Exported from your broker or a spreadsheet. Columns are detected automatically —
-            date, P&amp;L, R:R, instrument, direction, setup, notes.
-          </span>
-        </button>
+      {/* STEP 1 — file */}
+      {!parsed ? (
+        <>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="group flex w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-line-strong bg-raised/40 px-6 py-12 transition-colors hover:border-gold/50"
+          >
+            <span className="grid h-12 w-12 place-items-center rounded-xl border border-line bg-raised text-gold transition-transform duration-200 group-hover:scale-105">
+              <UploadIcon className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-semibold text-ink">Upload a CSV of your trades</span>
+            <span className="max-w-sm text-center text-xs leading-relaxed text-muted">
+              Exported from your broker or a spreadsheet. Columns are detected automatically —
+              date, P&amp;L, R:R, instrument, direction, setup, notes.
+            </span>
+          </button>
+          {fileError && (
+            <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2.5 text-[13px] text-loss">
+              {fileError}
+            </p>
+          )}
+          <div className="flex justify-end border-t border-line pt-4">
+            <Button variant="subtle" onClick={onClose}>Cancel</Button>
+          </div>
+        </>
       ) : (
         <>
-          {/* Summary */}
+          {/* STEP 2 — challenge */}
+          <div className="rounded-xl border border-gold/30 bg-gold/[0.05] p-4">
+            <p className="text-sm font-semibold text-ink">Which challenge should these trades belong to?</p>
+            <div className="mt-3 space-y-2">
+              {challenges.map((c) => (
+                <label key={c.id} className="flex cursor-pointer items-center gap-3 rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm has-[:checked]:border-gold/40 has-[:checked]:bg-gold/[0.06]">
+                  <input type="radio" name="import-challenge" checked={challengeId === c.id} onChange={() => { setChallengeId(c.id); setNewChallengeName(""); }} className="h-4 w-4 accent-[var(--gold-strong)]" />
+                  {c.name}
+                </label>
+              ))}
+              <label className="flex cursor-pointer items-center gap-3 rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm has-[:checked]:border-gold/40 has-[:checked]:bg-gold/[0.06]">
+                <input type="radio" name="import-challenge" checked={challengeId === "" && newChallengeName === ""} onChange={() => { setChallengeId(""); setNewChallengeName(""); }} className="h-4 w-4 accent-[var(--gold-strong)]" />
+                No challenge
+              </label>
+              <div className="flex items-center gap-2 pl-1">
+                <span className="text-xs text-faint">or create:</span>
+                <TextInput
+                  aria-label="New challenge name"
+                  placeholder="e.g. March $25K Challenge"
+                  value={newChallengeName}
+                  onChange={(e) => { setNewChallengeName(e.target.value); setChallengeId(""); }}
+                  className="!py-2 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* STEP 3 — preview */}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-raised/60 px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-ink">{fileName}</p>
@@ -474,7 +888,6 @@ function ImportPane({
             )}
           </div>
 
-          {/* Preview table */}
           {rows.length > 0 && (
             <div className="overflow-hidden rounded-xl border border-line">
               <div className="max-h-56 overflow-y-auto">
@@ -508,7 +921,6 @@ function ImportPane({
             </div>
           )}
 
-          {/* Invalid rows — never silently discarded */}
           {invalid.length > 0 && (
             <div className="rounded-xl border border-loss/25 bg-loss/[0.05] px-4 py-3">
               <p className="flex items-center gap-1.5 text-xs font-semibold text-loss">
@@ -533,21 +945,13 @@ function ImportPane({
               Different file
             </Button>
             <div className="flex gap-2.5">
-              <Button variant="subtle" onClick={onClose} disabled={saving}>
-                Cancel
-              </Button>
-              <Button variant="gold" onClick={() => onImport(rows)} loading={saving} disabled={saving || rows.length === 0}>
+              <Button variant="subtle" onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button variant="gold" onClick={() => void runImport()} loading={saving} disabled={saving || rows.length === 0}>
                 Import {rows.length > 0 ? rows.length : ""} {rows.length === 1 ? "trade" : "trades"}
               </Button>
             </div>
           </div>
         </>
-      )}
-
-      {fileError && (
-        <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2.5 text-[13px] text-loss">
-          {fileError}
-        </p>
       )}
     </div>
   );

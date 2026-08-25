@@ -47,6 +47,10 @@ function writeAll(accounts: Record<string, EdgeBookAccount>): void {
   fs.renameSync(tmp, STORE_FILE);
 }
 
+export function listAccounts(): EdgeBookAccount[] {
+  return Object.values(readAll());
+}
+
 export function getAccount(email: string): EdgeBookAccount | null {
   return readAll()[email.toLowerCase()] ?? null;
 }

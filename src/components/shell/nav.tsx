@@ -10,6 +10,7 @@ import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
   BookOpenIcon,
+  CalendarIcon,
   ChartLineIcon,
   FlaskIcon,
   LogoutIcon,
@@ -17,12 +18,16 @@ import {
   SettingsIcon,
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { TrophyIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", icon: ChartLineIcon },
+  { href: "/calendar", label: "Calendar", icon: CalendarIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
   { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
+  { href: "/ranking", label: "Ranking", icon: TrophyIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 
@@ -121,8 +126,12 @@ export function Sidebar() {
         </p>
       </div>
 
-      {/* User */}
+      {/* Theme + User */}
       <div className="border-t border-line p-4">
+        <div className="flex items-center justify-between pb-3">
+          <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Theme</span>
+          <ThemeToggle />
+        </div>
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line-strong bg-raised text-xs font-semibold text-gold">
             {initials}
@@ -158,7 +167,10 @@ export function MobileTopBar({ title }: { title?: string }) {
       <p className="absolute left-1/2 -translate-x-1/2 font-display text-sm font-semibold text-muted">
         {title ?? current?.label}
       </p>
-      <MobileAddButton />
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
+        <MobileAddButton />
+      </div>
     </header>
   );
 }

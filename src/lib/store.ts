@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import type { JournalEntry, JournalSettings, NoTradeLog, TradeReflection } from "./types";
-import { defaultSettings } from "./types";
+import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, TradeReflection } from "./types";
+import { defaultSettings, reviewStatusOf } from "./types";
 import { dataStore, type JournalPayload } from "./services/storage";
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl } from "./images";
@@ -18,6 +18,17 @@ export interface EntryDraft {
   setup: string;
   notes: string;
   images: JournalEntry["images"];
+  challengeId?: string;
+  tradeNumber?: 1 | 2 | null;
+  entryTime?: string;
+  exitTime?: string;
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  checklist?: JournalEntry["checklist"];
+  review?: JournalEntry["review"];
+  reviewStatus?: JournalEntry["reviewStatus"];
 }
 
 interface AppState {
@@ -45,11 +56,14 @@ interface AppState {
   logNoTradeDay(date: string, reason?: string): Promise<void>;
   removeNoTradeDay(date: string): Promise<void>;
 
+  saveChallenge(challenge: Challenge): Promise<void>;
+  deleteChallenge(id: string): Promise<void>;
+  /** Persist structured review data for an entry and refresh its review status. */
+  saveTradeReview(entryId: string, patch: { review?: JournalEntry["review"]; checklist?: JournalEntry["checklist"]; reflection?: JournalEntry["reflection"]; reviewStatus?: JournalEntry["reviewStatus"] }): Promise<void>;
   updateSettings(patch: Partial<JournalSettings>): Promise<void>;
   replaceJournal(payload: JournalPayload): Promise<void>;
   exportPayload(): JournalPayload;
   loadDemoData(): Promise<void>;
-  clearAllEntries(): Promise<void>;
 }
 
 async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[]) {
@@ -129,6 +143,7 @@ export const useApp = create<AppState>((set, get) => ({
     const entry: JournalEntry = {
       id: uid("e"),
       ...draft,
+      reviewStatus: draft.reviewStatus ?? "not_reviewed",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -210,6 +225,48 @@ export const useApp = create<AppState>((set, get) => ({
     await persist(user.id, entries, settings, next);
   },
 
+  async saveChallenge(challenge) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const challenges = [...(settings.challenges ?? []).filter((c) => c.id !== challenge.id), challenge];
+    const next = { ...settings, challenges };
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs);
+  },
+
+  async deleteChallenge(id) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const challenges = (settings.challenges ?? []).filter((c) => c.id !== id);
+    const next = { ...settings, challenges };
+    // Trades keep their challengeId (historical record); they simply render as "removed challenge".
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs);
+  },
+
+  async saveTradeReview(entryId, patch) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const prev = entries.find((e) => e.id === entryId);
+    if (!prev) throw new Error("Entry not found");
+    const updated: JournalEntry = {
+      ...prev,
+      review: { ...prev.review, ...patch.review },
+      checklist: patch.checklist ?? prev.checklist,
+      reflection: patch.reflection ?? prev.reflection,
+      reviewStatus: patch.reviewStatus ?? reviewStatusOf({
+        review: { ...prev.review, ...patch.review },
+        reflection: patch.reflection ?? prev.reflection,
+        images: prev.images,
+        checklist: patch.checklist ?? prev.checklist,
+      }),
+      updatedAt: Date.now(),
+    };
+    const next = entries.map((e) => (e.id === entryId ? updated : e));
+    set({ entries: next });
+    await persist(user.id, next, settings, dayLogs);
+  },
+
   async updateSettings(patch) {
     const { user, entries, settings, dayLogs } = get();
     if (!user) return;
@@ -240,18 +297,6 @@ export const useApp = create<AppState>((set, get) => ({
     await persist(user.id, demo, get().settings, dayLogs);
   },
 
-  async clearAllEntries() {
-    const { user, settings } = get();
-    if (!user) return;
-    for (const e of get().entries) {
-      for (const img of e.images) {
-        await dataStore.deleteImage(img.id);
-        dropImageUrl(img.id);
-      }
-    }
-    set({ entries: [], dayLogs: [] });
-    await persist(user.id, [], settings, []);
-  },
 }));
 
 /* ------------------------------ helpers ------------------------------ */

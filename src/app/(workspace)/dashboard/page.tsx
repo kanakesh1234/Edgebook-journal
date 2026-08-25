@@ -3,10 +3,11 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { useApp, sortEntriesNewestFirst } from "@/lib/store";
-import { computeStats, currentStreak, groupByDay } from "@/lib/stats";
+import { useApp } from "@/lib/store";
+import { computeStats, currentStreak } from "@/lib/stats";
 import { journeyState } from "@/lib/journey";
 import { evaluateRules } from "@/lib/rules";
+import { ChallengeCard, CalendarAccessCard, LabAccessCard } from "@/components/cc/access-cards";
 import {
   formatDateFull,
   formatDateMedium,
@@ -21,8 +22,6 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { EquityCurve } from "@/components/charts/equity-curve";
 import { WinRateDonut, DrawdownMeter } from "@/components/charts/winrate-donut";
 import { JourneyTrack } from "@/components/journey/journey-track";
-import { WeekStrip } from "@/components/cc/week-strip";
-import { DisciplinePanel } from "@/components/cc/discipline-panel";
 import { EmptyState, Pill } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -31,7 +30,6 @@ import {
   ArrowRightIcon,
   AwardIcon,
   BookOpenIcon,
-  CalendarIcon,
   FlameIcon,
   PlusIcon,
   ShieldIcon,
@@ -50,9 +48,11 @@ export default function DashboardPage() {
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const journey = useMemo(() => journeyState(settings, stats), [settings, stats]);
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
-  const byDay = useMemo(() => groupByDay(entries), [entries]);
-  const recentEntries = useMemo(() => sortEntriesNewestFirst(entries).slice(0, 3), [entries]);
   const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
+  const unreviewedCount = useMemo(
+    () => entries.filter((e) => e.reviewStatus === "not_reviewed" || e.reviewStatus === "incomplete" || e.reviewStatus === "in_progress").length,
+    [entries],
+  );
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -341,123 +341,13 @@ export default function DashboardPage() {
       {/* ------------------------------ Journey ------------------------------ */}
       <JourneyTrack settings={settings} stats={stats} journey={journey} />
 
-      {/* ---------------------------- Discipline ----------------------------- */}
-      <DisciplinePanel delay={0.28} />
+      {/* --------------------- Challenge + Calendar access -------------------- */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <ChallengeCard />
+        <CalendarAccessCard unreviewed={unreviewedCount} monthPnl={stats.totalPnl} />
+        <LabAccessCard />
+      </div>
 
-      {/* ------------------------- Secondary stats ------------------------- */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.55, delay: 0.34, ease: EASE }}
-        className="grid grid-cols-2 gap-4 xl:grid-cols-4"
-      >
-          <MiniStat
-            label="To target"
-            value={formatMoney(Math.max(0, stats.remainingToTarget), settings.currency, { compact: true })}
-            tone={stats.remainingToTarget <= 0 ? "profit" : "gold"}
-            note={stats.remainingToTarget <= 0 ? "target reached" : `${Math.round((1 - stats.targetProgress) * 100)}% of journey left`}
-            icon={<TargetIcon className="h-3.5 w-3.5" />}
-          />
-          <MiniStat
-            label="Average R:R"
-            value={stats.avgRR != null ? `${stats.avgRR > 0 ? "+" : ""}${stats.avgRR.toFixed(1)}R` : "—"}
-            tone={stats.avgRR != null && stats.avgRR > 0 ? "profit" : "neutral"}
-            note={`${Math.round(stats.rrCoverage * 100)}% of trades tracked`}
-            icon={<SparklesIcon className="h-3.5 w-3.5" />}
-          />
-          <MiniStat
-            label="Win rate"
-            value={`${Math.round(stats.winRate * 100)}%`}
-            tone={stats.winRate >= 0.5 ? "profit" : "neutral"}
-            note="across decided days"
-            icon={<TrendingUpIcon className="h-3.5 w-3.5" />}
-          />
-          <MiniStat
-            label="Sessions logged"
-            value={String(stats.tradingDays)}
-            tone="neutral"
-            note={`${stats.tradeCount} entries total`}
-            icon={<BookOpenIcon className="h-3.5 w-3.5" />}
-          />
-      </motion.div>
-
-      {/* --------------------------- Recent days --------------------------- */}
-      <motion.section
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.55, delay: 0.4, ease: EASE }}
-        className="panel p-5 sm:p-6"
-        aria-label="Recent trading days"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="font-display text-base font-semibold tracking-tight text-ink">Recent days</h2>
-            <p className="text-xs text-muted">Your last week at a glance</p>
-          </div>
-          <Link
-            href="/calendar"
-            className="group flex items-center gap-1.5 text-xs font-medium text-gold transition-colors hover:text-gold-deep"
-          >
-            <CalendarIcon className="h-3.5 w-3.5" />
-            Open calendar
-            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-          </Link>
-        </div>
-        <WeekStrip byDay={byDay} currency={settings.currency} />
-      </motion.section>
-
-      {/* -------------------------- Journal memory -------------------------- */}
-      <motion.section
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.55, delay: 0.44, ease: EASE }}
-        className="panel p-5 sm:p-6"
-        aria-label="Recent journal entries"
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <div>
-            <h2 className="font-display text-base font-semibold tracking-tight text-ink">Journal memory</h2>
-            <p className="text-xs text-muted">Your latest sessions</p>
-          </div>
-          <Link
-            href="/journal"
-            className="group flex items-center gap-1.5 text-xs font-medium text-gold transition-colors hover:text-gold-deep"
-          >
-            <BookOpenIcon className="h-3.5 w-3.5" />
-            Open journal
-            <ArrowRightIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
-          </Link>
-        </div>
-        <div className="divide-y divide-line-soft">
-          {recentEntries.map((e) => (
-            <Link
-              key={e.id}
-              href="/journal"
-              className="group flex items-center gap-4 py-3 transition-colors first:pt-1 last:pb-0"
-            >
-              <span className="w-20 shrink-0 text-xs text-muted">{formatDateMedium(e.date)}</span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-ink">
-                    {e.instrument !== "—" ? e.instrument : e.setup || "Session"}
-                  </span>
-                  {e.setup && <span className="hidden truncate text-xs text-faint sm:inline">{e.setup}</span>}
-                </span>
-                {e.notes && <span className="mt-0.5 block truncate text-xs text-muted">{e.notes}</span>}
-              </span>
-              <span
-                className={cn(
-                  "num shrink-0 text-sm",
-                  e.pnl > 0 ? "text-profit" : e.pnl < 0 ? "text-loss" : "text-muted",
-                )}
-              >
-                {formatSignedMoney(e.pnl, settings.currency)}
-              </span>
-              <ArrowRightIcon className="h-3.5 w-3.5 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-            </Link>
-          ))}
-        </div>
-      </motion.section>
     </div>
   );
 }

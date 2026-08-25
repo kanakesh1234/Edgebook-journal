@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field, TextInput } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { Wordmark } from "@/components/landing/logo";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { ArrowRightIcon, CheckIcon, EyeIcon, GoogleIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
@@ -103,9 +104,12 @@ function LoginView() {
         <div className="grid-backdrop absolute inset-0 opacity-60" aria-hidden />
 
         <div className="relative flex h-full flex-col justify-between p-12">
-          <Link href="/" aria-label="Back to home">
-            <Wordmark />
-          </Link>
+          <div className="flex items-center justify-between">
+            <Link href="/" aria-label="Back to home">
+              <Wordmark />
+            </Link>
+            <ThemeToggle />
+          </div>
 
           <div>
             <motion.h1
@@ -188,10 +192,11 @@ function LoginView() {
           transition={{ duration: 0.65, ease: EASE }}
           className="panel relative w-full max-w-md p-7 sm:p-9"
         >
-          <div className="mb-8 lg:hidden">
+          <div className="mb-8 flex items-center justify-between lg:hidden">
             <Link href="/" aria-label="Back to home">
               <Wordmark />
             </Link>
+            <ThemeToggle />
           </div>
 
           <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">

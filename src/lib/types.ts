@@ -36,9 +36,9 @@ export interface EntryImage {
 
 export interface JournalEntry {
   id: string;
-  /** Local calendar date, `YYYY-MM-DD`. */
+  /** Local trading date, `YYYY-MM-DD` (America/New_York). */
   date: string;
-  /** Net profit & loss for the day in account currency. */
+  /** Net profit & loss for the trade in account currency. */
   pnl: number;
   /** Realized risk-to-reward multiple, e.g. 2.5 = 2.5R. Null when not tracked. */
   rr: number | null;
@@ -49,6 +49,23 @@ export interface JournalEntry {
   images: EntryImage[]; // max MAX_IMAGES_PER_ENTRY
   /** Structured post-trade reflection (optional; older entries may not have one). */
   reflection?: TradeReflection;
+  /** Challenge this trade belongs to. */
+  challengeId?: string;
+  /** Planned trade number within the day (1 or 2). */
+  tradeNumber?: 1 | 2 | null;
+  /** Entry / exit clock time in NY trading time, "HH:MM". */
+  entryTime?: string;
+  exitTime?: string;
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  /** Execution playbook checklist (6/6 first trade, 7/7 second trade). */
+  checklist?: TradeChecklist;
+  /** Structured review data — setup, execution, psychology, outcome. */
+  review?: TradeReviewData;
+  /** Review lifecycle status (derived + persisted for calendar/list display). */
+  reviewStatus?: ReviewStatus;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,6 +82,146 @@ export interface JournalSettings {
   playbook?: PlaybookSetup[];
   /** AI companion preferences. */
   aiPrefs?: AiPrefs;
+  /** Trading challenges — distinct trading periods/objectives. */
+  challenges?: Challenge[];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Challenges — distinct trading periods/objectives                   */
+/* ------------------------------------------------------------------ */
+
+export interface Challenge {
+  id: string;
+  name: string;
+  notes?: string;
+  startingBalance?: number | null;
+  targetBalance?: number | null;
+  createdAt: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Trade review — checklist, execution, psychology, process           */
+/* ------------------------------------------------------------------ */
+
+export type ReviewStatus = "not_reviewed" | "in_progress" | "reviewed" | "incomplete";
+
+export interface ChecklistItem {
+  answer: boolean | null;
+  note?: string;
+}
+
+/** Execution playbook checklist — 6/6 for trade #1, 7/7 for trade #2. */
+export interface TradeChecklist {
+  /** Planned trade number within the day. */
+  tradeNumber: 1 | 2;
+  /** R1 — 9:33 AM rule (no entry before 9:33 AM EST). */
+  r1Time?: ChecklistItem;
+  /** R2 — Environment gate: clean delivery vs manipulative wicks. */
+  r2Environment?: ChecklistItem;
+  /** R3 — Liquidity sweep: exact high/low + timestamp. */
+  r3LiquiditySweep?: ChecklistItem;
+  /** R4 — Institutional manipulation confirmed after the sweep. */
+  r4Manipulation?: ChecklistItem;
+  /** R5 — Clear draw on liquidity / target levels before entry. */
+  r5Target?: ChecklistItem;
+  /** R6 — SMT divergence at key structural levels. */
+  r6Smt?: ChecklistItem;
+  /** R7 — Second trade only: new SMT after minor liquidity (3-candle divergence). */
+  r7NewSmt?: ChecklistItem;
+}
+
+export function checklistItems(c: TradeChecklist): { id: string; label: string; item: ChecklistItem }[] {
+  const defs: [string, string, ChecklistItem | undefined][] = [
+    ["r1Time", "9:33 AM rule — no entry before 9:33 AM EST", c.r1Time],
+    ["r2Environment", "Environment gate — clean candle-body delivery", c.r2Environment],
+    ["r3LiquiditySweep", "Liquidity sweep — exact high/low + timestamp", c.r3LiquiditySweep],
+    ["r4Manipulation", "Manipulation confirmed after the sweep", c.r4Manipulation],
+    ["r5Target", "Clear draw on liquidity / target levels", c.r5Target],
+    ["r6Smt", "SMT divergence at key structural levels", c.r6Smt],
+    ...(c.tradeNumber === 2 ? ([["r7NewSmt", "New SMT after minor liquidity — 3-candle divergence", c.r7NewSmt]] as [string, string, ChecklistItem | undefined][]) : []),
+  ];
+  return defs.map(([id, label, item]) => ({ id, label, item: item ?? { answer: null } }));
+}
+
+export function checklistScore(c: TradeChecklist): { confirmed: number; required: number } {
+  const items = checklistItems(c);
+  return {
+    confirmed: items.filter((i) => i.item.answer === true).length,
+    required: items.length,
+  };
+}
+
+/** Execution review — how the trade was actually taken. */
+export interface ExecutionReview {
+  whyEntered?: string;
+  planned?: boolean | null;
+  correctTime?: boolean | null;
+  followedStop?: boolean | null;
+  movedStop?: boolean | null;
+  movedStopReason?: string;
+  exitedEarly?: boolean | null;
+  exitedEarlyReason?: string;
+  chased?: boolean | null;
+}
+
+/** Psychology review — emotional state around the trade. */
+export interface PsychologyReview {
+  emotionBefore?: string;
+  convictionOrUrgency?: "conviction" | "urgency" | "";
+  fomo?: boolean | null;
+  revenge?: boolean | null;
+  fearExit?: boolean | null;
+  makeItBack?: boolean | null;
+  notes?: string;
+}
+
+/** Outcome vs process — a win can be a process failure; a loss can be a process success. */
+export interface OutcomeReview {
+  followedPlan?: boolean | null;
+  goodTradeDespiteLoss?: boolean | null;
+  badTradeDespiteWin?: boolean | null;
+  processVerdict?: "a-plus" | "process-success" | "process-failure" | "";
+  notes?: string;
+}
+
+export interface TradeReviewData {
+  setup?: {
+    liquiditySwept?: string;
+    sweepTimestamp?: string;
+    smtEvidence?: string;
+    targetDescription?: string;
+    manipulationIdentified?: string;
+  };
+  checklist?: TradeChecklist;
+  execution?: ExecutionReview;
+  psychology?: PsychologyReview;
+  outcome?: OutcomeReview;
+  postLossGate?: {
+    emotionalState?: string;
+    immediateThoughts?: string;
+    fomo?: boolean | null;
+    revenge?: boolean | null;
+    urgency?: boolean | null;
+    intendedNextAction?: string;
+    acknowledgedAt: number;
+  };
+  prematureEntryAcknowledgedAt?: number;
+  reviewedAt?: number;
+}
+
+/** Derive review status — REVIEWED requires evidence, checklist, execution, psychology, outcome. */
+export function reviewStatusOf(entry: Pick<JournalEntry, "review" | "reflection" | "images" | "checklist">): ReviewStatus {
+  const hasChecklist = !!entry.checklist && checklistScore(entry.checklist).confirmed > 0;
+  const hasReflection = !!entry.reflection;
+  const hasExecution = !!entry.review?.execution && Object.values(entry.review.execution).some((v) => v != null && v !== "");
+  const hasPsychology = !!entry.review?.psychology && Object.values(entry.review.psychology).some((v) => v != null && v !== "");
+  const hasOutcome = !!entry.review?.outcome && Object.values(entry.review.outcome).some((v) => v != null && v !== "");
+  const hasEvidence = entry.images.length > 0;
+
+  if (!hasChecklist && !hasReflection && !hasExecution && !hasPsychology && !hasOutcome) return "not_reviewed";
+  if (hasChecklist && hasReflection && hasExecution && hasPsychology && hasOutcome && hasEvidence) return "reviewed";
+  if (!hasEvidence) return "incomplete"; // attempted review without screenshot evidence
+  return "in_progress";
 }
 
 /* ------------------------------------------------------------------ */

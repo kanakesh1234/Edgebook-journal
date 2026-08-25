@@ -10,7 +10,6 @@ import { dataStore } from "@/lib/services/storage";
 import { formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Field, Select, TextInput } from "@/components/ui/input";
-import { ConfirmDialog } from "@/components/ui/confirm";
 import { Modal } from "@/components/ui/modal";
 import { toast } from "@/components/ui/toast";
 import {
@@ -23,7 +22,6 @@ import {
   SparklesIcon,
   SunIcon,
   TargetIcon,
-  TrashIcon,
   UploadIcon,
 } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
@@ -60,8 +58,6 @@ export default function SettingsPage() {
   const [savingPlan, setSavingPlan] = useState(false);
 
   const [usage, setUsage] = useState<number | null>(null);
-  const [clearOpen, setClearOpen] = useState(false);
-  const [clearBusy, setClearBusy] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const [importPreview, setImportPreview] = useState<{ entries: number; name: string } | null>(null);
@@ -130,14 +126,6 @@ export default function SettingsPage() {
       setImportPreview(null);
       if (importRef.current) importRef.current.value = "";
     }
-  };
-
-  const clearAll = async () => {
-    setClearBusy(true);
-    await useApp.getState().clearAllEntries();
-    setClearBusy(false);
-    setClearOpen(false);
-    toast.info("All entries removed", "A blank page again.");
   };
 
   const loadDemo = async () => {
@@ -215,60 +203,6 @@ export default function SettingsPage() {
           </p>
         </section>
 
-        {/* --------------------------- Google Drive --------------------------- */}
-        <section className="panel p-6" aria-label="Google Drive">
-          <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-ink">
-            <CloudIcon className="h-4 w-4 text-info" />
-            Google Drive
-          </h2>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted">
-            Persist your journal in your own Drive — private to your account, never shared.
-            Local storage keeps working when Drive isn't connected.
-          </p>
-          <div className="mt-4">
-            {!driveState ? (
-              <p className="text-sm text-faint">Checking connection…</p>
-            ) : !driveState.configured ? (
-              <p className="rounded-control border border-line bg-raised/60 px-4 py-3 text-[13px] text-muted">
-                Google OAuth isn't configured on this server. Set{" "}
-                <code className="font-mono text-xs text-ink">GOOGLE_CLIENT_ID</code> and{" "}
-                <code className="font-mono text-xs text-ink">GOOGLE_CLIENT_SECRET</code> in{" "}
-                <code className="font-mono text-xs text-ink">.env.local</code> to enable Drive persistence.
-              </p>
-            ) : driveState.driveConnected ? (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="flex items-center gap-2 text-sm text-ink">
-                  <span className="h-2 w-2 rounded-full bg-profit" />
-                  Connected as <span className="font-medium">{driveState.email}</span>
-                  <span className="text-xs text-faint">· verified just now</span>
-                </p>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => {
-                    void fetch("/api/auth/google/disconnect", { method: "POST" }).then(() =>
-                      setDriveState({ ...driveState, driveConnected: false }),
-                    );
-                  }}
-                >
-                  Disconnect
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted">
-                  {driveState.loggedIn
-                    ? "Authorize Drive to sync your journal to your own Google Drive."
-                    : "Sign in with Google to enable Drive persistence for your account."}
-                </p>
-                <Button variant="outline" size="sm" onClick={() => window.location.assign("/api/auth/google/start?next=/settings")}>
-                  Connect Google Drive
-                </Button>
-              </div>
-            )}
-          </div>
-        </section>
-
         {/* ------------------------- AI Buddy privacy ------------------------- */}
         <section className="panel p-6" aria-label="AI Buddy">
           <h2 className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-ink">
@@ -323,6 +257,12 @@ export default function SettingsPage() {
             <div className="min-w-0">
               <p className="truncate font-medium text-ink">{user?.name}</p>
               <p className="truncate text-sm text-muted">{user?.email}</p>
+              {user?.id.startsWith("g_") && (
+                <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-faint">
+                  <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                  Google account · Drive persistence active
+                </p>
+              )}
             </div>
           </div>
           <Button variant="subtle" size="sm" onClick={() => void signOut()} className="mt-5">
@@ -453,32 +393,10 @@ export default function SettingsPage() {
               </span>
             </button>
 
-            <button
-              onClick={() => setClearOpen(true)}
-              disabled={entryCount === 0}
-              className="group flex items-start gap-3 rounded-xl border border-line bg-raised/50 p-4 text-left transition-all hover:border-loss/40 hover:bg-loss/[0.05] active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
-            >
-              <TrashIcon className="mt-0.5 h-4.5 w-4.5 shrink-0 text-loss" />
-              <span>
-                <span className="block text-sm font-semibold text-ink">Remove all entries</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted">
-                  {entryCount === 0 ? "Nothing to remove" : `Delete all ${entryCount} permanently`}
-                </span>
-              </span>
-            </button>
+
           </div>
         </section>
       </div>
-
-      <ConfirmDialog
-        open={clearOpen}
-        onClose={() => setClearOpen(false)}
-        onConfirm={() => void clearAll()}
-        busy={clearBusy}
-        title="Delete every entry?"
-        body={`All ${entryCount} entries and their screenshots will be permanently erased from this device. Consider exporting first.`}
-        confirmLabel="Delete everything"
-      />
 
       <Modal
         open={!!importPreview}

@@ -152,7 +152,7 @@ async function clickByText(page: Page, selector: string, text: string) {
 
   /* ------------------------------- Calendar ----------------------------- */
   await page.goto(`${BASE}/calendar`, { waitUntil: "networkidle0" });
-  await expectText(page, "one square at a time", "calendar header");
+  await expectText(page, "one day at a time", "calendar header");
   const monthLabel = await page.$eval("h2", (el) => el.textContent ?? "");
   ok(`calendar month label: ${monthLabel.trim()}`);
 
@@ -165,7 +165,7 @@ async function clickByText(page: Page, selector: string, text: string) {
   });
   clickedDay ? ok("calendar day clicked") : fail("calendar day click");
   await sleep(600);
-  await expectText(page, "Add entry for this day", "calendar day modal opens");
+  await expectText(page, "Add trade for this day", "calendar day modal opens");
   await page.keyboard.press("Escape");
   await sleep(400);
 
@@ -203,7 +203,7 @@ async function clickByText(page: Page, selector: string, text: string) {
   await clickByText(page, "button[type=submit]", "Add to journal");
   await sleep(900);
   await expectText(page, "Green day logged", "create-entry toast");
-  await expectText(page, "What went well", "reflection flow opens after save");
+  await expectText(page, "Setup checklist", "review flow opens after save");
   await page.keyboard.press("Escape");
   await sleep(400);
   drainErrors(page, "journal-create");
@@ -248,13 +248,11 @@ async function clickByText(page: Page, selector: string, text: string) {
   /* ------------------------------ Trading Lab ---------------------------- */
   await page.goto(`${BASE}/lab`, { waitUntil: "networkidle0" });
   await expectText(page, "Trading Lab", "lab header");
-  await expectText(page, "Risk rules", "lab risk section");
-  await expectText(page, "Personal rules", "lab behavior section");
-  await expectText(page, "Violation log", "lab violation log");
-  await expectText(page, "Maximum daily loss", "lab default rule present");
-  // toggle a rule off and back on (autosave)
-  await clickByText(page, "button[role=switch]", "");
-  await sleep(400);
+  await expectText(page, "Account & Risk", "lab risk parameters");
+  await expectText(page, "First Trade — 6/6 required", "lab first trade section");
+  await expectText(page, "Second Trade — 7/7 required", "lab second trade section");
+  await expectText(page, "Common Mistakes — Never Repeat", "lab common mistakes");
+  await expectText(page, "$75", "lab predefined risk limits");
   drainErrors(page, "lab");
 
   /* ------------------------------- MINATO ------------------------------- */

@@ -46,14 +46,14 @@ function resolve(choice: ThemeChoice): ResolvedTheme {
   return choice;
 }
 
-/** Apply the resolved theme to <html> and refresh the snapshot. */
+/** Apply the resolved theme to <html>. Only reassigns the snapshot on change. */
 function apply(choice: ThemeChoice): ResolvedTheme {
   const resolved = resolve(choice);
   document.documentElement.dataset.theme = resolved;
-  const next = { choice, resolved };
-  const changed = next.choice !== snapshot.choice || next.resolved !== snapshot.resolved;
-  snapshot = next;
-  return changed ? resolved : resolved; // resolution always returned
+  if (choice !== snapshot.choice || resolved !== snapshot.resolved) {
+    snapshot = { choice, resolved };
+  }
+  return resolved;
 }
 
 function notify() {
@@ -74,9 +74,9 @@ function ensureMediaWatch() {
 function subscribe(cb: () => void): () => void {
   ensureMediaWatch();
   listeners.add(cb);
-  // Re-apply on mount so a stale server snapshot never lingers.
-  apply(snapshot.choice);
-  notify();
+  // NOTE: no apply/notify here — the no-flash script already applied the
+  // theme before hydration; re-assigning the snapshot during subscribe
+  // would make getSnapshot unstable and loop React forever.
   return () => listeners.delete(cb);
 }
 
@@ -84,8 +84,12 @@ function getSnapshot(): ThemeState {
   return snapshot;
 }
 
+// Must be a stable module-level constant — a fresh object per call makes
+// useSyncExternalStore loop forever during hydration.
+const SERVER_SNAPSHOT: ThemeState = { choice: "system", resolved: "light" };
+
 function getServerSnapshot(): ThemeState {
-  return { choice: "system", resolved: "light" };
+  return SERVER_SNAPSHOT;
 }
 
 /** Persist a new choice and apply it immediately. */

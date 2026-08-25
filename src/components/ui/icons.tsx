@@ -22,6 +22,13 @@ function Svg({ children, ...props }: P) {
   );
 }
 
+export const ArrowLeftIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M19 12H5" />
+    <path d="m12 19-7-7 7-7" />
+  </Svg>
+);
+
 export const ArrowRightIcon = (p: P) => (
   <Svg {...p}>
     <path d="M5 12h14" />
@@ -280,6 +287,17 @@ export const FlagIcon = (p: P) => (
 export const CloudIcon = (p: P) => (
   <Svg {...p}>
     <path d="M7 18a4.5 4.5 0 1 1 .9-8.9 5.5 5.5 0 0 1 10.7 1.6A3.7 3.7 0 0 1 17.8 18Z" />
+  </Svg>
+);
+
+export const TrophyIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" />
+    <path d="M8 5H5.5a0 0 0 0 0 0 0c0 2.5 1 4 2.5 4.5" />
+    <path d="M16 5h2.5c0 2.5-1 4-2.5 4.5" />
+    <path d="M12 13v3.5" />
+    <path d="M8.5 20h7" />
+    <path d="M10 20c0-2 .5-3.5 2-3.5s2 1.5 2 3.5" />
   </Svg>
 );
 
