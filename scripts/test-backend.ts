@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { encryptToken, decryptToken, signState, verifyState, randomNonce } from "../src/lib/server/tokens.ts";
 import { sealAppSession, openAppSession } from "../src/lib/server/session.ts";
 import { ensureAppFolders, ensureFolder, putFile, getFile, readJournalDoc, writeJournalDoc, exchangeCode } from "../src/lib/server/drive.ts";
+import { normalizeImportedTimestamp } from "../src/lib/tz.ts";
 
 let failures = 0;
 function expect(name: string, got: unknown, want: unknown) {

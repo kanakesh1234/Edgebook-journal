@@ -51,6 +51,8 @@ export interface JournalEntry {
   reflection?: TradeReflection;
   /** Challenge this trade belongs to. */
   challengeId?: string;
+  /** Pre-trade plan this trade executed (plan ↔ trade link, no duplication). */
+  planId?: string;
   /** Planned trade number within the day (1 or 2). */
   tradeNumber?: 1 | 2 | null;
   /** Entry / exit clock time in NY trading time, "HH:MM". */
@@ -108,6 +110,65 @@ export interface Challenge {
   tradeLimit?: number | null;
   instruments?: string[];
   createdAt: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pre-trade plans — "what I intend to do if my setup appears"        */
+/*  A plan is NOT a trade. No entry/exit/P&L is required or expected.  */
+/* ------------------------------------------------------------------ */
+
+export type PlanStatus =
+  | "planned"
+  | "ready"
+  | "active"
+  | "executed"
+  | "not_executed"
+  | "invalidated"
+  | "cancelled";
+
+export const PLAN_EMOTIONS = [
+  "CALM", "FOCUSED", "CONFIDENT", "UNCERTAIN", "FOMO", "ANXIOUS",
+  "FRUSTRATED", "REVENGE-PRONE", "TIRED", "DISTRACTED", "OTHER",
+] as const;
+
+/** Pre-trade checklist rule state — planning defines WHAT MUST HAPPEN, not what did. */
+export type PlanRuleState = "waiting" | "expected" | "ready" | "invalidated";
+
+export interface PlanRule {
+  label: string;
+  state: PlanRuleState;
+  note?: string;
+}
+
+export interface TradePlan {
+  id: string;
+  userId?: string; // informational; server isolation is by session
+  date: string; // planned trading day YYYY-MM-DD
+  challengeId?: string;
+  playbookId?: string;
+  playbookName?: string;
+  playbookVersion?: number;
+  instrument?: string;
+  bias?: "long" | "short" | "either";
+  /** "What is price likely to do today?" — stored exactly as written. */
+  thesis: string;
+  drawOnLiquidity?: string;
+  drawLevel?: string;
+  liquidityObservations?: string;
+  importantLevels?: string;
+  mustHappenBeforeEntry?: string;
+  invalidation?: string;
+  expectedSetup?: string;
+  expectedTarget?: string;
+  emotionalState?: (typeof PLAN_EMOTIONS)[number];
+  emotionalNote?: string;
+  whatCouldBreakPlan?: string;
+  rules: PlanRule[];
+  preTradeScreenshotIds?: string[];
+  status: PlanStatus;
+  linkedTradeId?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,6 +257,11 @@ export interface OutcomeReview {
 }
 
 export interface TradeReviewData {
+  plannedVsActual?: {
+    followedChecklist?: boolean | null;
+    deviations?: string;
+    notes?: string;
+  };
   playbookRef?: { name: string; version: number };
   concepts?: {
     used: string[];

@@ -10,7 +10,6 @@ import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
   BookOpenIcon,
-  CalendarIcon,
   ChartLineIcon,
   FlaskIcon,
   LogoutIcon,
@@ -20,15 +19,15 @@ import {
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { TrophyIcon } from "@/components/ui/icons";
+import { UserIcon, TrophyIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", icon: ChartLineIcon },
-  { href: "/calendar", label: "Calendar", icon: CalendarIcon },
   { href: "/challenges", label: "Challenges", icon: TargetIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
   { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
+  { href: "/friends", label: "Friends", icon: UserIcon },
   { href: "/ranking", label: "Ranking", icon: TrophyIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
@@ -8,6 +8,9 @@ import { computeStats, currentStreak } from "@/lib/stats";
 import { journeyState } from "@/lib/journey";
 import { evaluateRules } from "@/lib/rules";
 import { ChallengeCard, CalendarAccessCard, LabAccessCard } from "@/components/cc/access-cards";
+import { PlanTradeFlow } from "@/components/journal/plan-trade-flow";
+import { PlansList } from "@/components/journal/plans-list";
+import { CalendarView } from "@/components/calendar/calendar-view";
 import {
   formatDateFull,
   formatDateMedium,
@@ -44,6 +47,9 @@ export default function DashboardPage() {
   const settings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const [planOpen, setPlanOpen] = useState(false);
+  const plans = useApp((st) => st.plans);
+  const dayLogs = useApp((st) => st.dayLogs);
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const journey = useMemo(() => journeyState(settings, stats), [settings, stats]);
@@ -77,6 +83,9 @@ export default function DashboardPage() {
                 <PlusIcon className="h-4 w-4" />
                 Log first trade
               </Button>
+              <Button variant="outline" onClick={() => setPlanOpen(true)}>
+                Plan a trade
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => void useApp.getState().loadDemoData()}
@@ -87,6 +96,7 @@ export default function DashboardPage() {
             </>
           }
         />
+        <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />
       </div>
     );
   }
@@ -121,6 +131,9 @@ export default function DashboardPage() {
             <span className={cn("h-1.5 w-1.5 rounded-full", risk.dot)} />
             <span className={risk.text}>{risk.label}</span>
           </Pill>
+          <Button variant="outline" size="sm" onClick={() => setPlanOpen(true)}>
+            Plan a trade
+          </Button>
           <Button variant="gold" size="sm" onClick={openNewEntry} className="hidden lg:inline-flex">
             <PlusIcon className="h-4 w-4" />
             Add trade
@@ -248,6 +261,17 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
+      {/* ------------------------------ Calendar ----------------------------- */}
+      <CalendarView
+        entries={entries}
+        dayLogs={dayLogs}
+        challenges={settings.challenges ?? []}
+        currency={settings.currency}
+      />
+
+      {/* ------------------------------ Plans -------------------------------- */}
+      <PlansList plans={plans} />
+
       {/* --------------------------- Charts row ---------------------------- */}
       <div className="grid gap-4 xl:grid-cols-3">
         {/* Equity curve */}
@@ -348,6 +372,7 @@ export default function DashboardPage() {
         <LabAccessCard />
       </div>
 
+      <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />
     </div>
   );
 }

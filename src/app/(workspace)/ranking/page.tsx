@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
@@ -25,11 +25,13 @@ interface RankingRow {
  * Only intentionally-public aggregate metrics are shown.
  */
 export default function RankingPage() {
+  const [tab, setTab] = useState<"global" | "friends">("global");
   const [rows, setRows] = useState<RankingRow[] | null>(null);
+  const [friends, setFriends] = useState<RankingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void fetch("/api/ranking", { cache: "no-store" })
+  const load = useCallback((scope: "global" | "friends") => {
+    void fetch(`/api/ranking?scope=${scope}`, { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) {
           const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -38,13 +40,23 @@ export default function RankingPage() {
           return;
         }
         const j = (await r.json()) as { rows: RankingRow[] };
-        setRows(j.rows);
+        if (scope === "friends") setFriends(j.rows);
+        else setRows(j.rows);
       })
       .catch(() => {
         setError("network");
         setRows([]);
       });
   }, []);
+
+  useEffect(() => {
+    load("global");
+  }, [load]);
+
+  const showFriends = () => {
+    setTab("friends");
+    if (friends === null) load("friends");
+  };
 
   return (
     <div className="space-y-6">
@@ -63,7 +75,36 @@ export default function RankingPage() {
         </p>
       </header>
 
-      {rows === null ? (
+      <div className="grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1" role="tablist" aria-label="Ranking scope">
+        {([["global", "Global"], ["friends", "Friends"]] as const).map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => (id === "friends" ? showFriends() : setTab("global"))}
+            className={cn(
+              "rounded-lg py-2 text-sm font-medium transition-colors",
+              tab === id ? "text-ink" : "text-faint hover:text-muted",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "friends" && friends !== null && friends.length === 0 && error === "not_logged_in" ? null : null}
+
+      {tab === "friends" ? (
+        friends === null ? (
+          <p className="text-sm text-faint">Loading…</p>
+        ) : friends.length === 0 ? (
+          <EmptyState
+            icon={<TrophyIcon className="h-7 w-7" />}
+            title="No friends yet"
+            body="Add friends by their @handle to compete on process scores and Edge Points."
+          />
+        ) : null
+      ) : rows === null ? (
         <p className="text-sm text-faint">Loading rankings…</p>
       ) : error ? (
         <EmptyState
@@ -77,7 +118,7 @@ export default function RankingPage() {
                 : "Rankings couldn't be loaded. Please try again."
           }
         />
-      ) : rows.length === 0 ? (
+      ) : false ? (
         <EmptyState
           icon={<TrophyIcon className="h-7 w-7" />}
           title="Not enough traders yet"

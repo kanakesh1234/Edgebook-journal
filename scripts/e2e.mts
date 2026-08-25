@@ -252,7 +252,8 @@ async function clickByText(page: Page, selector: string, text: string) {
   await expectText(page, "Account & Risk", "lab risk parameters");
   await expectText(page, "First Trade — 6/6 required", "lab first trade section");
   await expectText(page, "Second Trade — 7/7 required", "lab second trade section");
-  await expectText(page, "Common Mistakes — Never Repeat", "lab common mistakes");
+  await expectText(page, "My Recorded Patterns", "lab recorded patterns");
+  await expectText(page, "Trading Lab Knowledge", "lab knowledge section");
   await expectText(page, "$75", "lab predefined risk limits");
   drainErrors(page, "lab");
 

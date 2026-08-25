@@ -11,6 +11,7 @@ import { Playbook } from "@/components/lab/playbook";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { FlaskIcon, ShieldIcon, SparklesIcon } from "@/components/ui/icons";
+import { detectPatterns } from "@/lib/minato/patterns";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 
@@ -67,6 +68,8 @@ export default function LabPage() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const playbook = settings.playbook ?? [];
   const [openSetup, setOpenSetup] = useState<PlaybookSetup | null>(null);
+
+  const patterns = useMemo(() => detectPatterns(entries), [entries]);
 
   const checklistStats = useMemo(() => {
     const withChecklists = entries.filter((e) => e.checklist);
@@ -223,21 +226,55 @@ export default function LabPage() {
         </p>
       </Section>
 
-      {/* COMMON MISTAKES */}
-      <Section title="Common Mistakes — Never Repeat" subtitle="Not static text. Each one triggers at its exact friction point in the app.">
+      {/* MY RECORDED PATTERNS */}
+      <Section title="My Recorded Patterns" subtitle="Generated from your actual reflections and reviews — evidence-backed, never generic.">
+        {patterns.length === 0 ? (
+          <p className="rounded-control border border-dashed border-line-strong px-4 py-8 text-center text-sm text-muted">
+            No recurring patterns detected yet. MINATO watches your reviews and will surface a pattern
+            only after it appears at least twice.
+          </p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {patterns.map((p, i) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: i * 0.05, ease: EASE }}
+                className="rounded-control border border-line bg-raised/60 p-4"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink">{p.label}</p>
+                  <span className={cn(
+                    "rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                    p.confidence === "established" ? "border-loss/30 bg-loss/[0.08] text-loss" : p.confidence === "repeated" ? "border-gold/30 bg-gold/[0.08] text-gold" : "border-line bg-raised text-faint",
+                  )}>
+                    {p.confidence}
+                  </span>
+                </div>
+                <p className="num mt-1.5 text-[11px] text-muted">Observed {p.count} times{p.improving ? " · improving" : ""}</p>
+                <ul className="mt-2 space-y-1">
+                  {p.evidence.slice(0, 3).map((ev) => (
+                    <li key={ev.entryId} className="truncate text-[11px] text-faint">
+                      {ev.date} — “{ev.excerpt}”
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* TRADING LAB KNOWLEDGE — clearly separated educational content */}
+      <Section title="Trading Lab Knowledge" subtitle="General execution principles — these trigger automatically at their friction points in the app. They are not a personal diagnosis.">
         <div className="grid gap-3 sm:grid-cols-2">
-          {COMMON_MISTAKES.map((m, i) => (
-            <motion.div
-              key={m.title}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: i * 0.05, ease: EASE }}
-              className="rounded-control border border-line bg-raised/60 p-4"
-            >
+          {COMMON_MISTAKES.map((m) => (
+            <div key={m.title} className="rounded-control border border-line bg-raised/50 p-4">
               <p className="text-sm font-semibold text-ink">{m.title}</p>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{m.body}</p>
-              <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-gold">{m.trigger}</p>
-            </motion.div>
+              <p className="mt-2 text-[11px] font-medium uppercase tracking-wide text-gold">Auto-trigger: {m.trigger}</p>
+            </div>
           ))}
         </div>
       </Section>

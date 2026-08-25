@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, TradeReflection } from "./types";
+import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
 import { dataStore, type JournalPayload } from "./services/storage";
 import { auth, AuthError, type User } from "./services/auth";
@@ -29,6 +29,7 @@ export interface EntryDraft {
   checklist?: JournalEntry["checklist"];
   review?: JournalEntry["review"];
   reviewStatus?: JournalEntry["reviewStatus"];
+  planId?: string;
 }
 
 interface AppState {
@@ -38,6 +39,8 @@ interface AppState {
   settings: JournalSettings;
   /** Explicit "no trade" day records (discipline system). */
   dayLogs: NoTradeLog[];
+  /** Pre-trade plans — "what I intend to do if my setup appears". */
+  plans: TradePlan[];
 
   init(externalUser?: User): Promise<void>;
   /** Local (dev) session lookup — used by the bootstrap for the email/password path. */
@@ -56,6 +59,9 @@ interface AppState {
   logNoTradeDay(date: string, reason?: string): Promise<void>;
   removeNoTradeDay(date: string): Promise<void>;
 
+  savePlan(plan: TradePlan): Promise<void>;
+  deletePlan(id: string): Promise<void>;
+  linkPlanToTrade(planId: string, tradeId: string): Promise<void>;
   saveChallenge(challenge: Challenge): Promise<void>;
   deleteChallenge(id: string): Promise<void>;
   /** Persist structured review data for an entry and refresh its review status. */
@@ -66,8 +72,8 @@ interface AppState {
   loadDemoData(): Promise<void>;
 }
 
-async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[]) {
-  await dataStore.saveJournal(userId, { entries, settings, dayLogs, version: 2 });
+async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
+  await dataStore.saveJournal(userId, { entries, settings, dayLogs, plans, version: 2 });
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -76,11 +82,12 @@ export const useApp = create<AppState>((set, get) => ({
   entries: [],
   settings: defaultSettings(),
   dayLogs: [],
+  plans: [],
 
   async init(externalUser?: User) {
     const user = externalUser ?? (await auth.getSession());
     if (!user) {
-      set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
+      set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
       return;
     }
     const payload = (await dataStore.loadJournal(user.id)) ?? {
@@ -93,6 +100,7 @@ export const useApp = create<AppState>((set, get) => ({
       entries: payload.entries ?? [],
       settings: { ...defaultSettings(), ...payload.settings },
       dayLogs: payload.dayLogs ?? [],
+      plans: payload.plans ?? [],
     });
   },
 
@@ -103,8 +111,8 @@ export const useApp = create<AppState>((set, get) => ({
   async signUp(name, email, password) {
     try {
       const user = await auth.signUp(name, email, password);
-      await persist(user.id, [], { ...defaultSettings(), traderName: user.name }, []);
-      set({ status: "authenticated", user, entries: [], settings: { ...defaultSettings(), traderName: user.name }, dayLogs: [] });
+      await persist(user.id, [], { ...defaultSettings(), traderName: user.name }, [], []);
+      set({ status: "authenticated", user, entries: [], settings: { ...defaultSettings(), traderName: user.name }, dayLogs: [], plans: [] });
     } catch (err) {
       if (err instanceof AuthError) throw err;
       throw new AuthError("storage", "Could not create the account on this device.");
@@ -132,11 +140,14 @@ export const useApp = create<AppState>((set, get) => ({
       /* offline dev — local signout still applies */
     }
     await auth.signOut();
-    set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [] });
+    try {
+      await fetch("/api/auth/google/signout", { method: "POST" });
+    } catch { /* offline */ }
+    set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
   },
 
   async createEntry(draft, blobs) {
-    const { user, entries, settings, dayLogs } = get();
+    const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
     if (blobs) for (const [id, blob] of blobs) await dataStore.putImage(id, blob);
 
@@ -149,12 +160,21 @@ export const useApp = create<AppState>((set, get) => ({
     };
     const next = [...entries, entry];
     set({ entries: next });
+    // Link the executed plan (plan ↔ trade, no duplication).
+    let plansNext = plans;
+    if (draft.planId) {
+      plansNext = plans.map((p) =>
+        p.id === draft.planId ? { ...p, status: "executed" as const, linkedTradeId: entry.id, updatedAt: Date.now() } : p,
+      );
+      if (plansNext !== plans) set({ plans: plansNext });
+    }
+
     // A traded day supersedes an explicit no-trade record.
     const nextDayLogs = dayLogs.some((d) => d.date === draft.date)
       ? dayLogs.filter((d) => d.date !== draft.date)
       : dayLogs;
     if (nextDayLogs !== dayLogs) set({ dayLogs: nextDayLogs });
-    await persist(user.id, next, settings, nextDayLogs);
+    await persist(user.id, next, settings, nextDayLogs, plansNext);
     return entry;
   },
 
@@ -177,7 +197,7 @@ export const useApp = create<AppState>((set, get) => ({
     const updated: JournalEntry = { ...prev, ...draft, updatedAt: Date.now() };
     const next = entries.map((e) => (e.id === id ? updated : e));
     set({ entries: next });
-    await persist(user.id, next, settings, dayLogs);
+    await persist(user.id, next, settings, dayLogs, get().plans);
     return updated;
   },
 
@@ -193,7 +213,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
     const next = entries.filter((e) => e.id !== id);
     set({ entries: next });
-    await persist(user.id, next, settings, dayLogs);
+    await persist(user.id, next, settings, dayLogs, get().plans);
   },
 
   async saveReflection(entryId, reflection) {
@@ -204,25 +224,57 @@ export const useApp = create<AppState>((set, get) => ({
     const updated: JournalEntry = { ...prev, reflection, updatedAt: Date.now() };
     const next = entries.map((e) => (e.id === entryId ? updated : e));
     set({ entries: next });
-    await persist(user.id, next, settings, dayLogs);
+    await persist(user.id, next, settings, dayLogs, get().plans);
   },
 
   async logNoTradeDay(date, reason) {
-    const { user, entries, settings, dayLogs } = get();
+    const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
     if (entries.some((e) => e.date === date)) return; // traded days are already journaled
     if (dayLogs.some((d) => d.date === date)) return;
     const next = [...dayLogs, { date, reason: reason?.trim() || undefined, createdAt: Date.now() }];
     set({ dayLogs: next });
-    await persist(user.id, entries, settings, next);
+    await persist(user.id, entries, settings, next, plans);
   },
 
   async removeNoTradeDay(date) {
-    const { user, entries, settings, dayLogs } = get();
+    const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
     const next = dayLogs.filter((d) => d.date !== date);
     set({ dayLogs: next });
-    await persist(user.id, entries, settings, next);
+    await persist(user.id, entries, settings, next, plans);
+  },
+
+  async savePlan(plan) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    const exists = plans.some((p) => p.id === plan.id);
+    const next = exists ? plans.map((p) => (p.id === plan.id ? plan : p)) : [...plans, plan];
+    set({ plans: next });
+    await persist(user.id, entries, settings, dayLogs, next);
+  },
+
+  async deletePlan(id) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    const next = plans.filter((p) => p.id !== id);
+    set({ plans: next });
+    await persist(user.id, entries, settings, dayLogs, next);
+  },
+
+  async linkPlanToTrade(planId, tradeId) {
+    const { user, plans, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const next = plans.map((p) => (p.id === planId ? { ...p, status: "executed" as const, linkedTradeId: tradeId, updatedAt: Date.now() } : p));
+    set({ plans: next });
+    const entry = entries.find((e) => e.id === tradeId);
+    if (entry) {
+      const nextEntries = entries.map((e) => (e.id === tradeId ? { ...e, planId } : e));
+      set({ entries: nextEntries });
+      await persist(user.id, nextEntries, settings, dayLogs, next);
+    } else {
+      await persist(user.id, entries, settings, dayLogs, next);
+    }
   },
 
   async saveChallenge(challenge) {
@@ -231,7 +283,7 @@ export const useApp = create<AppState>((set, get) => ({
     const challenges = [...(settings.challenges ?? []).filter((c) => c.id !== challenge.id), challenge];
     const next = { ...settings, challenges };
     set({ settings: next });
-    await persist(user.id, entries, next, dayLogs);
+    await persist(user.id, entries, next, dayLogs, get().plans);
   },
 
   async deleteChallenge(id) {
@@ -241,7 +293,7 @@ export const useApp = create<AppState>((set, get) => ({
     const next = { ...settings, challenges };
     // Trades keep their challengeId (historical record); they simply render as "removed challenge".
     set({ settings: next });
-    await persist(user.id, entries, next, dayLogs);
+    await persist(user.id, entries, next, dayLogs, get().plans);
   },
 
   async saveTradeReview(entryId, patch) {
@@ -264,7 +316,7 @@ export const useApp = create<AppState>((set, get) => ({
     };
     const next = entries.map((e) => (e.id === entryId ? updated : e));
     set({ entries: next });
-    await persist(user.id, next, settings, dayLogs);
+    await persist(user.id, next, settings, dayLogs, get().plans);
   },
 
   async updateSettings(patch) {
@@ -272,7 +324,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (!user) return;
     const next = { ...settings, ...patch };
     set({ settings: next });
-    await persist(user.id, entries, next, dayLogs);
+    await persist(user.id, entries, next, dayLogs, get().plans);
   },
 
   async replaceJournal(payload) {
@@ -281,7 +333,7 @@ export const useApp = create<AppState>((set, get) => ({
     const settings = { ...defaultSettings(), ...payload.settings };
     const dayLogs = payload.dayLogs ?? [];
     set({ entries: payload.entries ?? [], settings, dayLogs });
-    await persist(user.id, payload.entries ?? [], settings, dayLogs);
+    await persist(user.id, payload.entries ?? [], settings, dayLogs, get().plans);
   },
 
   exportPayload() {
@@ -294,7 +346,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (!user) return;
     const demo = generateDemoEntries();
     set({ entries: demo, settings: { ...settings, startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1500 } });
-    await persist(user.id, demo, get().settings, dayLogs);
+    await persist(user.id, demo, get().settings, dayLogs, get().plans);
   },
 
 }));

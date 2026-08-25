@@ -321,6 +321,61 @@ expect("minato greeting personal", greet(mCtx).startsWith("Namaste Test"), true)
 // Provider seam
 const provider = new DeterministicMinatoProvider();
 void (async () => {
+  /* ------------------- hold time + patterns + competence ------------------- */
+  const { holdTimeStats, formatHold } = await import("../src/lib/holdtime.ts");
+  const { detectPatterns, matchPlanToPatterns } = await import("../src/lib/minato/patterns.ts");
+  const { processScore } = await import("../src/lib/competence.ts");
+
+  const hEntries = [
+    { ...mk("2026-07-01", 200, 2), entryTime: "09:35", exitTime: "10:05" },   // win, 30m
+    { ...mk("2026-07-02", -100, -1), entryTime: "09:40", exitTime: "09:55" }, // loss, 15m
+    { ...mk("2026-07-03", 300, 3), entryTime: "10:00", exitTime: "10:45" },   // win, 45m
+    { ...mk("2026-07-06", -150), entryTime: "09:33", exitTime: "09:50" },     // loss, 17m
+  ];
+  const hs = holdTimeStats(hEntries as never);
+  expect("hold avg win", hs.avgWinMin, 38); // (30+45)/2
+  expect("hold avg loss", hs.avgLossMin, 16); // (15+17)/2
+  expect("hold median win", hs.medianWinMin, 38);
+  expect("hold longest win", hs.longestWinMin, 45);
+  expect("hold shortest loss", hs.shortestLossMin, 15);
+  expect("hold format", formatHold(95), "1h 35m");
+  expect("hold no timestamps → null", holdTimeStats([mk("2026-07-07", 50)]).avgHoldMin, null);
+
+  // Pattern confidence: 2 occurrences = possible, 3 = repeated
+  const pEntries = [
+    { ...mk("2026-08-01", -100), reflection: { wentPoorly: "entered early, fomo", cause: "", followedSetup: null, followedRisk: null, updatedAt: 0 } },
+    { ...mk("2026-08-02", -80), reflection: { wentPoorly: "didn't want to miss the move", cause: "", followedSetup: null, followedRisk: null, updatedAt: 0 } },
+    { ...mk("2026-08-03", 50) },
+  ];
+  const pats1 = detectPatterns(pEntries as never);
+  expect("pattern 2 occurrences → possible", pats1[0]?.confidence, "possible");
+  const pEntries3 = [...pEntries, { ...mk("2026-08-04", -60), reflection: { wentPoorly: "thought if I waited I would miss the move", cause: "", followedSetup: null, followedRisk: null, updatedAt: 0 } }];
+  const pats2 = detectPatterns(pEntries3 as never);
+  expect("pattern 3 occurrences → repeated", pats2[0]?.confidence, "repeated");
+  expect("pattern label", pats2[0]?.label, "Entry urgency / fear of missing the move");
+  // Evidence preserved with original text
+  expect("pattern evidence intact (newest first)", pats2[0]?.evidence[0]?.excerpt, "thought if I waited I would miss the move");
+  // Single occurrence → not reported
+  const patsNone = detectPatterns([{ ...mk("2026-08-05", -10), reflection: { wentPoorly: "early entry", cause: "", followedSetup: null, followedRisk: null, updatedAt: 0 } }] as never);
+  expect("pattern 1 occurrence not reported", patsNone.length, 0);
+
+  // Plan text matching established pattern
+  const match = matchPlanToPatterns("I didn't want to wait too long because price might move", pats2);
+  expect("plan matches urgency pattern", match?.pattern.label, "Entry urgency / fear of missing the move");
+  expect("unrelated plan no match", matchPlanToPatterns("clean sweep and smt plan", pats2), null);
+
+  // Process score: reviewed + checklist trades score higher than bare trades
+  const bare = [mk("2026-08-01", 100), mk("2026-08-02", -50)];
+  const rich = [
+    { ...mk("2026-08-01", 100), reviewStatus: "reviewed" as const, checklist: { tradeNumber: 1 as const, r1Time: { answer: true }, r2Environment: { answer: true }, r3LiquiditySweep: { answer: true }, r4Manipulation: { answer: true }, r5Target: { answer: true }, r6Smt: { answer: true } }, review: { execution: { planned: true, followedStop: true, movedStop: false, exitedEarly: false, chased: false }, psychology: { fomo: false }, outcome: { followedPlan: true } }, reflection: { wentWell: "clean", cause: "", followedSetup: true, followedRisk: true, lesson: "repeat", updatedAt: 0 }, conceptsUsed: ["SMT"] },
+    { ...mk("2026-08-02", -50), reviewStatus: "reviewed" as const, checklist: { tradeNumber: 1 as const, r1Time: { answer: true }, r2Environment: { answer: true }, r3LiquiditySweep: { answer: true }, r4Manipulation: { answer: true }, r5Target: { answer: true }, r6Smt: { answer: true } }, review: { execution: { planned: true, followedStop: true, movedStop: false, exitedEarly: false, chased: false }, psychology: { fomo: false }, outcome: { followedPlan: true } }, reflection: { wentPoorly: "valid loss", cause: "", followedSetup: true, followedRisk: true, lesson: "accept", updatedAt: 0 } },
+  ];
+  const scoreBare = processScore(bare as never, []);
+  const scoreRich = processScore(rich as never, []);
+  expect("competence rewards process", scoreRich.score > scoreBare.score, true);
+  expect("competence bounded", scoreRich.score <= 100 && scoreRich.score > 0, true);
+
+
   const pReply = await provider.reply({ messages: [{ role: "user", text: "discipline?" }] }, mCtx);
   expect("minato provider reply", pReply.text.includes("Discipline streak"), true);
   expect("minato provider meta", [pReply.meta.deterministic, pReply.meta.visionSupported], [true, false]);

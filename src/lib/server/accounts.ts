@@ -23,6 +23,10 @@ export interface EdgeBookAccount {
   email: string;
   sub: string;
   name: string;
+  /** Public unique handle for friend discovery — never the email. */
+  handle: string;
+  /** Deterministic virtual competition points (never money). */
+  edgePoints: number;
   /** Root "EdgeBook" folder id in the user's Drive. */
   folderId: string | null;
   /** AES-GCM encrypted Google refresh token (key never leaves server env). */
@@ -51,6 +55,35 @@ export function listAccounts(): EdgeBookAccount[] {
   return Object.values(readAll());
 }
 
+function slugHandle(name: string): string {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 16);
+  return `${base || "trader"}_${crypto.randomBytes(2).toString("hex")}`;
+}
+
+/** Ensure uniqueness — append a suffix if the handle is taken. */
+function ensureHandle(handle: string, accounts: Record<string, EdgeBookAccount>): string {
+  const taken = new Set(Object.values(accounts).map((a) => a.handle));
+  if (!taken.has(handle)) return handle;
+  let i = 2;
+  while (taken.has(`${handle}_${i}`)) i += 1;
+  return `${handle}_${i}`;
+}
+
+export function findByHandle(handle: string): EdgeBookAccount | null {
+  const h = handle.toLowerCase().replace(/^@/, "");
+  return Object.values(readAll()).find((a) => a.handle.toLowerCase() === h) ?? null;
+}
+
+export function addEdgePoints(email: string, points: number): EdgeBookAccount | null {
+  const key = email.toLowerCase();
+  const accounts = readAll();
+  const existing = accounts[key];
+  if (!existing) return null;
+  accounts[key] = { ...existing, edgePoints: Math.max(0, (existing.edgePoints ?? 0) + points), updatedAt: Date.now() };
+  writeAll(accounts);
+  return accounts[key];
+}
+
 export function getAccount(email: string): EdgeBookAccount | null {
   return readAll()[email.toLowerCase()] ?? null;
 }
@@ -59,8 +92,10 @@ export function upsertAccount(patch: {
   email: string;
   sub?: string;
   name?: string;
+  handle?: string;
   folderId?: string | null;
   refreshToken?: string | null; // plaintext in, encrypted at rest
+  edgePoints?: number;
 }): EdgeBookAccount {
   const key = patch.email.toLowerCase();
   const accounts = readAll();
@@ -70,6 +105,8 @@ export function upsertAccount(patch: {
     email: key,
     sub: patch.sub ?? existing?.sub ?? "",
     name: patch.name ?? existing?.name ?? key.split("@")[0],
+    handle: existing?.handle ?? ensureHandle(patch.handle ?? slugHandle(patch.name ?? key.split("@")[0]), accounts),
+    edgePoints: patch.edgePoints != null ? patch.edgePoints : existing?.edgePoints ?? 0,
     folderId: patch.folderId ?? existing?.folderId ?? null,
     encRefreshToken:
       patch.refreshToken != null ? encryptToken(patch.refreshToken, tokenSecretFor(key)) : existing?.encRefreshToken ?? null,

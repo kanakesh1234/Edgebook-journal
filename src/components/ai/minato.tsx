@@ -121,8 +121,27 @@ export function Minato() {
     setInput("");
     setBusy(true);
     try {
-      const reply = await provider.reply({ messages: next, focusEntry }, ctx);
-      setMessages([...next, { role: "buddy", text: reply.text }]);
+      // Server computes deterministic facts from the persisted journal
+      // (hallucination-proof), then renders via OpenRouter when configured.
+      let replyText: string | null = null;
+      try {
+        const res = await fetch("/api/minato/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: next }),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as { text?: string; fallback?: boolean };
+          replyText = json.fallback ? null : json.text ?? null;
+        }
+      } catch {
+        /* offline → deterministic fallback below */
+      }
+      if (!replyText) {
+        const reply = await provider.reply({ messages: next, focusEntry }, ctx);
+        replyText = reply.text;
+      }
+      setMessages([...next, { role: "buddy", text: replyText }]);
     } finally {
       setBusy(false);
     }
