@@ -21,7 +21,8 @@ import { uid } from "@/lib/utils";
  */
 export default function ChallengesPage() {
   const entries = useApp((s) => s.entries);
-  const challenges = useApp((s) => s.settings.challenges ?? []);
+  const settings = useApp((s) => s.settings);
+  const challenges = useMemo(() => settings.challenges ?? [], [settings]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Challenge | null>(null);
 

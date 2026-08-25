@@ -67,6 +67,9 @@ export default function LabPage() {
   const settings = useApp((s) => s.settings);
   const openNewEntry = useUi((s) => s.openNewEntry);
   const playbook = settings.playbook ?? [];
+  const updatePlaybook = (next: PlaybookSetup[]) => {
+    void useApp.getState().updateSettings({ playbook: next });
+  };
   const [openSetup, setOpenSetup] = useState<PlaybookSetup | null>(null);
 
   const patterns = useMemo(() => detectPatterns(entries), [entries]);
@@ -173,58 +176,8 @@ export default function LabPage() {
         </ol>
       </Section>
 
-      {/* EXECUTION PLAYBOOK (custom setups) */}
-      <Section title="Execution Playbook" subtitle="Your defined setups — the strategy, the entry, the invalidation, the exit.">
-        {playbook.length === 0 ? (
-          <p className="rounded-control border border-dashed border-line-strong px-4 py-8 text-center text-sm text-muted">
-            No custom setups defined. Define them from the Playbook editor to give every trade a name.
-          </p>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {playbook.map((p) => {
-              const trades = entries.filter((e) => e.setup.toLowerCase() === p.name.toLowerCase());
-              const wins = trades.filter((e) => e.pnl > 0).length;
-              const losses = trades.filter((e) => e.pnl < 0).length;
-              const pnl = trades.reduce((s, e) => s + e.pnl, 0);
-              const rrList = trades.filter((e) => e.rr != null);
-              const avgR = rrList.length > 0 ? rrList.reduce((s, e) => s + (e.rr ?? 0), 0) / rrList.length : null;
-              const decided = wins + losses;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setOpenSetup(p)}
-                  className="rounded-control border border-line bg-raised/60 p-4 text-left transition-colors hover:border-line-strong"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
-                    <span className="shrink-0 rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-medium text-faint">
-                      v{p.version ?? 1}{p.active === false ? " · inactive" : ""}
-                    </span>
-                  </div>
-                  {p.strategy && <p className="mt-0.5 line-clamp-2 text-xs text-muted">{p.strategy}</p>}
-                  {trades.length > 0 ? (
-                    <p className="num mt-2 text-[11px] text-muted">
-                      {trades.length} {trades.length === 1 ? "trade" : "trades"} ·{" "}
-                      <span className={pnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(pnl)}</span>
-                      {decided > 0 && <> · {Math.round((wins / decided) * 100)}% win</>}
-                      {avgR != null && <> · {avgR >= 0 ? "+" : ""}{avgR.toFixed(1)}R avg</>}
-                    </p>
-                  ) : (
-                    <p className="mt-2 text-[11px] text-faint">No trades recorded against this playbook yet.</p>
-                  )}
-                  <p className="mt-1.5 text-[11px] text-faint">
-                    {[p.minRR != null ? `≥ ${p.minRR}R` : null, p.instruments?.join(", "), p.sessions?.join(" · ")].filter(Boolean).join(" · ") || "Tap for details"}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <p className="mt-3 text-xs text-faint">
-          Manage setups in the Playbook editor — they appear in the trade form and are matched to
-          trades during review.
-        </p>
-      </Section>
+      {/* PLAYBOOK — full CRUD editor */}
+      <Playbook setups={playbook} onChange={updatePlaybook} />
 
       {/* MY RECORDED PATTERNS */}
       <Section title="My Recorded Patterns" subtitle="Generated from your actual reflections and reviews — evidence-backed, never generic.">
