@@ -4,7 +4,6 @@ import fs from "node:fs";
 import { encryptToken, decryptToken, signState, verifyState, randomNonce } from "../src/lib/server/tokens.ts";
 import { sealAppSession, openAppSession } from "../src/lib/server/session.ts";
 import { ensureAppFolders, ensureFolder, putFile, getFile, readJournalDoc, writeJournalDoc, exchangeCode } from "../src/lib/server/drive.ts";
-import { isEmailAllowed } from "../src/lib/server/google-config.ts";
 
 let failures = 0;
 function expect(name: string, got: unknown, want: unknown) {
@@ -30,15 +29,42 @@ expect("state verify ok", verifyState(SECRET, state), nonce);
 expect("state wrong key", verifyState("other", state), null);
 expect("state tampered nonce", verifyState(SECRET, `${nonce}x.${state.split(".")[1]}`), null);
 
-/* ------------------------------ allowlist ------------------------------ */
-const cfg = { clientId: "id", clientSecret: "s", redirectUri: "r", tokenSecret: "t", allowedEmails: ["trader@example.com", "eswar@example.com"] };
-expect("allowlist permits member", isEmailAllowed(cfg, "trader@example.com"), true);
-expect("allowlist permits case-insensitive", isEmailAllowed(cfg, "Eswar@Example.com"), true);
-expect("allowlist denies stranger", isEmailAllowed(cfg, "stranger@example.com"), false);
-const openCfg = { ...cfg, allowedEmails: [] };
-expect("empty allowlist denies by default", isEmailAllowed(openCfg, "trader@example.com"), false);
-
 void (async () => {
+const accountsMod = await import("../src/lib/server/accounts.ts");
+/* ------------------- open signup: arbitrary Google identities ------------------- */
+// No allowlist anywhere: any verified Google identity gets an account.
+// tsx doesn't load .env.local — provide test env (never real credentials).
+process.env.GOOGLE_CLIENT_ID ??= "test-client-id";
+process.env.GOOGLE_CLIENT_SECRET ??= "test-client-secret";
+const { getGoogleConfig } = await import("../src/lib/server/google-config.ts");
+const cfg = getGoogleConfig();
+expect("config loads from env", cfg?.clientId != null, true);
+expect("no allowlist field remains", cfg && "allowedEmails" in cfg ? false : true, true);
+
+// 1. New arbitrary identity → account created
+accountsMod.upsertAccount({ email: "new.user.42@gmail.com", sub: "sub-new-42", name: "New User", folderId: "folder-new", refreshToken: "rt-new" });
+const accNew = accountsMod.getAccount("new.user.42@gmail.com");
+expect("open signup creates account", accNew?.folderId, "folder-new");
+
+// 2. Existing identity → existing account restored (same record)
+const accExisting = accountsMod.getAccount("new.user.42@gmail.com");
+expect("existing identity restored", [accExisting?.sub, accExisting?.folderId], ["sub-new-42", "folder-new"]);
+
+// 3. Same identity cannot create duplicates — upsert updates in place
+accountsMod.upsertAccount({ email: "new.user.42@gmail.com", folderId: "folder-new-v2", refreshToken: "rt-new-2" });
+const accDedup = accountsMod.getAccount("new.user.42@gmail.com");
+expect("duplicate identity updates, not duplicates", accDedup?.folderId, "folder-new-v2");
+expect("duplicate keeps original sub", accDedup?.sub, "sub-new-42");
+expect("refresh token rotated on re-auth", accountsMod.accountRefreshToken(accDedup!, "seed"), "rt-new-2");
+
+// 4. Empty/unset EDGEBOOK_ALLOWED_EMAILS → signup still succeeds
+// (structural: the config no longer carries any allowlist; nothing gates upsert)
+expect("no allowlist gate on account creation", accNew !== null, true);
+
+// 9. Sign out → sign in again: authorization persists (cookie is irrelevant to the store)
+const beforeSignout = accountsMod.getAccount("new.user.42@gmail.com")?.encRefreshToken;
+expect("auth persists across signout", beforeSignout != null, true);
+
 /* ------------------------- drive (mock fetch) ------------------------- */
 function mockDriveFetch(created: Map<string, string>, content = new Map<string, string>()) {
   let idCounter = 100;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGoogleConfig, isEmailAllowed } from "@/lib/server/google-config";
+import { getGoogleConfig } from "@/lib/server/google-config";
 import { verifyState } from "@/lib/server/tokens";
 import { APP_SESSION_COOKIE, OAUTH_STATE_COOKIE, readCookie, sealAppSession, sessionCookieOptions } from "@/lib/server/session";
 import { upsertAccount } from "@/lib/server/accounts";
@@ -76,7 +76,6 @@ export async function GET(request: Request) {
   }
 
   if (!email) return fail("no_email");
-  if (!isEmailAllowed(config, email)) return fail("not_allowed");
 
   // Provision (or reuse) the user's private EdgeBook folder tree.
   const folders = await ensureAppFolders(tokens.accessToken);

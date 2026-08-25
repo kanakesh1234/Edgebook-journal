@@ -14,7 +14,6 @@ export interface GoogleConfig {
   clientSecret: string;
   redirectUri: string;
   tokenSecret: string;
-  allowedEmails: string[];
 }
 
 /** Least-privilege scope: app-created files only. */
@@ -33,12 +32,7 @@ export function getGoogleConfig(): GoogleConfig | null {
   // client secret so a single-env setup still never stores plaintext tokens.
   const tokenSecret = process.env.GOOGLE_TOKEN_SECRET ?? clientSecret;
 
-  const allowedEmails = (process.env.EDGEBOOK_ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-
-  return { clientId, clientSecret, redirectUri, tokenSecret, allowedEmails };
+  return { clientId, clientSecret, redirectUri, tokenSecret };
 }
 
 export function isGoogleConfigured(): boolean {
@@ -52,19 +46,10 @@ export function googleAuthUrl(config: GoogleConfig, state: string): string {
     response_type: "code",
     scope: AUTH_SCOPE,
     access_type: "offline",
-    prompt: "consent",
+    // Account chooser on every sign-in; Drive consent only when not yet granted.
+    prompt: "select_account",
     include_granted_scopes: "true",
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-}
-
-export function isEmailAllowed(config: GoogleConfig, email: string): boolean {
-  // Private phase: when no allowlist is configured, allow the configured
-  // accounts only through the allowlist — an empty list denies everyone
-  // except during explicit local development (ALLOW_ANY_EMAIL=1).
-  if (config.allowedEmails.length === 0) {
-    return process.env.ALLOW_ANY_EMAIL === "1";
-  }
-  return config.allowedEmails.includes(email.toLowerCase());
 }

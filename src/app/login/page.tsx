@@ -18,10 +18,6 @@ import { EASE } from "@/components/landing/reveal";
 type Mode = "signin" | "signup";
 
 const DRIVE_MESSAGES: Record<string, { tone: "error" | "info"; text: string }> = {
-  not_allowed: {
-    tone: "error",
-    text: "This Google account isn't on the Edge Book access list yet. Ask the administrator to add your email.",
-  },
   not_configured: { tone: "error", text: "Google sign-in isn't configured on this server yet." },
   state_mismatch: { tone: "error", text: "The sign-in attempt expired. Please try again." },
   token_exchange_failed: { tone: "error", text: "Google sign-in couldn't be completed. Please try again." },
@@ -230,7 +226,7 @@ function LoginView() {
             <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-muted" />
           </a>
           <p className="mt-2 text-center text-xs text-faint">
-            Signs you in and connects your private Google Drive — one step.
+            New here? This creates your journal. Returning? This signs you in — Drive included.
           </p>
 
           {/* Divider */}

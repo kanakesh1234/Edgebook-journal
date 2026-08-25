@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       {
         error: "google_not_configured",
         message:
-          "Google OAuth is not configured on this server. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (and optionally GOOGLE_REDIRECT_URI, EDGEBOOK_ALLOWED_EMAILS) in .env.local.",
+          "Google OAuth is not configured on this server. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (and optionally GOOGLE_REDIRECT_URI) in .env.local.",
       },
       { status: 503 },
     );
