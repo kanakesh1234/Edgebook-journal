@@ -424,6 +424,29 @@ expect("minato isolation by construction", buildContext({
   const pvaReply = respondMod.respond(respCtx, "am I following my plan");
   expect("respond plan-vs-actual", pvaReply.includes("plan"), true);
 
+  // Time-window analytics
+  const { timeWindowAnalytics } = await import("../src/lib/time-patterns.ts");
+  const twEntries: JournalEntry[] = [
+    { ...mk("2026-06-01", 200, 2), entryTime: "09:35", exitTime: "10:05" },
+    { ...mk("2026-06-02", -50, -0.5), entryTime: "09:38", exitTime: "09:52" },
+    { ...mk("2026-06-03", 150, 1.5), entryTime: "09:40", exitTime: "10:10" },
+    { ...mk("2026-06-04", -100), entryTime: "10:05", exitTime: "10:20" },
+    { ...mk("2026-06-05", 300, 3), entryTime: "10:10", exitTime: "10:40" },
+  ];
+  const tw = timeWindowAnalytics(twEntries);
+  expect("tw has windows", tw.windows.length > 0, true);
+  expect("tw total sample", tw.totalSample, 5);
+  expect("tw best win rate exists", tw.bestWinRate !== null || tw.bestAvgR !== null, true);
+  // All trades have entry times so not sparse
+  expect("tw not sparse", tw.sparse, false);
+  // Each window has correct trade count
+  const totalInWindows = tw.windows.reduce((s, w) => s + w.trades, 0);
+  expect("tw window trade counts sum", totalInWindows, 5);
+
+  // Time-window question routing
+  const twReply = respondMod.respond(respCtx, "what time do I perform best");
+  expect("respond time window", twReply.includes("window") || twReply.includes("not enough data"), true);
+
   if (failures > 0) {
     console.log(`\n${failures} FAILURES`);
     process.exit(1);

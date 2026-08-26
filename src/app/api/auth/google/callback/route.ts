@@ -77,18 +77,16 @@ export async function GET(request: Request) {
 
   if (!email) return fail("no_email");
 
-  // Provision (or reuse) the user's private EdgeBook folder tree.
-  const folders = await ensureAppFolders(tokens.accessToken);
-  if (!folders) return fail("folder_setup_failed");
-
   // Persist the Drive authorization server-side per Edge Book user.
   // Returning users keep their stored refresh token when Google doesn't
   // issue a new one (Google only sends it on first consent).
+  // NOTE: Folder provisioning is deferred to first data access (lazy) via
+  // getAuthedDrive() → ensureAppFolders(). This keeps the OAuth callback
+  // fast — the user is redirected immediately after authentication.
   upsertAccount({
     email,
     sub,
     name: name || undefined,
-    folderId: folders.root,
     refreshToken: tokens.refreshToken ?? undefined,
   });
 

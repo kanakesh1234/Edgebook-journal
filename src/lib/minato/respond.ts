@@ -1,5 +1,6 @@
 import type { EdgeBookContext, TradeReviewContext } from "./context";
 import { holdTimeStats, formatHold } from "../holdtime";
+import { timeWindowAnalytics } from "../time-patterns";
 import { executionVerdict, findSimilarTrades, histDate, strategyForEntry } from "./context";
 
 /* ------------------------------------------------------------------ */
@@ -188,6 +189,28 @@ export function respond(ctx: EdgeBookContext, input: string): string {
     if (pats.length === 0) return "No recurring patterns detected yet bro. Keep reviewing — patterns surface after at least two occurrences.";
     const top = pats[0];
     return `I've noticed "${top.pattern}" appeared ${top.count} times in your recent reviews. ${pats[1] ? `Also "${pats[1].pattern}" (${pats[1].count}×). ` : ""}Worth reviewing before your next entry.`;
+  }
+
+  if (/best time|worst time|best window|time window|best session|when.*best|when.*worst|highest.*rr|rr.*window|perform best|perform worst|best.*window|worst.*window/.test(q)) {
+    const tw = timeWindowAnalytics(ctx.recentTrades);
+    if (tw.sparse) return `Only ${tw.totalSample} trades with timestamps recorded — not enough data to identify a reliable time window yet bro.`;
+    const best = tw.bestWinRate;
+    const bestR = tw.bestAvgR;
+    if (!best && !bestR) return "No clear time pattern emerged from your recorded trades.";
+    const parts: string[] = [];
+    if (best) parts.push(`Your strongest window is ${best.label}: ${best.trades} trades, ${best.winRate}% win rate${best.avgR != null ? `, ${best.avgR >= 0 ? "+" : ""}${best.avgR}R avg` : ""}.`);
+    if (bestR && bestR !== best) parts.push(`Highest-RR window: ${bestR.label} (${bestR.avgR}R avg, ${bestR.trades} trades).`);
+    parts.push(`Sample is ${tw.sparse ? "still small" : "reasonable"} — keep recording.`);
+    return parts.join(" ");
+  }
+
+  if (/cut.*winner|hold.*loser|hold.*win|hold.*loss|early.*exit.*winner/.test(q)) {
+    const holds = holdTimeStats(ctx.recentTrades);
+    if (holds.avgWinMin == null || holds.avgLossMin == null) return "Need more trades with entry/exit times to compare winner vs loser hold durations.";
+    if (holds.avgWinMin < holds.avgLossMin) {
+      return `You're cutting winners short (avg ${formatHold(holds.avgWinMin)}) compared to losers (avg ${formatHold(holds.avgLossMin)}). That's a classic discipline leak — let winners breathe.`;
+    }
+    return `Winners held ${formatHold(holds.avgWinMin)} vs losers ${formatHold(holds.avgLossMin)} — you're letting winners run. Good discipline.`;
   }
 
   if (/concept/.test(q)) {

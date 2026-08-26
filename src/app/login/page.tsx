@@ -49,6 +49,7 @@ function LoginView() {
   const [showPw, setShowPw] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; form?: string }>({});
   const [busy, setBusy] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // Drive flow feedback (connected / errors surfaced by the callback)
   const driveParam = params.get("drive");
@@ -220,16 +221,33 @@ function LoginView() {
             </p>
           )}
 
-          {/* Primary: Google */}
-          <a
-            href="/api/auth/google/start?next=/dashboard"
-            className="group mt-6 flex h-11 w-full items-center justify-center gap-3 rounded-control border border-line-strong bg-surface text-sm font-medium text-ink shadow-sm transition-all duration-200 hover:bg-raised hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20"
+          {/* Primary: Google — single click, loading state, no double-fire */}
+          <button
+            type="button"
+            disabled={googleLoading || busy}
+            onClick={(e) => {
+              e.preventDefault();
+              if (googleLoading || busy) return;
+              setGoogleLoading(true);
+              window.location.assign("/api/auth/google/start?next=/dashboard");
+            }}
+            className={cn(
+              "group mt-6 flex h-11 w-full items-center justify-center gap-3 rounded-control border border-line-strong bg-surface text-sm font-medium text-ink shadow-sm transition-all duration-200 hover:bg-raised hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20",
+              googleLoading && "pointer-events-none opacity-60",
+            )}
             aria-label="Continue with Google"
+            aria-busy={googleLoading}
           >
-            <GoogleIcon className="h-[18px] w-[18px]" />
-            Continue with Google
-            <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-muted" />
-          </a>
+            {googleLoading ? (
+              <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-line-strong border-t-gold" />
+            ) : (
+              <GoogleIcon className="h-[18px] w-[18px]" />
+            )}
+            {googleLoading ? "Redirecting to Google…" : "Continue with Google"}
+            {!googleLoading && (
+              <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-muted" />
+            )}
+          </button>
           <p className="mt-2 text-center text-xs text-faint">
             New here? This creates your journal. Returning? This signs you in — Drive included.
           </p>

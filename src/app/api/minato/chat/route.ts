@@ -9,6 +9,7 @@ import { holdTimeStats, formatHold } from "@/lib/holdtime";
 import { detectPatterns, matchPlanToPatterns } from "@/lib/minato/patterns";
 import { respond, greet, type MinatoMessage } from "@/lib/minato/respond";
 import { processScore } from "@/lib/competence";
+import { timeWindowAnalytics } from "@/lib/time-patterns";
 import { getOpenRouterConfig, type OpenRouterConfig } from "@/lib/services/ai";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +118,17 @@ export async function POST(request: Request) {
       label: p.label, count: p.count, confidence: p.confidence, improving: p.improving,
       evidence: p.evidence.slice(0, 3).map((ev) => ({ date: ev.date, excerpt: ev.excerpt })),
     })),
+    timeWindows: timeWindowAnalytics(entries as never).windows
+      .filter((w) => w.trades >= 2)
+      .slice(0, 6)
+      .map((w) => ({
+        window: w.label,
+        trades: w.trades,
+        winRatePct: w.winRate,
+        avgR: w.avgR,
+        totalPnl: w.totalPnl,
+        avgHold: w.avgHoldMin != null ? `${w.avgHoldMin}m` : null,
+      })),
     processScore: proc.score,
     reviewedCount: (entries as { reviewStatus?: string }[]).filter((e) => e.reviewStatus === "reviewed").length,
     conceptsUsed: concepts.slice(0, 10),
