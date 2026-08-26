@@ -1,4 +1,5 @@
 import type { EdgeBookContext, TradeReviewContext } from "./context";
+import { holdTimeStats, formatHold } from "../holdtime";
 import { executionVerdict, findSimilarTrades, histDate, strategyForEntry } from "./context";
 
 /* ------------------------------------------------------------------ */
@@ -170,6 +171,36 @@ export function respond(ctx: EdgeBookContext, input: string): string {
     return stats.remainingToTarget <= 0
       ? "Target reached ra! Settings lo bigger target pettu, journey continue."
       : `Target ki ${money(stats.remainingToTarget)} to go (${Math.round(stats.targetProgress * 100)}% done). Pace bagundi, rush avvaku.`;
+  }
+
+  if (/hold|how long|duration/.test(q)) {
+    const holds = holdTimeStats(ctx.recentTrades);
+    if (holds.sampleSize === 0) return "Entry/exit times not recorded yet bro. Add times to your trades and I'll calculate hold durations.";
+    return (
+      `Winning trades: avg ${formatHold(holds.avgWinMin)}, median ${formatHold(holds.medianWinMin)}, longest ${formatHold(holds.longestWinMin)}. ` +
+      `Losing trades: avg ${formatHold(holds.avgLossMin)}, median ${formatHold(holds.medianLossMin)}, shortest ${formatHold(holds.shortestLossMin)}. ` +
+      `(${holds.sampleSize} trades with timestamps)`
+    );
+  }
+
+  if (/pattern|recurring|same mistake/.test(q)) {
+    const pats = ctx.recurringPatterns;
+    if (pats.length === 0) return "No recurring patterns detected yet bro. Keep reviewing — patterns surface after at least two occurrences.";
+    const top = pats[0];
+    return `I've noticed "${top.pattern}" appeared ${top.count} times in your recent reviews. ${pats[1] ? `Also "${pats[1].pattern}" (${pats[1].count}×). ` : ""}Worth reviewing before your next entry.`;
+  }
+
+  if (/concept/.test(q)) {
+    const concepts = [...new Set(ctx.recentTrades.flatMap((e) => e.review?.concepts?.used ?? []))];
+    if (concepts.length === 0) return "No concepts tagged yet bro. Tag them in the review flow — they help me spot what's working.";
+    return `Concepts you've been using: ${concepts.slice(0, 6).join(", ")}. ${concepts.length > 6 ? `+${concepts.length - 6} more.` : ""}`;
+  }
+
+  if (/plan vs actual|deviat|followed.*plan|following.*plan|am i following/.test(q)) {
+    const linked = ctx.recentTrades.filter((e) => e.planId);
+    const followed = linked.filter((e) => e.review?.outcome?.followedPlan === true).length;
+    if (linked.length === 0) return "No trades linked to plans yet bro. Plan a trade first, then link it when you execute.";
+    return `${followed} of ${linked.length} plan-linked trades followed the plan. ${followed === linked.length ? "Clean execution ra." : "Check the deviations in each trade review."}`;
   }
 
   // Honest fallback — no fabrication, no pretending to be a full LLM.

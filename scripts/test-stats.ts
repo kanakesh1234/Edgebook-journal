@@ -25,6 +25,7 @@ const settings = { ...defaultSettings(), startingEquity: 10000, targetEquity: 20
 const mk = (date: string, pnl: number, rr: number | null = null) => ({
   id: date + pnl, date, pnl, rr, instrument: "NQ", direction: "long" as const,
   setup: "", notes: "", images: [], createdAt: 0, updatedAt: 0,
+  entryTime: "09:35", exitTime: "10:05",
 });
 
 // Scenario A: three green days, one red day
@@ -339,7 +340,7 @@ void (async () => {
   expect("hold longest win", hs.longestWinMin, 45);
   expect("hold shortest loss", hs.shortestLossMin, 15);
   expect("hold format", formatHold(95), "1h 35m");
-  expect("hold no timestamps → null", holdTimeStats([mk("2026-07-07", 50)]).avgHoldMin, null);
+  expect("hold no timestamps → null", holdTimeStats([{ ...mk("2026-07-07", 50), entryTime: undefined, exitTime: undefined } as never]).avgHoldMin, null);
 
   // Pattern confidence: 2 occurrences = possible, 3 = repeated
   const pEntries = [
@@ -396,6 +397,32 @@ expect("minato isolation by construction", buildContext({
   adherence: adherenceSummary([mEntries[0]], mSettings, "2026-08-12"),
   playbook: [], activeRules: [], violations: [], focusEntry: null, includeNotes: true,
 }).recentTrades.length, 1);
+
+  // Hold-time + pattern + concept + plan-vs-actual question routing
+  const respondMod = await import("../src/lib/minato/respond.ts");
+  const respEntries: JournalEntry[] = [
+    { ...mk("2026-06-01", 200, 2), entryTime: "09:35", exitTime: "10:05" },
+    { ...mk("2026-06-02", -100, -1), entryTime: "09:40", exitTime: "09:55" },
+    { ...mk("2026-06-03", 300, 3), entryTime: "10:00", exitTime: "10:45" },
+  ];
+  const respCtx = {
+    ...mCtx,
+    recentTrades: respEntries,
+    recurringPatterns: [{ pattern: "Entry urgency", count: 3 }],
+  } as never;
+  const holdReply = respondMod.respond(respCtx, "what is my average winning trade hold time");
+  expect("respond hold-time answer", holdReply.includes("Winning trades:"), true);
+  const lossHoldReply = respondMod.respond(respCtx, "how long do I usually hold losing trades");
+  expect("respond losing hold answer", lossHoldReply.includes("Losing trades:"), true);
+
+  const patReply = respondMod.respond(respCtx, "what patterns do you see");
+  expect("respond pattern answer", patReply.includes("Entry urgency") || patReply.includes("No recurring"), true);
+
+  const concReply = respondMod.respond(respCtx, "what concepts do I use most");
+  expect("respond concept answer", concReply.includes("concepts") || concReply.includes("Concepts"), true);
+
+  const pvaReply = respondMod.respond(respCtx, "am I following my plan");
+  expect("respond plan-vs-actual", pvaReply.includes("plan"), true);
 
   if (failures > 0) {
     console.log(`\n${failures} FAILURES`);
