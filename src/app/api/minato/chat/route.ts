@@ -27,7 +27,7 @@ function rateLimited(key: string): boolean {
 }
 
 const SYSTEM_PROMPT = [
-  "You are MINATO SENSEI, a Telugu-English trading sensei in the EdgeBook app.",
+  "You are MINATO SENSEI, the EdgeBook trading-process companion.",
   "You are calm, sharp, and caring. You speak like a close friend who happens to be a great trader.",
   "",
   "RULES:",
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   const traderName = session?.name.split(" ")[0] ?? "Trader";
 
   if (rateLimited(session?.email ?? "local")) {
-    return NextResponse.json({ error: "rate_limited", text: "Easy bro — ask again in a bit." }, { status: 429 });
+    return NextResponse.json({ error: "rate_limited", text: "Rate limit reached — please try again shortly." }, { status: 429 });
   }
 
   // ---- Load journal data ----
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
   }
 
   if (entries.length === 0) {
-    return NextResponse.json({ text: "Journal is empty bro — log or import a trade first and I'll have real data to work with." });
+    return NextResponse.json({ text: "Your journal is empty — log or import a trade first and I'll have real data to work with." });
   }
 
   // ---- Deterministic facts (backend-computed, hallucination-proof) ----

@@ -3,21 +3,23 @@
 /* ------------------------------------------------------------------ */
 /*  Authenticated Drive resolution                                     */
 /*                                                                      */
-/*  App session cookie (identity only) → server-side account store →    */
-/*  encrypted refresh token → real Google token refresh.                */
+/*  CANONICAL FOLDER ARCHITECTURE:                                      */
+/*  1. Check account.folderId (persisted across restarts)               */
+/*  2. If exists → verify accessible → USE IT (no search, no create)    */
+/*  3. If not → search by name → if found, persist ID → USE IT          */
+/*  4. If not → create ONCE → persist ID → USE IT                       */
 /*                                                                      */
-/*  "Connected" means the stored authorization was JUST verified to     */
-/*  obtain a valid access token — never a stale UI flag.                */
-/*  User isolation: every request operates strictly inside the folder   */
-/*  bound to the authenticated account.                                 */
+/*  Token refresh NEVER triggers folder creation.                      */
+/*  In-memory cache is a per-process optimization only.                */
+/*  The canonical source is the account store's folderId.              */
 /* ------------------------------------------------------------------ */
 
 import { cookies } from "next/headers";
 import { getGoogleConfig, type GoogleConfig } from "./google-config";
 import { decryptToken } from "./tokens";
 import { APP_SESSION_COOKIE, openAppSession, readCookie, type AppSession } from "./session";
-import { accountRefreshToken, getAccount } from "./accounts";
-import { ensureAppFolders, fetchAccessToken, type EdgeBookFolders } from "./drive";
+import { accountRefreshToken, getAccount, upsertAccount } from "./accounts";
+import { ensureAppFolders, ensureFolder, fetchAccessToken, findFolder, type EdgeBookFolders } from "./drive";
 
 export interface AuthedDrive {
   session: AppSession;
@@ -32,34 +34,11 @@ export type DriveAuthFailure =
   | "drive_revoked"
   | "folder_setup_failed";
 
-let cachedFolders: Map<string, EdgeBookFolders> = new Map();
-let verifiedOk: { email: string; expires: number } | null = null;
+/** Per-process in-memory cache. Secondary to the persisted account.folderId. */
+const cachedFolders = new Map<string, EdgeBookFolders>();
 
-/** Verify the stored authorization can actually obtain a Drive access token. */
-export function verifyDriveAuth(
-  accountEmail: string,
-  config: GoogleConfig,
-  getAccountByEmail: (email: string) => { encRefreshToken: string | null } | null,
-  fetchAccessTokenImpl: (rt: string, cid: string, cs: string, f?: typeof fetch) => Promise<string | null>,
-  fetchImpl?: typeof fetch,
-): Promise<boolean> {
-  return (async () => {
-    if (verifiedOk && verifiedOk.email === accountEmail && verifiedOk.expires > Date.now()) return true;
-    const account = getAccountByEmail(accountEmail);
-    if (!account?.encRefreshToken) return false;
-    const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
-    const refreshToken = decryptToken(account.encRefreshToken, secret);
-    if (!refreshToken) return false;
-    const accessToken = await fetchAccessTokenImpl(refreshToken, config.clientId, config.clientSecret, fetchImpl);
-    if (!accessToken) return false;
-    verifiedOk = { email: accountEmail, expires: Date.now() + 60_000 };
-    return true;
-  })();
-}
-
-/** Full resolution for data routes: session → account → live access token → folders. */
 export async function getAuthedDrive(): Promise<
-  { ok: true; drive: AuthedDrive } | { ok: false; status: 401 | 503; error: DriveAuthFailure }
+  { ok: true; drive: AuthedDrive } | { ok: false; status: 401 | 503; error: string }
 > {
   const config = getGoogleConfig();
   if (!config) return { ok: false, status: 503, error: "google_not_configured" };
@@ -71,11 +50,10 @@ export async function getAuthedDrive(): Promise<
   return resolveDriveForSession(session, config);
 }
 
-/** Resolve Drive for an app session (testable — no next/headers dependency). */
 export async function resolveDriveForSession(
   session: AppSession,
   config: GoogleConfig,
-): Promise<{ ok: true; drive: AuthedDrive } | { ok: false; status: 401; error: DriveAuthFailure }> {
+): Promise<{ ok: true; drive: AuthedDrive } | { ok: false; status: 401; error: string }> {
   const account = getAccount(session.email);
   const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
   const refreshToken = account ? accountRefreshToken(account, secret) : null;
@@ -84,14 +62,50 @@ export async function resolveDriveForSession(
   const accessToken = await fetchAccessToken(refreshToken, config.clientId, config.clientSecret);
   if (!accessToken) return { ok: false, status: 401, error: "drive_revoked" };
 
-  let folders: EdgeBookFolders | null | undefined = cachedFolders.get(session.email);
+  // ── CANONICAL FOLDER RESOLUTION ──
+  // Priority: in-memory cache → account.folderId → search → create (last resort)
+  let folders = cachedFolders.get(session.email);
+
+  if (!folders && account?.folderId) {
+    // Stored folder ID exists — verify it's still accessible
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${account.folderId}?fields=id,name`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (res.ok) {
+        // Stored folder is valid — construct subfolder paths from it
+        const rootId = account.folderId;
+        folders = await ensureSubfolders(accessToken, rootId);
+        cachedFolders.set(session.email, folders);
+      }
+      // If 404, the stored folder was deleted — fall through to search/create
+    } catch {
+      // Network error verifying stored folder — fall through
+    }
+  }
+
   if (!folders) {
-    folders = await ensureAppFolders(accessToken);
-    if (!folders) return { ok: false, status: 401, error: "folder_setup_failed" };
+    // No stored folder ID (or it was invalid) — search by name
+    const found = await ensureAppFolders(accessToken);
+    if (!found) return { ok: false, status: 401, error: "folder_setup_failed" };
+    folders = found;
     cachedFolders.set(session.email, folders);
+    // Persist the canonical folder ID so future sessions/restarts use it directly
+    upsertAccount({ email: session.email, folderId: found.root });
   }
 
   return { ok: true, drive: { session, accessToken, folders } };
+}
+
+/** Ensure the 5 subfolders exist under a known root. Does NOT recreate the root. */
+async function ensureSubfolders(accessToken: string, rootId: string): Promise<EdgeBookFolders> {
+  const subs = ["trades", "journals", "screenshots", "challenges", "exports"] as const;
+  const result: Record<string, string> = { root: rootId };
+  for (const sub of subs) {
+    result[sub] = await ensureFolder(accessToken, sub, rootId);
+  }
+  return result as unknown as EdgeBookFolders;
 }
 
 export { readCookie, APP_SESSION_COOKIE };
