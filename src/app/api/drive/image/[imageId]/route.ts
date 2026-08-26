@@ -41,15 +41,23 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
     return NextResponse.json({ error: "invalid_size" }, { status: 400 });
   }
 
-  const ok = await putFile(
-    authed.drive.accessToken,
-    authed.drive.folders.screenshots,
-    screenshotFileName(imageId),
-    Buffer.from(await blob.arrayBuffer()),
-    "image/jpeg",
-  );
-  if (!ok) return NextResponse.json({ error: "drive_write_failed" }, { status: 502 });
-  return NextResponse.json({ ok: true });
+  try {
+    await putFile(
+      authed.drive.accessToken,
+      authed.drive.folders.screenshots,
+      screenshotFileName(imageId),
+      Buffer.from(await blob.arrayBuffer()),
+      "image/jpeg",
+    );
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    const driveErr = err as { driveError?: { status: number; reason: string; message: string } };
+    if (driveErr.driveError) {
+      console.error(`[Drive] Image write failed: ${driveErr.driveError.status} ${driveErr.driveError.message}`);
+      return NextResponse.json({ error: "drive_write_failed", detail: driveErr.driveError.reason }, { status: driveErr.driveError.status === 401 ? 401 : 502 });
+    }
+    throw err;
+  }
 }
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ imageId: string }> }) {

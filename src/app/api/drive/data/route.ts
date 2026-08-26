@@ -37,12 +37,25 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const ok = await writeJournalDoc(authed.drive.accessToken, authed.drive.folders, {
-    ...payload,
-    version: payload.version ?? 2,
-    storedAt: Date.now(),
-    owner: authed.drive.session.email,
-  });
-  if (!ok) return NextResponse.json({ error: "drive_write_failed" }, { status: 502 });
-  return NextResponse.json({ ok: true });
+  try {
+    await writeJournalDoc(authed.drive.accessToken, authed.drive.folders, {
+      ...payload,
+      version: payload.version ?? 2,
+      storedAt: Date.now(),
+      owner: authed.drive.session.email,
+    });
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    const driveErr = err as { driveError?: { status: number; reason: string; message: string } };
+    if (driveErr.driveError) {
+      console.error(`[Drive] Write failed for ${authed.drive.session.email}: ${driveErr.driveError.status} ${driveErr.driveError.reason} ${driveErr.driveError.message}`);
+      const status = driveErr.driveError.status === 401 ? 401 : 502;
+      return NextResponse.json({
+        error: "drive_write_failed",
+        detail: driveErr.driveError.reason,
+        message: `Google Drive sync failed (${driveErr.driveError.status}). Your data has not been confirmed as saved.`,
+      }, { status });
+    }
+    throw err;
+  }
 }

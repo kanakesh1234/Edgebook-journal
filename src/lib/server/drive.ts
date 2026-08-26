@@ -15,6 +15,33 @@ import { zonedToUtc } from "../tz";
 
 const API = "https://www.googleapis.com";
 
+export interface DriveError {
+  status: number;
+  reason: string;
+  message: string;
+}
+
+/** Capture the actual Google API error for diagnostics (never tokens). */
+async function captureDriveError(res: Response): Promise<DriveError> {
+  let reason = "unknown";
+  let message = `Google Drive API returned ${res.status}`;
+  try {
+    const body = await res.text();
+    const json = JSON.parse(body) as { error?: { message?: string; errors?: { reason?: string }[] } };
+    message = json.error?.message ?? message;
+    reason = json.error?.errors?.[0]?.reason ?? reason;
+  } catch { /* non-JSON error body */ }
+  return { status: res.status, reason, message };
+}
+
+/** Wrap a fetch Response — throws DriveError on failure instead of returning false. */
+async function assertOk(res: Response, operation: string): Promise<Response> {
+  if (res.ok) return res;
+  const err = await captureDriveError(res);
+  console.error(`[Drive] ${operation} failed: status=${err.status} reason=${err.reason} message=${err.message}`);
+  throw Object.assign(new Error(err.message), { driveError: err, operation });
+}
+
 export const APP_FOLDER = "EdgeBook";
 export const SUBFOLDERS = ["trades", "journals", "screenshots", "challenges", "exports"] as const;
 
@@ -120,10 +147,12 @@ export async function createFolder(accessToken: string, name: string, parentId: 
 }
 
 /** Locate or create a folder — reuse before create, never duplicates. */
-export async function ensureFolder(accessToken: string, name: string, parentId: string | null, fetchImpl?: typeof fetch): Promise<string | null> {
+export async function ensureFolder(accessToken: string, name: string, parentId: string | null, fetchImpl?: typeof fetch): Promise<string> {
   const existing = await findFolder(accessToken, name, parentId, fetchImpl);
   if (existing) return existing;
-  return createFolder(accessToken, name, parentId, fetchImpl);
+  const created = await createFolder(accessToken, name, parentId, fetchImpl);
+  if (!created) throw Object.assign(new Error(`Failed to create folder "${name}"`), { driveError: { status: 500, reason: "folder_create_failed", message: `Failed to create folder "${name}"` } });
+  return created;
 }
 
 export interface EdgeBookFolders {
@@ -136,14 +165,11 @@ export interface EdgeBookFolders {
 }
 
 /** Create/find the complete EdgeBook folder tree for a user. */
-export async function ensureAppFolders(accessToken: string, fetchImpl?: typeof fetch): Promise<EdgeBookFolders | null> {
+export async function ensureAppFolders(accessToken: string, fetchImpl?: typeof fetch): Promise<EdgeBookFolders> {
   const root = await ensureFolder(accessToken, APP_FOLDER, null, fetchImpl);
-  if (!root) return null;
   const result = { root } as Record<string, string>;
   for (const sub of SUBFOLDERS) {
-    const id = await ensureFolder(accessToken, sub, root, fetchImpl);
-    if (!id) return null;
-    result[sub] = id;
+    result[sub] = await ensureFolder(accessToken, sub, root, fetchImpl);
   }
   return result as unknown as EdgeBookFolders;
 }
@@ -156,7 +182,7 @@ export async function putFile(
   body: Blob | Buffer,
   mimeType: string,
   fetchImpl?: typeof fetch,
-): Promise<boolean> {
+): Promise<void> {
   const existing = await findFileId(accessToken, folderId, name, fetchImpl);
   const metadata = JSON.stringify({ name, parents: [folderId] });
   const form = new FormData();
@@ -168,7 +194,7 @@ export async function putFile(
     { method: existing ? "PATCH" : "POST", body: form },
     fetchImpl,
   );
-  return res.ok;
+  await assertOk(res, `putFile(${name})`);
 }
 
 async function findFileId(accessToken: string, folderId: string, name: string, fetchImpl?: typeof fetch): Promise<string | null> {
@@ -214,8 +240,8 @@ export async function readJournalDoc(accessToken: string, folders: EdgeBookFolde
   }
 }
 
-export async function writeJournalDoc(accessToken: string, folders: EdgeBookFolders, payload: unknown, fetchImpl?: typeof fetch): Promise<boolean> {
-  return putFile(accessToken, folders.journals, JOURNAL_FILE, Buffer.from(JSON.stringify(payload, null, 2)), "application/json", fetchImpl);
+export async function writeJournalDoc(accessToken: string, folders: EdgeBookFolders, payload: unknown, fetchImpl?: typeof fetch): Promise<void> {
+  await putFile(accessToken, folders.journals, JOURNAL_FILE, Buffer.from(JSON.stringify(payload, null, 2)), "application/json", fetchImpl);
 }
 
 /** Screenshot file naming — kept stable per image id. */

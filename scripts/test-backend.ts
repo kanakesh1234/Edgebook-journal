@@ -243,7 +243,8 @@ const payload = {
   dayLogs: [{ date: "2026-08-06", createdAt: 2 }],
   version: 2,
 };
-expect("journal write ok", await writeJournalDoc("token-a", foldersA!, payload, f), true);
+let journalWriteOk = true; try { await writeJournalDoc("token-a", foldersA!, payload, f); } catch { journalWriteOk = false; }
+expect("journal write ok", journalWriteOk, true);
 const readBack = (await readJournalDoc("token-a", foldersA!, f)) as typeof payload;
 expect("journal read matches", readBack?.entries?.[0]?.pnl, 22.5);
 expect("journal deep round-trip", {
@@ -255,7 +256,8 @@ expect("journal deep round-trip", {
 
 // Overwrite cycle — second write must fully replace first content
 const payload2 = { ...payload, entries: [{ ...payload.entries[0], pnl: 99 }] };
-expect("journal overwrite ok", await writeJournalDoc("token-a", foldersA!, payload2, f), true);
+let journalOverwriteOk = true; try { await writeJournalDoc("token-a", foldersA!, payload2, f); } catch { journalOverwriteOk = false; }
+expect("journal overwrite ok", journalOverwriteOk, true);
 const readBack2 = (await readJournalDoc("token-a", foldersA!, f)) as typeof payload;
 expect("journal overwrite read", readBack2?.entries?.[0]?.pnl, 99);
 
@@ -269,7 +271,8 @@ expect("user B cannot read user A screenshot", await getFile("token-b", foldersB
 expect("journal absent → null", await readJournalDoc("token-a", { root: "r", trades: "t", journals: "j-empty", screenshots: "s", challenges: "c", exports: "e" }, f), null);
 
 // Screenshot binary round-trip — exact bytes
-expect("screenshot write ok", await putFile("token-a", foldersA!.screenshots, "img-1.jpg", Buffer.from("jpegdata"), "image/jpeg", f), true);
+let screenshotWriteOk = true; try { await putFile("token-a", foldersA!.screenshots, "img-1.jpg", Buffer.from("jpegdata"), "image/jpeg", f); } catch { screenshotWriteOk = false; }
+expect("screenshot write ok", screenshotWriteOk, true);
 const blob = await getFile("token-a", foldersA!.screenshots, "img-1.jpg", f);
 expect("screenshot read ok", blob ? await blob.text() : null, "jpegdata");
 // Overwrite with different bytes → read returns new bytes
