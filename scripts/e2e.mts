@@ -249,12 +249,10 @@ async function clickByText(page: Page, selector: string, text: string) {
   /* ------------------------------ Trading Lab ---------------------------- */
   await page.goto(`${BASE}/lab`, { waitUntil: "networkidle0" });
   await expectText(page, "Trading Lab", "lab header");
-  await expectText(page, "Account & Risk", "lab risk parameters");
   await expectText(page, "First Trade — 6/6 required", "lab first trade section");
   await expectText(page, "Second Trade — 7/7 required", "lab second trade section");
   await expectText(page, "My Recorded Patterns", "lab recorded patterns");
   await expectText(page, "Trading Lab Knowledge", "lab knowledge section");
-  await expectText(page, "$75", "lab predefined risk limits");
   drainErrors(page, "lab");
 
   /* ------------------------------- MINATO ------------------------------- */
@@ -266,7 +264,7 @@ async function clickByText(page: Page, selector: string, text: string) {
   await clickByText(page, "button", "How am I doing?");
   await sleep(600);
   const minatoText = await page.evaluate(() => document.body.innerText);
-  const hasData = ["trades", "P&L", "process", "win rate", "adherence", "discipline", "score"].some(w => minatoText.toLowerCase().includes(w));
+  const hasData = ["trade", "process", "review", "pattern", "window", "hold", "rule", "plan"].some(w => minatoText.toLowerCase().includes(w));
   hasData ? ok("minato data-grounded reply") : fail("minato data-grounded reply");
   await page.click('button[aria-label="Close MINATO"]');
   await sleep(400);

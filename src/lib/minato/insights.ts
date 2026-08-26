@@ -2,8 +2,9 @@ import type { EdgeBookContext } from "./context";
 import { executionVerdict } from "./context";
 
 /* ------------------------------------------------------------------ */
-/*  Deterministic insights — computed from data, never invented.       */
-/*  MINATO stays quiet unless something here earns his attention.      */
+/*  MINATO insights — quiet by default, evidence-based when active.    */
+/*  No constant nagging. No discipline monitoring. No Telugu.          */
+/*  Only surfaces when there is meaningful, evidence-backed data.      */
 /* ------------------------------------------------------------------ */
 
 export type MinatoState = "idle" | "curious" | "warning" | "firm" | "proud" | "celebration" | "thinking";
@@ -11,90 +12,67 @@ export type MinatoState = "idle" | "curious" | "warning" | "firm" | "proud" | "c
 export interface Insight {
   id: string;
   state: MinatoState;
-  priority: number; // higher = more urgent
-  message: string; // Telugu-English, 1–3 sentences
+  priority: number;
+  message: string;
 }
 
 export function computeInsights(ctx: EdgeBookContext): Insight[] {
   const out: Insight[] = [];
-  const { discipline, adherence, stats, recurringPatterns, recentTrades } = ctx;
+  const { recentTrades } = ctx;
 
-  // 1. Missed journal discipline
-  if (discipline.missedDays > 0) {
+  // Only surface insights when there are enough reviewed trades to be meaningful.
+  const reviewedTrades = recentTrades.filter((e) => e.reviewStatus === "reviewed");
+  if (reviewedTrades.length < 3) return out;
+
+  // 1. Repeated patterns (3+ occurrences from actual reflection text)
+  const topPattern = ctx.recurringPatterns[0];
+  if (topPattern && topPattern.count >= 3) {
     out.push({
-      id: "missed-journal",
-      state: discipline.missedDays >= 3 ? "firm" : "warning",
+      id: `pattern-${topPattern.pattern}`,
+      state: "firm",
       priority: 80,
-      message:
-        `Orey, ${discipline.missedDays} trading ${discipline.missedDays === 1 ? "day" : "days"} journal cheyyaledu. ` +
-        `Traded day ayithe entry, lekapothe no-trade ani mark cheyyi. Process miss avvakudadhu bro.`,
+      message: `I've noticed "${topPattern.pattern}" in ${topPattern.count} of your recent trade reviews. Worth reviewing before your next entry.`,
     });
   }
 
-  // 2. Hard breaches in the last 7 days
-  if (adherence.breaches30 > 0 && adherence.recent[0]?.severity === "breach") {
-    const v = adherence.recent.find((x) => x.severity === "breach");
-    if (v) {
+  // 2. Rule violations across reviewed trades
+  const violated = reviewedTrades.filter((e) => {
+    const c = e.checklist;
+    if (!c) return false;
+    return [c.r1Time, c.r2Environment, c.r3LiquiditySweep, c.r4Manipulation, c.r5Target, c.r6Smt].some((i) => i?.answer === false);
+  });
+  if (violated.length >= 2) {
+    out.push({
+      id: "rule-violations",
+      state: "warning",
+      priority: 70,
+      message: `${violated.length} of your last ${reviewedTrades.length} reviewed trades had at least one checklist rule marked as broken.`,
+    });
+  }
+
+  // 3. Consistent improvement (recent trades all reviewed + followed plan)
+  const recent5 = reviewedTrades.slice(0, 5);
+  const allClean = recent5.length >= 3 && recent5.every((e) => e.review?.outcome?.followedPlan === true);
+  if (allClean) {
+    out.push({
+      id: "consistent-execution",
+      state: "proud",
+      priority: 60,
+      message: `Your last ${recent5.length} reviewed trades all followed the plan. That's the kind of consistency that compounds.`,
+    });
+  }
+
+  // 4. Significant drawdown
+  if (ctx.stats.drawdown > 0 && ctx.stats.tradingDays > 0) {
+    const ddPct = ctx.stats.tradingDays > 0 ? Math.round((ctx.stats.drawdown / Math.max(1, ctx.stats.tradingDays * 100)) * 100) : 0;
+    if (ddPct >= 5) {
       out.push({
-        id: "recent-breach",
+        id: "drawdown",
         state: "warning",
-        priority: 75,
-        message: `Recent ga "${v.ruleLabel}" break ayyindhi — ${v.detail} Result entho le, process matter.`,
+        priority: 65,
+        message: `You're in a ${ddPct}% drawdown from your peak equity. Consider reducing size or taking a break until your setup re-aligns.`,
       });
     }
-  }
-
-  // 3. Repeated pattern from actual reflections
-  const top = recurringPatterns[0];
-  if (top && top.count >= 2) {
-    out.push({
-      id: `pattern-${top.pattern}`,
-      state: top.count >= 3 ? "firm" : "warning",
-      priority: 60 + top.count,
-      message:
-        `I've noticed — recent reviews lo "${top.pattern}" pattern ${top.count} sarlu kanipisthundi. ` +
-        `Same mistake malli avvakunda next entry mundu oka line reminder pettuko bro.`,
-    });
-  }
-
-  // 4. Recent trades without reflection
-  const unreflected = recentTrades.filter((e) => executionVerdict(e) === "unreflected").length;
-  if (unreflected > 0) {
-    out.push({
-      id: "missing-reflection",
-      state: "curious",
-      priority: 40,
-      message:
-        `${unreflected} recent ${unreflected === 1 ? "trade" : "trades"} ki reflection ledu. ` +
-        `2 minutes pettu bro — review is the edge.`,
-    });
-  }
-
-  // 5. Milestone proximity
-  if (stats.remainingToTarget > 0 && stats.targetProgress > 0.75) {
-    out.push({
-      id: "milestone-close",
-      state: "celebration",
-      priority: 30,
-      message: `Target ki ${Math.round(stats.targetProgress * 100)}% reach ayyav. Last stretch lo discipline loose cheyyaku.`,
-    });
-  }
-
-  // 6. Clean streak / proud
-  if (discipline.disciplineStreak >= 5) {
-    out.push({
-      id: "clean-streak",
-      state: "proud",
-      priority: 35,
-      message: `Super ra. ${discipline.disciplineStreak} days clean discipline. Profit kanna important — consistency. Ilaane continue cheyyali.`,
-    });
-  } else if (adherence.cleanDayRate >= 0.9 && adherence.tradingDays30 >= 5) {
-    out.push({
-      id: "high-adherence",
-      state: "proud",
-      priority: 30,
-      message: `Last 30 days adherence ${Math.round(adherence.cleanDayRate * 100)}%. Clean execution ra. Nice.`,
-    });
   }
 
   return out.sort((a, b) => b.priority - a.priority);

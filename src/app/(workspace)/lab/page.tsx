@@ -138,25 +138,6 @@ export default function LabPage() {
         }
       />
 
-      {/* ACCOUNT & RISK */}
-      <Section title="Account & Risk" subtitle="The hard parameters of this execution period.">
-        <dl className="grid gap-px overflow-hidden rounded-control border border-line bg-line sm:grid-cols-2 lg:grid-cols-5">
-          {RISK_PARAMS.map(([label, value]) => (
-            <div key={label} className="bg-surface px-4 py-3.5">
-              <dt className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">{label}</dt>
-              <dd className="num mt-1 text-sm font-semibold text-ink">{value}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="mt-3 flex items-start gap-2 rounded-control border border-loss/25 bg-loss/[0.05] px-4 py-2.5 text-[12.5px] leading-relaxed text-ink">
-          <ShieldIcon className="mt-0.5 h-4 w-4 shrink-0 text-loss" />
-          <span>
-            <strong className="text-loss">Psychological rule:</strong> more than 3 trades in a day
-            constitutes an immediate psychological failure. Two planned trades. That is the plan.
-          </span>
-        </p>
-      </Section>
-
       {/* FIRST TRADE */}
       <Section title="First Trade — 6/6 required" subtitle="All six criteria confirmed YES. An incomplete setup is not an A+ setup.">
         <ol className="space-y-2">

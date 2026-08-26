@@ -1,28 +1,28 @@
 import type { EdgeBookContext, TradeReviewContext } from "./context";
+import { findSimilarTrades, histDate, strategyForEntry } from "./context";
 import { holdTimeStats, formatHold } from "../holdtime";
 import { timeWindowAnalytics } from "../time-patterns";
-import { executionVerdict, findSimilarTrades, histDate, strategyForEntry } from "./context";
 
 /* ------------------------------------------------------------------ */
-/*  MINATO SENSEI — deterministic persona responses                    */
-/*                                                                      */
-/*  Every statement is derived from recorded data. No fabrication:     */
-/*  if history has no match, he says so. He challenges behavior,       */
-/*  never the person. Telugu + English, natural mix.                   */
+/*  MINATO — English-only, analytical, evidence-based.                 */
+/*  No Telugu. No "bro". No constant nagging.                          */
+/*  Short conclusion → numbered findings → confidence note.            */
 /* ------------------------------------------------------------------ */
 
 export interface MinatoMessage {
   role: "buddy" | "user";
   text: string;
-  state?: string;
 }
 
 export const QUICK_PROMPTS = [
   "How am I doing?",
-  "What should I fix?",
-  "Review my last trade",
-  "Find similar trades",
-  "How's my discipline?",
+  "What is my best time window?",
+  "What is my average winning hold time?",
+  "What is my average losing hold time?",
+  "What patterns do you see?",
+  "What should I improve?",
+  "Am I following my plan?",
+  "Which setup works best?",
 ] as const;
 
 function money(n: number): string {
@@ -30,202 +30,193 @@ function money(n: number): string {
   return `${n < 0 ? "−" : "+"}$${abs}`;
 }
 
-/** Greeting when the panel opens — reflects the current reality. */
 export function greet(ctx: EdgeBookContext): string {
-  const name = ctx.userFirstName || "bro";
+  const name = ctx.userFirstName || "there";
   if (ctx.recentTrades.length === 0) {
-    return `Namaste ${name}. MINATO here. Journal empty ga undhi — first trade log cheyyi, appudu nenu watch cheyyadam start chestha.`;
+    return `Welcome, ${name}. Your journal is empty — log or import a trade and I'll start analyzing your process.`;
   }
-  if (ctx.discipline.missedDays > 0) {
-    return `Namaste ${name}. ${ctx.discipline.missedDays} missed journals unnayi kada... adhi fix cheddam. Adigite adugu.`;
+  const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
+  if (unreviewed > 3) {
+    return `Hello, ${name}. You have ${unreviewed} trades awaiting review. Completing those will give me enough data to identify patterns.`;
   }
-  if (ctx.adherence.breaches30 > 0) {
-    return `Namaste ${name}. Recent ga oka few rule breaks kanipisthunnayi. Let's see what happened.`;
-  }
-  return `Namaste ${name}. Sab bagundi — ${Math.round(ctx.adherence.cleanDayRate * 100)}% clean days last 30 lo. Em help kavali?`;
+  return `Hello, ${name}. Ask me anything about your recorded trading data.`;
 }
 
-/** Trade review — compares intended (playbook) vs actual (reflection). */
-export function reviewTrade(ctx: EdgeBookContext, t: TradeReviewContext): string {
-  const { entry, strategy } = t;
-  const verdict = executionVerdict(entry);
-  const setupName = entry.setup || (strategy ? strategy.name : "");
-  const parts: string[] = [];
-
-  if (!setupName && !strategy) {
-    parts.push(`Ee trade ki setup label ledu. Playbook lo define chesuko — appudu nenu proper ga review chestha.`);
-  } else {
-    parts.push(`${setupName} — ${histDate(entry)}, ${money(entry.pnl)}${entry.rr != null ? `, ${entry.rr}R` : ""}.`);
-  }
-
-  switch (verdict) {
-    case "clean-win":
-      parts.push("Profit + rules followed. Clean execution ra. Idi repeat cheyyali, luck kaadu.");
-      break;
-    case "profitable-but-sloppy":
-      parts.push(
-        "Profit vachindhi... kani result ni chusi execution ignore cheyyaku. " +
-          (entry.reflection?.followedSetup === false ? "Setup follow avvale." : "Risk rules respect avvale.") +
-          " Next time adhi hit avvochu.",
-      );
-      break;
-    case "valid-loss":
-      parts.push("Loss ayyindhi, but setup and risk rules follow ayyayi. This is a valid loss — market always mana side lo undadu.");
-      break;
-    case "loss-and-sloppy":
-      parts.push(
-        "Loss + rules broken — idi execution problem bro, strategy problem kaadu. " +
-          (entry.reflection?.cause ? `Nuvve cheppav: "${entry.reflection.cause}".` : "") +
-          " Next trade mundu reset avvu.",
-      );
-      break;
-    case "unreflected":
-      parts.push("Reflection ivvaledu ee trade ki. What went well, what caused this — quick ga fill cheyyi, appudu nenu honest ga review chestha.");
-      break;
-  }
-
-  if (strategy?.entryConditions && verdict.includes("sloppy")) {
-    parts.push(`Playbook prakaaram: ${strategy.entryConditions.split("\n")[0]} — confirmation kosam wait cheyyali ani rule kada?`);
-  }
-  return parts.filter(Boolean).join(" ");
-}
-
-/** Historical lookup — real records only, DD/MM/YYYY dates. */
-export function findSimilar(ctx: EdgeBookContext, setupName?: string): string {
-  const name = setupName ?? ctx.focus?.entry.setup ?? ctx.recentTrades.find((e) => e.setup)?.setup;
-  if (!name) {
-    return "Setup label ledu ee trade ki. Named setup ayithe similar history search chestha.";
-  }
-  const probe = ctx.recentTrades.find((e) => e.setup.toLowerCase() === name.toLowerCase()) ?? {
-    id: "probe", date: "", pnl: 0, rr: null, instrument: "—", direction: null,
-    setup: name, notes: "", images: [], createdAt: 0, updatedAt: 0,
-  };
-  const matches = findSimilarTrades(probe, ctx.recentTrades);
-  if (matches.length === 0) {
-    return `"${name}" ki similar trade dorakaledu in your recorded history. Nenu invent cheyyanu bro.`;
-  }
-  const wins = matches.filter((m) => m.pnl > 0).length;
-  const top = matches.slice(0, 3).map((m) => `${histDate(m)} (${money(m.pnl)})`).join(", ");
-  return (
-    `"${name}" — ${matches.length} recorded ${matches.length === 1 ? "trade" : "trades"} dorikindi: ${top}. ` +
-    `${wins}/${matches.length} green. ${matches.length < 5 ? "Small sample — pattern worth reviewing, conclusion kaadu." : ""}`
-  ).trim();
-}
-
-/** Route a user utterance to a deterministic answer. */
 export function respond(ctx: EdgeBookContext, input: string): string {
   const q = input.toLowerCase();
   const { stats, discipline, adherence } = ctx;
 
+  // --- Overview / performance ---
   if (/how am i|doing|overall|performance|summary/.test(q)) {
-    return (
-      `Equity ${money(stats.totalPnl)} (${stats.tradingDays} trading days). ` +
-      `Adherence ${Math.round(adherence.cleanDayRate * 100)}%, discipline streak ${discipline.disciplineStreak} days, ` +
-      `${adherence.violations30} violations last 30. ` +
-      (adherence.cleanDayRate >= 0.8
-        ? "Process solid ga undhi bro — profit follow avthundi."
-        : "Process loose ga undhi konchem — profit kanna process first.")
-    );
-  }
-
-  if (/fix|improve|wrong|mistake|problem/.test(q)) {
-    const pattern = ctx.recurringPatterns[0];
-    if (pattern) {
-      return `Okate pattern focus cheyyi: "${pattern.pattern}" — ${pattern.count} sarlu recent reviews lo. ` +
-        `Anni okate sari fix cheyyalem. Next week idi okate target.`;
+    const parts: string[] = [];
+    parts.push(`Across ${stats.tradingDays} trading days, your net P&L is ${money(stats.totalPnl)} with a ${Math.round(stats.winRate * 100)}% win rate.`);
+    if (adherence.cleanDayRate != null) {
+      parts.push(`\n1. Clean-plan days: ${Math.round(adherence.cleanDayRate * 100)}%`);
+      parts.push(`2. Average day P&L: ${money(stats.avgDayPnl)}`);
+      parts.push(`3. Max drawdown: ${money(stats.drawdown)}`);
     }
-    if (discipline.missedDays > 0) return `Mundhu simple thing: ${discipline.missedDays} missed journals. Journaling fix aithe chala clear avthundi bro.`;
-    const v = adherence.recent.find((x) => x.severity !== undefined);
-    if (v) return `Ee rule meeda focus pettu: "${v.ruleLabel}" — ${v.detail}`;
-    return "Prastutham peedha em kanipisthledu bro. Records clean. Consistency ne continue cheyyi.";
+    if (stats.totalPnl > 0 && adherence.cleanDayRate != null && adherence.cleanDayRate >= 0.7) {
+      parts.push(`\nYour process and results are both solid. Keep following your plan.`);
+    } else if (adherence.cleanDayRate != null && adherence.cleanDayRate < 0.5) {
+      parts.push(`\nYour plan adherence is below 50%. Improving that would likely improve your results.`);
+    }
+    return parts.join("\n");
   }
 
-  if (/review|last trade|check.*trade/.test(q)) {
-    const focus = ctx.focus?.entry ?? ctx.recentTrades[0];
-    if (!focus) return "Inka trades log avvaledu. First trade pettu, review cheddam.";
-    const t = ctx.focus ?? { entry: focus, strategy: strategyForEntry(focus, ctx.playbook), violations: [] };
-    return reviewTrade(ctx, t);
-  }
-
-  if (/similar|history|same setup|last time|eppudu/.test(q)) {
-    return findSimilar(ctx);
-  }
-
-  if (/discipline|streak|xp|journal streak/.test(q)) {
-    return (
-      `Discipline streak ${discipline.disciplineStreak} days, completion ${Math.round(discipline.completionRate * 100)}%. ` +
-      `${discipline.noTradeDays} no-trade days marked, ${discipline.missedDays} missed. ` +
-      (discipline.missedDays === 0 ? "Idi bagundi bro — every trading day has an outcome." : "Missed days fix cheyyi bro.")
-    );
-  }
-
-  if (/rule|lab|playbook|strategy/.test(q)) {
-    return (
-      `${ctx.activeRules.length} active rules unnayi, playbook lo ${ctx.playbook.length} setups. ` +
-      (ctx.adherence.violations30 > 0
-        ? `Last 30 lo ${ctx.adherence.violations30} violations — violation log check cheyyi Lab lo.`
-        : "Rules anni hold avthunnayi recent ga. Good.")
-    );
-  }
-
-  if (/milestone|target/.test(q)) {
-    return stats.remainingToTarget <= 0
-      ? "Target reached ra! Settings lo bigger target pettu, journey continue."
-      : `Target ki ${money(stats.remainingToTarget)} to go (${Math.round(stats.targetProgress * 100)}% done). Pace bagundi, rush avvaku.`;
-  }
-
+  // --- Hold time ---
   if (/hold|how long|duration/.test(q)) {
     const holds = holdTimeStats(ctx.recentTrades);
-    if (holds.sampleSize === 0) return "Entry/exit times not recorded yet bro. Add times to your trades and I'll calculate hold durations.";
-    return (
-      `Winning trades: avg ${formatHold(holds.avgWinMin)}, median ${formatHold(holds.medianWinMin)}, longest ${formatHold(holds.longestWinMin)}. ` +
-      `Losing trades: avg ${formatHold(holds.avgLossMin)}, median ${formatHold(holds.medianLossMin)}, shortest ${formatHold(holds.shortestLossMin)}. ` +
-      `(${holds.sampleSize} trades with timestamps)`
-    );
+    if (holds.sampleSize === 0) return "No entry/exit times recorded yet. Add timestamps to your trades and I'll calculate hold durations.";
+    const parts: string[] = [];
+    parts.push(`Hold time analysis (${holds.sampleSize} trades with timestamps):`);
+    parts.push(`1. Average winning hold: ${formatHold(holds.avgWinMin)}`);
+    parts.push(`2. Average losing hold: ${formatHold(holds.avgLossMin)}`);
+    parts.push(`3. Median winning hold: ${formatHold(holds.medianWinMin)}`);
+    parts.push(`4. Median losing hold: ${formatHold(holds.medianLossMin)}`);
+    parts.push(`5. Longest winning hold: ${formatHold(holds.longestWinMin)}`);
+    parts.push(`6. Shortest losing hold: ${formatHold(holds.shortestLossMin)}`);
+    if (holds.avgWinMin != null && holds.avgLossMin != null && holds.avgWinMin < holds.avgLossMin) {
+      parts.push(`\nYou're cutting winners shorter than losers — a common discipline leak worth watching.`);
+    } else if (holds.avgWinMin != null && holds.avgLossMin != null) {
+      parts.push(`\nYou're letting winners run longer than losers. That's healthy discipline.`);
+    }
+    return parts.join("\n");
   }
 
+  // --- Time windows ---
+  if (/best time|worst time|best window|worst window|time window|best session|when.*best|when.*worst|perform best|perform worst|time.*perform/.test(q)) {
+    const tw = timeWindowAnalytics(ctx.recentTrades);
+    if (tw.sparse) return `Only ${tw.totalSample} trades with timestamps recorded — not enough data to identify a reliable time window yet.`;
+    const best = tw.bestWinRate;
+    const worst = tw.worstWinRate;
+    if (!best && !worst) return "No clear time pattern emerged from your recorded trades.";
+    const parts: string[] = [];
+    if (best) {
+      parts.push(`Your strongest recorded window is ${best.label}.`);
+      parts.push(`\n1. Trades: ${best.trades}`);
+      parts.push(`2. Win rate: ${best.winRate ?? "—"}%`);
+      parts.push(`3. Average R: ${best.avgR != null ? `${best.avgR >= 0 ? "+" : ""}${best.avgR}R` : "—"}`);
+      parts.push(`4. Average P&L: ${money(best.avgPnl)}`);
+      parts.push(`5. Sample: ${best.trades} trades`);
+    }
+    if (worst && worst.label !== best?.label) {
+      parts.push(`\nWeakest window: ${worst.label} — ${worst.winRate ?? "—"}% win rate across ${worst.trades} trades.`);
+    }
+    parts.push(`\n${best && best.trades >= 10 ? "Sample size is reasonable." : "Sample is still developing — treat this as directional, not definitive."}`);
+    return parts.join("\n");
+  }
+
+  // --- Highest RR window ---
+  if (/highest.*rr|rr.*window|rr.*best/.test(q)) {
+    const tw = timeWindowAnalytics(ctx.recentTrades);
+    const byR = [...tw.windows].filter((w) => w.avgR != null && w.trades >= 2).sort((a, b) => (b.avgR ?? 0) - (a.avgR ?? 0));
+    if (byR.length === 0) return "No R-multiple data available for time window analysis yet. Tag R values on your trades.";
+    const top = byR[0];
+    const topR = top.avgR ?? 0;
+    return `Your highest-RR window is ${top.label}.\n\n1. Average R: ${topR >= 0 ? "+" : ""}${topR}R\n2. Trades: ${top.trades}\n3. Win rate: ${top.winRate ?? "—"}%\n4. Total R: ${top.totalR != null ? `${top.totalR >= 0 ? "+" : ""}${top.totalR}R` : "—"}\n\nSample size: ${top.trades}. ${top.trades >= 10 ? "Reasonable confidence." : "Early signal — more data needed."}`;
+  }
+
+  // --- Patterns ---
   if (/pattern|recurring|same mistake/.test(q)) {
     const pats = ctx.recurringPatterns;
-    if (pats.length === 0) return "No recurring patterns detected yet bro. Keep reviewing — patterns surface after at least two occurrences.";
-    const top = pats[0];
-    return `I've noticed "${top.pattern}" appeared ${top.count} times in your recent reviews. ${pats[1] ? `Also "${pats[1].pattern}" (${pats[1].count}×). ` : ""}Worth reviewing before your next entry.`;
+    if (pats.length === 0) return "No recurring patterns detected yet. Patterns surface after at least two occurrences in your reviews.";
+    const parts: string[] = [`Detected ${pats.length} recurring ${pats.length === 1 ? "pattern" : "patterns"}:`];
+    pats.forEach((p, i) => {
+      parts.push(`${i + 1}. ${p.pattern} — ${p.count} occurrences`);
+    });
+    parts.push(`\nThese are based on your recorded reflections. Review the evidence in each trade for details.`);
+    return parts.join("\n");
   }
 
-  if (/best time|worst time|best window|time window|best session|when.*best|when.*worst|highest.*rr|rr.*window|perform best|perform worst|best.*window|worst.*window/.test(q)) {
-    const tw = timeWindowAnalytics(ctx.recentTrades);
-    if (tw.sparse) return `Only ${tw.totalSample} trades with timestamps recorded — not enough data to identify a reliable time window yet bro.`;
-    const best = tw.bestWinRate;
-    const bestR = tw.bestAvgR;
-    if (!best && !bestR) return "No clear time pattern emerged from your recorded trades.";
-    const parts: string[] = [];
-    if (best) parts.push(`Your strongest window is ${best.label}: ${best.trades} trades, ${best.winRate}% win rate${best.avgR != null ? `, ${best.avgR >= 0 ? "+" : ""}${best.avgR}R avg` : ""}.`);
-    if (bestR && bestR !== best) parts.push(`Highest-RR window: ${bestR.label} (${bestR.avgR}R avg, ${bestR.trades} trades).`);
-    parts.push(`Sample is ${tw.sparse ? "still small" : "reasonable"} — keep recording.`);
+  // --- Concepts ---
+  if (/concept/.test(q)) {
+    const concepts = [...new Set(ctx.recentTrades.flatMap((e) => e.review?.concepts?.used ?? []))];
+    if (concepts.length === 0) return "No concepts tagged yet. Tag them in the review flow — they help identify which ideas are working for you.";
+    return `Concepts you've been using: ${concepts.slice(0, 8).join(", ")}.`;
+  }
+
+  // --- Plan vs actual ---
+  if (/plan.*actual|deviat|followed.*plan|following.*plan|am i following/.test(q)) {
+    const linked = ctx.recentTrades.filter((e) => e.planId);
+    const followed = linked.filter((e) => e.review?.outcome?.followedPlan === true).length;
+    if (linked.length === 0) return "No trades linked to plans yet. Create a plan first, then link it when you execute.";
+    return `Plan adherence: ${followed} of ${linked.length} plan-linked trades followed the plan (${Math.round((followed / linked.length) * 100)}%).\n${followed === linked.length ? "Clean execution across the board." : "Check the deviations in each trade review for specifics."}`;
+  }
+
+  // --- Discipline ---
+  if (/discipline|streak|journal streak/.test(q)) {
+    return `Discipline streak: ${discipline.disciplineStreak} days. Completion rate: ${Math.round(discipline.completionRate * 100)}%. ${discipline.missedDays > 0 ? `${discipline.missedDays} missed journal days.` : "No missed journal days."}`;
+  }
+
+  // --- Rules ---
+  if (/rule|violate|violation/.test(q)) {
+    const ruleViolations = ctx.recentTrades.filter((e) => {
+      const c = e.checklist;
+      if (!c) return false;
+      const items = [c.r1Time?.answer, c.r2Environment?.answer, c.r3LiquiditySweep?.answer, c.r4Manipulation?.answer, c.r5Target?.answer, c.r6Smt?.answer];
+      return items.some((a) => a === false);
+    });
+    if (ruleViolations.length === 0) return "No rule violations detected in your reviewed trades.";
+    return `${ruleViolations.length} trades with rule violations detected. Check the Trading Lab for the specific rules that were broken.`;
+  }
+
+  // --- Trade review ---
+  if (/review|last trade|autopsy/.test(q)) {
+    const focus = ctx.focus?.entry ?? ctx.recentTrades[0];
+    if (!focus) return "No trades to review yet.";
+    const verdict = executionVerdict(focus);
+    const setupName = focus.setup || "Unnamed";
+    const parts: string[] = [`Last trade: ${setupName} — ${histDate(focus)}, ${money(focus.pnl)}${focus.rr != null ? `, ${focus.rr}R` : ""}.`];
+    switch (verdict) {
+      case "clean-win":
+        parts.push("Profit + rules followed. Clean execution — repeat this process.");
+        break;
+      case "profitable-but-sloppy":
+        parts.push("Profitable, but execution deviated from the plan. Don't let the result mask the process gap.");
+        break;
+      case "valid-loss":
+        parts.push("Loss, but setup and risk rules were followed. This is a valid loss — the market doesn't always cooperate.");
+        break;
+      case "loss-and-sloppy":
+        parts.push("Loss + rules broken. This is an execution issue, not a strategy issue.");
+        break;
+      case "unreflected":
+        parts.push("No review recorded for this trade. Complete the autopsy to unlock pattern analysis.");
+        break;
+    }
     return parts.join(" ");
   }
 
-  if (/cut.*winner|hold.*loser|hold.*win|hold.*loss|early.*exit.*winner/.test(q)) {
-    const holds = holdTimeStats(ctx.recentTrades);
-    if (holds.avgWinMin == null || holds.avgLossMin == null) return "Need more trades with entry/exit times to compare winner vs loser hold durations.";
-    if (holds.avgWinMin < holds.avgLossMin) {
-      return `You're cutting winners short (avg ${formatHold(holds.avgWinMin)}) compared to losers (avg ${formatHold(holds.avgLossMin)}). That's a classic discipline leak — let winners breathe.`;
-    }
-    return `Winners held ${formatHold(holds.avgWinMin)} vs losers ${formatHold(holds.avgLossMin)} — you're letting winners run. Good discipline.`;
+  // --- Similar trades ---
+  if (/similar|history|same setup/.test(q)) {
+    const name = ctx.focus?.entry.setup ?? ctx.recentTrades.find((e) => e.setup)?.setup;
+    if (!name) return "No setup label found. Tag your trades with a setup name to enable historical comparison.";
+    const matches = ctx.recentTrades.filter((e) => e.setup.toLowerCase() === name.toLowerCase());
+    if (matches.length <= 1) return `No other recorded trades match "${name}" yet.`;
+    const wins = matches.filter((e) => e.pnl > 0).length;
+    return `"${name}" — ${matches.length} recorded trades. ${wins}/${matches.length} profitable. Combined P&L: ${money(matches.reduce((s, e) => s + e.pnl, 0))}.`;
   }
 
-  if (/concept/.test(q)) {
-    const concepts = [...new Set(ctx.recentTrades.flatMap((e) => e.review?.concepts?.used ?? []))];
-    if (concepts.length === 0) return "No concepts tagged yet bro. Tag them in the review flow — they help me spot what's working.";
-    return `Concepts you've been using: ${concepts.slice(0, 6).join(", ")}. ${concepts.length > 6 ? `+${concepts.length - 6} more.` : ""}`;
+  // --- Improve ---
+  if (/improve|fix|better/.test(q)) {
+    const pattern = ctx.recurringPatterns[0];
+    if (pattern) return `Focus on one thing: "${pattern.pattern}" — it appeared ${pattern.count} times in your recent reviews. Fixing one pattern at a time is more effective than trying to change everything.`;
+    if (discipline.missedDays > 0) return `Start with the basics: ${discipline.missedDays} missed journal days. Completing those builds the data I need to help you.`;
+    return "Your recorded data doesn't show a clear weakness yet. Keep logging trades and I'll identify patterns as they emerge.";
   }
 
-  if (/plan vs actual|deviat|followed.*plan|following.*plan|am i following/.test(q)) {
-    const linked = ctx.recentTrades.filter((e) => e.planId);
-    const followed = linked.filter((e) => e.review?.outcome?.followedPlan === true).length;
-    if (linked.length === 0) return "No trades linked to plans yet bro. Plan a trade first, then link it when you execute.";
-    return `${followed} of ${linked.length} plan-linked trades followed the plan. ${followed === linked.length ? "Clean execution ra." : "Check the deviations in each trade review."}`;
-  }
-
-  // Honest fallback — no fabrication, no pretending to be a full LLM.
-  return "Full brain connect avvaledu yet bro — ippudu nenu recorded data meeda matrame matlautanu. Try cheyyi: \"How am I doing?\", \"Review my last trade\", leda \"Find similar trades\".";
+  // --- Fallback ---
+  return `I can answer questions about your recorded trades — hold times, time windows, patterns, rule adherence, plan vs actual, and concepts. What would you like to know?`;
 }
+
+function executionVerdict(entry: EdgeBookContext["recentTrades"][number]): string {
+  const r = entry.reflection;
+  if (!r || (r.followedSetup === null && r.followedRisk === null)) return "unreflected";
+  const brokeRules = r.followedSetup === false || r.followedRisk === false;
+  if (entry.pnl > 0) return brokeRules ? "profitable-but-sloppy" : "clean-win";
+  if (entry.pnl < 0) return brokeRules ? "loss-and-sloppy" : "valid-loss";
+  return brokeRules ? "loss-and-sloppy" : "valid-loss";
+}
+
+// Keep existing exports for compatibility
+export { findSimilarTrades, histDate, strategyForEntry };
