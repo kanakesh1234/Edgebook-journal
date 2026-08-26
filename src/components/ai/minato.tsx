@@ -128,7 +128,7 @@ export function Minato() {
         const res = await fetch("/api/minato/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: next }),
+          body: JSON.stringify({ messages: next, entries: useApp.getState().entries }),
         });
         if (res.ok) {
           const json = (await res.json()) as { text?: string; fallback?: boolean };

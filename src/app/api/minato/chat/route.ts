@@ -9,7 +9,6 @@ import { holdTimeStats, formatHold } from "@/lib/holdtime";
 import { detectPatterns, matchPlanToPatterns } from "@/lib/minato/patterns";
 import { respond, greet, type MinatoMessage } from "@/lib/minato/respond";
 import { processScore } from "@/lib/competence";
-import { timeWindowAnalytics } from "@/lib/time-patterns";
 import { getOpenRouterConfig, type OpenRouterConfig } from "@/lib/services/ai";
 
 export const dynamic = "force-dynamic";
@@ -46,50 +45,60 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 export async function POST(request: Request) {
+  // Parse body first — local users send entries in the body
+  const body = (await request.json().catch(() => ({}))) as {
+    messages?: MinatoMessage[];
+    entries?: Record<string, unknown>[];
+  };
+  const messages = body.messages ?? [];
+  const clientEntries = body.entries ?? [];
+  const question = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
+
+  // Session resolution — Google session or local (client-provided entries)
   const config = getGoogleConfig();
   const cookie = readCookie(request, APP_SESSION_COOKIE);
   const session = config && cookie ? openAppSession(cookie, config.tokenSecret) : null;
-  if (!session) {
-    return NextResponse.json({ fallback: true, text: null });
-  }
 
-  const body = (await request.json().catch(() => ({}))) as { messages?: MinatoMessage[] };
-  const messages = body.messages ?? [];
-  const question = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
+  const traderName = session?.name.split(" ")[0] ?? "Trader";
 
-  if (rateLimited(session.email)) {
+  if (rateLimited(session?.email ?? "local")) {
     return NextResponse.json({ error: "rate_limited", text: "Easy bro — ask again in a bit." }, { status: 429 });
   }
 
-  // ---- Load the authenticated user's persisted journal (their Drive) ----
-  const account = getAccount(session.email);
-  const secret = process.env.GOOGLE_TOKEN_SECRET ?? config?.clientSecret ?? "";
-  const refreshToken = account ? accountRefreshToken(account, secret) : null;
-  let entries: Record<string, unknown>[] = [];
-  if (config && refreshToken && account?.folderId) {
-    const accessToken = await fetchAccessToken(refreshToken, config.clientId, config.clientSecret);
-    if (accessToken) {
-      const doc = (await readJournalDoc(accessToken, {
-        root: account.folderId, trades: account.folderId, journals: account.folderId,
-        screenshots: account.folderId, challenges: account.folderId, exports: account.folderId,
-      })) as { entries?: Record<string, unknown>[] } | null;
-      entries = doc?.entries ?? [];
+  // ---- Load journal data ----
+  // Google session → read from Drive (authoritative)
+  // Local session → use client-provided entries
+  let entries: Record<string, unknown>[] = clientEntries;
+  if (session) {
+    const account = getAccount(session.email);
+    const secret = process.env.GOOGLE_TOKEN_SECRET ?? config?.clientSecret ?? "";
+    const refreshToken = account ? accountRefreshToken(account, secret) : null;
+    if (config && refreshToken && account?.folderId) {
+      const accessToken = await fetchAccessToken(refreshToken, config.clientId, config.clientSecret);
+      if (accessToken) {
+        const doc = (await readJournalDoc(accessToken, {
+          root: account.folderId, trades: account.folderId, journals: account.folderId,
+          screenshots: account.folderId, challenges: account.folderId, exports: account.folderId,
+        })) as { entries?: Record<string, unknown>[] } | null;
+        entries = doc?.entries ?? entries;
+      }
     }
   }
 
-  // ---- Deterministic facts ----
+  if (entries.length === 0) {
+    return NextResponse.json({ text: "Journal is empty bro — log or import a trade first and I'll have real data to work with." });
+  }
+
+  // ---- Deterministic facts (backend-computed, hallucination-proof) ----
   const stats = computeStats(entries as never, {
-    traderName: session.name, startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1000, currency: "USD",
+    traderName: traderName, startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1000, currency: "USD",
   });
   const holds = holdTimeStats(entries as never);
   const patterns = detectPatterns(entries as never);
   const proc = processScore(entries as never, []);
 
   const concepts = [...new Set(
-    (entries as Record<string, unknown>[]).flatMap((e) => {
-      const r = e.review as { concepts?: { used?: string[] } } | undefined;
-      return r?.concepts?.used ?? [];
-    }),
+    (entries as { review?: { concepts?: { used?: string[] } } }[]).flatMap((e) => e.review?.concepts?.used ?? []),
   )];
 
   const plans = (entries as { planId?: string }[]).filter((e) => e.planId);
@@ -97,7 +106,7 @@ export async function POST(request: Request) {
     .filter((e) => e.planId && e.review?.outcome?.followedPlan === true).length;
 
   const facts = {
-    trader: session.name.split(" ")[0],
+    trader: traderName,
     trades: stats.tradingDays,
     totalPnl: Math.round(stats.totalPnl),
     winRatePct: Math.round(stats.winRate * 100),
@@ -118,17 +127,6 @@ export async function POST(request: Request) {
       label: p.label, count: p.count, confidence: p.confidence, improving: p.improving,
       evidence: p.evidence.slice(0, 3).map((ev) => ({ date: ev.date, excerpt: ev.excerpt })),
     })),
-    timeWindows: timeWindowAnalytics(entries as never).windows
-      .filter((w) => w.trades >= 2)
-      .slice(0, 6)
-      .map((w) => ({
-        window: w.label,
-        trades: w.trades,
-        winRatePct: w.winRate,
-        avgR: w.avgR,
-        totalPnl: w.totalPnl,
-        avgHold: w.avgHoldMin != null ? `${w.avgHoldMin}m` : null,
-      })),
     processScore: proc.score,
     reviewedCount: (entries as { reviewStatus?: string }[]).filter((e) => e.reviewStatus === "reviewed").length,
     conceptsUsed: concepts.slice(0, 10),
@@ -140,9 +138,9 @@ export async function POST(request: Request) {
   // ---- Deterministic answer path (always available) ----
   const deterministic = respond(
     {
-      userFirstName: session.name.split(" ")[0],
+      userFirstName: traderName,
       stats, discipline: { disciplineStreak: 0 } as never,
-      adherence: {} as never, recentTrades: [], focus: null, playbook: [], activeRules: [],
+      adherence: {} as never, recentTrades: entries as never, focus: null, playbook: [], activeRules: [],
       recurringPatterns: patterns.map((p) => ({ pattern: p.label, count: p.count })),
       privacy: { includeNotes: true },
     },
@@ -150,8 +148,9 @@ export async function POST(request: Request) {
   );
 
   const greetingText = greet({
-    userFirstName: session.name.split(" ")[0], stats, discipline: { disciplineStreak: 0 } as never,
-    adherence: {} as never, recentTrades: [], focus: null, playbook: [], activeRules: [],
+    userFirstName: traderName,
+    stats, discipline: { disciplineStreak: 0 } as never,
+    adherence: {} as never, recentTrades: entries as never, focus: null, playbook: [], activeRules: [],
     recurringPatterns: patterns.map((p) => ({ pattern: p.label, count: p.count })),
     privacy: { includeNotes: true },
   });
