@@ -88,9 +88,16 @@ export class GoogleDriveDataStore implements DataStore {
 
   async loadJournal(_userId: string): Promise<JournalPayload | null> {
     const res = await fetch("/api/drive/data", { cache: "no-store" });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { payload: JournalPayload | null };
-    return json.payload ?? null;
+    // 200 = file found (or new user with no file) — safe to proceed
+    if (res.ok) {
+      const json = (await res.json()) as { payload: JournalPayload | null };
+      return json.payload ?? null;
+    }
+    // 404 = file doesn't exist yet (new user) — same as null
+    if (res.status === 404) return null;
+    // Any other error (401, 502, network) = failed to read — DO NOT return null
+    // (that would cause the store to initialize with empty data and overwrite Drive)
+    throw new Error(`drive_read_failed:${res.status}`);
   }
 
   async saveJournal(_userId: string, payload: JournalPayload): Promise<void> {

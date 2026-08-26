@@ -44,7 +44,11 @@ export function useBootstrap() {
       }
 
       if (googleUser) {
-        setActiveStore(driveConnected ? new GoogleDriveDataStore() : new IdbDataStore());
+        // ALWAYS use the Drive store for Google-authenticated users.
+        // Falling back to IndexedDB causes data "disappearance" when the
+        // Drive token verification fails temporarily. The Drive store's
+        // error handling will surface connection issues to the user.
+        setActiveStore(new GoogleDriveDataStore());
         await init(googleUser);
         return;
       }

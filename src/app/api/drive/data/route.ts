@@ -19,6 +19,7 @@ export async function GET() {
     return NextResponse.json({ error: authed.error }, { status: authed.status });
   }
   const doc = await readJournalDoc(authed.drive.accessToken, authed.drive.folders);
+  if (doc == null) return NextResponse.json({ payload: null }, { status: 404 });
   return NextResponse.json({ payload: doc });
 }
 

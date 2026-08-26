@@ -56,9 +56,14 @@ function LoginView() {
   const driveMessage = driveParam ? DRIVE_MESSAGES[driveParam] : undefined;
 
   // Already signed in → straight to the journal
+  // OAuth callback success → also straight to the journal (skip login form)
   useEffect(() => {
+    if (driveParam === "connected") {
+      router.replace("/dashboard");
+      return;
+    }
     if (status === "authenticated") router.replace("/dashboard");
-  }, [status, router]);
+  }, [status, router, driveParam]);
 
   const validate = (): boolean => {
     const next: typeof errors = {};

@@ -90,17 +90,21 @@ export const useApp = create<AppState>((set, get) => ({
       set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
       return;
     }
-    const payload = (await dataStore.loadJournal(user.id)) ?? {
-      entries: [],
-      settings: defaultSettings(),
-    };
+    let payload: { entries?: JournalEntry[]; settings?: JournalSettings; dayLogs?: NoTradeLog[]; plans?: TradePlan[] } | null = null;
+    let loadError = false;
+    try {
+      payload = await dataStore.loadJournal(user.id);
+    } catch {
+      // Drive read failed — do NOT initialize with empty data (would overwrite Drive)
+      loadError = true;
+    }
     set({
       status: "authenticated",
       user,
-      entries: payload.entries ?? [],
-      settings: { ...defaultSettings(), ...payload.settings },
-      dayLogs: payload.dayLogs ?? [],
-      plans: payload.plans ?? [],
+      entries: loadError ? [] : payload?.entries ?? [],
+      settings: loadError ? defaultSettings() : { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      dayLogs: loadError ? [] : payload?.dayLogs ?? [],
+      plans: loadError ? [] : payload?.plans ?? [],
     });
   },
 
