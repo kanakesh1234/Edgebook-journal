@@ -178,8 +178,8 @@ export function getOpenRouterConfig(): OpenRouterConfig | null {
   if (!apiKey) return null;
   return {
     apiKey,
-    model: process.env.MINATO_MODEL ?? "meta-llama/llama-3.1-8b-instruct:free",
-    fallbackModel: process.env.MINATO_FALLBACK_MODEL ?? "google/gemini-2.0-flash-exp:free",
+    model: process.env.MINATO_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free",
+    fallbackModel: process.env.MINATO_FALLBACK_MODEL ?? "z-ai/glm-5.2:free",
     visionModel: process.env.MINATO_VISION_MODEL ?? "",
   };
 }
