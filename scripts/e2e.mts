@@ -240,20 +240,82 @@ async function clickByText(page: Page, selector: string, text: string) {
   await expectText(page, "Appearance", "settings appearance section");
   await expectText(page, "Export journal", "settings export tile");
   await expectText(page, "Profile", "settings profile section");
-  const hasDeleteAll = await page.evaluate(() => document.body.innerText.includes("Remove all entries"));
-  hasDeleteAll ? fail("settings delete-all removed") : ok("settings delete-all removed");
-  const hasConnectDrive = await page.evaluate(() => document.body.innerText.includes("Connect Google Drive"));
-  hasConnectDrive ? fail("settings connect-drive removed") : ok("settings connect-drive removed");
+  await expectText(page, "Full name", "settings full-name field");
+  await expectText(page, "Connection ID", "settings handle field");
+  // Full Name save updates the greeting on Home
+  await fill(page, "#settings-fullname", "Kanakeswara Rao Nandigam");
+  await clickByText(page, "button", "Save");
+  await sleep(700);
+  await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle0" });
+  await expectText(page, "Kanakeswara", "dashboard greeting uses Full Name");
+  await page.goto(`${BASE}/settings`, { waitUntil: "networkidle0" });
   drainErrors(page, "settings");
 
   /* ------------------------------ Trading Lab ---------------------------- */
   await page.goto(`${BASE}/lab`, { waitUntil: "networkidle0" });
   await expectText(page, "Trading Lab", "lab header");
-  await expectText(page, "First Trade — 6/6 required", "lab first trade section");
-  await expectText(page, "Second Trade — 7/7 required", "lab second trade section");
-  await expectText(page, "My Recorded Patterns", "lab recorded patterns");
-  await expectText(page, "Trading Lab Knowledge", "lab knowledge section");
-  drainErrors(page, "lab");
+  await expectText(page, "Setups", "lab playbook section");
+  // "My Recorded Patterns" was removed from the Lab (product decision) —
+  // the page must NOT contain it anymore.
+  const patternsGone = await page.evaluate(() => !document.body.innerText.toLowerCase().includes("my recorded patterns"));
+  patternsGone ? ok("lab recorded patterns removed") : fail("lab recorded patterns removed");
+  const removedOldLab = await page.evaluate(() =>
+    document.body.innerText.includes("First Trade — 6/6") ||
+    document.body.innerText.includes("Trading Lab Knowledge"),
+  );
+  !removedOldLab ? ok("lab old fixed sections removed") : fail("lab old fixed sections removed");
+
+  // Create a setup with two rules
+  await clickByText(page, "button", "New setup");
+  await sleep(500);
+  await fill(page, "#pb-name", "E2E VWAP Reclaim");
+  await clickByText(page, "button", "Add rule");
+  await sleep(300);
+  await fill(page, 'input[aria-label="Rule 1 text"]', "Price reclaims VWAP with conviction");
+  await clickByText(page, "button", "Add rule");
+  await sleep(300);
+  await fill(page, 'input[aria-label="Rule 2 text"]', "SMT divergence confirms");
+  await clickByText(page, "button[type=submit]", "Add to playbook");
+  await sleep(900);
+  await expectText(page, "E2E VWAP Reclaim", "setup card appears");
+
+  // Open the folder view
+  await clickByText(page, "button", "E2E VWAP Reclaim");
+  await sleep(600);
+  await expectText(page, "Price reclaims VWAP with conviction", "setup detail shows rule");
+  await expectText(page, "Associated trades", "setup detail shows trades section");
+  drainErrors(page, "lab-setup-crud");
+
+  /* ------------------------------ Challenges ----------------------------- */
+  await page.goto(`${BASE}/challenges`, { waitUntil: "networkidle0" });
+  await expectText(page, "Challenges", "challenges header");
+  const hasCreateChallenge = await page.evaluate(() => document.body.innerText.toLowerCase().includes("new challenge"));
+  hasCreateChallenge ? ok("challenges create CTA present") : fail("challenges create CTA present");
+
+  // Create a challenge → save → card appears immediately on this page
+  await clickByText(page, "button", "New challenge");
+  await sleep(500);
+  await fill(page, "#ch-name", "E2E August $10K→$11K");
+  await fill(page, "#ch-start", "10000");
+  await fill(page, "#ch-target", "11000");
+  await clickByText(page, "button[type=submit]", "Create challenge");
+  await sleep(900);
+  await expectText(page, "E2E August $10K→$11K", "challenge card appears after save");
+
+  // First challenge becomes primary automatically — otherwise make it primary explicitly.
+  const madePrimary = await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll("button"));
+    const b = btns.find((e) => (e.textContent ?? "").includes("Make primary"));
+    if (b) { (b as HTMLElement).click(); return true; }
+    return false;
+  });
+  await sleep(800);
+  const primaryBadge = await page.evaluate(() => document.body.innerText.toLowerCase().includes("primary"));
+  primaryBadge ? ok(`primary badge shown (${madePrimary ? "explicit" : "auto"})`) : fail("primary badge shown");
+  await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle0" });
+  await sleep(600);
+  await expectText(page, "E2E August $10K→$11K", "home hero shows primary challenge name");
+  drainErrors(page, "challenges-primary-flow");
 
   /* ------------------------------- MINATO ------------------------------- */
   await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle0" });

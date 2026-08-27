@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
 import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
-import { getAccount } from "@/lib/server/accounts";
+import { getAccount, findByHandle } from "@/lib/server/accounts";
 import { friendEmails, findRecord, listFor, respond, sendRequest, terminate } from "@/lib/server/friends";
 import { publicMetricsFor } from "@/lib/server/metrics";
 
@@ -23,21 +23,24 @@ export async function GET(request: Request) {
 
   // Search by @handle — returns only handle + name, never email.
   if (searchHandle) {
-    const target = getAccount(searchHandle.toLowerCase().replace(/^@/, ""));
+    const target = findByHandle(searchHandle);
     if (!target || target.email === me) return NextResponse.json({ results: [] });
     return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name.split(" ")[0] }] });
   }
 
   const records = listFor(me);
   const pendingIncoming = [];
+  const pendingOutgoing = [];
   const friends = [];
 
   for (const r of records) {
     const otherEmail = r.from === me ? r.to : me;
     const direction = r.from === me ? "outgoing" : "incoming";
+    const acct = getAccount(otherEmail);
     if (r.status === "pending" && direction === "incoming") {
-      const acct = getAccount(otherEmail);
       pendingIncoming.push({ id: r.id, handle: acct?.handle, displayName: acct?.name?.split(" ")[0] ?? otherEmail });
+    } else if (r.status === "pending" && direction === "outgoing") {
+      pendingOutgoing.push({ id: r.id, handle: acct?.handle, displayName: acct?.name?.split(" ")[0] ?? otherEmail });
     } else if (r.status === "accepted") {
       const metrics = await publicMetricsFor(otherEmail);
       if (metrics) friends.push({ id: r.id, ...metrics });
@@ -45,7 +48,7 @@ export async function GET(request: Request) {
   }
 
   friends.sort((a, b) => b.processScore - a.processScore);
-  return NextResponse.json({ friends, pendingIncoming });
+  return NextResponse.json({ friends, pendingIncoming, pendingOutgoing });
 }
 
 /** POST — actions: request | respond | remove | block. */

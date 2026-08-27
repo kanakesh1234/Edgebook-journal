@@ -136,18 +136,27 @@ export function TradeReviewFlow({
   }, [open, entry]);
 
   const conceptSuggestions = ["Liquidity Sweep", "SMT", "PD Array", "Displacement", "Market Structure", "Fair Value Gap", "Breaker Block", "Optimal Trade Entry"];
-  const items = useMemo(() => (entry?.checklist ?? checklist), [entry?.checklist, checklist]);
-  const score = checklistScore(entry?.checklist ?? checklist);
-  const stepLabels = ["Checklist", "Setup", "Execution", "Psychology", "Concepts", "Outcome", "Complete"];
+  // Pre-trade checklist is READ-ONLY evidence: canonical source first, legacy fallback.
+  const preTradeItems: { label: string; description?: string; confirmed: boolean }[] = useMemo(() => {
+    if (entry?.preTradeChecklist?.length) return entry.preTradeChecklist;
+    if (entry?.checklist) {
+      return checklistItems(entry.checklist).map(({ label, item }) => ({
+        label,
+        confirmed: item.answer === true,
+        description: undefined,
+      }));
+    }
+    return [];
+  }, [entry?.preTradeChecklist, entry?.checklist]);
+  const stepLabels = ["Pre-trade", "Setup", "Execution", "Psychology", "Concepts", "Outcome", "Complete"];
+  const preScore = {
+    confirmed: preTradeItems.filter((i) => i.confirmed).length,
+    required: preTradeItems.length,
+  };
 
   if (!entry) return null;
 
-  const canContinue = () => {
-    if (step === 0) return score.confirmed === score.required; // checklist must be complete to proceed
-    return true;
-  };
-
-  const buildChecklist = (): TradeChecklist => ({ ...checklist });
+  const canContinue = () => true;
 
   const save = async (status: "reviewed" | "in_progress" | "incomplete") => {
     setSaving(true);
@@ -160,7 +169,7 @@ export function TradeReviewFlow({
           targetDescription: targetDescription.trim() || undefined,
           manipulationIdentified: manipulationIdentified.trim() || undefined,
         },
-        checklist: buildChecklist(),
+        checklist: entry.checklist,
         execution: {
           whyEntered: whyEntered.trim() || undefined,
           planned,
@@ -200,7 +209,7 @@ export function TradeReviewFlow({
           processVerdict:
             badTradeDespiteWin === true
               ? "process-failure"
-              : goodTradeDespiteLoss === true || (followedPlan === true && score.confirmed === score.required)
+              : goodTradeDespiteLoss === true || (followedPlan === true && (preScore.required === 0 || preScore.confirmed === preScore.required))
                 ? "a-plus"
                 : followedPlan === false
                   ? "process-failure"
@@ -213,12 +222,12 @@ export function TradeReviewFlow({
         wentWell: wentWell.trim() || undefined,
         wentPoorly: wentPoorly.trim() || undefined,
         cause: cause.trim() || undefined,
-        followedSetup: followedSetup ?? (score.confirmed === score.required ? true : null),
+        followedSetup: followedSetup ?? (preScore.required === 0 || preScore.confirmed === preScore.required ? true : null),
         followedRisk: followedRisk ?? (movedStop === false && exitedEarly === false ? true : movedStop === true || exitedEarly === true ? false : null),
         lesson: lesson.trim() || undefined,
         updatedAt: Date.now(),
       };
-      await useApp.getState().saveTradeReview(entry.id, { review, checklist: buildChecklist(), reflection, reviewStatus: status });
+      await useApp.getState().saveTradeReview(entry.id, { review, reflection, reviewStatus: status });
       toast.success(
         status === "reviewed" ? "Review complete" : "Review progress saved",
         status === "reviewed" ? "Process noted — outcome is just data." : "Finish it from the trade review anytime.",
@@ -261,54 +270,41 @@ export function TradeReviewFlow({
         {/* Step body */}
         <div className="mt-6 min-h-[220px]">
           <AnimatePresence mode="wait" initial={false}>
-            {/* STEP 0 — checklist */}
+            {/* STEP 0 — pre-trade checklist: READ-ONLY historical evidence.
+                The canonical execution checklist is completed BEFORE the trade
+                in the Plan Trade flow and must never look post-trade here. */}
             {step === 0 && (
-              <StepShell key="checklist" title="Setup checklist" subtitle={`Trade #${checklist.tradeNumber} — ${score.required} / ${score.required} required. An incomplete setup is not an A+ setup.`}>
-                <div className="space-y-2">
-                  {checklistItems(checklist).map(({ id, label, item }) => (
-                    <ChecklistRow
-                      key={id}
-                      label={label}
-                      item={item}
-                      onChange={(next) => {
-                        const nextChecklist = { ...checklist, [id]: next } as TradeChecklist;
-                        setChecklist(nextChecklist);
-                        // Live-sync the entry's checklist so the score updates
-                        void useApp.getState().saveTradeReview(entry.id, {
-                          checklist: nextChecklist,
-                          reviewStatus: "in_progress",
-                        });
-                      }}
-                    />
-                  ))}
-                  {/* R3 sweep detail + R6 SMT evidence capture */}
-                  <div className="grid gap-3 pt-2 sm:grid-cols-2">
-                    <TextInput
-                      aria-label="What liquidity was swept?"
-                      placeholder="What liquidity was swept?"
-                      value={liquiditySwept}
-                      onChange={(e) => setLiquiditySwept(e.target.value)}
-                    />
-                    <TextInput
-                      aria-label="Sweep timestamp"
-                      placeholder="Sweep timestamp (e.g. 9:41 AM)"
-                      value={sweepTimestamp}
-                      onChange={(e) => setSweepTimestamp(e.target.value)}
-                    />
-                    <TextInput
-                      aria-label="SMT evidence"
-                      placeholder="SMT evidence / correlated asset"
-                      value={smtEvidence}
-                      onChange={(e) => setSmtEvidence(e.target.value)}
-                    />
-                    <TextInput
-                      aria-label="Target description"
-                      placeholder="Draw on liquidity / target"
-                      value={targetDescription}
-                      onChange={(e) => setTargetDescription(e.target.value)}
-                    />
+              <StepShell key="pretrade" title="Pre-trade checklist" subtitle="Captured before the trade was recorded — historical evidence, not editable.">
+                {preTradeItems.length > 0 ? (
+                  <div className="space-y-2">
+                    {preTradeItems.map((item, i) => (
+                      <div key={i} className={cn(
+                        "flex w-full items-start gap-3 rounded-xl border px-4 py-2.5",
+                        item.confirmed ? "border-profit/30 bg-profit/[0.05]" : "border-loss/25 bg-loss/[0.04]",
+                      )}>
+                        <span className={cn(
+                          "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border",
+                          item.confirmed ? "border-profit/50 bg-profit/[0.12] text-profit" : "border-loss/40 bg-loss/[0.08] text-loss",
+                        )}>{item.confirmed ? "✓" : "✗"}</span>
+                        <span className="min-w-0">
+                          <span className="block text-[13px] text-ink">{item.label}</span>
+                          {item.description && <span className="mt-0.5 block text-xs leading-relaxed text-muted">{item.description}</span>}
+                        </span>
+                        <span className={cn("ml-auto shrink-0 self-center text-[10px] font-bold uppercase tracking-wide", item.confirmed ? "text-profit" : "text-loss")}>
+                          {item.confirmed ? "confirmed" : "not confirmed"}
+                        </span>
+                      </div>
+                    ))}
+                    <p className="pt-1 text-[11px] text-faint">
+                      {preTradeItems.filter((i) => i.confirmed).length}/{preTradeItems.length} conditions were confirmed before entry.
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  <p className="rounded-control border border-dashed border-line-strong px-4 py-8 text-center text-sm text-muted">
+                    No pre-trade checklist was captured for this trade. Use the Plan Trade flow to record
+                    the execution gate before entering future trades.
+                  </p>
+                )}
               </StepShell>
             )}
 
@@ -316,7 +312,11 @@ export function TradeReviewFlow({
             {step === 1 && (
               <StepShell key="setup" title="Setup details" subtitle="What did the market show you?">
                 <div className="space-y-4">
+                  <TextInput aria-label="What liquidity was swept?" placeholder="What liquidity was swept?" value={liquiditySwept} onChange={(e) => setLiquiditySwept(e.target.value)} />
+                  <TextInput aria-label="Sweep timestamp" placeholder="Sweep timestamp (e.g. 9:41 AM)" value={sweepTimestamp} onChange={(e) => setSweepTimestamp(e.target.value)} />
                   <LabeledArea label="Manipulation identified" placeholder="Clear institutional manipulation after the sweep…" value={manipulationIdentified} onChange={setManipulationIdentified} />
+                  <TextInput aria-label="SMT evidence" placeholder="SMT evidence / correlated asset" value={smtEvidence} onChange={(e) => setSmtEvidence(e.target.value)} />
+                  <TextInput aria-label="Target description" placeholder="Draw on liquidity / target" value={targetDescription} onChange={(e) => setTargetDescription(e.target.value)} />
                   <LabeledArea label="What went well?" placeholder="Name it, so you can repeat it." value={wentWell} onChange={setWentWell} />
                   <LabeledArea label="What didn't go well?" placeholder="Be specific — the tape forgives nothing." value={wentPoorly} onChange={setWentPoorly} />
                   <LabeledArea label="What caused this?" placeholder="The trigger behind the result." value={cause} onChange={setCause} />
@@ -492,7 +492,7 @@ export function TradeReviewFlow({
             {step === 6 && (
               <StepShell key="complete" title="Complete review" subtitle="Check the summary and finish. Screenshots are required for a full review.">
                 <div className="space-y-3 text-sm">
-                  <SummaryRow label="Checklist" value={`${score.confirmed} / ${score.required} confirmed`} tone={score.confirmed === score.required ? "text-profit" : "text-gold"} />
+                  <SummaryRow label="Pre-trade checklist" value={preScore.required > 0 ? `${preScore.confirmed} / ${preScore.required} confirmed` : "Not captured"} tone={preScore.required === 0 || preScore.confirmed === preScore.required ? "text-profit" : "text-gold"} />
                   <SummaryRow label="Setup details" value={liquiditySwept || smtEvidence || manipulationIdentified ? "Recorded" : "Not provided"} />
                   <SummaryRow label="Execution" value={planned != null || whyEntered ? "Recorded" : "Not provided"} />
                   <SummaryRow label="Psychology" value={emotionBefore || fomo != null ? "Recorded" : "Not provided"} />
@@ -501,9 +501,9 @@ export function TradeReviewFlow({
                   <SummaryRow label="Screenshots" value={entry.images.length > 0 ? `${entry.images.length} attached` : "None — review will be marked INCOMPLETE"} tone={entry.images.length > 0 ? "text-profit" : "text-loss"} />
                   <div className="rounded-xl border border-line bg-raised/60 p-4">
                     <p className="text-[13px] leading-relaxed text-muted">
-                      {score.confirmed === score.required
-                        ? "Checklist satisfied. Process is what compounds — protect it."
-                        : "Checklist incomplete — this is not an A+ setup. Record it as the lesson it is."}
+                      {preScore.required === 0 || preScore.confirmed === preScore.required
+                        ? "Pre-trade conditions satisfied. Process is what compounds — protect it."
+                        : "Pre-trade checklist incomplete — this was not an A+ setup. Record it as the lesson it is."}
                     </p>
                   </div>
                 </div>

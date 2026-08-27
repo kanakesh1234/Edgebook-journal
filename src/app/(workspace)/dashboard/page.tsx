@@ -7,6 +7,7 @@ import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
 import { journeyState } from "@/lib/journey";
 import { evaluateRules } from "@/lib/rules";
+import { primaryChallenge, scopeToPrimary } from "@/lib/challenges";
 import { ChallengeCard, CalendarAccessCard, LabAccessCard } from "@/components/cc/access-cards";
 import { PlanTradeFlow } from "@/components/journal/plan-trade-flow";
 import { PlansList } from "@/components/journal/plans-list";
@@ -43,13 +44,19 @@ import {
 } from "@/components/ui/icons";
 
 export default function DashboardPage() {
-  const entries = useApp((s) => s.entries);
-  const settings = useApp((s) => s.settings);
+  const allEntries = useApp((s) => s.entries);
+  const rawSettings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
   const openNewEntry = useUi((s) => s.openNewEntry);
   const [planOpen, setPlanOpen] = useState(false);
   const plans = useApp((st) => st.plans);
   const dayLogs = useApp((st) => st.dayLogs);
+
+  // Primary challenge scoping — one shared source of truth for the whole page.
+  const { entries, settings, challenge } = useMemo(
+    () => scopeToPrimary(rawSettings, allEntries),
+    [rawSettings, allEntries],
+  );
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const journey = useMemo(() => journeyState(settings, stats), [settings, stats]);
@@ -62,14 +69,16 @@ export default function DashboardPage() {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  const firstName = (user?.name ?? "").split(" ")[0] || "trader";
+  // Full Name from Settings wins over the auth/Google name.
+  const displayName = settings.fullName?.trim() || user?.name || "";
+  const firstName = displayName.split(" ")[0] || "trader";
 
   // Animated counters
   const totalPnl = useCountUp(stats.totalPnl);
   const equity = useCountUp(stats.currentEquity);
   const avgDay = useCountUp(stats.avgDayPnl);
 
-  if (entries.length === 0) {
+  if (allEntries.length === 0) {
     return (
       <div className="space-y-7">
         <Header greeting={greeting} firstName={firstName} />
@@ -150,8 +159,9 @@ export default function DashboardPage() {
         aria-label="Current equity"
       >
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Current equity</p>
-          <p className="kpi mt-2 text-[34px] leading-none text-ink sm:text-[40px]">
+          <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
+            {challenge ? `${challenge.name} · equity` : "Current equity"}
+          </p>          <p className="kpi mt-2 text-[34px] leading-none text-ink sm:text-[40px]">
             {formatMoney(equity, settings.currency)}
           </p>
           <p className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -162,6 +172,12 @@ export default function DashboardPage() {
             <span className="text-muted">
               {stats.tradingDays} trading days · {formatPct(Math.abs(stats.totalPnl / Math.max(1, settings.startingEquity)), 0)} of start
             </span>
+            {challenge && stats.tradingDays === 0 && (
+              <>
+                <span className="text-faint">·</span>
+                <span className="text-gold">tag trades with this challenge to track its progress</span>
+              </>
+            )}
           </p>
         </div>
 
@@ -267,6 +283,7 @@ export default function DashboardPage() {
         dayLogs={dayLogs}
         challenges={settings.challenges ?? []}
         currency={settings.currency}
+        defaultChallengeId={challenge?.id ?? null}
       />
 
       {/* ------------------------------ Plans -------------------------------- */}

@@ -1,13 +1,14 @@
 "use client";
 
 import { create } from "zustand";
-import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, TradePlan, TradeReflection } from "./types";
+import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, PlaybookSetup, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
 import { dataStore, type JournalPayload } from "./services/storage";
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl } from "./images";
 import { uid } from "./utils";
 import { generateDemoEntries } from "./seed";
+import { toast } from "@/components/ui/toast";
 
 export interface EntryDraft {
   date: string;
@@ -16,6 +17,8 @@ export interface EntryDraft {
   instrument: string;
   direction: "long" | "short" | null;
   setup: string;
+  /** Canonical playbook setup reference. */
+  setupId?: string;
   notes: string;
   images: JournalEntry["images"];
   challengeId?: string;
@@ -27,6 +30,8 @@ export interface EntryDraft {
   stopLoss?: number | null;
   takeProfit?: number | null;
   checklist?: JournalEntry["checklist"];
+  /** Canonical pre-trade execution checklist — captured before recording. */
+  preTradeChecklist?: JournalEntry["preTradeChecklist"];
   review?: JournalEntry["review"];
   reviewStatus?: JournalEntry["reviewStatus"];
   planId?: string;
@@ -64,6 +69,14 @@ interface AppState {
   linkPlanToTrade(planId: string, tradeId: string): Promise<void>;
   saveChallenge(challenge: Challenge): Promise<void>;
   deleteChallenge(id: string): Promise<void>;
+  /** Select the challenge the whole app (Home, calendar, MINATO) is scoped to. */
+  setPrimaryChallenge(id: string | null): Promise<void>;
+  /** Create or update a playbook setup (canonical setup entity). */
+  saveSetup(setup: PlaybookSetup): Promise<void>;
+  /** Delete a playbook setup. Trades keep their historical setup labels. */
+  deleteSetup(id: string): Promise<void>;
+  /** Bulk insert for CSV import — one persist instead of one per row. */
+  createEntries(drafts: EntryDraft[]): Promise<JournalEntry[]>;
   /** Persist structured review data for an entry and refresh its review status. */
   saveTradeReview(entryId: string, patch: { review?: JournalEntry["review"]; checklist?: JournalEntry["checklist"]; reflection?: JournalEntry["reflection"]; reviewStatus?: JournalEntry["reviewStatus"] }): Promise<void>;
   updateSettings(patch: Partial<JournalSettings>): Promise<void>;
@@ -72,8 +85,56 @@ interface AppState {
   loadDemoData(): Promise<void>;
 }
 
+let _persistFailedAt = 0;
+let _loadFailed = false;
+
+/** True on the login/OAuth screens — data-layer toasts must never appear there. */
+function onAuthScreen(): boolean {
+  return typeof window !== "undefined" && window.location.pathname.startsWith("/login");
+}
+
+/** True when a persistence (Drive sync) failure happened at or after `since`. */
+export function persistFailedSince(since: number): boolean {
+  return _persistFailedAt >= since;
+}
+
+/**
+ * True while the cloud journal could not be loaded. While set, ALL
+ * persistence is blocked — otherwise an empty in-memory state could
+ * overwrite good Drive data (the classic "refresh loses my trades" bug).
+ */
+export function hasLoadFailed(): boolean {
+  return _loadFailed;
+}
+
 async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
-  await dataStore.saveJournal(userId, { entries, settings, dayLogs, plans, version: 2 });
+  if (_loadFailed && dataStore.kind === "cloud") {
+    // The authoritative cloud data was never loaded — saving now could
+    // destroy it. Refuse honestly instead of pretending.
+    if (!onAuthScreen()) {
+      toast.error(
+        "Save blocked — journal not loaded",
+        "Google Drive data hasn't been loaded in this tab, so writing is disabled to protect your trades. Reload the page.",
+      );
+    }
+    return;
+  }
+  try {
+    await dataStore.saveJournal(userId, { entries, settings, dayLogs, plans, version: 2 });
+    _persistFailedAt = 0;
+  } catch (err) {
+    // Known failure mode: drive_write_failed:<status> (e.g. 502 from Google).
+    // The UI state is already updated — report the sync failure clearly and
+    // keep the app usable. NEVER fake a successful cloud save.
+    _persistFailedAt = Date.now();
+    const status = err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "";
+    toast.error(
+      "Google Drive sync failed",
+      status
+        ? `The change is visible here but was NOT saved to Drive (error ${status}). Try again in a moment.`
+        : "The change is visible here but was NOT saved to the cloud. Check your connection and retry.",
+    );
+  }
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -94,17 +155,30 @@ export const useApp = create<AppState>((set, get) => ({
     let loadError = false;
     try {
       payload = await dataStore.loadJournal(user.id);
+      _loadFailed = false;
     } catch {
-      // Drive read failed — do NOT initialize with empty data (would overwrite Drive)
+      // Drive read failed. Do NOT initialize with empty data as "usable":
+      // persistence is now BLOCKED until a load succeeds, so the empty
+      // view can never overwrite the cloud journal.
       loadError = true;
+      _loadFailed = true;
+      if (!onAuthScreen()) {
+        toast.error(
+          "Google Drive could not be read",
+          "Showing an empty view for safety — changes are disabled until your journal loads. Reload to retry.",
+        );
+      }
     }
+    if (loadError) return;
+    // On load error the view initializes empty BUT every save stays blocked
+    // by _loadFailed until a successful reload — no silent data loss.
     set({
       status: "authenticated",
       user,
-      entries: loadError ? [] : payload?.entries ?? [],
-      settings: loadError ? defaultSettings() : { ...defaultSettings(), ...(payload?.settings ?? {}) },
-      dayLogs: loadError ? [] : payload?.dayLogs ?? [],
-      plans: loadError ? [] : payload?.plans ?? [],
+      entries: payload?.entries ?? [],
+      settings: { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      dayLogs: payload?.dayLogs ?? [],
+      plans: payload?.plans ?? [],
     });
   },
 
@@ -294,10 +368,72 @@ export const useApp = create<AppState>((set, get) => ({
     const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
     const challenges = (settings.challenges ?? []).filter((c) => c.id !== id);
-    const next = { ...settings, challenges };
-    // Trades keep their challengeId (historical record); they simply render as "removed challenge".
+    // Deleting a challenge never touches journal trades — they keep their
+    // challengeId as a historical record and render as "removed challenge".
+    const next = {
+      ...settings,
+      challenges,
+      primaryChallengeId: settings.primaryChallengeId === id ? null : settings.primaryChallengeId,
+    };
     set({ settings: next });
     await persist(user.id, entries, next, dayLogs, get().plans);
+  },
+
+  async setPrimaryChallenge(id) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) return;
+    const next = { ...settings, primaryChallengeId: id };
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs, get().plans);
+  },
+
+  async saveSetup(setup) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const playbook = settings.playbook ?? [];
+    const exists = playbook.some((s) => s.id === setup.id);
+    const saved: PlaybookSetup = {
+      ...setup,
+      version: exists ? (setup.version ?? 1) + 1 : setup.version ?? 1,
+      updatedAt: Date.now(),
+      createdAt: setup.createdAt ?? Date.now(),
+    };
+    const nextPlaybook = exists ? playbook.map((s) => (s.id === setup.id ? saved : s)) : [...playbook, saved];
+    const next = { ...settings, playbook: nextPlaybook };
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs, get().plans);
+  },
+
+  async deleteSetup(id) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user) throw new Error("Not signed in");
+    const playbook = (settings.playbook ?? []).filter((s) => s.id !== id);
+    const next = { ...settings, playbook };
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs, get().plans);
+  },
+
+  async createEntries(drafts) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    if (drafts.length === 0) return [];
+    const now = Date.now();
+    const created: JournalEntry[] = drafts.map((draft, i) => ({
+      id: uid(`e${now.toString(36)}-${i}`),
+      ...draft,
+      reviewStatus: draft.reviewStatus ?? "not_reviewed",
+      createdAt: now + i,
+      updatedAt: now + i,
+    }));
+    const next = [...entries, ...created];
+    // A traded day supersedes an explicit no-trade record.
+    const tradedDays = new Set(created.map((c) => c.date));
+    const nextDayLogs = dayLogs.some((d) => tradedDays.has(d.date))
+      ? dayLogs.filter((d) => !tradedDays.has(d.date))
+      : dayLogs;
+    set({ entries: next, ...(nextDayLogs !== dayLogs ? { dayLogs: nextDayLogs } : {}) });
+    await persist(user.id, next, settings, nextDayLogs, plans);
+    return created;
   },
 
   async saveTradeReview(entryId, patch) {
@@ -336,8 +472,9 @@ export const useApp = create<AppState>((set, get) => ({
     if (!user) throw new Error("Not signed in");
     const settings = { ...defaultSettings(), ...payload.settings };
     const dayLogs = payload.dayLogs ?? [];
-    set({ entries: payload.entries ?? [], settings, dayLogs });
-    await persist(user.id, payload.entries ?? [], settings, dayLogs, get().plans);
+    const plans = payload.plans ?? get().plans;
+    set({ entries: payload.entries ?? [], settings, dayLogs, plans });
+    await persist(user.id, payload.entries ?? [], settings, dayLogs, plans);
   },
 
   exportPayload() {

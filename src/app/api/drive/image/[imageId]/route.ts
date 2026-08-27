@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthedDrive } from "@/lib/server/authed-drive";
+import { getAuthedDrive, newRequestId, withDrive } from "@/lib/server/authed-drive";
 import { deleteFile, getFile, putFile, screenshotFileName } from "@/lib/server/drive";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,17 @@ export async function GET(_request: Request, ctx: { params: Promise<{ imageId: s
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
 
-  const blob = await getFile(authed.drive.accessToken, authed.drive.folders.screenshots, screenshotFileName(imageId));
+  const requestId = newRequestId();
+  let blob: Blob | null;
+  try {
+    blob = await withDrive(authed.drive, "getImage", requestId, (t) =>
+      getFile(t, authed.drive.folders.screenshots, screenshotFileName(imageId)),
+    );
+  } catch (err) {
+    const de = (err as { driveError?: { status: number } }).driveError;
+    if (de) return NextResponse.json({ error: "drive_read_failed", detail: String(de.status) }, { status: 502 });
+    throw err;
+  }
   if (!blob) return NextResponse.json({ error: "not_found" }, { status: 404 });
   return new NextResponse(blob, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=3600" } });
 }
@@ -42,12 +52,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
   }
 
   try {
-    await putFile(
-      authed.drive.accessToken,
-      authed.drive.folders.screenshots,
-      screenshotFileName(imageId),
-      Buffer.from(await blob.arrayBuffer()),
-      "image/jpeg",
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    await withDrive(authed.drive, "putImage", newRequestId(), (t) =>
+      putFile(t, authed.drive.folders.screenshots, screenshotFileName(imageId), bytes, "image/jpeg"),
     );
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {

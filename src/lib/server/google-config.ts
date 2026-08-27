@@ -46,10 +46,12 @@ export function googleAuthUrl(config: GoogleConfig, state: string): string {
     response_type: "code",
     scope: AUTH_SCOPE,
     access_type: "offline",
-    // Account chooser on every sign-in; Drive consent only when not yet granted.
-    prompt: "select_account",
     include_granted_scopes: "true",
     state,
+    // No `prompt` → returning users with a live Google session and prior
+    // consent sail straight through (true one-click login). First-time
+    // users still get the consent screen because drive.file + offline
+    // access have not been granted yet.
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }

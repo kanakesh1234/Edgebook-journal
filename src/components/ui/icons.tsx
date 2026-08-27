@@ -308,6 +308,26 @@ export const UserIcon = (p: P) => (
   </Svg>
 );
 
+export const StarIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9l-5.3 2.7 1-5.8-4.2-4.1 5.9-.9L12 3.5Z" />
+  </Svg>
+);
+
+export const CopyIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15" />
+  </Svg>
+);
+
+export const AtIcon = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1" />
+  </Svg>
+);
+
 export const FlaskIcon = (p: P) => (
   <Svg {...p}>
     <path d="M9.5 3h5" />

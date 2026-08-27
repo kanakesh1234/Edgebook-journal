@@ -70,11 +70,12 @@ const pDyn2 = challengeProgress(dynChallenge, [mkEntry("2026-08-03", 400), mkEnt
 expect("challenge dynamic DD reset at new high", pDyn2.currentDrawdown, 0);
 expect("challenge maxObserved kept", pDyn2.maxObservedDrawdown, 300);
 
-// Milestones: 50% passed at equity 15000
+// Milestones: 50% passed at equity 15000 (fractions: 0/.1/.25/.5/.75/.9/1)
 const pMile = challengeProgress(baseChallenge, [mkEntry("2026-08-03", 5000)]);
-expect("milestone 25% passed", pMile.milestones[0].passed, true);
-expect("milestone 50% passed", pMile.milestones[1].passed, true);
-expect("milestone 75% not passed", pMile.milestones[2].passed, false);
+expect("milestone 25% passed", pMile.milestones[2].passed, true);
+expect("milestone 50% passed", pMile.milestones[3].passed, true);
+expect("milestone 75% not passed", pMile.milestones[4].passed, false);
+expect("milestone ladder includes START and TARGET", [pMile.milestones[0].fraction, pMile.milestones[pMile.milestones.length - 1].fraction], [0, 1]);
 
 // Win rate + avg R
 const pWR = challengeProgress(baseChallenge, [mkEntry("2026-08-03", 100, 2), mkEntry("2026-08-04", -50, -1), mkEntry("2026-08-05", 80, 3)]);
@@ -191,22 +192,29 @@ function mockDriveFetch(created: Map<string, string>, content = new Map<string, 
       return new Response(JSON.stringify({ files: existing ? [{ id: existing }] : [] }));
     }
 
-    // Multipart upload (FormData): metadata part carries name+parents
-    if (u.includes("uploadType=multipart") && init?.body instanceof FormData) {
-      const metaBlob = init.body.get("metadata") as Blob | null;
-      const fileBlob = init.body.get("file") as Blob | null;
-      const meta = metaBlob ? (JSON.parse(await metaBlob.text()) as { name: string; parents: string[] }) : null;
-      if (meta) {
-        const key = `${token}:${meta.parents[0]}/${meta.name}`;
-        let id = created.get(key);
+    // Multipart upload (manual multipart/related body on the /upload endpoint):
+    // part 1 = JSON metadata {name, parents?}, part 2 = file content
+    const rawBody = typeof init?.body === "string" ? init.body : init?.body instanceof Uint8Array ? Buffer.from(init.body).toString("utf8") : null;
+    if (u.includes("uploadType=multipart") && rawBody != null) {
+      if (!u.includes("/upload/drive/v3")) return new Response('{"error":{"code":400,"message":"Parse Error","errors":[{"reason":"parseError"}]}}', { status: 400 });
+      const parts = rawBody.split(/\r\n--edgebook-[0-9a-f]+\r\n/);
+      const metaPart = (parts[0] ?? "").split("\r\n\r\n").slice(1).join("\r\n\r\n") || "{}";
+      const meta = JSON.parse(metaPart) as { name: string; parents?: string[] };
+      const contentPart = ((parts[1] ?? "").split("\r\n\r\n").slice(1).join("\r\n\r\n")).replace(/\r\n--edgebook-[0-9a-f]+--\r?\n?$/, "");
+      let id: string | undefined;
+      if (init.method === "PATCH") {
+        // Update targets /files/{id} directly
+        id = u.match(/files\/([^?]+)/)?.[1];
+      } else {
+        const key = `${token}:${meta.parents?.[0] ?? "me"}/${meta.name}`;
+        id = created.get(key);
         if (!id) {
           id = `id-${idCounter++}`;
           created.set(key, id);
         }
-        if (fileBlob) content.set(id, await fileBlob.text());
-        return new Response(JSON.stringify({ id }), { status: 200 });
       }
-      return new Response("{}", { status: 400 });
+      if (id) content.set(id, contentPart);
+      return new Response(JSON.stringify({ id }), { status: 200 });
     }
 
     // Folder creation: POST /files?fields=id with JSON body

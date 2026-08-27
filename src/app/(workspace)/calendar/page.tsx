@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { groupByDay, monthGrid } from "@/lib/stats";
 import { evaluateRules } from "@/lib/rules";
+import { primaryChallenge } from "@/lib/challenges";
 import type { Challenge } from "@/lib/types";
 import {
   formatDateFull,
@@ -62,9 +63,15 @@ export default function CalendarPage() {
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const [dir, setDir] = useState(0);
-  const [challengeFilter, setChallengeFilter] = useState<string>("all");
+  const [challengeFilter, setChallengeFilter] = useState<string>(() => primaryChallenge(settings)?.id ?? "all");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [presetDate, setPresetDate] = useState<string | null>(null);
+
+  // Follow the primary challenge when it changes — no page reload.
+  const primaryId = primaryChallenge(settings)?.id ?? null;
+  useEffect(() => {
+    setChallengeFilter(primaryId ?? "all");
+  }, [primaryId]);
 
   const filtered = useMemo(
     () => (challengeFilter === "all" ? entries : entries.filter((e) => e.challengeId === challengeFilter)),
@@ -214,7 +221,7 @@ export default function CalendarPage() {
                   {pnl !== null && pnl !== 0 && (
                     <span
                       className={cn(
-                        "num w-fit rounded-md border px-1.5 py-0.5 text-[13px] font-bold leading-tight",
+                        "num w-fit rounded-md border px-1.5 py-0.5 text-[14px] font-bold leading-tight",
                         pnl > 0 ? "border-profit/30 bg-profit/[0.1] text-profit" : "border-loss/30 bg-loss/[0.1] text-loss",
                       )}
                     >

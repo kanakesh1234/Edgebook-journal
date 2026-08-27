@@ -1,4 +1,4 @@
-import type { Challenge, JournalEntry } from "./types";
+import type { Challenge, JournalEntry, JournalSettings } from "./types";
 
 /* ------------------------------------------------------------------ */
 /*  Challenge progress — pure calculations                             */
@@ -21,6 +21,8 @@ export interface ChallengeProgress {
   startingBalance: number;
   targetBalance: number;
   currentEquity: number;
+  /** Highest equity achieved during the challenge (high-water mark). */
+  highestBalance: number;
   currentPnl: number;
   /** 0..1 progress from start to target (clamped). */
   progress: number;
@@ -31,6 +33,13 @@ export interface ChallengeProgress {
   /** Remaining drawdown budget. */
   remainingDrawdown: number;
   drawdownMode: "static" | "dynamic";
+  /**
+   * Lowest equity allowed before breach.
+   * STATIC: startingBalance − maxDrawdown (fixed).
+   * DYNAMIC: high-water mark − maxDrawdown, never below drawdownFloor when set.
+   */
+  drawdownThreshold: number;
+  drawdownFloor: number | null;
   /** Worst peak-to-current decline seen (always trailing model). */
   maxObservedDrawdown: number;
   distanceToTarget: number;
@@ -79,6 +88,15 @@ export function challengeProgress(
   const dynamicDD = Math.max(0, peak - currentEquity);
   const currentDrawdown = drawdownMode === "dynamic" ? dynamicDD : staticDD;
 
+  // Drawdown threshold — the equity level that must not be breached.
+  // STATIC: fixed anchor at starting balance. DYNAMIC: trails the high-water
+  // mark upward with new equity highs, locked at drawdownFloor when set.
+  const floor = challenge.drawdownFloor ?? null;
+  const drawdownThreshold =
+    drawdownMode === "dynamic"
+      ? Math.max(floor ?? -Infinity, peak - maxDrawdown)
+      : startingBalance - maxDrawdown;
+
   const wins = tradesList.filter((e) => e.pnl > 0).length;
   const losses = tradesList.filter((e) => e.pnl < 0).length;
   const decided = wins + losses;
@@ -104,7 +122,7 @@ export function challengeProgress(
     }
   }
 
-  const milestoneFractions = [0.25, 0.5, 0.75];
+  const milestoneFractions = [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1];
   const milestones: ChallengeMilestone[] = milestoneFractions.map((f) => ({
     fraction: f,
     equity: startingBalance + f * range,
@@ -118,6 +136,7 @@ export function challengeProgress(
     startingBalance,
     targetBalance,
     currentEquity,
+    highestBalance: peak,
     currentPnl,
     progress,
     progressPct: Math.round(progress * 100),
@@ -125,6 +144,8 @@ export function challengeProgress(
     currentDrawdown,
     remainingDrawdown: Math.max(0, maxDrawdown - currentDrawdown),
     drawdownMode,
+    drawdownThreshold,
+    drawdownFloor: floor,
     maxObservedDrawdown: maxObserved,
     distanceToTarget: Math.max(0, targetBalance - currentEquity),
     reachedTarget: range > 0 && currentEquity >= targetBalance,
@@ -140,6 +161,40 @@ export function challengeProgress(
     milestones,
     tradesList,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Primary challenge — the single shared selection that the Home      */
+/*  dashboard, calendar, journey and MINATO all reference.             */
+/* ------------------------------------------------------------------ */
+
+/** The user's selected primary challenge, or null when none is set / it was deleted. */
+export function primaryChallenge(settings: Pick<JournalSettings, "challenges" | "primaryChallengeId">): Challenge | null {
+  const challenges = settings.challenges ?? [];
+  if (challenges.length === 0) return null;
+  return challenges.find((c) => c.id === settings.primaryChallengeId) ?? null;
+}
+
+/**
+ * Entries + effective equity settings scoped to the primary challenge.
+ * When no primary challenge exists the overall/default behaviour applies
+ * (all entries, global settings) — never crashes.
+ */
+export function scopeToPrimary(
+  settings: JournalSettings,
+  entries: JournalEntry[],
+): { entries: JournalEntry[]; settings: JournalSettings; challenge: Challenge | null } {
+  const challenge = primaryChallenge(settings);
+  if (!challenge) return { entries, settings, challenge: null };
+  const scoped = entries.filter((e) => e.challengeId === challenge.id);
+  const effective: JournalSettings = {
+    ...settings,
+    startingEquity: challenge.startingBalance ?? settings.startingEquity,
+    targetEquity: challenge.targetBalance ?? settings.targetEquity,
+    maxDrawdown:
+      challenge.maxDrawdown && challenge.maxDrawdown > 0 ? challenge.maxDrawdown : settings.maxDrawdown,
+  };
+  return { entries: scoped, settings: effective, challenge };
 }
 
 /** Context-aware motivational reminder — original wording, evidence-based. */
@@ -160,4 +215,48 @@ export function challengeReminder(progress: ChallengeProgress): string | null {
     return "Challenge ready. Wait for the playbook to come to you — patience is position one.";
   }
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Journey card — single source of truth = primary challenge           */
+/* ------------------------------------------------------------------ */
+
+export interface JourneyCardData {
+  /** null → no primary challenge; callers render an empty state. */
+  challengeName: string | null;
+  startingBalance: number | null;
+  currentBalance: number | null;
+  targetBalance: number | null;
+  /** 0..1 toward target. */
+  progress: number;
+  progressPct: number;
+  drawdownMode: "static" | "dynamic";
+  remainingDrawdown: number | null;
+}
+
+/**
+ * Derives Journey card values from the CURRENT PRIMARY CHALLENGE.
+ * Never falls back to global default equity — no hard-coded $10,000.
+ * When no primary challenge exists, returns nulls (empty state).
+ */
+export function journeyCardData(settings: JournalSettings, entries: JournalEntry[]): JourneyCardData {
+  const challenge = primaryChallenge(settings);
+  if (!challenge) {
+    return {
+      challengeName: null, startingBalance: null, currentBalance: null,
+      targetBalance: null, progress: 0, progressPct: 0,
+      drawdownMode: "static", remainingDrawdown: null,
+    };
+  }
+  const p = challengeProgress(challenge, entries);
+  return {
+    challengeName: challenge.name,
+    startingBalance: p.startingBalance,
+    currentBalance: p.currentEquity,
+    targetBalance: p.targetBalance,
+    progress: p.progress,
+    progressPct: p.progressPct,
+    drawdownMode: p.drawdownMode,
+    remainingDrawdown: p.maxDrawdown > 0 ? p.remainingDrawdown : null,
+  };
 }

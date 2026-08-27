@@ -1,44 +1,44 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
-import { decryptToken } from "@/lib/server/tokens";
 import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
-import { accountRefreshToken, getAccount } from "@/lib/server/accounts";
-import { revokeToken } from "@/lib/server/drive";
+import { verifyDriveConnection } from "@/lib/server/authed-drive";
 
 export const dynamic = "force-dynamic";
 
 /**
  * App session state for the client bootstrap.
- * `drive.connected` is VERIFIED: the stored server-side authorization must
- * successfully obtain a real access token from Google — a stale flag or a
- * revoked authorization reports connected:false.
+ *
+ * `drive.state` is explicit (never a collapsed boolean):
+ *   connected               – server verified a working authorization
+ *   auth_required           – Google definitively reports invalid_grant
+ *   temporarily_unavailable – transient refresh/network failure; NOT a logout
+ *   not_authorized          – no account/refresh token stored yet
+ *
+ * Verification uses the shared access-token cache: a real Google exchange
+ * happens only when needed, so returning-user bootstrap stays fast.
  */
 export async function GET(request: Request) {
   const config = getGoogleConfig();
   const sessionCookie = readCookie(request, APP_SESSION_COOKIE);
   const session = config && sessionCookie ? openAppSession(sessionCookie, config.tokenSecret) : null;
 
-  let driveConnected = false;
-  let driveReason = "not_authorized";
-  if (session && config) {
-    const account = getAccount(session.email);
-    const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
-    const refreshToken = account ? accountRefreshToken(account, secret) : null;
-    if (!refreshToken) {
-      driveConnected = false;
-      driveReason = "not_authorized";
-    } else {
-      const { fetchAccessToken } = await import("@/lib/server/drive");
-      const accessToken = await fetchAccessToken(refreshToken, config.clientId, config.clientSecret);
-      driveConnected = !!accessToken;
-      driveReason = accessToken ? "verified" : "revoked_or_invalid";
-    }
+  if (!session) {
+    return NextResponse.json({
+      configured: !!config,
+      loggedIn: false,
+      user: null,
+      drive: { connected: false, state: "not_authorized", reason: "no_session" },
+    });
   }
+
+  console.log(`[BOOTSTRAP] session_check_success email_domain=${session.email.split("@")[1] ?? "?"}`);
+  const { state, reason } = await verifyDriveConnection(session, config!);
+  console.log(`[BOOTSTRAP] drive_state=${state} reason=${reason}`);
 
   return NextResponse.json({
     configured: !!config,
-    loggedIn: !!session,
-    user: session ? { id: `g_${session.sub}`, name: session.name, email: session.email } : null,
-    drive: { connected: driveConnected, reason: driveReason },
+    loggedIn: true,
+    user: { id: `g_${session.sub}`, name: session.name, email: session.email },
+    drive: { connected: state === "connected", state, reason },
   });
 }

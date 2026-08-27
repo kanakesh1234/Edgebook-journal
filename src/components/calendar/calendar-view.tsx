@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { groupByDay, monthGrid } from "@/lib/stats";
@@ -24,12 +24,15 @@ export function CalendarView({
   dayLogs,
   challenges,
   currency,
+  defaultChallengeId = null,
   compact = false,
 }: {
   entries: JournalEntry[];
   dayLogs: NoTradeLog[];
   challenges: Challenge[];
   currency: CurrencyCode;
+  /** Preselect/track the primary challenge — stays in sync when it changes. */
+  defaultChallengeId?: string | null;
   compact?: boolean;
 }) {
   const router = useRouter();
@@ -40,6 +43,11 @@ export function CalendarView({
   const [dir, setDir] = useState(0);
   const [challengeFilter, setChallengeFilter] = useState("all");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+
+  // Follow the primary challenge selection without a page reload.
+  useEffect(() => {
+    setChallengeFilter(defaultChallengeId ?? "all");
+  }, [defaultChallengeId]);
 
   const filtered = useMemo(
     () => (challengeFilter === "all" ? entries : entries.filter((e) => e.challengeId === challengeFilter)),
@@ -172,7 +180,7 @@ export function CalendarView({
                   {pnl !== null && pnl !== 0 && (
                     <span
                       className={cn(
-                        "num w-fit rounded-md border px-1.5 py-0.5 text-[13px] font-bold leading-tight",
+                        "num w-fit rounded-md border px-1.5 py-0.5 text-[14px] font-bold leading-tight",
                         pnl > 0 ? "border-profit/30 bg-profit/[0.1] text-profit" : "border-loss/30 bg-loss/[0.1] text-loss",
                       )}
                     >

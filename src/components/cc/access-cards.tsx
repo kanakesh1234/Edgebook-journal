@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { useApp } from "@/lib/store";
+import { primaryChallenge } from "@/lib/challenges";
 import { formatSignedMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -14,18 +15,12 @@ import {
 
 /**
  * Home access cards — challenge context, calendar navigation, Lab access.
- * The calendar is the primary historical navigation; the Lab is the
- * execution system.
+ * The challenge card follows the user's primary challenge (shared source of truth).
  */
 export function ChallengeCard() {
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
-  const challenges = useMemo(() => settings.challenges ?? [], [settings]);
-
-  const current = useMemo(() => {
-    const sorted = [...challenges].sort((a, b) => b.createdAt - a.createdAt);
-    return sorted[0] ?? null;
-  }, [challenges]);
+  const current = useMemo(() => primaryChallenge(settings), [settings]);
 
   const challengeEntries = useMemo(
     () => (current ? entries.filter((e) => e.challengeId === current.id) : []),
@@ -61,8 +56,8 @@ export function ChallengeCard() {
         </>
       ) : (
         <div className="mt-2.5">
-          <p className="text-sm text-muted">No challenge yet.</p>
-          <p className="mt-1 text-xs text-faint">Create one from the trade form or an import.</p>
+          <p className="text-sm text-muted">No primary challenge yet.</p>
+          <p className="mt-1 text-xs text-faint">Create one from the Challenges page and mark it primary.</p>
         </div>
       )}
     </Link>

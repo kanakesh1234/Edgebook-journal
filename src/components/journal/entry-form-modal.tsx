@@ -9,7 +9,7 @@ import {
   type TradeDirection,
 } from "@/lib/types";
 import { todayKey, formatDateMedium, formatSignedMoney, weekdayLong } from "@/lib/format";
-import { useApp, type EntryDraft } from "@/lib/store";
+import { useApp, persistFailedSince, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ export function EntryFormModal({
   const [rr, setRr] = useState("");
   const [instrument, setInstrument] = useState("");
   const [direction, setDirection] = useState<TradeDirection | null>(null);
+  const [setupId, setSetupId] = useState("");
   const [setup, setSetup] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<UploadItem[]>([]);
@@ -78,18 +79,24 @@ export function EntryFormModal({
   const [gateAcknowledged, setGateAcknowledged] = useState(false);
   const [showPostLossGate, setShowPostLossGate] = useState<JournalEntry | null>(null);
 
+  const playbook = useMemo(() => settings.playbook ?? [], [settings]);
+
   const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(/[^\d.\-−]/g, "").replace("−", "-")));
 
-  // Hydrate/reset each time the dialog opens
+  // Hydrate/reset each time the dialog opens. Deliberately reads the latest
+  // settings imperatively so an unrelated settings update never re-runs this
+  // effect and wipes the user's in-progress form.
   useEffect(() => {
     if (!open) return;
-    const firstChallenge = challenges[0]?.id ?? "";
+    const firstChallenge = useApp.getState().settings.challenges?.[0]?.id ?? "";
     if (editing) {
       setDate(editing.date);
       setPnl(String(editing.pnl));
       setRr(editing.rr != null ? String(editing.rr) : "");
       setInstrument(editing.instrument === "—" ? "" : editing.instrument);
       setDirection(editing.direction);
+      setSetupId(editing.setupId ?? "");
+      // Legacy/custom setup names stay selectable even when not in the playbook.
       setSetup(editing.setup);
       setNotes(editing.notes);
       setImages(editing.images.map((m) => ({ meta: m, blob: null })));
@@ -107,6 +114,7 @@ export function EntryFormModal({
       setRr("");
       setInstrument("");
       setDirection(null);
+      setSetupId("");
       setSetup("");
       setNotes("");
       setImages([]);
@@ -127,7 +135,8 @@ export function EntryFormModal({
     setShowThirdTradeGate(false);
     setGateAcknowledged(false);
     setShowPostLossGate(null);
-  }, [open, editing, presetDate, challenges]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, presetDate]);
 
   const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl);
   const rrNumber = rr.trim() === "" ? null : Number(rr);
@@ -155,6 +164,7 @@ export function EntryFormModal({
     instrument: instrument.trim() || "—",
     direction,
     setup: setup.trim(),
+    setupId: setupId || undefined,
     notes: notes.trim(),
     images: images.map((i) => i.meta),
     challengeId: challengeId || undefined,
@@ -205,15 +215,19 @@ export function EntryFormModal({
     setSaving(true);
     try {
       if (editing) {
+        const t0 = Date.now();
         await useApp.getState().updateEntry(editing.id, draft, blobs);
-        toast.success("Entry updated");
+        if (!persistFailedSince(t0)) toast.success("Entry updated");
         onClose();
       } else {
+        const t0 = Date.now();
         const created = await useApp.getState().createEntry(draft, blobs);
-        toast.success(
-          draft.pnl > 0 ? "Green day logged" : draft.pnl < 0 ? "Red day logged" : "Session logged",
-          "Your dashboard and roadmap just updated.",
-        );
+        if (!persistFailedSince(t0)) {
+          toast.success(
+            draft.pnl > 0 ? "Green day logged" : draft.pnl < 0 ? "Red day logged" : "Session logged",
+            "Your dashboard and roadmap just updated.",
+          );
+        }
         onClose();
         if (created.pnl < 0) {
           // Post-loss gate — capture the internal dialogue before anything else.
@@ -398,19 +412,40 @@ export function EntryFormModal({
               </datalist>
             </Field>
 
-            <Field label="Setup" hint="optional" htmlFor="entry-setup">
-              <TextInput
+            {/* Setup — canonical playbook selector */}
+            <Field label="Setup" hint="from your playbook" htmlFor="entry-setup">
+              <select
                 id="entry-setup"
-                list="setup-list"
-                placeholder="e.g. Liquidity Sweep + SMT"
-                value={setup}
-                onChange={(e) => setSetup(e.target.value)}
-              />
-              <datalist id="setup-list">
-                {(useApp.getState().settings.playbook ?? []).map((p) => (
-                  <option key={p.id} value={p.name} />
+                value={setupId || (setup && !playbook.some((p) => p.id === setupId) ? `custom:${setup}` : "")}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.startsWith("custom:")) {
+                    setSetupId("");
+                    setSetup(v.slice(7));
+                  } else if (v === "") {
+                    setSetupId("");
+                    setSetup("");
+                  } else {
+                    const found = playbook.find((p) => p.id === v);
+                    setSetupId(found?.id ?? "");
+                    setSetup(found?.name ?? "");
+                  }
+                }}
+                className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
+              >
+                <option value="">No setup</option>
+                {playbook.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
-              </datalist>
+                {setup && !playbook.some((p) => p.id === setupId) && (
+                  <option value={`custom:${setup}`}>Keep “{setup}” (not in playbook)</option>
+                )}
+              </select>
+              {setupId && (
+                <p className="pt-1 text-[11px] text-faint">
+                  Linked to playbook setup — its rules load automatically when you plan a trade.
+                </p>
+              )}
             </Field>
 
             {/* Challenge */}
@@ -717,11 +752,14 @@ function ImportPane({
   const inputRef = useRef<HTMLInputElement>(null);
   const settings = useApp((s) => s.settings);
   const challenges = useMemo(() => settings.challenges ?? [], [settings]);
+  const playbook = useMemo(() => settings.playbook ?? [], [settings]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ReturnType<typeof import("@/lib/csv-import").parseTradesCsv> | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [challengeId, setChallengeId] = useState("");
   const [newChallengeName, setNewChallengeName] = useState("");
+  const [setupId, setSetupId] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const loadFile = async (file: File) => {
     setFileError(null);
@@ -754,6 +792,7 @@ function ImportPane({
   const runImport = async () => {
     if (rows.length === 0 || saving) return;
     setSaving(true);
+    setProgress({ done: 0, total: rows.length });
     let effectiveChallengeId = challengeId;
     try {
       if (newChallengeName.trim()) {
@@ -763,34 +802,49 @@ function ImportPane({
         });
         effectiveChallengeId = id;
       }
+      const linkedSetup = playbook.find((p) => p.id === setupId);
+      const drafts = rows.map((row) => ({
+        date: row.date,
+        pnl: row.pnl,
+        rr: row.rr,
+        instrument: row.instrument,
+        direction: row.direction,
+        // Row-level setup text wins; otherwise the selected playbook setup applies to all.
+        setup: row.setup || linkedSetup?.name || "",
+        setupId: row.setup ? undefined : linkedSetup?.id,
+        notes: row.notes,
+        images: [] as JournalEntry["images"],
+        challengeId: effectiveChallengeId || undefined,
+        reviewStatus: "not_reviewed" as const,
+      }));
+
+      // Batched insert with progress feedback — one persist per batch of 25.
       let ok = 0;
       let first: JournalEntry | null = null;
-      for (const row of rows) {
+      const BATCH = 25;
+      for (let i = 0; i < drafts.length; i += BATCH) {
+        const batch = drafts.slice(i, i + BATCH);
         try {
-          const created = await useApp.getState().createEntry({
-            date: row.date,
-            pnl: row.pnl,
-            rr: row.rr,
-            instrument: row.instrument,
-            direction: row.direction,
-            setup: row.setup,
-            notes: row.notes,
-            images: [],
-            challengeId: effectiveChallengeId || undefined,
-            reviewStatus: "not_reviewed",
-          });
-          ok += 1;
-          first = first ?? created;
-        } catch { /* skip row */ }
+          const created = await useApp.getState().createEntries(batch);
+          ok += created.length;
+          first = first ?? created[0] ?? null;
+        } catch { /* keep going — nothing silently dropped without count */ }
+        setProgress({ done: Math.min(i + BATCH, drafts.length), total: drafts.length });
       }
-      toast.success(
-        `Imported ${ok} ${ok === 1 ? "trade" : "trades"}`,
-        `${formatDateMedium(rows[0].date)} → ${formatDateMedium(rows[rows.length - 1].date)} · ${formatSignedMoney(netPnl)} — review required.`,
-      );
-      onClose();
-      onDone(first);
+
+      if (ok === 0) {
+        toast.error("Import failed", "None of the trades could be saved. Please try again.");
+      } else {
+        toast.success(
+          `Imported ${ok} ${ok === 1 ? "trade" : "trades"}`,
+          `${formatDateMedium(rows[0].date)} → ${formatDateMedium(rows[rows.length - 1].date)} · ${formatSignedMoney(netPnl)} — review required.`,
+        );
+        onClose();
+        onDone(first);
+      }
     } finally {
       setSaving(false);
+      setProgress(null);
     }
   };
 
@@ -836,7 +890,7 @@ function ImportPane({
         </>
       ) : (
         <>
-          {/* STEP 2 — challenge */}
+          {/* STEP 2 — challenge + setup */}
           <div className="rounded-xl border border-gold/30 bg-gold/[0.05] p-4">
             <p className="text-sm font-semibold text-ink">Which challenge should these trades belong to?</p>
             <div className="mt-3 space-y-2">
@@ -861,6 +915,26 @@ function ImportPane({
                 />
               </div>
             </div>
+
+            {playbook.length > 0 && (
+              <div className="mt-4 border-t border-gold/20 pt-3">
+                <p className="text-sm font-semibold text-ink">Tag with a setup</p>
+                <p className="mt-0.5 text-xs text-muted">
+                  Optional — rows that already carry a setup name keep it. Others get the setup selected here.
+                </p>
+                <select
+                  aria-label="Assign playbook setup to imported trades"
+                  value={setupId}
+                  onChange={(e) => setSetupId(e.target.value)}
+                  className="mt-2 w-full rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm text-ink focus:border-gold/60 focus:outline-none"
+                >
+                  <option value="">No setup</option>
+                  {playbook.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* STEP 3 — preview */}
@@ -936,6 +1010,21 @@ function ImportPane({
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {progress && (
+            <div className="rounded-xl border border-line bg-raised/60 px-4 py-3" aria-live="polite">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>Importing…</span>
+                <span className="num">{progress.done}/{progress.total}</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line-soft">
+                <div
+                  className="h-full rounded-full bg-gold transition-all duration-300"
+                  style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }}
+                />
+              </div>
             </div>
           )}
 

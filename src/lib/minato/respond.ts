@@ -17,12 +17,12 @@ export interface MinatoMessage {
 export const QUICK_PROMPTS = [
   "How am I doing?",
   "What is my best time window?",
+  "Which setup works best?",
   "What is my average winning hold time?",
   "What is my average losing hold time?",
+  "Long vs short — how do I perform?",
+  "Any day-of-week patterns?",
   "What patterns do you see?",
-  "What should I improve?",
-  "Am I following my plan?",
-  "Which setup works best?",
 ] as const;
 
 function money(n: number): string {
@@ -86,23 +86,30 @@ export function respond(ctx: EdgeBookContext, input: string): string {
   // --- Time windows ---
   if (/best time|worst time|best window|worst window|time window|best session|when.*best|when.*worst|perform best|perform worst|time.*perform/.test(q)) {
     const tw = timeWindowAnalytics(ctx.recentTrades);
-    if (tw.sparse) return `Only ${tw.totalSample} trades with timestamps recorded — not enough data to identify a reliable time window yet.`;
-    const best = tw.bestWinRate;
-    const worst = tw.worstWinRate;
-    if (!best && !worst) return "No clear time pattern emerged from your recorded trades.";
+    if (tw.sparse) {
+      return `1. Sample size\n   - Only ${tw.totalSample} trade${tw.totalSample === 1 ? "" : "s"} have entry timestamps — there is not enough data to identify a reliable time window yet.\n   - I won't fabricate probabilities from that. Add entry/exit times to more trades and ask again.`;
+    }
+    const qualified = [...tw.windows]
+      .filter((w) => w.trades >= 2)
+      .sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0) || b.avgPnl - a.avgPnl);
+    if (qualified.length === 0) return "No clear time pattern emerged from your recorded trades yet.";
+    const best = qualified[0];
+    const second = qualified[1] ?? null;
+    const weak = [...qualified].sort((a, b) => (a.winRate ?? 100) - (b.winRate ?? 100))[0];
     const parts: string[] = [];
-    if (best) {
-      parts.push(`Your strongest recorded window is ${best.label}.`);
-      parts.push(`\n1. Trades: ${best.trades}`);
-      parts.push(`2. Win rate: ${best.winRate ?? "—"}%`);
-      parts.push(`3. Average R: ${best.avgR != null ? `${best.avgR >= 0 ? "+" : ""}${best.avgR}R` : "—"}`);
-      parts.push(`4. Average P&L: ${money(best.avgPnl)}`);
-      parts.push(`5. Sample: ${best.trades} trades`);
+    parts.push(`1. Best window: ${best.label} NY`);
+    parts.push(`   - ${best.trades} trades · ${best.winRate ?? "—"}% win rate · avg ${money(best.avgPnl)}${best.avgR != null ? ` · avg ${best.avgR >= 0 ? "+" : ""}${best.avgR}R` : ""}`);
+    if (second && second.label !== best.label) {
+      parts.push(`2. Secondary window: ${second.label} NY`);
+      parts.push(`   - ${second.trades} trades · ${second.winRate ?? "—"}% win rate · avg ${money(second.avgPnl)}`);
     }
-    if (worst && worst.label !== best?.label) {
-      parts.push(`\nWeakest window: ${worst.label} — ${worst.winRate ?? "—"}% win rate across ${worst.trades} trades.`);
+    if (weak && weak.label !== best.label && (weak.winRate ?? 100) < 50) {
+      parts.push(`${second && second.label !== best.label ? "3" : "2"}. Weak window: ${weak.label} NY`);
+      parts.push(`   - ${weak.trades} trades · ${weak.winRate ?? "—"}% win rate · lower expectancy`);
     }
-    parts.push(`\n${best && best.trades >= 10 ? "Sample size is reasonable." : "Sample is still developing — treat this as directional, not definitive."}`);
+    parts.push(`4. Conclusion`);
+    parts.push(`   - Strongest historical window: ${best.label}. Weakest: ${weak?.label ?? "n/a"}.`);
+    parts.push(`   - Sample: ${tw.totalSample} timestamped trades — treat this as a historical tendency, not a guarantee.`);
     return parts.join("\n");
   }
 
@@ -114,6 +121,89 @@ export function respond(ctx: EdgeBookContext, input: string): string {
     const top = byR[0];
     const topR = top.avgR ?? 0;
     return `Your highest-RR window is ${top.label}.\n\n1. Average R: ${topR >= 0 ? "+" : ""}${topR}R\n2. Trades: ${top.trades}\n3. Win rate: ${top.winRate ?? "—"}%\n4. Total R: ${top.totalR != null ? `${top.totalR >= 0 ? "+" : ""}${top.totalR}R` : "—"}\n\nSample size: ${top.trades}. ${top.trades >= 10 ? "Reasonable confidence." : "Early signal — more data needed."}`;
+  }
+
+  // --- Setup performance ---
+  if (/which setup|best setup|setup.*(works|perform|win|profit|best)|worst setup/.test(q)) {
+    const bySetup = new Map<string, { pnl: number; wins: number; losses: number; rr: number[]; n: number }>();
+    for (const e of ctx.recentTrades) {
+      const key = e.setupId || e.setup;
+      if (!key) continue;
+      const cur = bySetup.get(key) ?? { pnl: 0, wins: 0, losses: 0, rr: [], n: 0 };
+      cur.pnl += e.pnl;
+      cur.n += 1;
+      if (e.pnl > 0) cur.wins += 1;
+      if (e.pnl < 0) cur.losses += 1;
+      if (e.rr != null && Number.isFinite(e.rr)) cur.rr.push(e.rr);
+      bySetup.set(key, cur);
+    }
+    if (bySetup.size === 0) return "No setups recorded yet. Name a playbook setup and tag your trades with it — then I can rank them.";
+    const rows = [...bySetup.entries()]
+      .map(([name, v]) => ({ name, ...v, winRate: v.wins + v.losses > 0 ? Math.round((v.wins / (v.wins + v.losses)) * 100) : null }))
+      .sort((a, b) => b.pnl - a.pnl);
+    const parts: string[] = [`Setup performance across ${rows.length} named ${rows.length === 1 ? "setup" : "setups"}:`];
+    rows.slice(0, 4).forEach((r, i) => {
+      parts.push(`${i + 1}. ${r.name} — ${money(r.pnl)} · ${r.winRate ?? "—"}% win rate · ${r.n} trades${r.rr.length > 0 ? ` · avg ${(r.rr.reduce((s, x) => s + x, 0) / r.rr.length).toFixed(2)}R` : ""}`);
+    });
+    const worst = rows[rows.length - 1];
+    if (rows.length > 1 && worst.pnl < 0) {
+      parts.push(`\n"${worst.name}" is your weakest (${money(worst.pnl)} over ${worst.n} trades). Consider tightening its rules or trading it smaller.`);
+    }
+    return parts.join("\n");
+  }
+
+  // --- Instrument / direction performance ---
+  if (/instrument|symbol|long vs short|longs? or shorts?|direction/.test(q)) {
+    const decided = ctx.recentTrades.filter((e) => e.direction);
+    if (decided.length < 3) return "Not enough tagged trades yet — record direction on your entries and I'll compare longs vs shorts and per-instrument results.";
+    const longs = decided.filter((e) => e.direction === "long");
+    const shorts = decided.filter((e) => e.direction === "short");
+    const stat = (list: typeof decided) => {
+      const pnl = list.reduce((s, e) => s + e.pnl, 0);
+      const wins = list.filter((e) => e.pnl > 0).length;
+      const losses = list.filter((e) => e.pnl < 0).length;
+      return `${money(pnl)} · ${wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : "—"}% win rate · ${list.length} trades`;
+    };
+    const parts: string[] = ["Long vs short:"];
+    parts.push(`1. Long: ${stat(longs)}`);
+    parts.push(`2. Short: ${stat(shorts)}`);
+    const byInstrument = new Map<string, { pnl: number; n: number }>();
+    for (const e of ctx.recentTrades) {
+      if (!e.instrument || e.instrument === "—") continue;
+      const cur = byInstrument.get(e.instrument) ?? { pnl: 0, n: 0 };
+      cur.pnl += e.pnl;
+      cur.n += 1;
+      byInstrument.set(e.instrument, cur);
+    }
+    const top = [...byInstrument.entries()].sort((a, b) => b[1].pnl - a[1].pnl)[0];
+    if (top) parts.push(`3. Best instrument: ${top[0]} — ${money(top[1].pnl)} over ${top[1].n} trades`);
+    return parts.join("\n");
+  }
+
+  // --- Day of week ---
+  if (/day of week|weekday|monday|friday|days?.*pattern|which day/.test(q)) {
+    const byDow = new Map<string, { pnl: number; wins: number; losses: number; n: number }>();
+    for (const e of ctx.recentTrades) {
+      const dow = new Date(e.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
+      const cur = byDow.get(dow) ?? { pnl: 0, wins: 0, losses: 0, n: 0 };
+      cur.pnl += e.pnl;
+      cur.n += 1;
+      if (e.pnl > 0) cur.wins += 1;
+      if (e.pnl < 0) cur.losses += 1;
+      byDow.set(dow, cur);
+    }
+    if (byDow.size < 2) return "Need trades spread across multiple weekdays before day-of-week patterns mean anything.";
+    const order = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    const rows = [...byDow.entries()].filter(([d]) => order.includes(d));
+    if (rows.length < 2) return "Your recorded days are too concentrated for a weekday comparison yet.";
+    const best = [...rows].sort((a, b) => b[1].pnl - a[1].pnl)[0];
+    const worst = [...rows].sort((a, b) => a[1].pnl - b[1].pnl)[0];
+    const wr = (v: (typeof rows)[number][1]) => (v.wins + v.losses > 0 ? Math.round((v.wins / (v.wins + v.losses)) * 100) : null);
+    const parts: string[] = ["Day-of-week pattern:"];
+    parts.push(`1. Best day: ${best[0]} — ${money(best[1].pnl)} · ${wr(best[1]) ?? "—"}% win rate · ${best[1].n} trades`);
+    parts.push(`2. Weakest day: ${worst[0]} — ${money(worst[1].pnl)} · ${wr(worst[1]) ?? "—"}% win rate · ${worst[1].n} trades`);
+    parts.push(`3. Note: weekday effects are usually noise at small sample sizes — treat as tendency only.`);
+    return parts.join("\n");
   }
 
   // --- Patterns ---

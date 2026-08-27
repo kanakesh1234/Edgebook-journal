@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { useApp, sortEntriesNewestFirst } from "@/lib/store";
 import { computeStats } from "@/lib/stats";
+import { journeyCardData } from "@/lib/challenges";
 import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
@@ -66,6 +67,8 @@ export function Sidebar() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const sorted = useMemo(() => sortEntriesNewestFirst(entries), [entries]);
   const stats = computeStats(sorted, settings);
+  // Journey follows the PRIMARY CHALLENGE — same source of truth as the dashboard.
+  const journey = useMemo(() => journeyCardData(settings, entries), [settings, entries]);
 
   const initials =
     (user?.name ?? "?")
@@ -99,33 +102,47 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Equity mini-card — the journey's persistent presence in the shell */}
-      <div className="mx-4 mb-3 rounded-control border border-line bg-raised/60 p-3.5">
-        <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Journey</p>
-        <p className="num mt-1 text-[15px] text-ink">
-          {formatMoney(stats.currentEquity, settings.currency)}
-        </p>
-        <div className="relative mt-2 h-1 overflow-visible rounded-full bg-canvas">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-profit to-gold transition-all duration-700"
-            style={{ width: `${Math.round(stats.targetProgress * 100)}%` }}
-          />
-          {[0.25, 0.5, 0.75].map((f) => (
-            <span
-              key={f}
-              aria-hidden
-              className={cn(
-                "absolute top-1/2 h-2 w-px -translate-y-1/2",
-                stats.targetProgress >= f ? "bg-gold/70" : "bg-line-strong",
-              )}
-              style={{ left: `${f * 100}%` }}
+      {/* Journey mini-card — derives from the CURRENT PRIMARY CHALLENGE
+          (settings.primaryChallengeId via journeyCardData). Updates instantly
+          when the primary challenge changes. No hard-coded default equity. */}
+      {journey.challengeName ? (
+        <div className="mx-4 mb-3 rounded-control border border-line bg-raised/60 p-3.5">
+          <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Journey · {journey.challengeName}</p>
+          <p className="num mt-1 text-[15px] text-ink">
+            {formatMoney(journey.currentBalance ?? 0, settings.currency)}
+          </p>
+          <div className="relative mt-2 h-1 overflow-visible rounded-full bg-canvas">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-profit to-gold transition-all duration-700"
+              style={{ width: `${journey.progressPct}%` }}
             />
-          ))}
+            {[0.25, 0.5, 0.75].map((f) => (
+              <span
+                key={f}
+                aria-hidden
+                className={cn(
+                  "absolute top-1/2 h-2 w-px -translate-y-1/2",
+                  journey.progress >= f ? "bg-gold/70" : "bg-line-strong",
+                )}
+                style={{ left: `${f * 100}%` }}
+              />
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-faint">
+            {journey.progressPct}% to target
+            {journey.remainingDrawdown != null && (
+              <> · DD left {formatMoney(journey.remainingDrawdown, settings.currency)}</>
+            )}
+          </p>
         </div>
-        <p className="mt-1.5 text-[11px] text-faint">
-          {Math.round(stats.targetProgress * 100)}% to target
-        </p>
-      </div>
+      ) : (
+        <div className="mx-4 mb-3 rounded-control border border-dashed border-line-strong p-3.5">
+          <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Journey</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            No primary challenge selected. Create one in Challenges and mark it primary to track progress here.
+          </p>
+        </div>
+      )}
 
       {/* Theme + User */}
       <div className="border-t border-line p-4">

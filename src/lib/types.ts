@@ -34,6 +34,17 @@ export interface EntryImage {
   size: number; // bytes
 }
 
+/**
+ * Canonical PRE-TRADE execution checklist item — completed BEFORE the trade
+ * is recorded, persisted as historical evidence on the entry itself.
+ * Labels are derived from the selected setup/plan; never hard-coded.
+ */
+export interface PreTradeChecklistItem {
+  label: string;
+  description?: string;
+  confirmed: boolean;
+}
+
 export interface JournalEntry {
   id: string;
   /** Local trading date, `YYYY-MM-DD` (America/New_York). */
@@ -51,6 +62,8 @@ export interface JournalEntry {
   reflection?: TradeReflection;
   /** Challenge this trade belongs to. */
   challengeId?: string;
+  /** Canonical PlaybookSetup this trade was executed under (id reference, never a copy). */
+  setupId?: string;
   /** Pre-trade plan this trade executed (plan ↔ trade link, no duplication). */
   planId?: string;
   /** Planned trade number within the day (1 or 2). */
@@ -64,6 +77,12 @@ export interface JournalEntry {
   takeProfit?: number | null;
   /** Execution playbook checklist (6/6 first trade, 7/7 second trade). */
   checklist?: TradeChecklist;
+  /**
+   * Canonical PRE-TRADE execution checklist — captured in the Plan Trade
+   * flow BEFORE recording. Read-only historical evidence after the trade.
+   * Replaces the legacy interactive post-trade checklist for new trades.
+   */
+  preTradeChecklist?: PreTradeChecklistItem[];
   /** Structured review data — setup, execution, psychology, outcome. */
   review?: TradeReviewData;
   /** Review lifecycle status (derived + persisted for calendar/list display). */
@@ -73,6 +92,10 @@ export interface JournalEntry {
 }
 
 export interface JournalSettings {
+  /** Display name used across the app (dashboard greeting, profile). Overrides the auth name when set. */
+  fullName?: string;
+  /** Canonical unique friend identifier (Connection ID) — never an email. */
+  handle?: string;
   traderName: string;
   startingEquity: number;
   targetEquity: number;
@@ -82,6 +105,8 @@ export interface JournalSettings {
   rules?: RuleSet;
   /** The trader's playbook — fully defined setups with entry/exit logic. */
   playbook?: PlaybookSetup[];
+  /** The challenge the Home dashboard / calendar / MINATO are scoped to. */
+  primaryChallengeId?: string | null;
   /** AI companion preferences. */
   aiPrefs?: AiPrefs;
   /** Trading challenges — distinct trading periods/objectives. */
@@ -103,6 +128,11 @@ export interface Challenge {
   /** STATIC: measured from starting balance. DYNAMIC: trailing high-water mark. */
   drawdownMode?: DrawdownMode;
   maxDrawdown?: number | null;
+  /**
+   * DYNAMIC only: absolute equity floor the trailing threshold can never
+   * breach (broker "lock" level). Null = trail with no lock.
+   */
+  drawdownFloor?: number | null;
   startDate?: string;
   endDate?: string;
   dailyProfitTarget?: number | null;
@@ -150,6 +180,8 @@ export interface TradePlan {
   playbookVersion?: number;
   instrument?: string;
   bias?: "long" | "short" | "either";
+  /** Free-form pre-session / pre-trade process written by the trader. */
+  preSessionProcess?: string;
   /** "What is price likely to do today?" — stored exactly as written. */
   thesis: string;
   drawOnLiquidity?: string;
@@ -164,6 +196,9 @@ export interface TradePlan {
   emotionalNote?: string;
   whatCouldBreakPlan?: string;
   rules: PlanRule[];
+  /** Execution-checklist confirmations from the pre-trade analysis stage. */
+  executionChecklist?: PreTradeChecklistItem[];
+  executionConfirmedAt?: number;
   preTradeScreenshotIds?: string[];
   status: PlanStatus;
   linkedTradeId?: string;
@@ -301,8 +336,10 @@ export interface TradeReviewData {
 }
 
 /** Derive review status — REVIEWED requires evidence, checklist, execution, psychology, outcome. */
-export function reviewStatusOf(entry: Pick<JournalEntry, "review" | "reflection" | "images" | "checklist">): ReviewStatus {
-  const hasChecklist = !!entry.checklist && checklistScore(entry.checklist).confirmed > 0;
+export function reviewStatusOf(entry: Pick<JournalEntry, "review" | "reflection" | "images" | "checklist"> & { preTradeChecklist?: PreTradeChecklistItem[] }): ReviewStatus {
+  const hasChecklist =
+    (!!entry.checklist && checklistScore(entry.checklist).confirmed > 0) ||
+    (!!entry.preTradeChecklist && entry.preTradeChecklist.some((i) => i.confirmed));
   const hasReflection = !!entry.reflection;
   const hasExecution = !!entry.review?.execution && Object.values(entry.review.execution).some((v) => v != null && v !== "");
   const hasPsychology = !!entry.review?.psychology && Object.values(entry.review.psychology).some((v) => v != null && v !== "");
@@ -319,13 +356,22 @@ export function reviewStatusOf(entry: Pick<JournalEntry, "review" | "reflection"
 /*  Playbook — the trader's defined setups and strategy                */
 /* ------------------------------------------------------------------ */
 
+/** A single user-defined rule inside a setup. Canonical — referenced, never duplicated into trades. */
+export interface PlaybookRule {
+  id: string;
+  text: string;
+  description?: string;
+}
+
 export interface PlaybookSetup {
   id: string;
   name: string;
   purpose?: string;
   /** The idea behind the setup — where the edge comes from. */
   strategy?: string;
-  /** Conditions that must be true before entering (one per line = one rule). */
+  /** User-defined rules (unlimited). Preferred over entryConditions. */
+  rules?: PlaybookRule[];
+  /** Legacy: conditions that must be true before entering (one per line = one rule). */
   entryConditions?: string;
   /** What kills the trade / the idea. */
   invalidation?: string;
@@ -344,6 +390,20 @@ export interface PlaybookSetup {
   version: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Canonical rule list for a setup. Migrates legacy setups transparently:
+ * when `rules` is absent, rules are derived from `entryConditions` lines.
+ */
+export function setupRules(setup: Pick<PlaybookSetup, "rules" | "entryConditions"> | null | undefined): PlaybookRule[] {
+  if (!setup) return [];
+  if (setup.rules && setup.rules.length > 0) return setup.rules;
+  return (setup.entryConditions ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((text, i) => ({ id: `legacy-${i}`, text }));
 }
 
 export interface AiPrefs {

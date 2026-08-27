@@ -2,34 +2,68 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { useApp } from "@/lib/store";
-import { challengeReminder, challengeProgress, type ChallengeProgress } from "@/lib/challenges";
+import { useApp, persistFailedSince } from "@/lib/store";
+import { challengeProgress, type ChallengeProgress } from "@/lib/challenges";
 import type { Challenge, DrawdownMode } from "@/lib/types";
 import { formatSignedMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/misc";
-import { PlusIcon, TargetIcon } from "@/components/ui/icons";
+import { toast } from "@/components/ui/toast";
+import { PencilIcon, PlusIcon, StarIcon, TargetIcon, TrashIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import { uid } from "@/lib/utils";
 
 /**
- * Challenges — top-level section. Each challenge is a distinct trading
- * period/objective with its own progress, drawdown model and milestones.
+ * Challenges — multiple challenges as boxed folder cards.
+ * Full CRUD + one primary challenge that Home / calendar / MINATO scope to.
  */
 export default function ChallengesPage() {
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
-  const challenges = useMemo(() => settings.challenges ?? [], [settings]);
+  const challenges = useMemo(() => settings.challenges ?? [], [settings.challenges]);
+  const primaryId = settings.primaryChallengeId ?? null;
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Challenge | null>(null);
+  const [deleting, setDeleting] = useState<Challenge | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const progressList = useMemo(
     () => challenges.map((c) => ({ challenge: c, progress: challengeProgress(c, entries) })),
     [challenges, entries],
   );
+
+  const makePrimary = async (id: string) => {
+    const t0 = Date.now();
+    try {
+      await useApp.getState().setPrimaryChallenge(id);
+      if (!persistFailedSince(t0)) {
+        toast.success("Primary challenge updated", "Home, calendar and MINATO now follow this challenge.");
+      }
+    } catch {
+      toast.error("Could not update the primary challenge");
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    const t0 = Date.now();
+    try {
+      await useApp.getState().deleteChallenge(deleting.id);
+      if (!persistFailedSince(t0)) {
+        toast.success("Challenge deleted", "Your journal trades were not touched.");
+      }
+      setDeleting(null);
+    } catch {
+      toast.error("Could not delete the challenge");
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -44,14 +78,11 @@ export default function ChallengesPage() {
             Challenges
           </motion.h1>
           <p className="mt-1 max-w-xl text-sm text-muted">
-            What am I trying to achieve? Each challenge is a distinct trading period with its own
-            objective, drawdown model and milestones.
+            Each challenge is a distinct trading period with its own objective. Mark one as primary and
+            your dashboard follows it.
           </p>
         </div>
-        <Button
-          variant="gold"
-          onClick={() => setCreating(true)}
-        >
+        <Button variant="gold" onClick={() => setCreating(true)}>
           <PlusIcon className="h-4 w-4" />
           New challenge
         </Button>
@@ -65,19 +96,23 @@ export default function ChallengesPage() {
           action={<Button variant="gold" onClick={() => setCreating(true)}><PlusIcon className="h-4 w-4" />New challenge</Button>}
         />
       ) : (
-        <div className="space-y-6">
+        <div className="grid gap-4 lg:grid-cols-2">
           {progressList.map(({ challenge, progress }, i) => (
             <ChallengeCard
               key={challenge.id}
               challenge={challenge}
               progress={progress}
-              delay={i * 0.06}
+              primary={primaryId === challenge.id}
+              delay={i * 0.05}
               onEdit={() => setEditing(challenge)}
+              onMakePrimary={() => void makePrimary(challenge.id)}
+              onDelete={() => setDeleting(challenge)}
             />
           ))}
         </div>
       )}
 
+      {/* Create / edit form — closing returns to this list, new card visible immediately */}
       <ChallengeFormModal
         open={creating || editing !== null}
         challenge={editing}
@@ -86,151 +121,168 @@ export default function ChallengesPage() {
           setEditing(null);
         }}
       />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => void confirmDelete()}
+        busy={deleteBusy}
+        title={`Delete "${deleting?.name ?? ""}"?`}
+        body="Only the challenge is removed — journal trades are never deleted by this action."
+        confirmLabel="Delete challenge"
+      />
     </div>
   );
 }
 
 /* ------------------------------ challenge card ------------------------------ */
 
+function Metric({ label, value, tone }: { label: string; value: string; tone?: "loss" | "profit" | "gold" | "muted" }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-faint">{label}</dt>
+      <dd className={cn(
+        "num mt-0.5 truncate text-[13px] font-semibold",
+        tone === "loss" ? "text-loss" : tone === "profit" ? "text-profit" : tone === "gold" ? "text-gold" : "text-ink",
+      )}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 function ChallengeCard({
   challenge,
   progress,
+  primary,
   delay,
   onEdit,
+  onMakePrimary,
+  onDelete,
 }: {
   challenge: Challenge;
   progress: ChallengeProgress;
+  primary: boolean;
   delay: number;
   onEdit: () => void;
+  onMakePrimary: () => void;
+  onDelete: () => void;
 }) {
-  const reminder = challengeReminder(progress);
+  const tradingDays = new Set(progress.tradesList.map((t) => t.date)).size;
   return (
     <motion.section
-      initial={{ opacity: 0, y: 18 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay, ease: EASE }}
-      className="panel p-5 sm:p-6"
-      aria-label={`Challenge: ${challenge.name}`}
+      transition={{ duration: 0.45, delay, ease: EASE }}
+      whileHover={{ y: -3 }}
+      className={cn(
+        "panel panel-hover relative p-5",
+        primary && "border-gold/50 ring-1 ring-gold/25",
+      )}
+      aria-label={`Challenge: ${challenge.name}${primary ? " (primary)" : ""}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-display text-xl font-semibold tracking-[-0.02em] text-ink">{challenge.name}</h2>
-          <p className="mt-0.5 text-xs text-faint">
-            {challenge.drawdownMode === "dynamic" ? "Dynamic drawdown (trailing high-water mark)" : "Static drawdown (from starting balance)"}
-            {challenge.startDate ? ` · started ${challenge.startDate}` : ""}
+      {primary && (
+        <span className="absolute right-4 top-4 inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/[0.1] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gold">
+          <StarIcon className="h-3 w-3" />
+          Primary
+        </span>
+      )}
+
+      <div className="flex items-start gap-3 pr-20">
+        <span aria-hidden className="text-xl leading-none">📁</span>
+        <div className="min-w-0">
+          <h2 className="truncate font-display text-lg font-semibold tracking-[-0.02em] text-ink">{challenge.name}</h2>
+          <p className="num mt-0.5 text-xs text-muted">
+            {formatSignedMoney(progress.startingBalance)} → {formatSignedMoney(progress.targetBalance)}
+            {" · "}
+            <span className={progress.currentPnl >= 0 ? "text-profit" : "text-loss"}>
+              {formatSignedMoney(progress.currentPnl)} ({progress.progressPct}%)
+            </span>
+          </p>
+          <p className="num mt-0.5 text-[11px] text-faint">
+            {tradingDays} trading {tradingDays === 1 ? "day" : "days"} · {progress.trades} {progress.trades === 1 ? "trade" : "trades"}
+            {progress.winRate != null ? ` · ${Math.round(progress.winRate * 100)}% win rate` : ""}
           </p>
         </div>
-        <Button variant="subtle" size="sm" onClick={onEdit}>Edit</Button>
       </div>
 
-      {reminder && (
-        <p className="mt-4 rounded-control border border-gold/30 bg-gold/[0.06] px-4 py-2.5 text-[13px] leading-relaxed text-ink">
-          {reminder}
-        </p>
-      )}
-
-      {/* Stats grid */}
-      <dl className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-control border border-line bg-line sm:grid-cols-4 lg:grid-cols-6">
-        {([
-          ["Starting", formatSignedMoney(progress.startingBalance)],
-          ["Equity", formatSignedMoney(progress.currentEquity)],
-          ["Target", formatSignedMoney(progress.targetBalance)],
-          ["P&L", formatSignedMoney(progress.currentPnl)],
-          ["Progress", `${progress.progressPct}%`],
-          ["Max DD", formatSignedMoney(progress.maxDrawdown)],
-          ["Current DD", formatSignedMoney(progress.currentDrawdown)],
-          ["DD remaining", formatSignedMoney(progress.remainingDrawdown)],
-          ["To target", formatSignedMoney(progress.distanceToTarget)],
-          ["Trades", String(progress.trades)],
-          ["Win rate", progress.winRate != null ? `${Math.round(progress.winRate * 100)}%` : "—"],
-          ["Avg R", progress.avgR != null ? `${progress.avgR.toFixed(1)}R` : "—"],
-        ] as const).map(([label, value]) => (
-          <div key={label} className="bg-surface px-3.5 py-3">
-            <dt className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">{label}</dt>
-            <dd className="num mt-1 truncate text-sm font-semibold text-ink">{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {progress.ruleAdherence != null && (
-        <p className="mt-2 text-xs text-muted">
-          Rule adherence: <span className="num font-semibold text-ink">{Math.round(progress.ruleAdherence * 100)}%</span> across checklist-reviewed trades
-        </p>
-      )}
-
-      {/* Milestone path */}
-      <div className="mt-6" role="img" aria-label={`${progress.progressPct}% of challenge progress`}>
-        <MilestonePath progress={progress} />
-      </div>
-    </motion.section>
-  );
-}
-
-function MilestonePath({ progress }: { progress: ChallengeProgress }) {
-  const pct = progress.progressPct;
-  return (
-    <div>
-      <div className="relative mx-3 h-10">
-        {/* base */}
-        <div className="absolute inset-x-0 top-[38%] h-1.5 rounded-full bg-line-soft" />
-        {/* fill */}
+      {/* Compact progress bar */}
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-line-soft" role="img" aria-label={`${progress.progressPct}% of challenge progress`}>
         <div
-          className="absolute left-0 top-[38%] h-1.5 rounded-full bg-gradient-to-r from-profit-deep via-profit to-gold-strong transition-all duration-700"
+          className="h-full rounded-full bg-gradient-to-r from-profit-deep via-profit to-gold-strong transition-all duration-700"
           style={{ width: `${Math.min(100, progress.progress * 100)}%` }}
         />
-        {/* start */}
-        <Marker fraction={0} label="START" value={formatSignedMoney(progress.startingBalance, undefined, { compact: true })}>
-          <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-muted bg-surface"><span className="h-1 w-1 rounded-full bg-muted" /></span>
-        </Marker>
-        {progress.milestones.map((m) => (
-          <Marker key={m.fraction} fraction={m.fraction} label={`${m.fraction * 100}%`} value={formatSignedMoney(m.equity, undefined, { compact: true })} passed={m.passed}>
-            {m.passed ? (
-              <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-profit bg-surface text-profit">
-                <svg viewBox="0 0 10 10" className="h-2 w-2" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 5.2 4.2 7.4 8 3" /></svg>
-              </span>
-            ) : (
-              <span className="h-2.5 w-2.5 rounded-full border-2 border-line-strong bg-surface" />
-            )}
-          </Marker>
-        ))}
-        {/* target */}
-        <Marker fraction={1} label="TARGET" value={formatSignedMoney(progress.targetBalance, undefined, { compact: true })} align="end" gold>
-          <span className={cn("grid h-4 w-4 place-items-center rounded-full border-2", progress.reachedTarget ? "border-profit bg-profit text-surface" : "border-gold-strong bg-surface text-gold-strong")}>◎</span>
-        </Marker>
-        {/* live equity marker */}
-        {progress.trades > 0 && (
-          <span className="absolute top-[38%] z-10 -translate-x-1/2 -translate-y-1/2" style={{ left: `${progress.progress * 100}%` }}>
-            <span className="block h-3.5 w-3.5 rounded-full border-2 border-surface bg-ink shadow-sm" />
-          </span>
-        )}
       </div>
-      <p className="mt-1 text-center text-xs text-faint" aria-live="polite">{pct}% complete</p>
-    </div>
-  );
-}
 
-function Marker({ fraction, label, value, children, align = "center", passed, gold }: {
-  fraction: number;
-  label: string;
-  value?: string;
-  children: React.ReactNode;
-  align?: "center" | "end";
-  passed?: boolean;
-  gold?: boolean;
-}) {
-  return (
-    <div className="absolute top-[38%] -translate-x-1/2 -translate-y-1/2" style={{ left: `${fraction * 100}%` }}>
-      <div className="flex flex-col items-center gap-2">
-        {children}
-        <span className={cn("absolute top-6 whitespace-nowrap font-mono text-[9px] uppercase tracking-wider", gold ? "text-gold" : passed ? "text-profit" : "text-faint", align === "end" && "translate-x-1/2")}>
-          {label}
-        </span>
-        {value && (
-          <span className={cn("absolute top-11 whitespace-nowrap font-mono text-[9px] text-faint/70", align === "end" && "translate-x-1/2")}>
-            {value}
-          </span>
+      {/* Drawdown / equity metrics */}
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[12px] sm:grid-cols-3">
+        <Metric label="Current balance" value={formatSignedMoney(progress.currentEquity)} />
+        <Metric label="Highest balance" value={formatSignedMoney(progress.highestBalance)} />
+        <Metric
+          label={`Drawdown (${progress.drawdownMode})`}
+          value={formatSignedMoney(progress.currentDrawdown)}
+          tone={progress.currentDrawdown > 0 ? "loss" : "muted"}
+        />
+        <Metric
+          label="Drawdown remaining"
+          value={progress.maxDrawdown > 0 ? formatSignedMoney(progress.remainingDrawdown) : "—"}
+          tone={progress.maxDrawdown > 0 && progress.remainingDrawdown <= progress.maxDrawdown * 0.25 ? "loss" : "profit"}
+        />
+        <Metric
+          label="Drawdown threshold"
+          value={progress.maxDrawdown > 0 ? formatSignedMoney(progress.drawdownThreshold) : "—"}
+        />
+        <Metric label="Target progress" value={`${progress.progressPct}%`} tone="gold" />
+      </dl>
+
+      {/* Milestone path — START → 10 → 25 → 50 → 75 → 90 → TARGET */}
+      {progress.milestones.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3" aria-label="Challenge milestone path">
+          <div className="flex items-center gap-1.5">
+            {progress.milestones.map((m, i) => {
+              const next = progress.milestones[i + 1];
+              const isCurrent = m.passed && (!next || !next.passed);
+              return (
+                <div key={m.fraction} className="flex flex-1 items-center gap-1.5 last:flex-none">
+                  <span
+                    title={`${Math.round(m.fraction * 100)}% — ${formatSignedMoney(m.equity)}${m.passed ? " (reached)" : ""}`}
+                    className={cn(
+                      "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[9px] font-bold transition-colors",
+                      isCurrent ? "border-gold bg-gold/[0.14] text-gold"
+                        : m.passed ? "border-profit/50 bg-profit/[0.12] text-profit"
+                        : "border-line bg-raised text-faint",
+                    )}
+                  >
+                    {m.passed && !isCurrent ? "✓" : `${Math.round(m.fraction * 100)}`}
+                  </span>
+                  {next && <span className={cn("h-px flex-1", next.passed ? "bg-profit/50" : "bg-line-strong")} />}
+                </div>
+              );
+            })}
+          </div>
+          <p className="num mt-1.5 text-[11px] text-faint">
+            START → TARGET{progress.reachedTarget ? " — COMPLETED" : ` · ${formatSignedMoney(progress.distanceToTarget)} to go`}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+        {!primary && (
+          <Button variant="outline" size="sm" onClick={onMakePrimary}>
+            <StarIcon className="h-3.5 w-3.5" />
+            Make primary
+          </Button>
         )}
+        <Button variant="subtle" size="sm" onClick={onEdit}>
+          <PencilIcon className="h-3.5 w-3.5" />
+          Edit
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDelete} className="!text-faint hover:!text-loss">
+          <TrashIcon className="h-3.5 w-3.5" />
+          Delete
+        </Button>
       </div>
-    </div>
+    </motion.section>
   );
 }
 
@@ -243,6 +295,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
   const [targetBalance, setTargetBalance] = useState("");
   const [maxDrawdown, setMaxDrawdown] = useState("");
   const [drawdownMode, setDrawdownMode] = useState<DrawdownMode>("static");
+  const [drawdownFloor, setDrawdownFloor] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [dailyProfitTarget, setDailyProfitTarget] = useState("");
@@ -260,6 +313,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       setTargetBalance(editing.targetBalance?.toString() ?? "");
       setMaxDrawdown(editing.maxDrawdown?.toString() ?? "");
       setDrawdownMode(editing.drawdownMode ?? "static");
+      setDrawdownFloor(editing.drawdownFloor?.toString() ?? "");
       setStartDate(editing.startDate ?? "");
       setEndDate(editing.endDate ?? "");
       setDailyProfitTarget(editing.dailyProfitTarget?.toString() ?? "");
@@ -269,7 +323,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       setNotes(editing.notes ?? "");
     } else {
       setName(""); setStartingBalance(""); setTargetBalance(""); setMaxDrawdown("");
-      setDrawdownMode("static"); setStartDate(""); setEndDate("");
+      setDrawdownMode("static"); setDrawdownFloor(""); setStartDate(""); setEndDate("");
       setDailyProfitTarget(""); setDailyLossLimit(""); setTradeLimit(""); setInstruments(""); setNotes("");
     }
     setError(null);
@@ -281,7 +335,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
     const target = Number(targetBalance);
     if (!Number.isFinite(start) || start <= 0) { setError("Enter a valid starting balance."); return; }
     if (!Number.isFinite(target) || target <= start) { setError("Target must be above the starting balance."); return; }
-    await useApp.getState().saveChallenge({
+    const saved: Challenge = {
       id: editing?.id ?? uid(`ch-${Date.now().toString(36)}`),
       name: name.trim(),
       notes: notes.trim() || undefined,
@@ -289,6 +343,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       targetBalance: target,
       drawdownMode,
       maxDrawdown: Number(maxDrawdown) || null,
+      drawdownFloor: drawdownMode === "dynamic" && drawdownFloor ? Number(drawdownFloor) : null,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       dailyProfitTarget: Number(dailyProfitTarget) || null,
@@ -296,65 +351,90 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       tradeLimit: Number(tradeLimit) || null,
       instruments: instruments ? instruments.split(",").map((i) => i.trim().toUpperCase()).filter(Boolean) : undefined,
       createdAt: editing?.createdAt ?? Date.now(),
-    });
-    onClose();
+    };
+    const t0 = Date.now();
+    try {
+      await useApp.getState().saveChallenge(saved);
+      // First challenge becomes primary automatically so the dashboard follows it.
+      if (!editing && !useApp.getState().settings.primaryChallengeId) {
+        await useApp.getState().setPrimaryChallenge(saved.id);
+      }
+      if (!persistFailedSince(t0) && !editing) toast.success("Challenge created");
+      onClose();
+    } catch {
+      setError("Could not save the challenge. Please try again.");
+    }
   };
 
   return (
     <Modal open={open} onClose={onClose} size="md" label="Challenge" title={editing ? "Edit challenge" : "New challenge"} description="Define the objective — EdgeBook measures the journey.">
-      <div className="space-y-4 px-6 py-6">
-        <Field label="Challenge name" htmlFor="ch-name">
-          <TextInput id="ch-name" autoFocus placeholder="e.g. March $25K Challenge" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Starting balance" htmlFor="ch-start">
-            <TextInput id="ch-start" inputMode="decimal" className="tabular" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value.replace(/[^\d.]/g, ""))} />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <div className="space-y-4 px-6 py-6">
+          <Field label="Challenge name" htmlFor="ch-name">
+            <TextInput id="ch-name" autoFocus placeholder="e.g. March $25K Challenge" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Target balance" htmlFor="ch-target">
-            <TextInput id="ch-target" inputMode="decimal" className="tabular" value={targetBalance} onChange={(e) => setTargetBalance(e.target.value.replace(/[^\d.]/g, ""))} />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Starting balance" htmlFor="ch-start">
+              <TextInput id="ch-start" inputMode="decimal" className="tabular" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value.replace(/[^\d.]/g, ""))} />
+            </Field>
+            <Field label="Target balance" htmlFor="ch-target">
+              <TextInput id="ch-target" inputMode="decimal" className="tabular" value={targetBalance} onChange={(e) => setTargetBalance(e.target.value.replace(/[^\d.]/g, ""))} />
+            </Field>
+            <Field label="Max drawdown" htmlFor="ch-dd">
+              <TextInput id="ch-dd" inputMode="decimal" className="tabular" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value.replace(/[^\d.]/g, ""))} />
+            </Field>
+            {drawdownMode === "dynamic" ? (
+              <Field label="Drawdown floor / lock" hint="optional — trailing threshold never goes below this" htmlFor="ch-ddfloor">
+                <TextInput id="ch-ddfloor" inputMode="decimal" className="tabular" placeholder={`e.g. ${(Number(startingBalance) || 50000) - (Number(maxDrawdown) || 2500)}`} value={drawdownFloor} onChange={(e) => setDrawdownFloor(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+            ) : (
+              <div aria-hidden className="hidden sm:block" />
+            )}
+            <Field label="Drawdown model" htmlFor="ch-ddmode">
+              <select
+                id="ch-ddmode"
+                value={drawdownMode}
+                onChange={(e) => setDrawdownMode(e.target.value as DrawdownMode)}
+                className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink focus:border-gold/60 focus:outline-none"
+              >
+                <option value="static">Static — from starting balance</option>
+                <option value="dynamic">Dynamic — trailing high-water mark</option>
+              </select>
+            </Field>
+            <Field label="Start date" hint="optional" htmlFor="ch-startdate">
+              <TextInput id="ch-startdate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </Field>
+            <Field label="End date" hint="optional" htmlFor="ch-enddate">
+              <TextInput id="ch-enddate" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </Field>
+            <Field label="Daily profit target" hint="optional" htmlFor="ch-dpt">
+              <TextInput id="ch-dpt" inputMode="decimal" className="tabular" value={dailyProfitTarget} onChange={(e) => setDailyProfitTarget(e.target.value.replace(/[^\d.]/g, ""))} />
+            </Field>
+            <Field label="Daily loss limit" hint="optional" htmlFor="ch-dll">
+              <TextInput id="ch-dll" inputMode="decimal" className="tabular" value={dailyLossLimit} onChange={(e) => setDailyLossLimit(e.target.value.replace(/[^\d.]/g, ""))} />
+            </Field>
+            <Field label="Trade limit per day" hint="optional" htmlFor="ch-tl">
+              <TextInput id="ch-tl" inputMode="numeric" className="tabular" value={tradeLimit} onChange={(e) => setTradeLimit(e.target.value.replace(/[^\d]/g, ""))} />
+            </Field>
+            <Field label="Instruments" hint="optional, comma-separated" htmlFor="ch-instruments">
+              <TextInput id="ch-instruments" placeholder="NQ, ES…" value={instruments} onChange={(e) => setInstruments(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Description" hint="optional" htmlFor="ch-notes">
+            <TextArea id="ch-notes" className="min-h-16" placeholder="What does passing this challenge mean?" value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
-          <Field label="Max drawdown" htmlFor="ch-dd">
-            <TextInput id="ch-dd" inputMode="decimal" className="tabular" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value.replace(/[^\d.]/g, ""))} />
-          </Field>
-          <Field label="Drawdown model" htmlFor="ch-ddmode">
-            <select
-              id="ch-ddmode"
-              value={drawdownMode}
-              onChange={(e) => setDrawdownMode(e.target.value as DrawdownMode)}
-              className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink focus:border-gold/60 focus:outline-none"
-            >
-              <option value="static">Static — from starting balance</option>
-              <option value="dynamic">Dynamic — trailing high-water mark</option>
-            </select>
-          </Field>
-          <Field label="Start date" hint="optional" htmlFor="ch-startdate">
-            <TextInput id="ch-startdate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </Field>
-          <Field label="End date" hint="optional" htmlFor="ch-enddate">
-            <TextInput id="ch-enddate" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </Field>
-          <Field label="Daily profit target" hint="optional" htmlFor="ch-dpt">
-            <TextInput id="ch-dpt" inputMode="decimal" className="tabular" value={dailyProfitTarget} onChange={(e) => setDailyProfitTarget(e.target.value.replace(/[^\d.]/g, ""))} />
-          </Field>
-          <Field label="Daily loss limit" hint="optional" htmlFor="ch-dll">
-            <TextInput id="ch-dll" inputMode="decimal" className="tabular" value={dailyLossLimit} onChange={(e) => setDailyLossLimit(e.target.value.replace(/[^\d.]/g, ""))} />
-          </Field>
-          <Field label="Trade limit per day" hint="optional" htmlFor="ch-tl">
-            <TextInput id="ch-tl" inputMode="numeric" className="tabular" value={tradeLimit} onChange={(e) => setTradeLimit(e.target.value.replace(/[^\d]/g, ""))} />
-          </Field>
-          <Field label="Instruments" hint="optional, comma-separated" htmlFor="ch-instruments">
-            <TextInput id="ch-instruments" placeholder="NQ, ES…" value={instruments} onChange={(e) => setInstruments(e.target.value)} />
-          </Field>
+          {error && <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2 text-[13px] text-loss">{error}</p>}
+          <div className="flex justify-end gap-2.5 border-t border-line pt-4">
+            <Button type="button" variant="subtle" onClick={onClose}>Cancel</Button>
+            <Button type="submit" variant="gold">{editing ? "Save challenge" : "Create challenge"}</Button>
+          </div>
         </div>
-        <Field label="Description" hint="optional" htmlFor="ch-notes">
-          <TextArea id="ch-notes" className="min-h-16" placeholder="What does passing this challenge mean?" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-        {error && <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2 text-[13px] text-loss">{error}</p>}
-        <div className="flex justify-end gap-2.5 border-t border-line pt-4">
-          <Button variant="subtle" onClick={onClose}>Cancel</Button>
-          <Button variant="gold" onClick={() => void save()}>{editing ? "Save challenge" : "Create challenge"}</Button>
-        </div>
-      </div>
+      </form>
     </Modal>
   );
 }

@@ -27,6 +27,12 @@ export async function GET(request: Request) {
   const nonce = randomNonce();
   const state = signState(config.tokenSecret, nonce);
 
+  console.log(`[AUTH-TRACE] stage=OAUTH_START_ENTERED requestUrl=${request.url} origin=${new URL(request.url).origin} redirectUri=${config.redirectUri} next=${next}`);
+  if (!config.redirectUri.startsWith(new URL(request.url).origin)) {
+    console.warn(`[AUTH-TRACE] ORIGIN_MISMATCH appOrigin=${new URL(request.url).origin} redirectUri=${config.redirectUri} → Google will redirect to a DIFFERENT origin than the one serving this page`);
+  }
+  console.log(`[AUTH-TRACE] stage=OAUTH_PROVIDER_REDIRECT target=accounts.google.com stateCookieSet=true`);
+
   const res = NextResponse.redirect(googleAuthUrl(config, state));
   res.cookies.set(
     OAUTH_STATE_COOKIE,

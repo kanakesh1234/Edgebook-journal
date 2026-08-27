@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
+import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { disciplineSummary } from "@/lib/discipline";
 import { evaluateRules, adherenceSummary } from "@/lib/rules";
@@ -42,14 +43,17 @@ const STATE_GLYPH: Record<MinatoState, string> = {
  * later without UI changes.
  */
 export function Minato() {
-  const entries = useApp((s) => s.entries);
-  const settings = useApp((s) => s.settings);
+  const allEntries = useApp((s) => s.entries);
+  const rawSettings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
   const dayLogs = useApp((s) => s.dayLogs);
   const open = useUi((s) => s.minatoOpen);
   const setOpen = useUi((s) => s.setMinatoOpen);
   const focusId = useUi((s) => s.minatoTradeId);
   const reduce = useReducedMotion();
+
+  // MINATO follows the primary challenge — same source of truth as Home.
+  const { entries, settings } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
 
   const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
   const focusEntry = useMemo(
@@ -65,7 +69,7 @@ export function Minato() {
   const ctx = useMemo(
     () =>
       buildContext({
-        userFirstName: (user?.name ?? "").split(" ")[0] ?? "",
+        userFirstName: (settings.fullName?.trim() || user?.name || "").split(" ")[0] ?? "",
         entries,
         stats,
         discipline,
@@ -158,7 +162,6 @@ export function Minato() {
         className={cn(
           "fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-all duration-200 hover:scale-[1.03] active:scale-95",
           open ? "border-gold/50" : "border-line-strong",
-          !open && !reduce && insights.length > 0 && "animate-pulse-soft",
         )}
       >
         <span
@@ -201,7 +204,7 @@ export function Minato() {
                   <p className="text-sm font-bold tracking-wide text-ink">MINATO SENSEI</p>
                   <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
                     <span className={cn("h-1.5 w-1.5 rounded-full bg-profit")} />
-                    watching your journal
+                    trading companion
                   </p>
                 </div>
               </div>

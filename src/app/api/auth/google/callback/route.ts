@@ -25,6 +25,7 @@ const LOG = (event: string, detail?: Record<string, unknown>) => {
  * refresh token is kept when Google doesn't issue a new one.
  */
 export async function GET(request: Request) {
+  console.log(`[AUTH-TRACE] stage=OAUTH_CALLBACK_ENTERED requestUrl=${request.url} origin=${new URL(request.url).origin} stateCookiePresent=${request.headers.get("cookie")?.includes(OAUTH_STATE_COOKIE) ? "yes" : "no"}`);
   const config = getGoogleConfig();
   if (!config) {
     return NextResponse.redirect(new URL("/login?drive=not_configured", request.url));
@@ -58,6 +59,7 @@ export async function GET(request: Request) {
     return fail("state_mismatch");
   }
   LOG("STATE_VALIDATED");
+  console.log(`[AUTH-TRACE] stage=STATE_VALIDATION result=ok`);
 
   const tokens = await exchangeCode({
     code,
@@ -70,6 +72,7 @@ export async function GET(request: Request) {
     return fail("token_exchange_failed");
   }
   LOG("CODE_EXCHANGE_SUCCESS", { hasRefreshToken: !!tokens.refreshToken });
+  console.log(`[AUTH-TRACE] stage=CODE_EXCHANGE result=ok hasRefreshToken=${!!tokens.refreshToken}`);
 
   // Identify the user from the id_token claims (obtained directly from the
   // TLS-protected token endpoint — no client involvement).
@@ -112,9 +115,11 @@ export async function GET(request: Request) {
   });
 
   LOG("ACCOUNT_STORED");
+  console.log(`[AUTH-TRACE] stage=ACCOUNT_UPSERT result=ok`);
   // Edge Book app session — identity only, no tokens.
   const res = NextResponse.redirect(new URL(next, request.url));
   LOG("SESSION_COOKIE_SET", { next });
+  console.log(`[AUTH-TRACE] stage=SESSION_CREATED result=ok redirectTarget=${new URL(next, request.url).toString()}`);
   res.cookies.set(
     APP_SESSION_COOKIE,
     sealAppSession({ email, name: name || email.split("@")[0], sub }, config.tokenSecret),

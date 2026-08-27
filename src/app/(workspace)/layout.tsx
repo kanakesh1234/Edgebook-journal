@@ -9,6 +9,7 @@ import { LogoMark } from "@/components/landing/logo";
 import { BottomTabs, MobileTopBar, Sidebar } from "@/components/shell/nav";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
 import { Minato } from "@/components/ai/minato";
+import { AppErrorBoundary } from "@/components/ui/error-boundary";
 
 function Splash() {
   return (
@@ -63,7 +64,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         tabIndex={-1}
         className="relative mx-auto min-h-dvh w-full max-w-6xl px-4 pb-24 pt-6 outline-none sm:px-6 lg:pb-12 lg:pl-[264px] lg:pr-8 xl:pl-[272px]"
       >
-        {children}
+        <AppErrorBoundary>{children}</AppErrorBoundary>
       </main>
 
       <BottomTabs />

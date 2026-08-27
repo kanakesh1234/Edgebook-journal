@@ -33,6 +33,8 @@ interface FriendRow extends Metrics {
 export default function FriendsPage() {
   const [friends, setFriends] = useState<FriendRow[] | null>(null);
   const [pending, setPending] = useState<{ id: string; handle?: string; displayName?: string }[]>([]);
+  const [outgoing, setOutgoing] = useState<{ id: string; handle?: string; displayName?: string }[]>([]);
+  const [myHandle, setMyHandle] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchResult, setSearchResult] = useState<{ handle: string; displayName: string } | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -40,15 +42,19 @@ export default function FriendsPage() {
   const [headToHead, setHeadToHead] = useState<{ handle: string; me: Metrics; them: Metrics } | null>(null);
 
   const refresh = useCallback(() => {
-    void fetch("/api/friends", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d) {
-          setFriends(d.friends ?? []);
-          setPending(d.pendingIncoming ?? []);
-        }
-      })
-      .catch(() => setFriends([]));
+    void Promise.all([
+      fetch("/api/friends", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/profile/handle", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([d, p]) => {
+      if (d) {
+        setFriends(d.friends ?? []);
+        setPending(d.pendingIncoming ?? []);
+        setOutgoing(d.pendingOutgoing ?? []);
+      } else {
+        setFriends([]);
+      }
+      if (p?.handle) setMyHandle(p.handle as string);
+    });
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -74,11 +80,21 @@ export default function FriendsPage() {
   const act = async (body: Record<string, unknown>) => {
     setBusy(true);
     try {
-      await fetch("/api/friends", {
+      const res = await fetch("/api/friends", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(
+          d.error === "already_pending_or_friends" ? "Already connected or requested"
+          : d.error === "not_found" ? "No trader found with that handle"
+          : "That didn't work — try again.",
+        );
+      } else if (body.action === "respond" && body.status === "accepted") {
+        toast.success("Friend added");
+      }
       refresh();
       setHeadToHead(null);
     } finally {
@@ -119,6 +135,18 @@ export default function FriendsPage() {
       {/* Add friend */}
       <div className="panel p-5">
         <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Add friend by handle</p>
+        {myHandle && (
+          <p className="mt-1 text-xs text-muted">
+            Your Connection ID:{" "}
+            <span className="rounded-md border border-line bg-raised px-1.5 py-0.5 font-mono text-[12px] font-semibold text-ink">@{myHandle}</span>{" "}
+            <button
+              onClick={() => void navigator.clipboard.writeText(`@${myHandle}`).then(() => toast.success("Copied", "Share it so friends can find you."))}
+              className="font-medium text-gold underline-offset-2 hover:underline"
+            >
+              copy
+            </button>
+          </p>
+        )}
         <div className="mt-2.5 flex gap-2.5">
           <TextInput
             aria-label="Friend handle"
@@ -153,6 +181,25 @@ export default function FriendsPage() {
           </div>
         )}
       </div>
+
+      {/* Outgoing requests */}
+      {outgoing.length > 0 && (
+        <div className="panel p-5">
+          <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Sent — waiting for a response</p>
+          <ul className="mt-2.5 space-y-2">
+            {outgoing.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-line bg-raised/60 px-4 py-3">
+                <span className="text-sm text-ink">
+                  <span className="font-semibold">{p.displayName}</span> <span className="text-muted">{p.handle}</span>
+                </span>
+                <Button variant="subtle" size="sm" disabled={busy} onClick={() => void act({ action: "remove", recordId: p.id })}>
+                  Cancel
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Pending incoming */}
       {pending.length > 0 && (

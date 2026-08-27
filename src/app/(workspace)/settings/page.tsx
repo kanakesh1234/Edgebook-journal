@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
+import { useUi } from "@/lib/ui-store";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 
 import { dataStore } from "@/lib/services/storage";
@@ -14,6 +15,7 @@ import { Modal } from "@/components/ui/modal";
 import { toast } from "@/components/ui/toast";
 import {
   CloudIcon,
+  CopyIcon,
   DownloadIcon,
   LogoutIcon,
   MoonIcon,
@@ -39,14 +41,12 @@ export default function SettingsPage() {
   const entryCount = useApp((s) => s.entries.length);
   const { choice: themeChoice, resolved: resolvedTheme, setChoice: setThemeChoice } = useTheme();
 
-  // Google Drive connection state — server-verified (real token refresh)
-  const [driveState, setDriveState] = useState<{ configured: boolean; loggedIn: boolean; email: string | null; driveConnected: boolean } | null>(null);
-  useEffect(() => {
-    void fetch("/api/auth/google/session", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setDriveState(d ? { configured: d.configured, loggedIn: d.loggedIn, email: d.user?.email ?? null, driveConnected: d.drive.connected } : { configured: false, loggedIn: false, email: null, driveConnected: false }))
-      .catch(() => setDriveState({ configured: false, loggedIn: false, email: null, driveConnected: false }));
-  }, []);
+  // Full Name from Settings wins over the auth/Google name everywhere.
+  const displayName = settings.fullName?.trim() || user?.name || "";
+
+  // Google Drive connection status — shared, bootstrap-verified state
+  // (no duplicate /api/auth/google/session request from this page).
+  const driveStatus = useUi((s) => s.driveStatus);
 
 
   const [usage, setUsage] = useState<number | null>(null);
@@ -177,10 +177,10 @@ export default function SettingsPage() {
           <h2 className="font-display text-base font-semibold tracking-tight text-ink">Profile</h2>
           <div className="mt-4 flex items-center gap-4">
             <span className="grid h-14 w-14 place-items-center rounded-2xl border border-gold/30 bg-gold/[0.07] text-lg font-semibold text-gold">
-              {(user?.name ?? "?").slice(0, 2).toUpperCase()}
+              {displayName.slice(0, 2).toUpperCase()}
             </span>
             <div className="min-w-0">
-              <p className="truncate font-medium text-ink">{user?.name}</p>
+              <p className="truncate font-medium text-ink">{displayName}</p>
               <p className="truncate text-sm text-muted">{user?.email}</p>
               {user?.id.startsWith("g_") && (
                 <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-faint">
@@ -190,6 +190,8 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
+
+          <ProfileFields />
           <Button variant="subtle" size="sm" onClick={() => void signOut()} className="mt-5">
             <LogoutIcon className="h-3.5 w-3.5" />
             Sign out
@@ -289,4 +291,169 @@ export default function SettingsPage() {
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* ------------------------------ profile fields ------------------------------ */
+
+const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
+
+/**
+ * Full Name + Account Handle / Connection ID.
+ * The handle is the canonical friend identifier — never an email.
+ */
+function ProfileFields() {
+  const user = useApp((s) => s.user);
+  const settings = useApp((s) => s.settings);
+  const [fullName, setFullName] = useState(settings.fullName ?? "");
+  const [handle, setHandle] = useState(settings.handle ?? "");
+  const [nameState, setNameState] = useState<"idle" | "saving" | "saved">("idle");
+  const [handleState, setHandleState] = useState<"idle" | "saving" | "saved">("idle");
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Keep local inputs in sync when settings change elsewhere.
+  useEffect(() => { setFullName(settings.fullName ?? ""); }, [settings.fullName]);
+  useEffect(() => { setHandle(settings.handle ?? ""); }, [settings.handle]);
+
+  // Google users own their handle server-side; claim it on load if not yet local.
+  const isGoogleUser = !!user?.id.startsWith("g_");
+  useEffect(() => {
+    if (!isGoogleUser) return;
+    let cancelled = false;
+    void fetch("/api/profile/handle", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.handle && !useApp.getState().settings.handle) {
+          void useApp.getState().updateSettings({ handle: d.handle as string });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isGoogleUser]);
+
+  const saveName = async () => {
+    setNameState("saving");
+    await useApp.getState().updateSettings({ fullName: fullName.trim() });
+    setNameState("saved");
+    toast.success("Full name saved", "Your dashboard greeting now uses it.");
+    setTimeout(() => setNameState("idle"), 1600);
+  };
+
+  const saveHandle = async () => {
+    const clean = handle.trim().replace(/^@/, "").toLowerCase();
+    if (!HANDLE_RE.test(clean)) {
+      setHandleError("3–24 characters — lowercase letters, numbers and underscores only.");
+      return;
+    }
+    setHandleError(null);
+    setHandleState("saving");
+    try {
+      if (isGoogleUser) {
+        // Server-side uniqueness check + claim.
+        const res = await fetch("/api/profile/handle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ handle: clean }),
+        });
+        if (!res.ok) {
+          const d = (await res.json().catch(() => ({}))) as { detail?: string };
+          setHandleError(d.detail ?? "Could not save that handle. Please try another.");
+          setHandleState("idle");
+          return;
+        }
+      } else {
+        // Local accounts: best-effort local uniqueness against friends we know about.
+        try {
+          const d = (await fetch(`/api/friends?search=${encodeURIComponent(clean)}`).then((r) => r.json())) as { results?: unknown[] };
+          if (Array.isArray(d.results) && d.results.length > 0) {
+            setHandleError("That handle is already taken.");
+            setHandleState("idle");
+            return;
+          }
+        } catch { /* offline dev — accept locally */ }
+      }
+      await useApp.getState().updateSettings({ handle: clean });
+      setHandle(clean);
+      setHandleState("saved");
+      toast.success("Handle saved", "Friends can find you with this Connection ID.");
+      setTimeout(() => setHandleState("idle"), 1600);
+    } finally {
+      setHandleState("idle");
+    }
+  };
+
+  const connectionId = (settings.handle ?? "").replace(/^@/, "");
+  const copyHandle = async () => {
+    if (!connectionId) return;
+    try {
+      await navigator.clipboard.writeText(`@${connectionId}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  const nameDirty = fullName.trim() !== (settings.fullName ?? "").trim();
+  const handleDirty = handle.trim().replace(/^@/, "").toLowerCase() !== (settings.handle ?? "").trim();
+
+  return (
+    <div className="mt-6 space-y-5 border-t border-line pt-5">
+      {/* Full Name */}
+      <Field label="Full name" hint="used in your dashboard greeting" htmlFor="settings-fullname">
+        <div className="flex gap-2">
+          <TextInput
+            id="settings-fullname"
+            placeholder="e.g. Nandigam Kanakeswara Rao"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && nameDirty && (void saveName())}
+          />
+          <Button variant="outline" size="sm" disabled={!nameDirty || nameState === "saving"} onClick={() => void saveName()}>
+            {nameState === "saving" ? "Saving…" : nameState === "saved" ? "Saved ✓" : "Save"}
+          </Button>
+        </div>
+        <p className="pt-1 text-[11px] text-faint">Shown instead of your email or Google name across EdgeBook.</p>
+      </Field>
+
+      {/* Handle / Connection ID */}
+      <Field label="Account handle · Connection ID" hint="how friends find and connect with you" htmlFor="settings-handle">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-faint">@</span>
+            <TextInput
+              id="settings-handle"
+              className="pl-8 font-mono"
+              placeholder="your_handle"
+              value={handle}
+              invalid={!!handleError}
+              onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_@]/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && handleDirty && (void saveHandle())}
+            />
+          </div>
+          <Button variant="outline" size="sm" disabled={!handleDirty || handleState === "saving"} onClick={() => void saveHandle()}>
+            {handleState === "saving" ? "Checking…" : handleState === "saved" ? "Saved ✓" : "Save"}
+          </Button>
+        </div>
+        {handleError ? (
+          <p role="alert" className="pt-1 text-[11px] text-loss">{handleError}</p>
+        ) : (
+          <p className="pt-1 text-[11px] text-faint">
+            Unique across EdgeBook. Friends search this handle to send a request — your email is never exposed.
+          </p>
+        )}
+      </Field>
+
+      {connectionId && (
+        <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-raised/60 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-faint">Connection ID</p>
+            <p className="truncate font-mono text-sm font-semibold text-ink">@{connectionId}</p>
+          </div>
+          <Button variant="subtle" size="sm" onClick={() => void copyHandle()}>
+            <CopyIcon className="h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }

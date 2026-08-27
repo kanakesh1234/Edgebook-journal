@@ -51,9 +51,11 @@ function LoginView() {
   const [busy, setBusy] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Drive flow feedback (connected / errors surfaced by the callback)
+  // Drive flow feedback (connected / errors surfaced by the callback).
+  // Hidden while an OAuth redirect is in progress — the login page must
+  // show ONLY the authentication state, never journal/Drive data errors.
   const driveParam = params.get("drive");
-  const driveMessage = driveParam ? DRIVE_MESSAGES[driveParam] : undefined;
+  const driveMessage = !googleLoading && driveParam ? DRIVE_MESSAGES[driveParam] : undefined;
 
   // Already signed in → straight to the journal
   // OAuth callback success → also straight to the journal (skip login form)
