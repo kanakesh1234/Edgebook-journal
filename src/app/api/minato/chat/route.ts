@@ -37,6 +37,7 @@ const SYSTEM_PROMPT = [
   "- Distinguish confidence explicitly: strong evidence / moderate evidence / weak small-sample evidence — instead of reflexively saying 'not enough data'.",
   "- PROBABILITY: compute ONLY from provided FACTS, ALWAYS show sample size (e.g. 'Estimated win rate: 64% — sample: 25 trades'). Under ~10 samples add: 'Early estimate — sample size is limited.' Never present estimates as guarantees.",
   "- If facts genuinely don't cover the question, say so briefly and what data would fix it. Never fabricate numbers.",
+  "- For questions about a SPECIFIC trade (a date, 'my last trade', an instrument on a given day), look in facts.recentTrades — it lists individual trades, most recent first. Only say a trade isn't available if it's genuinely absent from that list (it only covers the most recent 40 trades).",
   "",
   "EXTERNAL CONTEXT RULES:",
   "- You may use general market knowledge (sessions, typical event schedules, instrument characteristics) when it clearly helps the answer — e.g. 'around NY open', 'pre-FOMC tape is usually thinner'.",
@@ -223,6 +224,28 @@ export async function POST(request: Request) {
   const followedPlanCount = (entries as { planId?: string; review?: { outcome?: { followedPlan?: boolean } } }[])
     .filter((e) => e.planId && e.review?.outcome?.followedPlan === true).length;
 
+  // Per-trade rows so specific-trade questions ("how was my last trade",
+  // "the 31 Aug trade") can be answered — the aggregated facts above have
+  // no per-trade detail at all. Capped and most-recent-first to keep the
+  // payload small; increase the cap if older trades need to be reachable.
+  const recentTrades = (entries as RawEntry[])
+    .slice()
+    .sort((a, b2) => (b2.date ?? "").localeCompare(a.date ?? ""))
+    .slice(0, 40)
+    .map((e) => ({
+      date: e.date ?? null,
+      instrument: e.instrument ?? null,
+      direction: e.direction ?? null,
+      pnl: typeof e.pnl === "number" ? e.pnl : null,
+      rr: typeof e.rr === "number" ? e.rr : null,
+      setup: e.setup ?? null,
+      entryTime: e.entryTime ?? null,
+      exitTime: e.exitTime ?? null,
+      reviewStatus: e.reviewStatus ?? null,
+      followedPlan: e.review?.outcome?.followedPlan ?? null,
+      lesson: e.reflection?.lesson ?? null,
+    }));
+
   const now = new Date();
   const facts = {
     // Current temporal context so the model can reason about sessions/days
@@ -261,6 +284,10 @@ export async function POST(request: Request) {
       ? { linked: plans.length, followedPlanPct: plans.length > 0 ? Math.round((followedPlanCount / plans.length) * 100) : null }
       : null,
     deep: deepFacts(entries as RawEntry[]),
+    // Individual trades, most recent first — needed for any question about
+    // a SPECIFIC trade rather than aggregate stats (e.g. "how was my last
+    // trade", "the 31 Aug trade"). Older than the cap below isn't included.
+    recentTrades,
   };
 
   // ---- Deterministic answer path (always available) ----
