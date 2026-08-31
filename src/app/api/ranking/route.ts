@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const viewer = config && sessionCookie ? openAppSession(sessionCookie, config.tokenSecret) : null;
   if (!viewer) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
 
-  const accounts: import("@/lib/server/accounts").EdgeBookAccount[] = listAccounts().filter((a) => a.encRefreshToken);
+  const accounts: import("@/lib/server/accounts").EdgeBookAccount[] = (await listAccounts()).filter((a) => a.encRefreshToken);
   const rows: {
     handle: string;
     isViewer: boolean;

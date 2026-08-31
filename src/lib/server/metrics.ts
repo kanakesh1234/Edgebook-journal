@@ -29,7 +29,7 @@ export interface PublicMetrics {
 export async function publicMetricsFor(email: string): Promise<PublicMetrics | null> {
   const config = getGoogleConfig();
   if (!config) return null;
-  const account = getAccount(email);
+  const account = await getAccount(email);
   if (!account?.encRefreshToken) return null;
 
   const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;

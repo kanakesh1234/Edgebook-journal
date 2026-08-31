@@ -17,11 +17,11 @@ export async function POST(request: Request) {
   const session = config && sessionCookie ? openAppSession(sessionCookie, config.tokenSecret) : null;
 
   if (config && session) {
-    const account = getAccount(session.email);
+    const account = await getAccount(session.email);
     const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
     const refreshToken = account ? accountRefreshToken(account, secret) : null;
     if (refreshToken) await revokeToken(refreshToken);
-    clearDriveAuth(session.email);
+    await clearDriveAuth(session.email);
   }
 
   const res = NextResponse.json({ ok: true });

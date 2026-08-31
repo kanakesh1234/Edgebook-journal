@@ -17,7 +17,7 @@ function sessionEmail(request: Request): string | null {
 export async function GET(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
-  const account = getAccount(me);
+  const account = await getAccount(me);
   return NextResponse.json({ handle: account?.handle ?? null });
 }
 
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = findByHandle(handle);
+  const existing = await findByHandle(handle);
   if (existing && existing.email !== me) {
     return NextResponse.json(
       { error: "taken", detail: "That handle is already taken." },
@@ -47,6 +47,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const updated = upsertAccount({ email: me, handle });
+  const updated = await upsertAccount({ email: me, handle });
   return NextResponse.json({ handle: updated.handle });
 }

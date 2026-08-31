@@ -11,6 +11,7 @@ import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
   BookOpenIcon,
+  CandlestickIcon,
   ChartLineIcon,
   FlaskIcon,
   LogoutIcon,
@@ -28,6 +29,7 @@ export const NAV_ITEMS = [
   { href: "/challenges", label: "Challenges", icon: TargetIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
   { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
+  { href: "/backtesting", label: "Backtesting", icon: CandlestickIcon },
   { href: "/friends", label: "Friends", icon: UserIcon },
   { href: "/ranking", label: "Ranking", icon: TrophyIcon },
   { href: "/settings", label: "Settings", icon: SettingsIcon },

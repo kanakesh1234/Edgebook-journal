@@ -20,17 +20,31 @@ export interface GoogleConfig {
 export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const AUTH_SCOPE = `openid email ${DRIVE_SCOPE}`;
 
+/**
+ * Strips whitespace and rejects newline/control characters. A pasted env
+ * value that accidentally contains a trailing newline (very common when
+ * copy-pasting into a dashboard field) will crash Node's HTTP header
+ * serializer with an opaque, unhandled 500 the moment it's used in a
+ * redirect or Set-Cookie header. Better to fail clean here.
+ */
+function cleanEnvValue(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed || /[\r\n\t\0]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 export function getGoogleConfig(): GoogleConfig | null {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = cleanEnvValue(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanEnvValue(process.env.GOOGLE_CLIENT_SECRET);
   if (!clientId || !clientSecret) return null;
 
   const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/auth/google/callback";
+    cleanEnvValue(process.env.GOOGLE_REDIRECT_URI) ?? "http://localhost:3000/api/auth/google/callback";
 
   // Token encryption key — dedicated secret preferred, falls back to the
   // client secret so a single-env setup still never stores plaintext tokens.
-  const tokenSecret = process.env.GOOGLE_TOKEN_SECRET ?? clientSecret;
+  const tokenSecret = cleanEnvValue(process.env.GOOGLE_TOKEN_SECRET) ?? clientSecret;
 
   return { clientId, clientSecret, redirectUri, tokenSecret };
 }

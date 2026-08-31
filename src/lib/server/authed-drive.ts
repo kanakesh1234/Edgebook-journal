@@ -127,7 +127,7 @@ export async function verifyDriveConnection(
   session: AppSession,
   config: GoogleConfig,
 ): Promise<{ state: DriveConnectionState; reason: string }> {
-  const account = getAccount(session.email);
+  const account = await getAccount(session.email);
   if (!account) return { state: "not_authorized", reason: "no_account" };
   const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
   const refreshToken = accountRefreshToken(account, secret);
@@ -171,7 +171,7 @@ export async function withDrive<T>(
     const config = getGoogleConfig();
     if (!config) throw err;
     const email = drive.session.email;
-    const account = getAccount(email);
+    const account = await getAccount(email);
     if (!account) throw err;
     const secret = process.env.GOOGLE_TOKEN_SECRET ?? config.clientSecret;
     const refreshToken = accountRefreshToken(account, secret);
@@ -221,7 +221,7 @@ export async function resolveDriveForSession(
 
 async function resolveImpl(session: AppSession, config: GoogleConfig): Promise<Resolution> {
   const requestId = newRequestId();
-  const account = getAccount(session.email);
+  const account = await getAccount(session.email);
   const handle = account?.handle ?? session.email.split("@")[0];
   diag("RESOLVE_START", { requestId, operation: "resolveDriveForSession", handle, hasAccount: !!account, storedRootId: account?.folderId ?? null });
 
@@ -325,7 +325,7 @@ async function resolveImpl(session: AppSession, config: GoogleConfig): Promise<R
     if (foundRoot) {
       folders = await ensureSubfolders(tok.token, foundRoot, requestId, handle);
       cachedFolders.set(session.email, folders);
-      upsertAccount({ email: session.email, folderId: foundRoot });
+      await upsertAccount({ email: session.email, folderId: foundRoot });
       diag("ROOT_ADOPTED", { requestId, operation: "search_root", handle, rootFolderId: foundRoot, previousStoredId: account.folderId ?? null });
       diag("ROOT_ID_PERSISTED", { requestId, operation: "upsertAccount", handle, rootFolderId: foundRoot });
     } else {
@@ -343,7 +343,7 @@ async function resolveImpl(session: AppSession, config: GoogleConfig): Promise<R
       }
       folders = await ensureSubfolders(tok.token, root, requestId, handle);
       cachedFolders.set(session.email, folders);
-      upsertAccount({ email: session.email, folderId: root });
+      await upsertAccount({ email: session.email, folderId: root });
       diag("ROOT_CREATED", { requestId, operation: "create_root", handle, rootFolderId: root, previousStoredId: account.folderId ?? null, condition: "no usable stored id AND no valid non-trashed EdgeBook folder found" });
       diag("ROOT_ID_PERSISTED", { requestId, operation: "upsertAccount", handle, rootFolderId: root });
     }

@@ -23,12 +23,12 @@ export async function GET(request: Request) {
 
   // Search by @handle — returns only handle + name, never email.
   if (searchHandle) {
-    const target = findByHandle(searchHandle);
+    const target = await findByHandle(searchHandle);
     if (!target || target.email === me) return NextResponse.json({ results: [] });
     return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name.split(" ")[0] }] });
   }
 
-  const records = listFor(me);
+  const records = await listFor(me);
   const pendingIncoming = [];
   const pendingOutgoing = [];
   const friends = [];
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   for (const r of records) {
     const otherEmail = r.from === me ? r.to : me;
     const direction = r.from === me ? "outgoing" : "incoming";
-    const acct = getAccount(otherEmail);
+    const acct = await getAccount(otherEmail);
     if (r.status === "pending" && direction === "incoming") {
       pendingIncoming.push({ id: r.id, handle: acct?.handle, displayName: acct?.name?.split(" ")[0] ?? otherEmail });
     } else if (r.status === "pending" && direction === "outgoing") {
@@ -66,28 +66,28 @@ export async function POST(request: Request) {
 
   if (body.action === "request") {
     if (!body.handle) return NextResponse.json({ error: "handle_required" }, { status: 400 });
-    const target = getAccount(body.handle.toLowerCase().replace(/^@/, ""));
+    const target = await getAccount(body.handle.toLowerCase().replace(/^@/, ""));
     if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
     if (target.email === me) return NextResponse.json({ error: "self" }, { status: 400 });
-    const record = sendRequest(me, target.email);
+    const record = await sendRequest(me, target.email);
     if (!record) return NextResponse.json({ error: "already_pending_or_friends" }, { status: 409 });
     return NextResponse.json({ ok: true, status: record.status });
   }
 
   if (body.action === "respond" && body.recordId && body.status) {
-    const record = respond(body.recordId, me, body.status);
+    const record = await respond(body.recordId, me, body.status);
     if (!record) return NextResponse.json({ error: "not_permitted" }, { status: 403 });
     return NextResponse.json({ ok: true, status: record.status });
   }
 
   if (body.action === "remove" && body.recordId) {
-    const record = terminate(body.recordId, me, false);
+    const record = await terminate(body.recordId, me, false);
     if (!record) return NextResponse.json({ error: "not_permitted" }, { status: 403 });
     return NextResponse.json({ ok: true });
   }
 
   if (body.action === "block" && body.recordId) {
-    const record = terminate(body.recordId, me, true);
+    const record = await terminate(body.recordId, me, true);
     if (!record) return NextResponse.json({ error: "not_permitted" }, { status: 403 });
     return NextResponse.json({ ok: true });
   }

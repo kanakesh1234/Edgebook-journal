@@ -107,12 +107,17 @@ export async function GET(request: Request) {
   // getAuthedDrive() → ensureAppFolders(). This keeps the OAuth callback
   // fast — the user is redirected immediately after authentication.
   LOG("ACCOUNT_UPSERT_START");
-  upsertAccount({
-    email,
-    sub,
-    name: name || undefined,
-    refreshToken: tokens.refreshToken ?? undefined,
-  });
+  try {
+    await upsertAccount({
+      email,
+      sub,
+      name: name || undefined,
+      refreshToken: tokens.refreshToken ?? undefined,
+    });
+  } catch (err) {
+    LOG("ACCOUNT_UPSERT_FAILED", { message: String(err) });
+    return fail("account_store_unavailable");
+  }
 
   LOG("ACCOUNT_STORED");
   console.log(`[AUTH-TRACE] stage=ACCOUNT_UPSERT result=ok`);

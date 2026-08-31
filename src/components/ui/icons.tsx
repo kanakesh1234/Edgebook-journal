@@ -372,3 +372,17 @@ export const MonitorIcon = (p: P) => (
     <path d="M12 17v4" />
   </Svg>
 );
+
+export const CandlestickIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M6 3v4" />
+    <rect x="4" y="7" width="4" height="7" rx="0.5" />
+    <path d="M6 14v7" />
+    <path d="M13 3v2" />
+    <rect x="11" y="5" width="4" height="10" rx="0.5" />
+    <path d="M13 15v6" />
+    <path d="M20 8v3" />
+    <rect x="18" y="11" width="4" height="6" rx="0.5" />
+    <path d="M20 17v4" />
+  </Svg>
+);

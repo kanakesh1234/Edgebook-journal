@@ -34,7 +34,7 @@ export async function GET() {
   }
 
   const { drive } = authed;
-  const account = (await import("@/lib/server/accounts")).getAccount(drive.session.email);
+  const account = await (await import("@/lib/server/accounts")).getAccount(drive.session.email);
 
   // Verify the canonical root + journal file directly.
   const H = { Authorization: `Bearer ${drive.accessToken}` };

@@ -23,8 +23,8 @@ export async function GET(request: Request) {
 
   const { canSee } = await import("@/lib/server/friends");
   const { findByHandle } = await import("@/lib/server/accounts");
-  const targetAccount = findByHandle(handle);
-  if (!targetAccount || !canSee(session.email, targetAccount.email)) {
+  const targetAccount = await findByHandle(handle);
+  if (!targetAccount || !(await canSee(session.email, targetAccount.email))) {
     return NextResponse.json({ error: "not_friends" }, { status: 403 });
   }
 
