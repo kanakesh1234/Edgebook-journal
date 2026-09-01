@@ -102,7 +102,7 @@ export function PlanTradeFlow({
   const [exitTime, setExitTime] = useState("");
   const [createdEntry, setCreatedEntry] = useState<JournalEntry | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  const [importRows, setImportRows] = useState<{ date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string }[] | null>(null);
+  const [importRows, setImportRows] = useState<{ date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null }[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
 
   // ── Stage 4: screenshots ──
@@ -256,6 +256,7 @@ export function PlanTradeFlow({
         setup: row.setup || selectedPlaybook?.name || "",
         setupId: row.setup ? undefined : playbookId || undefined,
         notes: row.notes,
+        entryTime: row.entryTime ?? undefined,
         images: [] as JournalEntry["images"],
         challengeId: challengeId || undefined,
         planId: i === 0 ? plan.id : undefined,
@@ -279,7 +280,7 @@ export function PlanTradeFlow({
       const result = parseTradesCsv(text);
       if (result.error) { setImportError(result.error); setImportRows(null); return; }
       if (result.rows.length === 0) { setImportError("No valid rows found in that file."); return; }
-      setImportRows(result.rows.map((r) => ({ date: r.date, pnl: r.pnl, rr: r.rr, instrument: r.instrument, direction: r.direction, setup: r.setup, notes: r.notes })));
+      setImportRows(result.rows.map((r) => ({ date: r.date, pnl: r.pnl, rr: r.rr, instrument: r.instrument, direction: r.direction, setup: r.setup, notes: r.notes, entryTime: r.entryTime })));
     } catch {
       setImportError("Could not read that file — try re-exporting it.");
     }

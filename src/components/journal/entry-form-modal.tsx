@@ -813,6 +813,7 @@ function ImportPane({
         setup: row.setup || linkedSetup?.name || "",
         setupId: row.setup ? undefined : linkedSetup?.id,
         notes: row.notes,
+        entryTime: row.entryTime ?? undefined,
         images: [] as JournalEntry["images"],
         challengeId: effectiveChallengeId || undefined,
         reviewStatus: "not_reviewed" as const,

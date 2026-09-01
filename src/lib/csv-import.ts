@@ -14,6 +14,8 @@ export interface ParsedTrade {
   direction: TradeDirection | null;
   setup: string;
   notes: string;
+  /** NY-local entry time (HH:MM), when the source column carried a timestamp. Structured — NOT just folded into notes. */
+  entryTime: string | null;
 }
 
 export interface InvalidRow {
@@ -248,6 +250,11 @@ export function parseTradesCsv(
       direction: direction ?? null,
       setup: get("setup"),
       notes: buildNotes(get("notes"), get("quantity"), get("entry"), get("exit"), get("duration"), nyEntryTime),
+      // Kept as a real field so time-window / day-of-week / hold-time analytics
+      // (which all key off entryTime) actually see it — buildNotes above also
+      // mentions it in free text for human readability, but that text is not
+      // machine-parsed anywhere.
+      entryTime: nyEntryTime,
     });
   }
 
