@@ -332,7 +332,7 @@ export async function POST(request: Request) {
   // ---- LLM interpretation when configured ----
   const orConfig = getOpenRouterConfig();
   if (orConfig && entries.length > 0) {
-    const text = await callOpenRouterWithFallback(orConfig, question, JSON.stringify(facts, null, 2));
+    const text = await callOpenRouterWithFallback(orConfig, messages, JSON.stringify(facts, null, 2));
     if (text) return NextResponse.json({ text, meta: { deterministic: false, provider: orConfig.model } });
   }
 
@@ -342,10 +342,18 @@ export async function POST(request: Request) {
 
 async function callOpenRouterWithFallback(
   config: OpenRouterConfig,
-  question: string,
+  history: MinatoMessage[],
   factsJson: string,
 ): Promise<string | null> {
   const models = [config.model, ...(config.fallbackModel ? [config.fallbackModel] : [])];
+  // Real multi-turn context — previously only the single latest message
+  // was sent, so any follow-up like "let's analyse this" or "continue"
+  // arrived with zero memory of what was just discussed. Facts go in as
+  // an early grounding turn, then the actual back-and-forth follows.
+  const conversation = history.slice(-24).map((m) => ({
+    role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+    content: m.text,
+  }));
   for (const model of models) {
     try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -356,13 +364,15 @@ async function callOpenRouterWithFallback(
         },
         body: JSON.stringify({
           model,
-          max_tokens: 400,
+          max_tokens: 1400,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `DETERMINISTIC FACTS (source of truth):\n${factsJson}\n\nTRADER QUESTION: ${question}` },
+            { role: "user", content: `DETERMINISTIC FACTS (source of truth for this whole conversation):\n${factsJson}` },
+            { role: "assistant", content: "Understood — I'll treat those facts as ground truth for everything below." },
+            ...conversation,
           ],
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(25_000),
       });
       if (!res.ok) continue;
       const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };

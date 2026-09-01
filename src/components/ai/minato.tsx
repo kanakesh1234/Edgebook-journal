@@ -37,6 +37,26 @@ const STATE_GLYPH: Record<MinatoState, string> = {
 };
 
 /**
+ * Rotates on every welcome pop-up so the login/signup greeting doesn't
+ * feel identical each time. Kept short and process-focused (not generic
+ * hype) to match MINATO's tone elsewhere.
+ */
+const WELCOME_QUOTES = [
+  "Process over outcome — every session is evidence, not a verdict.",
+  "You don't need to be right. You need to be consistent.",
+  "The edge isn't in the setup. It's in doing the setup the same way every time.",
+  "A losing trade with a followed plan beats a winning trade with a broken one.",
+  "Review honestly today, so tomorrow's you doesn't repeat this.",
+  "Discipline compounds quieter than P&L, but it's what P&L is built on.",
+  "Your journal remembers what your memory won't. Use it.",
+  "Small, repeatable edges beat big, unrepeatable wins.",
+];
+
+function pickWelcomeQuote(): string {
+  return WELCOME_QUOTES[Math.floor(Math.random() * WELCOME_QUOTES.length)];
+}
+
+/**
  * Minimal inline-markdown for MINATO's replies. The model is instructed to
  * write **bold** for emphasis, but the chat bubble was rendering messages
  * as raw text — so people were seeing literal asterisks instead of bold
@@ -116,11 +136,25 @@ export function Minato() {
   useEffect(() => {
     if (open) {
       setMessages((m) =>
-        m.length > 0 ? m : [{ role: "buddy", text: provider.greeting(ctx) }],
+        m.length > 0 ? m : [{ role: "buddy", text: `${provider.greeting(ctx)}\n\n"${pickWelcomeQuote()}"` }],
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Auto pop-up once per login/signup — not on every page navigation
+  // within the app, since this component can persist across those. The
+  // sessionStorage flag resets when the tab/browser session ends, so a
+  // fresh login (new session) reliably triggers it again.
+  const status = useApp((s) => s.status);
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("minato_welcomed") === "1") return;
+    sessionStorage.setItem("minato_welcomed", "1");
+    const t = setTimeout(() => setOpen(true), 900);
+    return () => clearTimeout(t);
+  }, [status, setOpen]);
 
   // Trade-review context message when opened from an entry
   useEffect(() => {
