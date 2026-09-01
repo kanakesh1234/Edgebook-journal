@@ -29,6 +29,8 @@ export interface EntryDraft {
   exitPrice?: number | null;
   stopLoss?: number | null;
   takeProfit?: number | null;
+  quantity?: number | null;
+  holdDuration?: string | null;
   checklist?: JournalEntry["checklist"];
   /** Canonical pre-trade execution checklist — captured before recording. */
   preTradeChecklist?: JournalEntry["preTradeChecklist"];

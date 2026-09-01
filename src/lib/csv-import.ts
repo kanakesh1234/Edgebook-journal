@@ -14,8 +14,18 @@ export interface ParsedTrade {
   direction: TradeDirection | null;
   setup: string;
   notes: string;
-  /** NY-local entry time (HH:MM), when the source column carried a timestamp. Structured — NOT just folded into notes. */
+  /** NY-local entry time (HH:MM 24-hour). */
   entryTime: string | null;
+  /** NY-local exit time (HH:MM 24-hour). */
+  exitTime: string | null;
+  /** Entry price. */
+  entryPrice: number | null;
+  /** Exit price. */
+  exitPrice: number | null;
+  /** Trade quantity (contracts/shares). */
+  quantity: number | null;
+  /** Human-readable hold duration, e.g. "16 seconds". */
+  holdDuration: string | null;
 }
 
 export interface InvalidRow {
@@ -59,25 +69,30 @@ function splitCsvLine(line: string): string[] {
 
 /**
  * Normalise a header cell to a canonical field name.
- * Covers common broker/spreadsheet vocabulary; unknown columns are ignored.
+ * Covers common broker/spreadsheet vocabulary; unknown columns are ignored
+ * (metadata like _priceFormat, buyFillId, sellFillId are silently skipped).
  */
 function mapHeader(h: string): string | null {
   const key = h.toLowerCase().replace(/[^a-z]/g, "");
-  if (["date", "tradedate", "day", "closedate", "entrydate", "datetime"].includes(key)) return "date";
-  // Broker timestamps — open/entry preferred over close/exit for the trade date.
-  if (["boughttimestamp", "boughttime", "opentime", "opendatetime", "entrytime", "opendate"].includes(key)) return "date";
-  if (["soldtimestamp", "soldtime", "closetime", "closedatetime", "exittime", "closedate2", "selldate"].includes(key)) return "date";
-  if (["timestamp", "time"].includes(key)) return "date";
+  // Plain date columns (no time component expected)
+  if (["date", "tradedate", "day", "entrydate", "datetime"].includes(key)) return "date";
+  // Entry timestamp — full date+time for the buy/open side
+  if (["boughttimestamp", "boughttime", "opentime", "opendatetime", "entrytime", "opendate"].includes(key)) return "entryTimestamp";
+  // Exit timestamp — full date+time for the sell/close side
+  if (["soldtimestamp", "soldtime", "closetime", "closedatetime", "exittime", "closedate", "selldate"].includes(key)) return "exitTimestamp";
+  // Generic timestamp — treat as entry
+  if (["timestamp", "time"].includes(key)) return "entryTimestamp";
+  // P&L
   if (["pnl", "profit", "profitloss", "pnlusd", "netpnl", "pl", "net", "result", "pnlcurrency"].includes(key)) return "pnl";
   if (["rr", "r", "rmultiple", "riskreward", "riskrewardratio"].includes(key)) return "rr";
   if (["instrument", "symbol", "ticker", "market", "pair", "asset"].includes(key)) return "instrument";
   if (["direction", "side", "position", "type", "longshort"].includes(key)) return "direction";
   if (["setup", "strategy", "playbook", "pattern"].includes(key)) return "setup";
   if (["notes", "note", "comments", "comment", "journal", "remarks"].includes(key)) return "notes";
-  // Extra context columns — folded into notes, not stored as model fields.
+  // Structured trade fields — stored as proper fields, NOT folded into notes
   if (["qty", "quantity", "shares", "contracts", "size", "positionsize"].includes(key)) return "quantity";
-  if (["buyprice", "entryprice", "openprice", "pricein"].includes(key)) return "entry";
-  if (["sellprice", "exitprice", "closeprice", "priceout"].includes(key)) return "exit";
+  if (["buyprice", "entryprice", "openprice", "pricein"].includes(key)) return "entryPrice";
+  if (["sellprice", "exitprice", "closeprice", "priceout"].includes(key)) return "exitPrice";
   if (["duration", "holdingtime", "tradeduration", "timedintrade"].includes(key)) return "duration";
   return null;
 }
@@ -112,7 +127,7 @@ export function normalizePnl(raw: string): number | null {
   let v = raw.trim();
   if (!v) return null;
   v = v.replace(/[$\s,]/g, "");
-  const negParens = /^\((.*)\)$/.test(v);
+  const negParens = /^\(.*\)$/.test(v);
   if (negParens) v = v.slice(1, -1);
   v = v.replace(/[−–]/g, "-");
   if (v.endsWith("-")) v = "-" + v.slice(0, -1); // trailing-minus style
@@ -122,29 +137,58 @@ export function normalizePnl(raw: string): number | null {
   return negParens ? -Math.abs(n) : n;
 }
 
-/** Format a raw duration cell for the notes suffix ("272" → "4m 32s", text kept as-is). */
+/**
+ * Format a raw duration cell into a human-readable string:
+ *   "16sec" → "16 seconds"    "8sec" → "8 seconds"
+ *   "272"   → "4 minutes 32 seconds"   (pure numeric = seconds)
+ *   "5min"  → "5 minutes"
+ */
 function normalizeDuration(raw: string): string | null {
   const v = raw.trim();
   if (!v || v === "-") return null;
-  if (/^\d+$/.test(v)) {
-    const secs = Number(v);
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+  const formatSecs = (secs: number): string => {
+    if (secs >= 60) {
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      return s > 0
+        ? `${m} minute${m !== 1 ? "s" : ""} ${s} second${s !== 1 ? "s" : ""}`
+        : `${m} minute${m !== 1 ? "s" : ""}`;
+    }
+    return `${secs} second${secs !== 1 ? "s" : ""}`;
+  };
+
+  // "16sec", "8 sec", "120seconds"
+  const secMatch = /^(\d+)\s*sec(?:onds?)?$/i.exec(v);
+  if (secMatch) return formatSecs(Number(secMatch[1]));
+
+  // "5min", "5 mins", "5 minutes"
+  const minMatch = /^(\d+)\s*min(?:utes?|s)?$/i.exec(v);
+  if (minMatch) {
+    const mins = Number(minMatch[1]);
+    return `${mins} minute${mins !== 1 ? "s" : ""}`;
   }
-  return v;
+
+  // Pure numeric (assumed seconds)
+  if (/^\d+$/.test(v)) return formatSecs(Number(v));
+
+  return v; // unrecognised format — preserve as-is
 }
 
-function buildNotes(base: string, qty: string, entry: string, exit: string, duration: string, nyTime: string | null): string {
-  const parts: string[] = [];
-  if (qty) parts.push(`Qty ${qty}`);
-  if (entry) parts.push(`${entry} → ${exit || "?"}`);
-  const dur = normalizeDuration(duration);
-  if (dur) parts.push(dur);
-  if (nyTime) parts.push(`entry ${nyTime} NY`);
-  if (parts.length === 0) return base;
-  const suffix = parts.join(" · ");
-  return base ? `${base} · ${suffix}` : suffix;
+/** Parse a numeric price cell, return null for blanks. */
+function parsePrice(raw: string): number | null {
+  const v = raw.trim().replace(/[$,\s]/g, "");
+  if (!v || v === "-") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Parse a numeric quantity cell. */
+function parseQuantity(raw: string): number | null {
+  const v = raw.trim().replace(/[,\s]/g, "");
+  if (!v || v === "-") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /**
@@ -154,7 +198,10 @@ function buildNotes(base: string, qty: string, entry: string, exit: string, dura
  * Timestamp cells (date + time) are normalized from `opts.timestampSourceTz`
  * (default IST — broker exports) into the trading timezone (America/New_York)
  * immediately at this seam; the derived NY date becomes the journal date and
- * the NY entry time is preserved in notes. Plain calendar dates pass through.
+ * the NY entry/exit times are preserved as structured HH:MM fields.
+ *
+ * All structured data (qty, prices, duration, timestamps) is stored in
+ * dedicated ParsedTrade fields — NEVER concatenated into notes.
  */
 export function parseTradesCsv(
   text: string,
@@ -174,15 +221,15 @@ export function parseTradesCsv(
     if (headers.length === 0) {
       const mapped = cells.map(mapHeader);
       if (mapped.some(Boolean)) {
-        // First occurrence wins (e.g. boughtTimestamp beats soldTimestamp for date).
+        // First occurrence wins for each canonical field.
         const taken = new Set<string>();
         headers = mapped.map((m) => {
           if (!m || taken.has(m)) return "";
           taken.add(m);
           return m;
         });
-        // A recognised file still needs the two essentials.
-        if (!taken.has("date") || !taken.has("pnl")) {
+        // A recognised file needs at least a date source + P&L.
+        if (!(taken.has("date") || taken.has("entryTimestamp")) || !taken.has("pnl")) {
           return {
             rows: [],
             invalid: [],
@@ -216,17 +263,46 @@ export function parseTradesCsv(
 
     const fail = (reason: string) => invalid.push({ line: i + 1, reason, raw: raw.trim().slice(0, 120) });
 
-    // Timestamp cells normalize IST → New York at the import seam.
-    let date = normalizeDate(get("date"));
+    // --- Resolve trade date and entry/exit times ---
+    let date: string | null = null;
     let nyEntryTime: string | null = null;
-    if (date && hasTimeComponent(get("date")) && sourceTz) {
-      const ny = normalizeImportedTimestamp(get("date"), sourceTz);
-      if (ny) {
-        date = ny.date;
-        nyEntryTime = ny.time;
+    let nyExitTime: string | null = null;
+
+    const rawDate = get("date");
+    const rawEntryTs = get("entryTimestamp");
+    const rawExitTs = get("exitTimestamp");
+
+    // 1) Explicit date column
+    if (rawDate) {
+      date = normalizeDate(rawDate);
+      if (date && hasTimeComponent(rawDate) && sourceTz) {
+        const ny = normalizeImportedTimestamp(rawDate, sourceTz);
+        if (ny) { date = ny.date; nyEntryTime = ny.time; }
       }
     }
-    if (!date) { fail(`Unrecognised date "${get("date").slice(0, 24)}" — use MM/DD/YYYY or YYYY-MM-DD`); continue; }
+
+    // 2) Entry timestamp → trade date (if no explicit date) + entry time
+    if (rawEntryTs) {
+      if (hasTimeComponent(rawEntryTs) && sourceTz) {
+        const ny = normalizeImportedTimestamp(rawEntryTs, sourceTz);
+        if (ny) {
+          if (!date) date = ny.date;
+          nyEntryTime = ny.time;
+        }
+      } else if (!date) {
+        date = normalizeDate(rawEntryTs);
+      }
+    }
+
+    // 3) Exit timestamp → exit time
+    if (rawExitTs) {
+      if (hasTimeComponent(rawExitTs) && sourceTz) {
+        const ny = normalizeImportedTimestamp(rawExitTs, sourceTz);
+        if (ny) { nyExitTime = ny.time; }
+      }
+    }
+
+    if (!date) { fail(`Unrecognised date "${(rawDate || rawEntryTs || "").slice(0, 24)}" — use MM/DD/YYYY or YYYY-MM-DD`); continue; }
 
     const pnl = normalizePnl(get("pnl"));
     if (pnl === null) { fail("Missing or non-numeric P&L"); continue; }
@@ -249,12 +325,14 @@ export function parseTradesCsv(
       instrument: get("instrument") || "—",
       direction: direction ?? null,
       setup: get("setup"),
-      notes: buildNotes(get("notes"), get("quantity"), get("entry"), get("exit"), get("duration"), nyEntryTime),
-      // Kept as a real field so time-window / day-of-week / hold-time analytics
-      // (which all key off entryTime) actually see it — buildNotes above also
-      // mentions it in free text for human readability, but that text is not
-      // machine-parsed anywhere.
+      // Notes comes ONLY from the actual notes/comments column — never auto-generated
+      notes: get("notes"),
       entryTime: nyEntryTime,
+      exitTime: nyExitTime,
+      entryPrice: parsePrice(get("entryPrice")),
+      exitPrice: parsePrice(get("exitPrice")),
+      quantity: parseQuantity(get("quantity")),
+      holdDuration: normalizeDuration(get("duration")),
     });
   }
 

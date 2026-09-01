@@ -65,6 +65,8 @@ export function EntryFormModal({
   const [exitPrice, setExitPrice] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [holdDuration, setHoldDuration] = useState("");
   const [challengeId, setChallengeId] = useState("");
   const [newChallengeName, setNewChallengeName] = useState("");
   const [tradeNumber, setTradeNumber] = useState<1 | 2>(1);
@@ -106,6 +108,8 @@ export function EntryFormModal({
       setExitPrice(editing.exitPrice != null ? String(editing.exitPrice) : "");
       setStopLoss(editing.stopLoss != null ? String(editing.stopLoss) : "");
       setTakeProfit(editing.takeProfit != null ? String(editing.takeProfit) : "");
+      setQuantity(editing.quantity != null ? String(editing.quantity) : "");
+      setHoldDuration(editing.holdDuration ?? "");
       setChallengeId(editing.challengeId ?? firstChallenge);
       setTradeNumber(editing.tradeNumber ?? 1);
     } else {
@@ -124,6 +128,8 @@ export function EntryFormModal({
       setExitPrice("");
       setStopLoss("");
       setTakeProfit("");
+      setQuantity("");
+      setHoldDuration("");
       setChallengeId(firstChallenge);
       setTradeNumber(1);
       setMode("manual");
@@ -175,6 +181,8 @@ export function EntryFormModal({
     exitPrice: num(exitPrice),
     stopLoss: num(stopLoss),
     takeProfit: num(takeProfit),
+    quantity: num(quantity),
+    holdDuration: holdDuration.trim() || null,
   });
 
   const submit = async (e: React.FormEvent) => {
@@ -368,6 +376,12 @@ export function EntryFormModal({
               </Field>
               <Field label="Take profit" hint="optional" htmlFor="take-profit">
                 <TextInput id="take-profit" inputMode="decimal" className="tabular" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+              <Field label="Quantity" hint="optional" htmlFor="entry-quantity">
+                <TextInput id="entry-quantity" inputMode="decimal" className="tabular" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))} />
+              </Field>
+              <Field label="Hold duration" hint="optional" htmlFor="hold-duration">
+                <TextInput id="hold-duration" placeholder="e.g. 16 seconds" value={holdDuration} onChange={(e) => setHoldDuration(e.target.value)} />
               </Field>
             </div>
           </div>
@@ -814,6 +828,11 @@ function ImportPane({
         setupId: row.setup ? undefined : linkedSetup?.id,
         notes: row.notes,
         entryTime: row.entryTime ?? undefined,
+        exitTime: row.exitTime ?? undefined,
+        entryPrice: row.entryPrice,
+        exitPrice: row.exitPrice,
+        quantity: row.quantity,
+        holdDuration: row.holdDuration,
         images: [] as JournalEntry["images"],
         challengeId: effectiveChallengeId || undefined,
         reviewStatus: "not_reviewed" as const,

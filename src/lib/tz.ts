@@ -62,7 +62,7 @@ export function nyDateKey(ts: Date): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-/** "9:34 AM" — New York wall-clock time. */
+/** "9:34 AM" — New York wall-clock time (12-hour display). */
 export function formatNyTime(ts: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: TRADING_TZ,
@@ -71,9 +71,16 @@ export function formatNyTime(ts: Date): string {
   }).format(ts);
 }
 
+/** "09:40" — New York wall-clock time in 24-hour HH:MM format (for structured fields). */
+export function formatNyTime24(ts: Date): string {
+  const p = partsInTz(ts, TRADING_TZ);
+  const h = p.hour === "24" ? "00" : p.hour;
+  return `${h.padStart(2, "0")}:${p.minute}`;
+}
+
 /**
  * Normalize an imported timestamp (e.g. "08/05/2026 19:23:29" IST) into
- * the trading journal: NY date key + "9:53 AM" NY clock time.
+ * the trading journal: NY date key + HH:MM NY clock time (24-hour).
  * Returns null when the input can't be parsed.
  */
 export function normalizeImportedTimestamp(
@@ -97,7 +104,7 @@ export function normalizeImportedTimestamp(
 
   const utc = zonedToUtc(dateStr, timeStr, sourceTz);
   if (!utc) return null;
-  return { date: nyDateKey(utc), time: formatNyTime(utc) };
+  return { date: nyDateKey(utc), time: formatNyTime24(utc) };
 }
 
 /** Does the cell carry a time-of-day component (vs a plain calendar date)? */

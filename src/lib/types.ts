@@ -75,6 +75,10 @@ export interface JournalEntry {
   exitPrice?: number | null;
   stopLoss?: number | null;
   takeProfit?: number | null;
+  /** Trade quantity — contracts, shares, or lots. */
+  quantity?: number | null;
+  /** Human-readable hold duration imported from CSV (e.g. "16 seconds"). */
+  holdDuration?: string | null;
   /** Execution playbook checklist (6/6 first trade, 7/7 second trade). */
   checklist?: TradeChecklist;
   /**
