@@ -37,6 +37,23 @@ const STATE_GLYPH: Record<MinatoState, string> = {
 };
 
 /**
+ * Minimal inline-markdown for MINATO's replies. The model is instructed to
+ * write **bold** for emphasis, but the chat bubble was rendering messages
+ * as raw text — so people were seeing literal asterisks instead of bold
+ * text. This only handles **bold**; line breaks are already preserved by
+ * the bubble's `whitespace-pre-wrap`, and full markdown isn't needed here.
+ */
+function renderMinatoText(text: string) {
+  const parts = text.split(/(\*\*[^*\n]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+/**
  * MINATO SENSEI — floating trading companion.
  * Small, premium, quiet by default. Opens into a focused panel fed by
  * the deterministic provider; the AiCoachProvider seam swaps in an LLM
@@ -84,12 +101,16 @@ export function Minato() {
   );
 
   const insights = useMemo(() => computeInsights(ctx), [ctx]);
-  const state: MinatoState = open ? "thinking" : topState(insights);
 
   const [messages, setMessages] = useState<MinatoMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // "thinking" should reflect an actual in-flight request, not just
+  // whether the panel happens to be open — previously it showed
+  // "thinking" the entire time the panel was open, even at rest.
+  const state: MinatoState = busy ? "thinking" : topState(insights);
 
   // Greet on open
   useEffect(() => {
@@ -166,18 +187,32 @@ export function Minato() {
       >
         <span
           className={cn(
-            "grid h-8 w-8 place-items-center rounded-full border text-sm font-bold",
+            "grid h-8 w-8 place-items-center overflow-hidden rounded-full border text-sm font-bold",
             open ? "border-gold/60 bg-gold/15 text-gold" : "border-line-strong bg-raised text-gold",
           )}
           aria-hidden
         >
-          {open ? "×" : STATE_GLYPH[state]}
+          {open ? (
+            "×"
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/minato-avatar.png"
+              alt=""
+              className="h-full w-full object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+                e.currentTarget.nextElementSibling?.classList.remove("hidden");
+              }}
+            />
+          )}
+          {!open && <span className="hidden">{STATE_GLYPH[state]}</span>}
         </span>
         <span className="text-left">
           <span className="block text-[11px] font-bold tracking-wide text-ink">MINATO</span>
           <span className="flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-faint">
             <span className={cn("h-1.5 w-1.5 rounded-full", STATE_DOT[state])} />
-            {open ? "thinking" : state === "idle" ? "sensei" : state}
+            {state === "idle" ? "sensei" : state}
           </span>
         </span>
       </button>
@@ -197,8 +232,18 @@ export function Minato() {
             {/* Header */}
             <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
               <div className="flex items-center gap-2.5">
-                <span className="grid h-9 w-9 place-items-center rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
-                  M
+                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/minato-avatar.png"
+                    alt=""
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                      e.currentTarget.nextElementSibling?.classList.remove("hidden");
+                    }}
+                  />
+                  <span className="hidden">M</span>
                 </span>
                 <div>
                   <p className="text-sm font-bold tracking-wide text-ink">MINATO SENSEI</p>
@@ -234,7 +279,7 @@ export function Minato() {
                         : "rounded-bl-md border border-line bg-raised text-ink",
                     )}
                   >
-                    {m.text}
+                    {renderMinatoText(m.text)}
                   </p>
                 </div>
               ))}
