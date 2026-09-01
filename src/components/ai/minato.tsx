@@ -142,19 +142,20 @@ export function Minato() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Auto pop-up once per login/signup — not on every page navigation
-  // within the app, since this component can persist across those. The
-  // sessionStorage flag resets when the tab/browser session ends, so a
-  // fresh login (new session) reliably triggers it again.
+  // Full-screen welcome overlay — separate from the chat panel entirely.
+  // Shows once per login/signup (new browser session), dismisses on any
+  // click anywhere on the blurred backdrop.
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomeQuote] = useState(pickWelcomeQuote);
   const status = useApp((s) => s.status);
   useEffect(() => {
     if (status !== "authenticated") return;
     if (typeof window === "undefined") return;
     if (sessionStorage.getItem("minato_welcomed") === "1") return;
     sessionStorage.setItem("minato_welcomed", "1");
-    const t = setTimeout(() => setOpen(true), 900);
+    const t = setTimeout(() => setShowWelcome(true), 900);
     return () => clearTimeout(t);
-  }, [status, setOpen]);
+  }, [status]);
 
   // Trade-review context message when opened from an entry
   useEffect(() => {
@@ -208,6 +209,54 @@ export function Minato() {
 
   return (
     <>
+      {/* Full-screen welcome overlay — login/signup only, separate from the chat panel */}
+      <AnimatePresence>
+        {showWelcome && (
+          <motion.div
+            role="dialog"
+            aria-label="Welcome from MINATO"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.35, ease: EASE }}
+            onClick={() => setShowWelcome(false)}
+            className="fixed inset-0 z-[200] flex cursor-pointer flex-col items-center justify-center gap-5 bg-ink/50 px-6 backdrop-blur-md"
+          >
+            <motion.span
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.9 }}
+              animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.4, ease: EASE, delay: 0.05 }}
+              className="grid h-24 w-24 place-items-center overflow-hidden rounded-full border-2 border-gold/50 bg-raised text-3xl font-bold text-gold shadow-overlay"
+              aria-hidden
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/minato-avatar.png"
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                  e.currentTarget.nextElementSibling?.classList.remove("hidden");
+                }}
+              />
+              <span className="hidden">M</span>
+            </motion.span>
+            <motion.div
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10 }}
+              animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: EASE, delay: 0.15 }}
+              className="max-w-sm text-center"
+            >
+              <p className="text-lg font-semibold tracking-[-0.01em] text-canvas">
+                Welcome back{ctx.userFirstName ? `, ${ctx.userFirstName}` : ""}.
+              </p>
+              <p className="mt-2 text-[15px] italic leading-relaxed text-canvas/80">&ldquo;{welcomeQuote}&rdquo;</p>
+              <p className="mt-4 text-[11px] uppercase tracking-wider text-canvas/50">Tap anywhere to continue</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Floating companion */}
       <button
         type="button"
@@ -327,19 +376,21 @@ export function Minato() {
             </div>
 
             {/* Quick prompts */}
-            <div className="flex gap-1.5 overflow-x-auto border-t border-line-soft px-4 py-2.5 [scrollbar-width:none]">
-              {QUICK_PROMPTS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => void ask(p)}
-                  disabled={busy}
-                  className="shrink-0 rounded-full border border-line bg-raised/60 px-3 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            {QUICK_PROMPTS.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto border-t border-line-soft px-4 py-2.5 [scrollbar-width:none]">
+                {QUICK_PROMPTS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => void ask(p)}
+                    disabled={busy}
+                    className="shrink-0 rounded-full border border-line bg-raised/60 px-3 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Input */}
             <form

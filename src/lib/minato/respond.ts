@@ -14,16 +14,9 @@ export interface MinatoMessage {
   text: string;
 }
 
-export const QUICK_PROMPTS = [
-  "How am I doing?",
-  "What is my best time window?",
-  "Which setup works best?",
-  "What is my average winning hold time?",
-  "What is my average losing hold time?",
-  "Long vs short — how do I perform?",
-  "Any day-of-week patterns?",
-  "What patterns do you see?",
-] as const;
+// Quick-prompt chips were removed — they repeated the same handful of
+// canned questions on every open and the user found that irritating.
+export const QUICK_PROMPTS: readonly string[] = [];
 
 function money(n: number): string {
   const abs = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
