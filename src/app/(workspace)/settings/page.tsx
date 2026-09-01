@@ -20,6 +20,7 @@ import {
   LogoutIcon,
   MoonIcon,
   MonitorIcon,
+  RouteIcon,
   ShieldIcon,
   SparklesIcon,
   SunIcon,
@@ -51,6 +52,7 @@ export default function SettingsPage() {
 
   const [usage, setUsage] = useState<number | null>(null);
   const [demoBusy, setDemoBusy] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const [importPreview, setImportPreview] = useState<{ entries: number; name: string } | null>(null);
 
@@ -102,6 +104,23 @@ export default function SettingsPage() {
     await useApp.getState().loadDemoData();
     setDemoBusy(false);
     toast.success("Demo journal loaded");
+  };
+
+  const runBackfill = async () => {
+    setBackfillBusy(true);
+    try {
+      const count = await useApp.getState().backfillEntryTimesFromNotes();
+      if (count > 0) {
+        toast.success(
+          `Recovered entry time for ${count} ${count === 1 ? "trade" : "trades"}`,
+          "Extracted from notes left by the old importer — time-window and day-of-week analysis will now include these.",
+        );
+      } else {
+        toast.success("Nothing to recover", "No trades had a recoverable entry time in their notes.");
+      }
+    } finally {
+      setBackfillBusy(false);
+    }
   };
 
   const signOut = async () => {
@@ -253,6 +272,19 @@ export default function SettingsPage() {
               </span>
             </button>
 
+            <button
+              onClick={() => void runBackfill()}
+              disabled={backfillBusy}
+              className="group flex items-start gap-3 rounded-xl border border-line bg-raised/50 p-4 text-left transition-all hover:border-line-strong hover:bg-raised active:scale-[0.98] disabled:opacity-60"
+            >
+              <RouteIcon className="mt-0.5 h-4.5 w-4.5 shrink-0 text-info" />
+              <span>
+                <span className="block text-sm font-semibold text-ink">Recover entry times</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-muted">
+                  {backfillBusy ? "Scanning…" : "Fix old imports missing entry time"}
+                </span>
+              </span>
+            </button>
 
           </div>
         </section>

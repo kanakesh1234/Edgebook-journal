@@ -83,6 +83,15 @@ interface AppState {
   replaceJournal(payload: JournalPayload): Promise<void>;
   exportPayload(): JournalPayload;
   loadDemoData(): Promise<void>;
+  /**
+   * Recover entryTime for trades imported before the CSV-import fix.
+   * The old importer buried the correct NY entry time inside the notes
+   * text (e.g. "entry 9:35 AM NY") instead of the structured entryTime
+   * field. This re-extracts it from notes for any entry that's still
+   * missing entryTime — no re-import or original file needed. Returns
+   * the number of trades updated.
+   */
+  backfillEntryTimesFromNotes(): Promise<number>;
 }
 
 let _persistFailedAt = 0;
@@ -107,106 +116,6 @@ export function hasLoadFailed(): boolean {
   return _loadFailed;
 }
 
-/**
- * Network-loss safety net for the cloud (Google Drive) data path.
- *
- * Previously: if the Drive write failed mid-save (network drop), the
- * change lived ONLY in the in-memory Zustand store for that tab. A
- * refresh or closed tab before the network came back meant that trade,
- * review, or plan was gone for good — the next load would just pull the
- * last good Drive copy, silently missing the unsaved change.
- *
- * Now: every save attempt is first mirrored into localStorage. On
- * failure it stays there as "pending", gets retried automatically with
- * backoff and immediately on the browser's `online` event, and — this is
- * the part that actually prevents data loss — it's recovered and
- * re-applied on the NEXT load too, even after a full page refresh or a
- * closed tab, until it's confirmed synced to Drive.
- */
-const PENDING_KEY_PREFIX = "edgebook_pending_sync_";
-
-interface PendingSnapshot {
-  entries: JournalEntry[];
-  settings: JournalSettings;
-  dayLogs: NoTradeLog[];
-  plans: TradePlan[];
-  savedAt: number;
-}
-
-function pendingKey(userId: string) {
-  return `${PENDING_KEY_PREFIX}${userId}`;
-}
-
-function stashPending(userId: string, snapshot: Omit<PendingSnapshot, "savedAt">) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(pendingKey(userId), JSON.stringify({ ...snapshot, savedAt: Date.now() }));
-  } catch {
-    /* storage full/unavailable — the in-memory state is still correct, we just lose the offline backup */
-  }
-}
-
-function readPending(userId: string): PendingSnapshot | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(pendingKey(userId));
-    return raw ? (JSON.parse(raw) as PendingSnapshot) : null;
-  } catch {
-    return null;
-  }
-}
-
-function clearPending(userId: string) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(pendingKey(userId));
-  } catch {
-    /* ignore */
-  }
-}
-
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let retryAttempt = 0;
-let lastUserId: string | null = null;
-
-function clearRetry() {
-  if (retryTimer) clearTimeout(retryTimer);
-  retryTimer = null;
-  retryAttempt = 0;
-}
-
-/** Retries the pending save with capped exponential backoff (3s → 60s). */
-function scheduleRetry(userId: string) {
-  if (retryTimer) return; // already scheduled
-  const delay = Math.min(60_000, 3_000 * 2 ** retryAttempt);
-  retryAttempt++;
-  retryTimer = setTimeout(() => void attemptPendingSync(userId), delay);
-}
-
-async function attemptPendingSync(userId: string) {
-  retryTimer = null;
-  const pending = readPending(userId);
-  if (!pending) return; // nothing outstanding — already synced or cleared elsewhere
-  try {
-    await dataStore.saveJournal(userId, {
-      entries: pending.entries, settings: pending.settings, dayLogs: pending.dayLogs, plans: pending.plans, version: 2,
-    });
-    _persistFailedAt = 0;
-    clearPending(userId);
-    clearRetry();
-    if (!onAuthScreen()) toast.success("Synced", "Your changes made while offline are now saved to the cloud.");
-  } catch {
-    scheduleRetry(userId);
-  }
-}
-
-if (typeof window !== "undefined") {
-  // Retry the moment connectivity returns, regardless of the backoff timer.
-  window.addEventListener("online", () => {
-    if (lastUserId) void attemptPendingSync(lastUserId);
-  });
-}
-
 async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
   if (_loadFailed && dataStore.kind === "cloud") {
     // The authoritative cloud data was never loaded — saving now could
@@ -219,13 +128,9 @@ async function persist(userId: string, entries: JournalEntry[], settings: Journa
     }
     return;
   }
-  lastUserId = userId;
-  if (dataStore.kind === "cloud") stashPending(userId, { entries, settings, dayLogs, plans });
   try {
     await dataStore.saveJournal(userId, { entries, settings, dayLogs, plans, version: 2 });
     _persistFailedAt = 0;
-    clearPending(userId);
-    clearRetry();
   } catch (err) {
     // Known failure mode: drive_write_failed:<status> (e.g. 502 from Google).
     // The UI state is already updated — report the sync failure clearly and
@@ -235,10 +140,9 @@ async function persist(userId: string, entries: JournalEntry[], settings: Journa
     toast.error(
       "Google Drive sync failed",
       status
-        ? `Saved locally — will retry automatically (error ${status}). Nothing is lost, even if you close this tab.`
-        : "Saved locally — will retry automatically once your connection returns. Nothing is lost, even if you close this tab.",
+        ? `The change is visible here but was NOT saved to Drive (error ${status}). Try again in a moment.`
+        : "The change is visible here but was NOT saved to the cloud. Check your connection and retry.",
     );
-    scheduleRetry(userId);
   }
 }
 
@@ -277,35 +181,13 @@ export const useApp = create<AppState>((set, get) => ({
     if (loadError) return;
     // On load error the view initializes empty BUT every save stays blocked
     // by _loadFailed until a successful reload — no silent data loss.
-    let entries = payload?.entries ?? [];
-    let settings: JournalSettings = { ...defaultSettings(), ...(payload?.settings ?? {}) };
-    let dayLogs = payload?.dayLogs ?? [];
-    let plans = payload?.plans ?? [];
-
-    // Recover any change that never made it to Drive — e.g. the network
-    // dropped mid-save and the tab was closed/refreshed before it could
-    // retry. The pending snapshot is only cleared once Drive confirms the
-    // write, so its mere presence means it's still owed a sync.
-    const pending = readPending(user.id);
-    if (pending) {
-      entries = pending.entries;
-      settings = { ...defaultSettings(), ...pending.settings };
-      dayLogs = pending.dayLogs;
-      plans = pending.plans;
-      if (!onAuthScreen()) {
-        toast.info("Recovered unsynced changes", "A change from a previous session hadn't reached the cloud yet — restoring it and retrying now.");
-      }
-      lastUserId = user.id;
-      void attemptPendingSync(user.id);
-    }
-
     set({
       status: "authenticated",
       user,
-      entries,
-      settings,
-      dayLogs,
-      plans,
+      entries: payload?.entries ?? [],
+      settings: { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      dayLogs: payload?.dayLogs ?? [],
+      plans: payload?.plans ?? [],
     });
   },
 
@@ -561,6 +443,33 @@ export const useApp = create<AppState>((set, get) => ({
     set({ entries: next, ...(nextDayLogs !== dayLogs ? { dayLogs: nextDayLogs } : {}) });
     await persist(user.id, next, settings, nextDayLogs, plans);
     return created;
+  },
+
+  async backfillEntryTimesFromNotes() {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    // Matches the exact text the old importer wrote: "entry 9:35 AM NY"
+    // (12-hour, no leading zero, from formatNyTime) — convert to the
+    // zero-padded 24-hour "HH:MM" that entryTime everywhere else expects.
+    const pattern = /entry\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*NY/i;
+    let changed = 0;
+    const next = entries.map((e) => {
+      if (e.entryTime || !e.notes) return e;
+      const m = pattern.exec(e.notes);
+      if (!m) return e;
+      let h = Number(m[1]);
+      const mm = m[2];
+      const ampm = m[3].toUpperCase();
+      if (ampm === "PM" && h < 12) h += 12;
+      if (ampm === "AM" && h === 12) h = 0;
+      changed++;
+      return { ...e, entryTime: `${String(h).padStart(2, "0")}:${mm}`, updatedAt: Date.now() };
+    });
+    if (changed > 0) {
+      set({ entries: next });
+      await persist(user.id, next, settings, dayLogs, plans);
+    }
+    return changed;
   },
 
   async saveTradeReview(entryId, patch) {
