@@ -90,9 +90,9 @@ const server = createServer(async (req, res) => {
 
   res.writeHead(200, { "Content-Type": "text/plain" }).end("Done — check your terminal, then close this tab.");
   console.log("\nSuccess. Add this to your environment:\n");
-  console.log(`EDGEBOOK_STORE_REFRESH_TOKEN=${json.refresh_token}`);
+  console.log(`ADMIN_GOOGLE_REFRESH_TOKEN=${json.refresh_token}`);
   console.log("\n- Locally: add the line above to .env.local");
-  console.log("- Vercel: Project Settings → Environment Variables → add EDGEBOOK_STORE_REFRESH_TOKEN, then redeploy\n");
+  console.log("- Vercel: Project Settings → Environment Variables → add ADMIN_GOOGLE_REFRESH_TOKEN, then redeploy\n");
   server.close();
   process.exit(0);
 });
