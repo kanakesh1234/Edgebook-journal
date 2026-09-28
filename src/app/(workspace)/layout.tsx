@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -39,12 +39,27 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   useBootstrap();
   const status = useApp((s) => s.status);
   const router = useRouter();
+  const pathname = usePathname();
+
+  // Fullscreen mode for backtesting workspace
+  const isBacktestingWorkspace = pathname.startsWith("/backtesting/session");
 
   useEffect(() => {
     if (status === "guest") router.replace("/login");
   }, [status, router]);
 
   if (status !== "authenticated") return <Splash />;
+
+  // Fullscreen backtesting workspace — no sidebar, no mobile bars, edge-to-edge
+  if (isBacktestingWorkspace) {
+    return (
+      <div className="min-h-dvh bg-canvas">
+        <main id="content" tabIndex={-1} className="relative min-h-dvh w-full outline-none">
+          <AppErrorBoundary>{children}</AppErrorBoundary>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-canvas">

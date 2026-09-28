@@ -68,11 +68,18 @@ export type AccountType = "personal" | "prop";
 /** STATIC = measured from starting balance. TRAILING = high-water-mark walk. */
 export type DrawdownMode = "static" | "trailing";
 
+export interface ConsistencyRule {
+  enabled: boolean;
+  /** Maximum percentage of total profit that any single day can contribute. */
+  maxDailyProfitPct: number;
+}
+
 export interface PropAccountRules {
   maxDrawdown: number;
   drawdownMode: DrawdownMode;
   dailyLossLimit: number | null;
   maxContracts: number | null;
+  consistencyRule?: ConsistencyRule;
 }
 
 /* -------------------------------- Timeframes -------------------------------- */
@@ -86,11 +93,15 @@ export const TIMEFRAMES = [
 
 export type Timeframe = (typeof TIMEFRAMES)[number];
 
+export type DataResolution = 'tick' | '1s' | '5s' | '10s' | '15s' | '30s' | '1m' | '2m' | '3m' | '5m' | '10m' | '15m' | '30m' | '1h' | '2h' | '4h' | '1D';
+
 /* -------------------------------- Backtest config -------------------------------- */
 
 /** What the setup screen collects before a backtest can start. */
 export interface BacktestConfig {
   instrumentSymbol: string;
+  sessionName: string;
+  instruments: string[];
   sessionId: SessionId;
   /** Only used when sessionId === "custom". Wall-clock "HH:mm" in `customTimezone`. */
   customSession?: { startTime: string; endTime: string; timezone: string };
@@ -175,4 +186,86 @@ export interface BacktestTrade {
   drawdownAfter: number;
   session: SessionId;
   timezone: string;
+}
+
+export interface BacktestSessionSummary {
+  id: string;
+  sessionName: string;
+  instruments: string[];
+  dateRange: { start: string; end: string };
+  sessionWindow: { startTime: string; endTime: string };
+  startingBalance: number;
+  endingBalance: number;
+  netPnl: number;
+  winRate: number;
+  totalTrades: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  maxDailyLoss: number;
+  accountType: AccountType;
+  status: BacktestStatus;
+  timeframe: Timeframe;
+  lastModified: number;
+  createdAt: number;
+}
+
+export type ChartType = 'candlestick' | 'bar' | 'line';
+
+export interface ChartColors {
+  bullBody: string;
+  bearBody: string;
+  bullWick: string;
+  bearWick: string;
+  bullBorder: string;
+  bearBorder: string;
+  background: string;
+  gridLines: string;
+  crosshair: string;
+  text: string;
+}
+
+export interface ChartSettings {
+  chartType: ChartType;
+  colors: ChartColors;
+  showGrid: boolean;
+  showVerticalGrid: boolean;
+  showHorizontalGrid: boolean;
+}
+
+export const DEFAULT_CHART_COLORS_DARK: ChartColors = {
+  bullBody: '#26a69a',
+  bearBody: '#ef5350',
+  bullWick: '#26a69a',
+  bearWick: '#ef5350',
+  bullBorder: '#26a69a',
+  bearBorder: '#ef5350',
+  background: '#131722',
+  gridLines: '#1e222d',
+  crosshair: '#758696',
+  text: '#d1d4dc',
+};
+
+export const DEFAULT_CHART_COLORS_LIGHT: ChartColors = {
+  bullBody: '#26a69a',
+  bearBody: '#ef5350',
+  bullWick: '#26a69a',
+  bearWick: '#ef5350',
+  bullBorder: '#26a69a',
+  bearBorder: '#ef5350',
+  background: '#ffffff',
+  gridLines: '#e1e3eb',
+  crosshair: '#9598a1',
+  text: '#131722',
+};
+
+export type DrawingToolType = 'horizontal-line' | 'trend-line' | 'ray' | 'rectangle' | 'price-range';
+
+export interface DrawingObject {
+  id: string;
+  type: DrawingToolType;
+  /** Points are stored as { time: number (UTC epoch seconds), price: number } */
+  points: Array<{ time: number; price: number }>;
+  color: string;
+  lineWidth: number;
+  label?: string;
 }

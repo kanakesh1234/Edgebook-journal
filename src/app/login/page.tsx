@@ -24,6 +24,7 @@ const DRIVE_MESSAGES: Record<string, { tone: "error" | "info"; text: string }> =
   token_exchange_failed: { tone: "error", text: "Google sign-in couldn't be completed. Please try again." },
   folder_setup_failed: { tone: "error", text: "Your Edge Book Drive folder couldn't be prepared. Please try again." },
   no_email: { tone: "error", text: "Your Google account doesn't share an email address. Please try a different account." },
+  account_store_unavailable: { tone: "error", text: "The account store is temporarily unavailable. Please try again in a moment." },
   access_denied: { tone: "info", text: "Sign-in was cancelled." },
   connected: { tone: "info", text: "Google Drive connected — welcome back." },
 };
@@ -55,7 +56,9 @@ function LoginView() {
   // Hidden while an OAuth redirect is in progress — the login page must
   // show ONLY the authentication state, never journal/Drive data errors.
   const driveParam = params.get("drive");
-  const driveMessage = !googleLoading && driveParam ? DRIVE_MESSAGES[driveParam] : undefined;
+  const driveMessage = !googleLoading && driveParam
+    ? (DRIVE_MESSAGES[driveParam] ?? { tone: "error" as const, text: "Google sign-in encountered an unexpected issue. Please try again." })
+    : undefined;
 
   // Already signed in → straight to the journal
   // OAuth callback success → also straight to the journal (skip login form)

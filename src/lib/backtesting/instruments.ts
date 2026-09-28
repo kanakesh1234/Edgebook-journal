@@ -10,6 +10,20 @@ import type { InstrumentSpec } from "./types";
 
 export const INSTRUMENTS: InstrumentSpec[] = [
   {
+    symbol: "NQ",
+    name: "E-mini Nasdaq-100",
+    exchange: "CME",
+    assetClass: "futures",
+    tickSize: 0.25,
+    tickValue: 5,
+    pointValue: 20,
+    currency: "USD",
+    commissionPerContract: 2.04,
+    feesPerContract: 1.18,
+    timezone: "America/Chicago",
+    providerSymbol: "NQ.F",
+  },
+  {
     symbol: "MNQ",
     name: "Micro E-mini Nasdaq-100",
     exchange: "CME",
@@ -22,6 +36,20 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     feesPerContract: 0.62,
     timezone: "America/Chicago", // CME floor timezone
     providerSymbol: "MNQ",
+  },
+  {
+    symbol: "ES",
+    name: "E-mini S&P 500",
+    exchange: "CME",
+    assetClass: "futures",
+    tickSize: 0.25,
+    tickValue: 12.5,
+    pointValue: 50,
+    currency: "USD",
+    commissionPerContract: 2.04,
+    feesPerContract: 1.18,
+    timezone: "America/Chicago",
+    providerSymbol: "ES.F",
   },
   {
     symbol: "MES",
@@ -41,4 +69,8 @@ export const INSTRUMENTS: InstrumentSpec[] = [
 
 export function instrumentBySymbol(symbol: string): InstrumentSpec | undefined {
   return INSTRUMENTS.find((i) => i.symbol === symbol);
+}
+
+export function instrumentsBySymbols(symbols: string[]): InstrumentSpec[] {
+  return symbols.map(s => INSTRUMENTS.find(i => i.symbol === s)).filter((i): i is InstrumentSpec => i != null);
 }

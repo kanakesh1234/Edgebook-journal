@@ -64,13 +64,16 @@ const SYSTEM_PROMPT = [
 interface RawEntry {
   date?: string; pnl?: number; rr?: number | null; instrument?: string;
   setup?: string; entryTime?: string; exitTime?: string;
+  entryPrice?: number | null; exitPrice?: number | null;
+  stopLoss?: number | null; takeProfit?: number | null; notes?: string;
   direction?: string | null; reviewStatus?: string;
   reflection?: { cause?: string; lesson?: string } | null;
   review?: {
     execution?: { movedStop?: boolean | null; exitedEarly?: boolean | null; chased?: boolean | null };
     outcome?: { followedPlan?: boolean | null; processVerdict?: string } | null;
-    psychology?: { emotionBefore?: string; fomo?: boolean | null; revenge?: boolean | null } | null;
+    psychology?: { emotionBefore?: string; convictionOrUrgency?: string; fomo?: boolean | null; revenge?: boolean | null; fearExit?: boolean | null } | null;
     concepts?: { used?: string[] } | null;
+    followUp?: { biggestMistake?: string; watchNext?: string } | null;
   } | null;
 }
 
@@ -240,28 +243,47 @@ export async function POST(request: Request) {
   const recentTrades = (entries as RawEntry[])
     .slice()
     .sort((a, b2) => (b2.date ?? "").localeCompare(a.date ?? ""))
-    .map((e) => ({
-      date: e.date ?? null,
-      instrument: e.instrument ?? null,
-      direction: e.direction ?? null,
-      pnl: typeof e.pnl === "number" ? e.pnl : null,
-      rr: typeof e.rr === "number" ? e.rr : null,
-      setup: e.setup ?? null,
-      entryTime: e.entryTime ?? null,
-      exitTime: e.exitTime ?? null,
-      reviewStatus: e.reviewStatus ?? null,
-      followedPlan: e.review?.outcome?.followedPlan ?? null,
-      lesson: e.reflection?.lesson ?? null,
-    }));
+    .map((e) => {
+      const psych = e.review?.psychology;
+      const emotion =
+        psych?.fomo === true ? "FOMO"
+        : psych?.revenge === true ? "revenge/urgency"
+        : psych?.fearExit === true ? "fear/hesitation"
+        : psych?.convictionOrUrgency === "conviction" ? "calm"
+        : psych?.emotionBefore || null;
+      const processVerdict = e.review?.outcome?.processVerdict || null;
+      return {
+        date: e.date ?? null,
+        instrument: e.instrument ?? null,
+        direction: e.direction ?? null,
+        pnl: typeof e.pnl === "number" ? e.pnl : null,
+        rr: typeof e.rr === "number" ? e.rr : null,
+        setup: e.setup ?? null,
+        entryTime: e.entryTime ?? null,
+        exitTime: e.exitTime ?? null,
+        entryPrice: typeof e.entryPrice === "number" ? e.entryPrice : null,
+        exitPrice: typeof e.exitPrice === "number" ? e.exitPrice : null,
+        stopLoss: typeof e.stopLoss === "number" ? e.stopLoss : null,
+        takeProfit: typeof e.takeProfit === "number" ? e.takeProfit : null,
+        notes: e.notes || null,
+        reviewStatus: e.reviewStatus ?? null,
+        // The 5 Autopsy answers — all five, not just two of them:
+        followedPlan: e.review?.outcome?.followedPlan ?? null, // Q1
+        emotion, // Q2
+        goodProcessTrade: processVerdict === "a-plus" ? true : processVerdict === "process-failure" ? false : null, // Q3
+        mistakeOrLesson: e.review?.followUp?.biggestMistake ?? e.reflection?.lesson ?? null, // Q4
+        watchNext: e.review?.followUp?.watchNext ?? null, // Q5
+      };
+    });
 
   // Every written lesson/reflection across the WHOLE journal, oldest to
   // newest, so the model can teach from the user's own past reviews
   // ("learn from my last trades where I write reviews") instead of only
   // ever seeing the aggregated stats.
   const lessons = recentTrades
-    .filter((t) => t.lesson && t.lesson.trim().length > 0)
+    .filter((t) => (t.mistakeOrLesson && t.mistakeOrLesson.trim().length > 0) || (t.watchNext && t.watchNext.trim().length > 0))
     .reverse()
-    .map((t) => ({ date: t.date, instrument: t.instrument, pnl: t.pnl, lesson: t.lesson }));
+    .map((t) => ({ date: t.date, instrument: t.instrument, pnl: t.pnl, mistakeOrLesson: t.mistakeOrLesson, watchNext: t.watchNext }));
 
   const now = new Date();
   const facts = {

@@ -180,16 +180,18 @@ export const useApp = create<AppState>((set, get) => ({
         );
       }
     }
-    if (loadError) return;
     // On load error the view initializes empty BUT every save stays blocked
     // by _loadFailed until a successful reload — no silent data loss.
+    // IMPORTANT: Always set status to "authenticated" so the user isn't stuck
+    // on the splash screen forever — they see the app (with the error toast)
+    // and can reload to retry.
     set({
       status: "authenticated",
       user,
-      entries: payload?.entries ?? [],
-      settings: { ...defaultSettings(), ...(payload?.settings ?? {}) },
-      dayLogs: payload?.dayLogs ?? [],
-      plans: payload?.plans ?? [],
+      entries: loadError ? [] : (payload?.entries ?? []),
+      settings: loadError ? defaultSettings() : { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      dayLogs: loadError ? [] : (payload?.dayLogs ?? []),
+      plans: loadError ? [] : (payload?.plans ?? []),
     });
   },
 

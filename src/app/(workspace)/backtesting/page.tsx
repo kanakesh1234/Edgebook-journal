@@ -1,258 +1,179 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
-import { Field, Select, TextInput } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { CandlestickIcon } from "@/components/ui/icons";
+import { EmptyState, pnlClass } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
-import { useApp } from "@/lib/store";
-import { INSTRUMENTS } from "@/lib/backtesting/instruments";
-import {
-  SESSION_LIST,
-  resolvePeriodUtc,
-  sessionById,
-  validateBacktestConfig,
-  type ConfigValidationError,
-} from "@/lib/backtesting/sessions";
-import { TIMEFRAMES, type AccountType, type BacktestConfig, type DrawdownMode, type SessionId, type Timeframe } from "@/lib/backtesting/types";
+import { formatMoney, formatPct } from "@/lib/format";
+import { useBacktest } from "@/lib/backtesting/store";
+import type { BacktestSessionSummary } from "@/lib/backtesting/types";
 
-/**
- * Backtesting setup screen — PHASE 1.
- *
- * Collects everything the (Phase 2+) engine needs to start a session, then
- * hands the resolved config to a placeholder terminal route. No market
- * data, replay, chart, or order engine here yet — those are later phases.
- */
-export default function BacktestingSetupPage() {
-  const router = useRouter();
-  const settings = useApp((s) => s.settings);
+const STATUS_LABELS: Record<string, { label: string; className: string }> = {
+  ready: { label: "Ready", className: "bg-gold/10 text-gold border-gold/20" },
+  running: { label: "Running", className: "bg-info/10 text-info border-info/20" },
+  paused: { label: "Paused", className: "bg-gold/10 text-gold border-gold/20" },
+  completed: { label: "Completed", className: "bg-profit/10 text-profit border-profit/20" },
+  terminated: { label: "Stopped", className: "bg-loss/10 text-loss border-loss/20" },
+  breached: { label: "Breached", className: "bg-loss/10 text-loss border-loss/20" },
+};
 
-  const [instrumentSymbol, setInstrumentSymbol] = useState(INSTRUMENTS[0]?.symbol ?? "");
-  const [sessionId, setSessionId] = useState<SessionId>("new-york");
-  const [customStart, setCustomStart] = useState("09:30");
-  const [customEnd, setCustomEnd] = useState("16:00");
-
-  const [accountType, setAccountType] = useState<AccountType>("personal");
-  const [startingBalance, setStartingBalance] = useState(String(settings.startingEquity || 50000));
-  const [maxDrawdown, setMaxDrawdown] = useState("2500");
-  const [drawdownMode, setDrawdownMode] = useState<DrawdownMode>("static");
-  const [dailyLossLimit, setDailyLossLimit] = useState("");
-  const [maxContracts, setMaxContracts] = useState("");
-
-  const [fromDate, setFromDate] = useState("");
-  const [fromTime, setFromTime] = useState("09:30");
-  const [toDate, setToDate] = useState("");
-  const [toTime, setToTime] = useState("16:00");
-
-  const [timeframe, setTimeframe] = useState<Timeframe>("1m");
-  const [errors, setErrors] = useState<ConfigValidationError[]>([]);
-
-  const session = sessionById(sessionId);
-  const errorFor = (field: string) => errors.find((e) => e.field === field)?.message;
-
-  const config = useMemo<Partial<BacktestConfig>>(() => {
-    const tz = sessionId === "custom" ? session.timezone : session.timezone;
-    const period = fromDate && toDate ? resolvePeriodUtc(fromDate, fromTime, toDate, toTime, tz) : null;
-    return {
-      instrumentSymbol,
-      sessionId,
-      customSession: sessionId === "custom" ? { startTime: customStart, endTime: customEnd, timezone: tz } : undefined,
-      accountType,
-      startingBalance: Number(startingBalance) || 0,
-      currency: settings.currency,
-      propRules:
-        accountType === "prop"
-          ? {
-              maxDrawdown: Number(maxDrawdown) || 0,
-              drawdownMode,
-              dailyLossLimit: dailyLossLimit ? Number(dailyLossLimit) : null,
-              maxContracts: maxContracts ? Number(maxContracts) : null,
-            }
-          : undefined,
-      periodStartUtc: period?.startUtc,
-      periodEndUtc: period?.endUtc,
-      timeframe,
-    };
-  }, [
-    instrumentSymbol, sessionId, session.timezone, customStart, customEnd,
-    accountType, startingBalance, settings.currency, maxDrawdown, drawdownMode,
-    dailyLossLimit, maxContracts, fromDate, fromTime, toDate, toTime, timeframe,
-  ]);
-
-  function handleStart() {
-    const found = validateBacktestConfig(config);
-    setErrors(found);
-    if (found.length > 0) return;
-
-    // Phase 1 stops here — no engine, no market data yet. Stash the
-    // validated config and hand off to the (placeholder) terminal route,
-    // which Phase 4/5 will fill in with the real chart + replay engine.
-    sessionStorage.setItem("edgebook.backtesting.pendingConfig", JSON.stringify(config));
-    router.push("/backtesting/session");
-  }
+function SessionCard({ session, onOpen, onDelete }: {
+  session: BacktestSessionSummary;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const status = STATUS_LABELS[session.status] ?? STATUS_LABELS.ready;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <header className="flex items-center gap-3">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-control border border-line bg-raised text-gold">
-          <CandlestickIcon className="h-5 w-5" />
-        </span>
-        <div>
-          <h1 className="font-display text-xl font-semibold text-ink">Backtesting</h1>
-          <p className="text-sm text-faint">Set up a tick-accurate replay session before entering the chart.</p>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="rounded-control border border-line bg-surface overflow-hidden"
+    >
+      {/* Card header — always visible */}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-raised/40"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-raised text-gold">
+              <CandlestickIcon className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate font-display text-sm font-semibold text-ink">
+                {session.sessionName}
+              </p>
+              <p className="text-[11px] text-faint">
+                {session.instruments.join(" + ")} · {session.timeframe} ·{" "}
+                {session.sessionWindow.startTime}–{session.sessionWindow.endTime}
+              </p>
+            </div>
+          </div>
         </div>
+
+        <div className="hidden items-center gap-4 sm:flex">
+          <div className="text-right">
+            <p className={cn("text-sm font-semibold tabular-nums", pnlClass(session.netPnl))}>
+              {session.netPnl >= 0 ? "+" : ""}{formatMoney(session.netPnl)}
+            </p>
+            <p className="text-[11px] text-faint">{session.totalTrades} trades</p>
+          </div>
+          <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", status.className)}>
+            {status.label}
+          </span>
+        </div>
+
+        <svg
+          className={cn("h-4 w-4 shrink-0 text-faint transition-transform", expanded && "rotate-180")}
+          viewBox="0 0 20 20" fill="currentColor"
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      {/* Expanded details */}
+      {expanded && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          className="border-t border-line"
+        >
+          <div className="grid grid-cols-2 gap-3 px-5 py-4 sm:grid-cols-4">
+            <Stat label="Starting" value={formatMoney(session.startingBalance)} />
+            <Stat label="Ending" value={formatMoney(session.endingBalance)} className={pnlClass(session.netPnl)} />
+            <Stat label="Win Rate" value={formatPct(session.winRate)} />
+            <Stat label="Profit Factor" value={session.profitFactor === Infinity ? "∞" : session.profitFactor.toFixed(2)} />
+            <Stat label="Max Drawdown" value={formatMoney(session.maxDrawdown)} className="text-loss" />
+            <Stat label="Account" value={session.accountType === "prop" ? "Prop" : "Personal"} />
+            <Stat label="Date Range" value={session.dateRange.start.slice(0, 10)} />
+            <Stat label="Last Modified" value={new Date(session.lastModified).toLocaleDateString()} />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
+            <Button variant="ghost" size="sm" onClick={onDelete} className="text-loss">
+              Delete
+            </Button>
+            <Button variant="gold" size="sm" onClick={onOpen}>
+              Open Session
+            </Button>
+          </div>
+        </motion.div>
+      )}
+    </motion.div>
+  );
+}
+
+function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-medium uppercase tracking-wider text-faint">{label}</p>
+      <p className={cn("mt-0.5 text-sm font-semibold tabular-nums text-ink", className)}>{value}</p>
+    </div>
+  );
+}
+
+export default function BacktestingPage() {
+  const router = useRouter();
+  const sessions = useBacktest((s) => s.sessions);
+  const loading = useBacktest((s) => s.sessionsLoading);
+  const loadSessionList = useBacktest((s) => s.loadSessionList);
+  const deleteSession = useBacktest((s) => s.deleteSession);
+
+  useEffect(() => {
+    loadSessionList();
+  }, [loadSessionList]);
+
+  return (
+    <div className="space-y-6">
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-control border border-line bg-raised text-gold">
+            <CandlestickIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <h1 className="font-display text-xl font-semibold text-ink">Backtesting</h1>
+            <p className="text-sm text-faint">Replay historical sessions and practice your edge.</p>
+          </div>
+        </div>
+        <Button variant="gold" onClick={() => router.push("/backtesting/create")}>
+          + Create Session
+        </Button>
       </header>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="space-y-6 rounded-control border border-line bg-surface p-5 sm:p-6"
-      >
-        {/* Instrument */}
-        <Field label="Instrument" error={errorFor("instrumentSymbol")}>
-          <Select value={instrumentSymbol} onChange={(e) => setInstrumentSymbol(e.target.value)}>
-            {INSTRUMENTS.map((i) => (
-              <option key={i.symbol} value={i.symbol}>
-                {i.symbol} — {i.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        {/* Session */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Session</p>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {SESSION_LIST.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSessionId(s.id)}
-                className={cn(
-                  "rounded-control border px-3 py-2 text-[13px] font-medium transition-colors",
-                  sessionId === s.id
-                    ? "border-gold/40 bg-gold/[0.08] text-ink"
-                    : "border-line bg-raised text-faint hover:border-line-strong hover:text-muted",
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          {sessionId === "custom" ? (
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <Field label="Start (America/New_York)" htmlFor="custom-start">
-                <TextInput id="custom-start" type="time" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
-              </Field>
-              <Field label="End (America/New_York)" htmlFor="custom-end">
-                <TextInput id="custom-end" type="time" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
-              </Field>
-            </div>
-          ) : (
-            <p className="text-[11px] text-faint">
-              {session.startTime}–{session.endTime} · {session.timezone}
-            </p>
-          )}
-          {errorFor("customSession") && <p className="text-[11px] text-loss">{errorFor("customSession")}</p>}
+      {loading ? (
+        <div className="grid min-h-[200px] place-items-center">
+          <p className="text-sm text-faint">Loading sessions…</p>
         </div>
-
-        {/* Account type */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Account type</p>
-          <div role="tablist" className="grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1">
-            {([
-              { id: "personal", label: "Personal Account" },
-              { id: "prop", label: "Prop Account" },
-            ] as const).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={accountType === t.id}
-                onClick={() => setAccountType(t.id)}
-                className={cn(
-                  "rounded-lg py-2 text-sm font-medium transition-colors",
-                  accountType === t.id ? "bg-raised text-ink shadow-sm" : "text-faint hover:text-muted",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      ) : sessions.length === 0 ? (
+        <EmptyState
+          icon={<CandlestickIcon className="h-7 w-7" />}
+          title="No backtesting sessions yet"
+          body="Create your first session to start replaying historical market data and practicing your trading edge."
+          action={
+            <Button variant="gold" onClick={() => router.push("/backtesting/create")}>
+              + Create Session
+            </Button>
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {sessions.map((session) => (
+            <SessionCard
+              key={session.id}
+              session={session}
+              onOpen={() => router.push(`/backtesting/session?id=${session.id}`)}
+              onDelete={() => deleteSession(session.id)}
+            />
+          ))}
         </div>
-
-        <Field label="Starting balance" error={errorFor("startingBalance")} htmlFor="starting-balance">
-          <TextInput
-            id="starting-balance"
-            type="number"
-            min={0}
-            step={100}
-            value={startingBalance}
-            onChange={(e) => setStartingBalance(e.target.value)}
-          />
-        </Field>
-
-        {accountType === "prop" && (
-          <div className="space-y-4 rounded-control border border-dashed border-line-strong p-4">
-            <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Prop account risk rules</p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Maximum drawdown" error={errorFor("propRules.maxDrawdown")} htmlFor="max-dd">
-                <TextInput id="max-dd" type="number" min={0} step={50} value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value)} />
-              </Field>
-              <Field label="Daily loss limit" hint="optional" htmlFor="daily-loss">
-                <TextInput id="daily-loss" type="number" min={0} step={50} value={dailyLossLimit} onChange={(e) => setDailyLossLimit(e.target.value)} />
-              </Field>
-              <Field label="Maximum contracts" error={errorFor("propRules.maxContracts")} hint="optional" htmlFor="max-contracts">
-                <TextInput id="max-contracts" type="number" min={0} step={1} value={maxContracts} onChange={(e) => setMaxContracts(e.target.value)} />
-              </Field>
-              <Field label="Drawdown mode" htmlFor="dd-mode">
-                <Select id="dd-mode" value={drawdownMode} onChange={(e) => setDrawdownMode(e.target.value as DrawdownMode)}>
-                  <option value="static">Static (from starting balance)</option>
-                  <option value="trailing">Trailing (high-water mark)</option>
-                </Select>
-              </Field>
-            </div>
-          </div>
-        )}
-
-        {/* Period */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="From date" htmlFor="from-date">
-            <TextInput id="from-date" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </Field>
-          <Field label="From time" htmlFor="from-time">
-            <TextInput id="from-time" type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
-          </Field>
-          <Field label="To date" htmlFor="to-date">
-            <TextInput id="to-date" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </Field>
-          <Field label="To time" htmlFor="to-time">
-            <TextInput id="to-time" type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} />
-          </Field>
-        </div>
-        {errorFor("period") && <p className="text-[11px] text-loss">{errorFor("period")}</p>}
-        <p className="text-[11px] text-faint">
-          Times are entered in {session.timezone} and resolved to UTC with automatic DST handling.
-        </p>
-
-        {/* Timeframe */}
-        <Field label="Initial timeframe" error={errorFor("timeframe")} htmlFor="timeframe">
-          <Select id="timeframe" value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
-            {TIMEFRAMES.map((tf) => (
-              <option key={tf} value={tf}>
-                {tf}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Button variant="gold" size="lg" className="w-full" onClick={handleStart}>
-          Start Backtest
-        </Button>
-      </motion.div>
+      )}
     </div>
   );
 }
