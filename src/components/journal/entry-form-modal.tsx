@@ -59,6 +59,7 @@ export function EntryFormModal({
   const [setup, setSetup] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<UploadItem[]>([]);
+  const [compareImage, setCompareImage] = useState<UploadItem[]>([]);
   const [entryTime, setEntryTime] = useState("");
   const [exitTime, setExitTime] = useState("");
   const [entryPrice, setEntryPrice] = useState("");
@@ -102,6 +103,7 @@ export function EntryFormModal({
       setSetup(editing.setup);
       setNotes(editing.notes);
       setImages(editing.images.map((m) => ({ meta: m, blob: null })));
+      setCompareImage(editing.compareImage ? [{ meta: editing.compareImage, blob: null }] : []);
       setEntryTime(editing.entryTime ?? "");
       setExitTime(editing.exitTime ?? "");
       setEntryPrice(editing.entryPrice != null ? String(editing.entryPrice) : "");
@@ -122,6 +124,7 @@ export function EntryFormModal({
       setSetup("");
       setNotes("");
       setImages([]);
+      setCompareImage([]);
       setEntryTime("");
       setExitTime("");
       setEntryPrice("");
@@ -173,6 +176,7 @@ export function EntryFormModal({
     setupId: setupId || undefined,
     notes: notes.trim(),
     images: images.map((i) => i.meta),
+    compareImage: compareImage[0]?.meta,
     challengeId: challengeId || undefined,
     tradeNumber,
     entryTime: entryTime || undefined,
@@ -218,7 +222,7 @@ export function EntryFormModal({
     const draft = buildDraft();
     draft.challengeId = effectiveChallengeId || undefined;
     const blobs = new Map<string, Blob>();
-    for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
+    for (const item of [...images, ...compareImage]) if (item.blob) blobs.set(item.meta.id, item.blob);
 
     setSaving(true);
     try {
@@ -524,6 +528,9 @@ export function EntryFormModal({
           <Field label={`Screenshots (${images.length}/${MAX_IMAGES_PER_ENTRY})`} hint="entry / setup / execution / exit charts">
             <ImageUploader items={images} onChange={setImages} />
           </Field>
+          <Field label="Compare chart (optional)" hint="a related-symbol chart for side-by-side review">
+            <ImageUploader items={compareImage} onChange={setCompareImage} max={1} />
+          </Field>
         </div>
         </>
         )}
@@ -783,6 +790,8 @@ function ImportPane({
     }
     try {
       const text = await file.text();
+      // Let the picker visibly respond before parsing a large export.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { parseTradesCsv } = await import("@/lib/csv-import");
       const result = parseTradesCsv(text);
       if (result.error) {
@@ -838,19 +847,12 @@ function ImportPane({
         reviewStatus: "not_reviewed" as const,
       }));
 
-      // Batched insert with progress feedback — one persist per batch of 25.
-      let ok = 0;
-      let first: JournalEntry | null = null;
-      const BATCH = 25;
-      for (let i = 0; i < drafts.length; i += BATCH) {
-        const batch = drafts.slice(i, i + BATCH);
-        try {
-          const created = await useApp.getState().createEntries(batch);
-          ok += created.length;
-          first = first ?? created[0] ?? null;
-        } catch { /* keep going — nothing silently dropped without count */ }
-        setProgress({ done: Math.min(i + BATCH, drafts.length), total: drafts.length });
-      }
+      // createEntries performs one state update and one persistence operation;
+      // repeatedly syncing 25-row chunks made the import flow feel frozen.
+      const created = await useApp.getState().createEntries(drafts);
+      const ok = created.length;
+      const first = created[0] ?? null;
+      setProgress({ done: ok, total: drafts.length });
 
       if (ok === 0) {
         toast.error("Import failed", "None of the trades could be saved. Please try again.");
@@ -862,6 +864,8 @@ function ImportPane({
         onClose();
         onDone(first);
       }
+    } catch (err) {
+      toast.error("Import failed", err instanceof Error ? err.message : "An unexpected error occurred. Please try again.");
     } finally {
       setSaving(false);
       setProgress(null);

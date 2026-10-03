@@ -62,8 +62,8 @@ function generateWindows(entries: JournalEntry[]): { label: string; startMin: nu
 
   // Default 15-minute windows covering 9:00–12:00 EST (540–720 minutes)
   const windows: { label: string; startMin: number; endMin: number }[] = [];
-  const start = Math.max(540, Math.floor((times[0] - 15) / 15) * 15);
-  const end = Math.min(720, Math.ceil((times[times.length - 1] + 15) / 15) * 15);
+  const start = Math.min(540, Math.floor((times[0] - 15) / 15) * 15);
+  const end = Math.max(720, Math.ceil((times[times.length - 1] + 15) / 15) * 15);
 
   for (let t = start; t < end; t += 15) {
     const h1 = Math.floor(t / 60);

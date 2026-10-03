@@ -40,9 +40,9 @@ export async function publicMetricsFor(email: string): Promise<PublicMetrics | n
 
   const folderId = account.folderId;
   if (!folderId) return null;
-  const doc = (await readJournalDoc(accessToken, {
-    root: folderId, trades: folderId, journals: folderId, screenshots: folderId, challenges: folderId, exports: folderId,
-  })) as { entries?: JournalEntry[]; settings?: { startingEquity?: number }; plans?: TradePlan[] } | null;
+  const { ensureAppFolders } = await import("./drive");
+  const folders = await ensureAppFolders(accessToken);
+  const doc = (await readJournalDoc(accessToken, folders)) as { entries?: JournalEntry[]; settings?: { startingEquity?: number }; plans?: TradePlan[] } | null;
 
   const entries = doc?.entries ?? [];
   const plans = doc?.plans ?? [];

@@ -14,19 +14,20 @@ interface ToastItem {
   kind: ToastKind;
   title: string;
   message?: string;
+  action?: { label: string; onClick: () => void };
 }
 
 interface ToastStore {
   toasts: ToastItem[];
-  push(kind: ToastKind, title: string, message?: string): void;
+  push(kind: ToastKind, title: string, message?: string, action?: ToastItem["action"]): void;
   dismiss(id: string): void;
 }
 
 export const useToasts = create<ToastStore>((set) => ({
   toasts: [],
-  push: (kind, title, message) => {
+  push: (kind, title, message, action) => {
     const id = uid("t");
-    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, kind, title, message }] }));
+    set((s) => ({ toasts: [...s.toasts.slice(-3), { id, kind, title, message, action }] }));
     setTimeout(() => {
       set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
     }, kind === "error" ? 5200 : 3800);
@@ -36,7 +37,7 @@ export const useToasts = create<ToastStore>((set) => ({
 
 export const toast = {
   success: (title: string, message?: string) => useToasts.getState().push("success", title, message),
-  error: (title: string, message?: string) => useToasts.getState().push("error", title, message),
+  error: (title: string, message?: string, action?: ToastItem["action"]) => useToasts.getState().push("error", title, message, action),
   info: (title: string, message?: string) => useToasts.getState().push("info", title, message),
   celebrate: (title: string, message?: string) => useToasts.getState().push("celebrate", title, message),
 };
@@ -85,6 +86,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       <div className="min-w-0">
         <p className="text-sm font-semibold text-ink">{item.title}</p>
         {item.message && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.message}</p>}
+        {item.action && <button onClick={() => { item.action?.onClick(); dismiss(item.id); }} className="mt-2 rounded border border-gold/50 px-2 py-1 text-xs font-semibold text-gold hover:bg-gold/10">{item.action.label}</button>}
       </div>
       <button
         onClick={() => dismiss(item.id)}

@@ -126,7 +126,7 @@ function normalizeDirection(raw: string): TradeDirection | null | undefined {
 export function normalizePnl(raw: string): number | null {
   let v = raw.trim();
   if (!v) return null;
-  v = v.replace(/[$\s,]/g, "");
+  v = v.replace(/[^\d.\-()−–]/g, "");
   const negParens = /^\(.*\)$/.test(v);
   if (negParens) v = v.slice(1, -1);
   v = v.replace(/[−–]/g, "-");
@@ -284,7 +284,8 @@ export function parseTradesCsv(
     // 2) Entry timestamp → trade date (if no explicit date) + entry time
     if (rawEntryTs) {
       if (hasTimeComponent(rawEntryTs) && sourceTz) {
-        const ny = normalizeImportedTimestamp(rawEntryTs, sourceTz);
+        const input = date && !hasTimeComponent(rawDate ?? "") ? `${rawDate} ${rawEntryTs}` : rawEntryTs;
+        const ny = normalizeImportedTimestamp(input, sourceTz);
         if (ny) {
           if (!date) date = ny.date;
           nyEntryTime = ny.time;

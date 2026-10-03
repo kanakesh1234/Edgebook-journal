@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
 
   const body = (await request.json().catch(() => ({}))) as { handle?: string };
-  const handle = (body.handle ?? "").trim().replace(/^@/, "").toLowerCase();
+  const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
 
   if (!HANDLE_RE.test(handle)) {
     return NextResponse.json(

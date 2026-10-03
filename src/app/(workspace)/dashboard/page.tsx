@@ -7,8 +7,7 @@ import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
 import { journeyState } from "@/lib/journey";
 import { evaluateRules } from "@/lib/rules";
-import { primaryChallenge, scopeToPrimary } from "@/lib/challenges";
-import { ChallengeCard, CalendarAccessCard, LabAccessCard } from "@/components/cc/access-cards";
+import { scopeToPrimary } from "@/lib/challenges";
 import { PlanTradeFlow } from "@/components/journal/plan-trade-flow";
 import { PlansList } from "@/components/journal/plans-list";
 import { CalendarView } from "@/components/calendar/calendar-view";
@@ -25,7 +24,7 @@ import { useUi } from "@/lib/ui-store";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { EquityCurve } from "@/components/charts/equity-curve";
 import { WinRateDonut, DrawdownMeter } from "@/components/charts/winrate-donut";
-import { JourneyTrack } from "@/components/journey/journey-track";
+import { MatrixHome } from "@/components/matrix/matrix-home";
 import { EmptyState, Pill } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -62,16 +61,13 @@ export default function DashboardPage() {
   const journey = useMemo(() => journeyState(settings, stats), [settings, stats]);
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
   const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
-  const unreviewedCount = useMemo(
-    () => entries.filter((e) => e.reviewStatus === "not_reviewed" || e.reviewStatus === "incomplete" || e.reviewStatus === "in_progress").length,
-    [entries],
-  );
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   // Full Name from Settings wins over the auth/Google name.
   const displayName = settings.fullName?.trim() || user?.name || "";
   const firstName = displayName.split(" ")[0] || "trader";
+  const futureIntention = settings.practiceProgress?.futureSelfPredictions?.find((prediction) => prediction.date === todayKey());
 
   // Animated counters
   const totalPnl = useCountUp(stats.totalPnl);
@@ -149,6 +145,22 @@ export default function DashboardPage() {
           </Button>
         </div>
       </Header>
+
+      {futureIntention && (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: EASE }}
+          className="flex flex-col gap-3 rounded-panel border border-gold/30 bg-gold/[0.07] p-4 sm:flex-row sm:items-center sm:justify-between"
+          aria-label="Pre-market intention"
+        >
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[.16em] text-gold">Pre-market intention · sealed by Future Self</p>
+            <p className="mt-1 text-sm font-medium text-ink">“{futureIntention.rule}”</p>
+          </div>
+          <Link href="/practice" className="text-xs font-bold text-gold underline underline-offset-4">{futureIntention.outcome ? `Marked ${futureIntention.outcome}` : "Open training"}</Link>
+        </motion.section>
+      )}
 
       {/* ------------------------------ Hero band ------------------------------ */}
       <motion.section
@@ -277,6 +289,8 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
+      <MatrixHome />
+
       {/* ------------------------------ Calendar ----------------------------- */}
       <CalendarView
         entries={entries}
@@ -377,16 +391,6 @@ export default function DashboardPage() {
             </div>
           </motion.div>
         </div>
-      </div>
-
-      {/* ------------------------------ Journey ------------------------------ */}
-      <JourneyTrack settings={settings} stats={stats} journey={journey} />
-
-      {/* --------------------- Challenge + Calendar access -------------------- */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ChallengeCard />
-        <CalendarAccessCard unreviewed={unreviewedCount} monthPnl={stats.totalPnl} />
-        <LabAccessCard />
       </div>
 
       <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />

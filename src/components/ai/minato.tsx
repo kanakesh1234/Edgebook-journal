@@ -52,8 +52,13 @@ const WELCOME_QUOTES = [
   "Small, repeatable edges beat big, unrepeatable wins.",
 ];
 
-function pickWelcomeQuote(): string {
-  return WELCOME_QUOTES[Math.floor(Math.random() * WELCOME_QUOTES.length)];
+function nextWelcomeQuote(): string {
+  if (typeof window === "undefined") return WELCOME_QUOTES[0];
+  const key = "minato_welcome_quote_index";
+  const previous = Number(window.localStorage.getItem(key) ?? "-1");
+  const index = (Number.isInteger(previous) ? previous + 1 : 0) % WELCOME_QUOTES.length;
+  window.localStorage.setItem(key, String(index));
+  return WELCOME_QUOTES[index];
 }
 
 /**
@@ -63,8 +68,12 @@ function pickWelcomeQuote(): string {
  * text. This only handles **bold**; line breaks are already preserved by
  * the bubble's `whitespace-pre-wrap`, and full markdown isn't needed here.
  */
-function renderMinatoText(text: string) {
-  const parts = text.split(/(\*\*[^*\n]+\*\*)/g);
+function renderInline(text: string) {
+  // Some providers escape Markdown punctuation (\\*\\*label\\*\\*) despite
+  // the prompt. Normalize only escaped asterisks before rendering so the
+  // chat never exposes formatting syntax to the trader.
+  const normalized = text.replace(/\\\*/g, "*");
+  const parts = normalized.split(/(\*\*[^*\n]+\*\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
       return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
@@ -72,6 +81,37 @@ function renderMinatoText(text: string) {
     return <span key={i}>{part}</span>;
   });
 }
+
+/**
+ * Give analytical answers a dependable visual hierarchy even when a model
+ * returns plain text. Numbered findings become compact cards, supporting
+ * bullets stay visibly subordinate, and labels retain their emphasis.
+ */
+function renderMinatoText(text: string) {
+  return text.replace(/\r/g, "").split("\n").map((line, i) => {
+    const numbered = line.match(/^(\d+)\.\s+(.+)$/);
+    if (numbered) {
+      return (
+        <div key={i} className="minato-finding">
+          <span className="minato-finding-number">{numbered[1]}</span>
+          <span className="min-w-0">{renderInline(numbered[2])}</span>
+        </div>
+      );
+    }
+    const bullet = line.match(/^\s*[-•–]\s+(.+)$/);
+    if (bullet) {
+      return <div key={i} className="minato-supporting-point"><span>•</span><span>{renderInline(bullet[1])}</span></div>;
+    }
+    if (!line.trim()) return <div key={i} className="h-2" aria-hidden />;
+    return <p key={i} className={i === 0 ? "font-medium text-ink" : undefined}>{renderInline(line)}</p>;
+  });
+}
+
+const ANALYSIS_STEPS = [
+  "Reading your journal…",
+  "Checking patterns and plan adherence…",
+  "Preparing a focused answer…",
+] as const;
 
 /**
  * MINATO SENSEI — floating trading companion.
@@ -90,7 +130,12 @@ export function Minato() {
   const reduce = useReducedMotion();
 
   // MINATO follows the primary challenge — same source of truth as Home.
-  const { entries, settings } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
+  const { entries, settings, challenge } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
+  const updateSettings = useApp((s) => s.updateSettings);
+  // Most journal questions need a sharply scoped answer, not a long model
+  // generation. A smaller default makes the companion feel responsive while
+  // leaving the user-controlled budget available for deep reviews.
+  const responseTokenLimit = Math.min(8_000, Math.max(250, settings.aiPrefs?.responseTokenLimit ?? 900));
 
   const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
   const focusEntry = useMemo(
@@ -125,6 +170,8 @@ export function Minato() {
   const [messages, setMessages] = useState<MinatoMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState(0);
+  const [replySizeDraft, setReplySizeDraft] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // "thinking" should reflect an actual in-flight request, not just
@@ -136,7 +183,7 @@ export function Minato() {
   useEffect(() => {
     if (open) {
       setMessages((m) =>
-        m.length > 0 ? m : [{ role: "buddy", text: `${provider.greeting(ctx)}\n\n"${pickWelcomeQuote()}"` }],
+        m.length > 0 ? m : [{ role: "buddy", text: provider.greeting(ctx) }],
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,13 +193,14 @@ export function Minato() {
   // Shows once per login/signup (new browser session), dismisses on any
   // click anywhere on the blurred backdrop.
   const [showWelcome, setShowWelcome] = useState(false);
-  const [welcomeQuote] = useState(pickWelcomeQuote);
+  const [welcomeQuote, setWelcomeQuote] = useState("");
   const status = useApp((s) => s.status);
   useEffect(() => {
     if (status !== "authenticated") return;
     if (typeof window === "undefined") return;
     if (sessionStorage.getItem("minato_welcomed") === "1") return;
     sessionStorage.setItem("minato_welcomed", "1");
+    setWelcomeQuote(nextWelcomeQuote());
     const t = setTimeout(() => setShowWelcome(true), 900);
     return () => clearTimeout(t);
   }, [status]);
@@ -173,6 +221,17 @@ export function Minato() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   }, [messages, reduce]);
 
+  useEffect(() => {
+    if (!busy) {
+      setAnalysisStep(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setAnalysisStep((step) => Math.min(step + 1, ANALYSIS_STEPS.length - 1));
+    }, 1100);
+    return () => window.clearInterval(interval);
+  }, [busy]);
+
   const ask = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
@@ -185,11 +244,26 @@ export function Minato() {
       // (hallucination-proof), then renders via OpenRouter when configured.
       let replyText: string | null = null;
       try {
+        // Keep the interaction quick. If the remote analysis service does
+        // not respond promptly, the local evidence-based provider answers
+        // instead rather than leaving the trader watching a stalled panel.
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 7_500);
         const res = await fetch("/api/minato/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: next, entries: useApp.getState().entries }),
+          // Send only the current primary challenge's journal. This keeps the
+          // server analysis both relevant and much smaller/faster.
+          body: JSON.stringify({
+            messages: next,
+            entries,
+            journalProvided: true,
+            primaryChallenge: challenge ?? undefined,
+            responseTokenLimit,
+          }),
+          signal: controller.signal,
         });
+        window.clearTimeout(timeout);
         if (res.ok) {
           const json = (await res.json()) as { text?: string; fallback?: boolean };
           replyText = json.fallback ? null : json.text ?? null;
@@ -231,8 +305,10 @@ export function Minato() {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/minato-avatar.png"
+                src="/minato-avatar.jpg"
                 alt=""
+                width={256}
+                height={256}
                 className="h-full w-full object-cover"
                 onError={(e) => {
                   e.currentTarget.style.display = "none";
@@ -280,8 +356,10 @@ export function Minato() {
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src="/minato-avatar.png"
+              src="/minato-avatar.jpg"
               alt=""
+              width={256}
+              height={256}
               className="h-full w-full object-cover"
               onError={(e) => {
                 e.currentTarget.style.display = "none";
@@ -318,8 +396,10 @@ export function Minato() {
                 <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src="/minato-avatar.png"
+                    src="/minato-avatar.jpg"
                     alt=""
+                    width={256}
+                    height={256}
                     className="h-full w-full object-cover"
                     onError={(e) => {
                       e.currentTarget.style.display = "none";
@@ -336,7 +416,34 @@ export function Minato() {
                   </p>
                 </div>
               </div>
+              <label className="ml-3 flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 8,000 tokens">
+                <span>Reply</span>
+                <input
+                  aria-label="MINATO reply size in tokens"
+                  type="number"
+                  min={250}
+                  max={8000}
+                  step={250}
+                  value={replySizeDraft ?? responseTokenLimit}
+                  onChange={(e) => setReplySizeDraft(e.target.value)}
+                  onBlur={() => {
+                    const nextLimit = Math.min(8_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
+                    setReplySizeDraft(null);
+                    if (nextLimit !== responseTokenLimit) {
+                      void updateSettings({ aiPrefs: { ...(rawSettings.aiPrefs ?? { includeNotes: true }), responseTokenLimit: nextLimit } });
+                    }
+                  }}
+                  className="w-14 rounded border border-line bg-raised px-1 py-1 text-right text-[10px] text-ink focus:border-gold/60 focus:outline-none"
+                />
+                <span>tokens</span>
+              </label>
             </div>
+
+            {challenge && (
+              <div className="border-b border-line-soft bg-gold/5 px-4 py-2 text-[11px] text-muted">
+                Analysing only: <strong className="font-semibold text-ink">{challenge.name}</strong>
+              </div>
+            )}
 
             {/* Insights */}
             {insights.length > 0 && (
@@ -354,23 +461,24 @@ export function Minato() {
             <div ref={listRef} className="min-h-40 flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
               {messages.map((m, i) => (
                 <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                  <p
+                  <div
                     className={cn(
-                      "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed",
+                      "max-w-[88%] rounded-2xl px-3.5 py-3 text-[13px] leading-relaxed",
                       m.role === "user"
                         ? "rounded-br-md bg-ink text-canvas"
                         : "rounded-bl-md border border-line bg-raised text-ink",
                     )}
                   >
                     {renderMinatoText(m.text)}
-                  </p>
+                  </div>
                 </div>
               ))}
               {busy && (
                 <div className="flex justify-start">
-                  <p className="rounded-2xl rounded-bl-md border border-line bg-raised px-3.5 py-2.5 text-[13px] text-faint">
-                    {reduce ? "…" : "…"}
-                  </p>
+                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-line bg-raised px-3.5 py-2.5 text-[12px] text-muted">
+                    <span className="minato-thinking-dot" aria-hidden />
+                    <span>{reduce ? "Analyzing your journal…" : ANALYSIS_STEPS[analysisStep]}</span>
+                  </div>
                 </div>
               )}
             </div>

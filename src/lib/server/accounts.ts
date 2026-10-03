@@ -125,7 +125,8 @@ export async function clearDriveAuth(email: string): Promise<void> {
 /** Decrypt the stored refresh token (server-side only). */
 export function accountRefreshToken(account: EdgeBookAccount, secret: string): string | null {
   if (!account.encRefreshToken) return null;
-  return decryptToken(account.encRefreshToken, tokenSecretFor(account.email));
+  const scopedSecret = cryptoHash(`${secret}:${account.email.toLowerCase()}`);
+  return decryptToken(account.encRefreshToken, scopedSecret);
 }
 
 /**

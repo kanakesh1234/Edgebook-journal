@@ -36,10 +36,11 @@ export default function TradeReviewPage() {
   const settings = useApp((s) => s.settings);
   const challenges = settings.challenges ?? [];
   const entry = useMemo(() => entries.find((e) => e.id === id), [entries, id]);
-  const urls = useImageUrls(entry?.images.map((i) => i.id) ?? []);
+  const urls = useImageUrls(entry ? [...entry.images.map((i) => i.id), ...(entry.compareImage ? [entry.compareImage.id] : [])] : []);
 
   const [zoomed, setZoomed] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [compare, setCompare] = useState(false);
 
   if (!entry) {
     return (
@@ -143,14 +144,15 @@ export default function TradeReviewPage() {
             {entry.images.length > 0 ? `${entry.images.length} attached` : "none — review incomplete"}
           </span>
         </div>
+        {entry.compareImage && <button onClick={() => setCompare(!compare)} className="mb-3 text-xs text-gold underline underline-offset-4">Compare: {compare ? "side by side" : "single"}</button>}
         {entry.images.length === 0 ? (
           <div className="flex aspect-[16/7] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong bg-raised/30 text-faint">
             <ImageIcon className="h-5 w-5" />
             <p className="text-xs">No screenshots attached</p>
           </div>
         ) : (
-          <div className={cn("grid gap-3", entry.images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
-            {entry.images.map((img, i) => (
+          <div className={cn("grid gap-3", compare && entry.compareImage ? "grid-cols-1 sm:grid-cols-2" : entry.images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2")}>
+            {[...entry.images.slice(0, compare ? 1 : entry.images.length), ...(compare && entry.compareImage ? [entry.compareImage] : [])].map((img, i) => (
               <button
                 key={img.id}
                 onClick={() => { const u = urls[img.id]; if (u) setZoomed(u); }}
@@ -163,6 +165,7 @@ export default function TradeReviewPage() {
                 ) : (
                   <span className="grid h-full place-items-center"><span className="h-5 w-5 animate-spin rounded-full border-2 border-line-strong border-t-gold" /></span>
                 )}
+                <span className="absolute left-2 top-2 border border-gold bg-canvas px-1.5 py-0.5 text-[10px] text-gold">Decision point</span>
               </button>
             ))}
           </div>

@@ -161,7 +161,8 @@ export async function GET(req: NextRequest) {
     const raw = await lseRes.json();
 
     // Normalize: LSE may return an array directly or under a key
-    const rows: LseCandle[] = Array.isArray(raw) ? raw : (raw.data || raw.candles || raw.results || []);
+    const rawList = Array.isArray(raw) ? raw : (raw.data || raw.candles || raw.results);
+    const rows: LseCandle[] = Array.isArray(rawList) ? rawList : [];
 
     const candles = rows.map((r: LseCandle) => {
       /* -------------------------------------------------------------- */

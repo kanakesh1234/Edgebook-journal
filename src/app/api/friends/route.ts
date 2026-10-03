@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   if (searchHandle) {
     const target = await findByHandle(searchHandle);
     if (!target || target.email === me) return NextResponse.json({ results: [] });
-    return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name.split(" ")[0] }] });
+    return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name?.split(" ")[0] ?? target.handle }] });
   }
 
   const records = await listFor(me);
@@ -66,7 +66,8 @@ export async function POST(request: Request) {
 
   if (body.action === "request") {
     if (!body.handle) return NextResponse.json({ error: "handle_required" }, { status: 400 });
-    const target = await getAccount(body.handle.toLowerCase().replace(/^@/, ""));
+    // A connection ID is a public handle, not an email address.
+    const target = await findByHandle(body.handle);
     if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
     if (target.email === me) return NextResponse.json({ error: "self" }, { status: 400 });
     const record = await sendRequest(me, target.email);

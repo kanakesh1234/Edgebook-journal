@@ -23,12 +23,14 @@ function driveErrorResponse(err: unknown, requestId: string, operation: string):
   console.error(
     `[DRIVE] OP_FAILED requestId=${requestId} operation=${operation} status=${de.status} reason=${de.reason} message="${de.message}"`,
   );
-  const status = de.status === 401 ? 401 : de.status === 0 ? 502 : 502;
+  // Preserve Google's actual status for the browser's retry policy.  A
+  // network/local parse failure has no HTTP equivalent, so it stays a 502.
+  const status = de.status >= 400 && de.status <= 599 ? de.status : 502;
   return NextResponse.json({
     error: "drive_write_failed",
     detail: de.reason,
     googleStatus: de.status,
-    message: `Google Drive sync failed (${de.status}). Your data has not been confirmed as saved.`,
+    message: de.message,
   }, { status });
 }
 
@@ -37,7 +39,7 @@ export async function GET() {
   const authed = await getAuthedDrive();
   if (!authed.ok) {
     console.log(`[DRIVE] GET_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`);
-    return NextResponse.json({ error: authed.error }, { status: authed.status });
+    return NextResponse.json({ error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message }, { status: authed.status });
   }
   try {
     const doc = await withDrive(authed.drive, "readJournal", requestId, (t) => readJournalDoc(t, authed.drive.folders));
@@ -60,16 +62,26 @@ export async function PUT(request: Request) {
   const authed = await getAuthedDrive();
   if (!authed.ok) {
     console.log(`[DRIVE] PUT_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`);
-    return NextResponse.json({ error: authed.error }, { status: authed.status });
+    return NextResponse.json({ error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message }, { status: authed.status });
   }
   let payload: JournalPayload;
   try {
     payload = (await request.json()) as JournalPayload;
-    if (!Array.isArray(payload?.entries) || typeof payload?.settings !== "object") {
-      return NextResponse.json({ error: "invalid_payload" }, { status: 400 });
+    if (!Array.isArray(payload?.entries) || !payload.settings || typeof payload.settings !== "object" || Array.isArray(payload.settings)) {
+      return NextResponse.json({ error: "invalid_payload", message: "entries must be an array and settings must be an object" }, { status: 400 });
     }
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    // New practice fields intentionally remain forward-compatible: settings
+    // is an object, not a closed allow-list schema. Validate only the stable
+    // envelope so a newly shipped practiceProgress field cannot be rejected.
+    if (payload.dayLogs != null && !Array.isArray(payload.dayLogs)) {
+      return NextResponse.json({ error: "invalid_payload", message: "dayLogs must be an array when present" }, { status: 400 });
+    }
+    if (payload.plans != null && !Array.isArray(payload.plans)) {
+      return NextResponse.json({ error: "invalid_payload", message: "plans must be an array when present" }, { status: 400 });
+    }
+  } catch (err) {
+    console.error(`[DRIVE] PUT_DATA_INVALID_JSON requestId=${requestId} message="${err instanceof Error ? err.message : String(err)}"`);
+    return NextResponse.json({ error: "invalid_json", message: "Request body must be valid JSON" }, { status: 400 });
   }
 
   const storedAt = Date.now();

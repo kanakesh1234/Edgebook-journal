@@ -38,23 +38,22 @@ export function ImageUploader({
 
   // Object URL lifecycle: create for new blobs, revoke for removed ones.
   useEffect(() => {
-    setLocalUrls((prev) => {
-      const next = { ...prev };
-      const ids = new Set<string>();
-      for (const item of items) {
-        if (!item.blob) continue;
-        ids.add(item.meta.id);
-        if (!next[item.meta.id]) next[item.meta.id] = URL.createObjectURL(item.blob);
+    const prev = localUrlsRef.current;
+    const next = { ...prev };
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (!item.blob) continue;
+      ids.add(item.meta.id);
+      if (!next[item.meta.id]) next[item.meta.id] = URL.createObjectURL(item.blob);
+    }
+    for (const id of Object.keys(next)) {
+      if (!ids.has(id)) {
+        URL.revokeObjectURL(next[id]);
+        delete next[id];
       }
-      for (const id of Object.keys(next)) {
-        if (!ids.has(id)) {
-          URL.revokeObjectURL(next[id]);
-          delete next[id];
-        }
-      }
-      localUrlsRef.current = next;
-      return next;
-    });
+    }
+    localUrlsRef.current = next;
+    setLocalUrls(next);
   }, [items]);
 
   // Revoke everything on unmount only.

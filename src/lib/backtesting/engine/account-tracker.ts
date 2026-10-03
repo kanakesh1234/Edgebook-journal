@@ -197,15 +197,16 @@ export class AccountTracker {
       }
     }
 
-    // Daily loss limit breach
-    if (this._config.dailyLossLimit && this._dailyPnl < 0) {
-      if (Math.abs(this._dailyPnl) >= this._config.dailyLossLimit) {
+    // Daily loss limit breach (includes unrealized open P&L)
+    const currentDailyPnl = this._dailyPnl + this._openPnl;
+    if (this._config.dailyLossLimit && currentDailyPnl < 0) {
+      if (Math.abs(currentDailyPnl) >= this._config.dailyLossLimit) {
         this._breached = true;
         this._breachInfo = {
           time,
           equity,
-          drawdownValue: Math.abs(this._dailyPnl),
-          reason: `Daily loss limit breached: \$${Math.abs(this._dailyPnl).toFixed(2)} >= \$${this._config.dailyLossLimit}`,
+          drawdownValue: Math.abs(currentDailyPnl),
+          reason: `Daily loss limit breached: \$${Math.abs(currentDailyPnl).toFixed(2)} >= \$${this._config.dailyLossLimit}`,
         };
       }
     }

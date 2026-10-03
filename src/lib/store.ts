@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, PlaybookSetup, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
-import { dataStore, type JournalPayload } from "./services/storage";
+import { dataStore, DriveSyncError, loadJournalMirror, type JournalPayload } from "./services/storage";
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl } from "./images";
 import { uid } from "./utils";
@@ -21,6 +21,7 @@ export interface EntryDraft {
   setupId?: string;
   notes: string;
   images: JournalEntry["images"];
+  compareImage?: JournalEntry["compareImage"];
   challengeId?: string;
   tradeNumber?: 1 | 2 | null;
   entryTime?: string;
@@ -138,12 +139,14 @@ async function persist(userId: string, entries: JournalEntry[], settings: Journa
     // The UI state is already updated — report the sync failure clearly and
     // keep the app usable. NEVER fake a successful cloud save.
     _persistFailedAt = Date.now();
-    const status = err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "";
+    const syncError = err instanceof DriveSyncError ? err : null;
+    const status = syncError?.status || (err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "");
     toast.error(
-      "Google Drive sync failed",
+      "Unsaved, Retry",
       status
-        ? `The change is visible here but was NOT saved to Drive (error ${status}). Try again in a moment.`
-        : "The change is visible here but was NOT saved to the cloud. Check your connection and retry.",
+        ? `${syncError?.message ?? `Drive error ${status}`}. Your change is stored locally; retry when Drive is available.`
+        : "Your change is stored locally but was not confirmed on Drive. Retry when your connection is back.",
+      { label: "Retry", onClick: () => { void persist(userId, entries, settings, dayLogs, plans); } },
     );
   }
 }
@@ -173,6 +176,8 @@ export const useApp = create<AppState>((set, get) => ({
       // view can never overwrite the cloud journal.
       loadError = true;
       _loadFailed = true;
+      const mirror = dataStore.kind === "cloud" ? loadJournalMirror(user.id) : null;
+      if (mirror) payload = mirror;
       if (!onAuthScreen()) {
         toast.error(
           "Google Drive could not be read",
@@ -188,10 +193,10 @@ export const useApp = create<AppState>((set, get) => ({
     set({
       status: "authenticated",
       user,
-      entries: loadError ? [] : (payload?.entries ?? []),
-      settings: loadError ? defaultSettings() : { ...defaultSettings(), ...(payload?.settings ?? {}) },
-      dayLogs: loadError ? [] : (payload?.dayLogs ?? []),
-      plans: loadError ? [] : (payload?.plans ?? []),
+      entries: payload?.entries ?? [],
+      settings: { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      dayLogs: payload?.dayLogs ?? [],
+      plans: payload?.plans ?? [],
     });
   },
 
@@ -277,8 +282,8 @@ export const useApp = create<AppState>((set, get) => ({
     if (!prev) throw new Error("Entry not found");
 
     // Remove image binaries that were detached during editing
-    for (const img of prev.images) {
-      if (!draft.images.some((i) => i.id === img.id)) {
+    for (const img of [...prev.images, ...(prev.compareImage ? [prev.compareImage] : [])]) {
+      if (!draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id) {
         await dataStore.deleteImage(img.id);
         dropImageUrl(img.id);
       }
@@ -296,15 +301,18 @@ export const useApp = create<AppState>((set, get) => ({
     const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
     const target = entries.find((e) => e.id === id);
-    if (target?.images.length) {
-      for (const img of target.images) {
+    if (target?.images.length || target?.compareImage) {
+      for (const img of [...(target?.images ?? []), ...(target?.compareImage ? [target.compareImage] : [])]) {
         await dataStore.deleteImage(img.id);
         dropImageUrl(img.id);
       }
     }
     const next = entries.filter((e) => e.id !== id);
-    set({ entries: next });
-    await persist(user.id, next, settings, dayLogs, get().plans);
+    const plans = get().plans.map((p) =>
+      p.linkedTradeId === id ? { ...p, linkedTradeId: undefined, status: "planned" as const } : p,
+    );
+    set({ entries: next, plans });
+    await persist(user.id, next, settings, dayLogs, plans);
   },
 
   async saveReflection(entryId, reflection) {
@@ -312,7 +320,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (!user) throw new Error("Not signed in");
     const prev = entries.find((e) => e.id === entryId);
     if (!prev) throw new Error("Entry not found");
-    const updated: JournalEntry = { ...prev, reflection, updatedAt: Date.now() };
+    const updated: JournalEntry = { ...prev, reflection, reviewStatus: reviewStatusOf({ ...prev, reflection }), updatedAt: Date.now() };
     const next = entries.map((e) => (e.id === entryId ? updated : e));
     set({ entries: next });
     await persist(user.id, next, settings, dayLogs, get().plans);
@@ -518,8 +526,8 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   exportPayload() {
-    const { entries, settings, dayLogs } = get();
-    return { entries, settings, dayLogs, version: 2, exportedAt: Date.now() };
+    const { entries, settings, dayLogs, plans } = get();
+    return { entries, settings, dayLogs, plans, version: 2, exportedAt: Date.now() };
   },
 
   async loadDemoData() {

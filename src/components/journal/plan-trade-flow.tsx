@@ -21,31 +21,25 @@ import { PencilIcon, UploadIcon } from "@/components/ui/icons";
  * PLAN TRADE — the complete guided trade lifecycle, in fixed order:
  *
  *   PRE-SESSION → SETUP SELECTION → RULE CHECKLIST →
- *   PRE-TRADE ANALYSIS (execution gate) → MANUAL ENTRY / IMPORT →
- *   SCREENSHOTS → AUTOPSY
- *
- * The pre-trade execution checklist is a GATE: it must be explicitly
- * confirmed BEFORE the trade is recorded — never after.
+ *   MANUAL ENTRY / IMPORT → SCREENSHOTS → AUTOPSY
  */
 const STAGES = [
   "Pre-session",
   "Setup",
   "Rules",
-  "Pre-trade analysis",
   "Record trade",
   "Screenshots",
   "Autopsy",
 ] as const;
 
-/** Stage indices — the checklist MUST precede manual entry/import. */
+/** Stage indices — rules must precede manual entry/import. */
 export const PLAN_STAGE = {
   PRE_SESSION: 0,
   SETUP: 1,
   RULES: 2,
-  PRE_TRADE_ANALYSIS: 3,
-  RECORD: 4,
-  SCREENSHOTS: 5,
-  AUTOPSY: 6,
+  RECORD: 3,
+  SCREENSHOTS: 4,
+  AUTOPSY: 5,
 } as const;
 
 export function PlanTradeFlow({
@@ -87,10 +81,6 @@ export function PlanTradeFlow({
   // ── Stage 2: rule checklist ──
   const [ruleStates, setRuleStates] = useState<Record<string, PlanRuleState>>({});
 
-  // ── Stage 3: pre-trade analysis / execution checklist (the gate) ──
-  const [executionItems, setExecutionItems] = useState<{ label: string; description?: string; confirmed: boolean }[]>([]);
-  const [finalConfirm, setFinalConfirm] = useState(false);
-
   // ── Stage 3: manual entry / import ──
   const [entryMode, setEntryMode] = useState<"choose" | "manual" | "import">("choose");
   const [tradeDate, setTradeDate] = useState(todayKey());
@@ -128,52 +118,28 @@ export function PlanTradeFlow({
     setMustHappenBeforeEntry(""); setInvalidation(""); setExpectedTarget("");
     setEmotionalState(""); setEmotionalNote(""); setWhatCouldBreakPlan(""); setEntryTimePlanned("");
     setRuleStates({}); setStep(0);
-    setExecutionItems([]); setFinalConfirm(false);
     setEntryMode("choose"); setPnl(""); setRr(""); setDirInstrument(""); setDirection(null);
     setEntryTime(""); setExitTime(""); setCreatedEntry(null);
     setImportRows(null); setImportError(null); setImages([]); setAutopsyEntry(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const patterns = useMemo(() => detectPatterns(entries), [entries]);
+  // Pattern detection is only visible in the first stage. Avoid scanning a
+  // large imported journal while the trader is entering or importing trades.
+  const patterns = useMemo(
+    () => step === PLAN_STAGE.PRE_SESSION ? detectPatterns(entries) : [],
+    [entries, step],
+  );
   const planText = `${thesis} ${drawOnLiquidity} ${mustHappenBeforeEntry} ${whatCouldBreakPlan}`;
   const planMatch = useMemo(() => matchPlanToPatterns(planText, patterns), [planText, patterns]);
 
-  // Per-stage gating — the pre-trade execution gate MUST pass before recording
-  const allExecutionConfirmed =
-    executionItems.length > 0 && executionItems.every((i) => i.confirmed) && finalConfirm;
+  // Per-stage gating
   const canNext =
     step === 0 ? thesis.trim().length > 0 && emotionalState !== ""
     : step === 1 ? playbook.length === 0 || !!playbookId   // setup required when any exist
     : step === 2 ? allRulesConfirmed                        // setup rules gate
-    : step === 3 ? allExecutionConfirmed                    // execution checklist gate
-    : step === 4 ? createdEntry != null
+    : step === 3 ? createdEntry != null
     : true;
-
-  /** Build the dynamic execution checklist when entering the pre-trade analysis stage. */
-  const enterPreTradeAnalysis = () => {
-    const items: { label: string; description?: string; confirmed: boolean }[] = [];
-    // Setup rules not yet satisfied must be explicitly resolved here.
-    selectedRules.forEach((r, i) => {
-      if ((ruleStates[String(i)] ?? "waiting") !== "ready") {
-        items.push({ label: `Setup rule: ${r.text}`, description: r.description, confirmed: false });
-      }
-    });
-    // Dynamic plan-derived validations.
-    items.push({
-      label: entryTimePlanned < "09:33" && entryTimePlanned !== "" ? "Entry time respects the 9:33 rule" : "Entry timing matches the plan",
-      description: entryTimePlanned ? `Planned around ${entryTimePlanned} NY` : undefined,
-      confirmed: false,
-    });
-    items.push({ label: "Risk acceptable — stop placement and size defined", description: expectedTarget.trim() ? `Target: ${expectedTarget.trim()}` : undefined, confirmed: false });
-    items.push({
-      label: invalidation.trim() ? `Invalidation understood: ${invalidation.trim()}` : "No unresolved invalidation condition",
-      confirmed: false,
-    });
-    setExecutionItems(items);
-    setFinalConfirm(false);
-    setStep(PLAN_STAGE.PRE_TRADE_ANALYSIS);
-  };
 
   const buildPlan = (): TradePlan => ({
     id: uid(`pl-${Date.now().toString(36)}`),
@@ -198,17 +164,12 @@ export function PlanTradeFlow({
     emotionalNote: emotionalNote.trim() || undefined,
     whatCouldBreakPlan: whatCouldBreakPlan.trim() || undefined,
     rules: selectedRules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] ?? "waiting", note: r.description })),
-    executionChecklist: executionItems.map((i) => ({ label: i.label, description: i.description, confirmed: i.confirmed })),
-    executionConfirmedAt: allExecutionConfirmed ? Date.now() : undefined,
     status: "executed",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  /** The canonical pre-trade checklist persisted onto the trade entry. */
-  const preTradeChecklistPayload = () =>
-    executionItems.map((i) => ({ label: i.label, description: i.description, confirmed: i.confirmed }));
 
-  /** Create the actual trade from manual details (stage 3 → 4). */
+  /** Create the actual trade from manual details. */
   const saveManualTrade = async () => {
     const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl.replace(/[^\d.\-−]/g, "").replace("−", "-"));
     if (!Number.isFinite(pnlNumber)) {
@@ -231,7 +192,8 @@ export function PlanTradeFlow({
         images: [],
         challengeId: challengeId || undefined,
         planId: plan.id,
-        preTradeChecklist: preTradeChecklistPayload(),
+        entryTime: entryTime.trim() || undefined,
+        exitTime: exitTime.trim() || undefined,
       });
       setCreatedEntry(created);
       setStep(PLAN_STAGE.SCREENSHOTS);
@@ -240,7 +202,7 @@ export function PlanTradeFlow({
     }
   };
 
-  /** Import CSV rows (stage 3 → 4) — batched, linked to the same challenge/setup. */
+  /** Import CSV rows (stage 3 → 4) in one persisted transaction. */
   const runImport = async () => {
     if (!importRows?.length) return;
     setSaving(true);
@@ -260,7 +222,6 @@ export function PlanTradeFlow({
         images: [] as JournalEntry["images"],
         challengeId: challengeId || undefined,
         planId: i === 0 ? plan.id : undefined,
-        preTradeChecklist: preTradeChecklistPayload(),
         reviewStatus: "not_reviewed" as const,
       }));
       const created = await useApp.getState().createEntries(drafts);
@@ -276,6 +237,8 @@ export function PlanTradeFlow({
     setImportError(null);
     try {
       const text = await file.text();
+      // Let the upload state paint before parsing a large broker export.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { parseTradesCsv } = await import("@/lib/csv-import");
       const result = parseTradesCsv(text);
       if (result.error) { setImportError(result.error); setImportRows(null); return; }
@@ -351,7 +314,7 @@ export function PlanTradeFlow({
         </AnimatePresence>
 
         <div className="mt-5 min-h-[240px]">
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="sync" initial={false}>
             {/* ─────────────── STAGE 0 · PRE-SESSION ─────────────── */}
             {step === 0 && (
               <StageShell key="presession" title="Pre-session planning" subtitle="Plan before you know your entry or exit — that's the point.">
@@ -504,101 +467,9 @@ export function PlanTradeFlow({
               </StageShell>
             )}
 
-            {/* ─────── STAGE 3 · PRE-TRADE ANALYSIS / EXECUTION GATE ─────── */}
-            {step === 3 && (
-              <StageShell key="pretrade" title="Pre-trade analysis" subtitle="Is this trade actually valid according to your plan? Confirm every condition before recording.">
-                {/* Plan context summary */}
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-line bg-raised/60 p-4 text-[12px] sm:grid-cols-3">
-                  <Fact label="Setup" value={selectedPlaybook?.name ?? "—"} />
-                  <Fact label="Challenge" value={challenges.find((c) => c.id === challengeId)?.name ?? "—"} />
-                  <Fact label="Market / instrument" value={(dirInstrument || instrument).toUpperCase() || "—"} />
-                  <Fact label="Direction" value={bias !== "either" ? bias : "—"} />
-                  <Fact label="Planned target" value={expectedTarget.trim() || "—"} />
-                  <Fact label="Risk / reward" value={rr.trim() ? `${rr.trim()}R (planned)` : "—"} />
-                  <Fact label="Invalidation" value={invalidation.trim() || "—"} />
-                  <Fact label="Emotional state" value={emotionalState || "—"} />
-                  <Fact label="Must happen first" value={mustHappenBeforeEntry.trim() || "—"} />
-                </dl>
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <Field label="Planned entry time" hint="NY, optional" htmlFor="ptap-time">
-                    <TextInput id="ptap-time" type="time" value={entryTimePlanned} onChange={(e) => setEntryTimePlanned(e.target.value)} />
-                  </Field>
-                  <Field label="Planned risk / reward" hint="optional, e.g. 2.5" htmlFor="ptap-rr">
-                    <TextInput id="ptap-rr" inputMode="decimal" className="tabular" value={rr} onChange={(e) => setRr(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))} />
-                  </Field>
-                </div>
-
-                {/* Execution checklist — dynamic, interactive, gated */}
-                <p className="mt-5 text-[11px] font-semibold uppercase tracking-wider text-faint">Execution checklist</p>
-                {entryTimePlanned !== "" && entryTimePlanned < "09:33" && (
-                  <div className="mt-3 rounded-lg border border-loss/30 bg-loss/[0.07] px-3 py-2 text-xs text-loss" role="alert">
-                    Planned entry {entryTimePlanned} is before 9:33 AM NY — premature entries break the time rule.
-                  </div>
-                )}
-                <div className="mt-2 space-y-2">
-                  {executionItems.map((item, i) => {
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={item.confirmed}
-                        onClick={() => setExecutionItems(executionItems.map((it, j) => (j === i ? { ...it, confirmed: !it.confirmed } : it)))}
-                        className={cn(
-                          "flex w-full items-start gap-3 rounded-xl border px-4 py-2.5 text-left transition-colors",
-                          item.confirmed ? "border-profit/40 bg-profit/[0.06]" : "border-line bg-raised/60 hover:border-line-strong",
-                        )}
-                      >
-                        <span className={cn(
-                          "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition-colors",
-                          item.confirmed ? "border-profit bg-profit/[0.15] text-profit" : "border-line-strong bg-surface text-transparent",
-                        )}>✓</span>
-                        <span className="min-w-0">
-                          <span className="block text-[13px] text-ink">{item.label}</span>
-                          {item.description && <span className="mt-0.5 block text-xs leading-relaxed text-muted">{item.description}</span>}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {/* Final explicit confirmation */}
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={finalConfirm}
-                    onClick={() => setFinalConfirm((v) => !v)}
-                    className={cn(
-                      "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left font-medium transition-colors",
-                      finalConfirm ? "border-gold/60 bg-gold/[0.08]" : "border-line-strong bg-surface hover:border-gold/40",
-                    )}
-                  >
-                    <span className={cn(
-                      "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition-colors",
-                      finalConfirm ? "border-gold bg-gold/[0.15] text-gold" : "border-line-strong bg-surface text-transparent",
-                    )}>✓</span>
-                    <span className="text-[13px] text-ink">I confirm this trade is valid according to my plan.</span>
-                  </button>
-                </div>
-
-                {!allExecutionConfirmed && (
-                  <p className="mt-3 rounded-lg border border-gold/30 bg-gold/[0.06] px-3 py-2 text-xs text-gold" role="status">
-                    Incomplete: {[
-                      ...executionItems.filter((i) => !i.confirmed).map((i) => i.label),
-                      ...(finalConfirm ? [] : ["Final confirmation"]),
-                    ].join(" · ")}
-                  </p>
-                )}
-
-                <div className="mt-4 flex justify-end">
-                  <Button variant="gold" size="sm" disabled={!allExecutionConfirmed} onClick={() => setStep(PLAN_STAGE.RECORD)}>
-                    Proceed to Record Trade
-                  </Button>
-                </div>
-              </StageShell>
-            )}
-
-            {/* ─────────── STAGE 4 · MANUAL ENTRY OR IMPORT ─────────── */}
-            {step === 4 && !createdEntry && (
+            {/* ─────────── STAGE 3 · MANUAL ENTRY OR IMPORT ─────────── */}
+            {step === 3 && !createdEntry && (
               <StageShell key="record" title="Record the trade" subtitle="Manual entry or import — screenshots come right after either path.">
                 {entryMode === "choose" && (
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -700,7 +571,7 @@ export function PlanTradeFlow({
             )}
 
             {/* ─────────────── STAGE 4 · SCREENSHOTS ─────────────── */}
-            {step === 5 && createdEntry && (
+            {step === 4 && createdEntry && (
               <StageShell key="screenshots" title={`Screenshots — ${createdEntry.setup || createdEntry.instrument || "trade"} (${createdEntry.date})`} subtitle="Add up to two chart screenshots. They stay attached to THIS trade.">
                 <ImageUploader items={images} onChange={setImages} max={2} />
                 <div className="mt-4 flex justify-between">
@@ -718,7 +589,7 @@ export function PlanTradeFlow({
             )}
 
             {/* ─────────────── STAGE 5 · AUTOPSY HANDOFF ─────────────── */}
-            {step === 6 && createdEntry && (
+            {step === 5 && createdEntry && (
               <StageShell key="autopsy" title="Autopsy" subtitle="The full structured post-trade review — connected to your plan, checklist and setup.">
                 <div className="rounded-xl border border-gold/30 bg-gold/[0.05] p-4 text-[13px] leading-relaxed text-ink">
                   The trade is saved with its plan, checklist and screenshots. Autopsy walks through
@@ -739,7 +610,7 @@ export function PlanTradeFlow({
         <div className="mt-6 flex items-center justify-between border-t border-line pt-4">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Close</Button>
           <div className="flex items-center gap-2.5">
-            {step > 0 && step !== PLAN_STAGE.PRE_TRADE_ANALYSIS && step < PLAN_STAGE.SCREENSHOTS && (
+            {step > 0 && step < PLAN_STAGE.SCREENSHOTS && (
               <Button variant="subtle" size="sm" onClick={() => setStep((s) => s - 1)} disabled={saving}>Back</Button>
             )}
             {(step === 0 || step === 1 || step === 2) && (
@@ -747,7 +618,7 @@ export function PlanTradeFlow({
                 variant="gold"
                 size="sm"
                 disabled={!canNext || saving}
-                onClick={() => (step === 2 ? enterPreTradeAnalysis() : setStep((s) => s + 1))}
+                onClick={() => setStep((s) => s + 1)}
               >
                 Next
               </Button>
@@ -804,7 +675,7 @@ function reduceSafe(): boolean {
 
 function StageShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <motion.div initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.25, ease: EASE }}>
+    <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.16, ease: EASE }}>
       <h3 className="font-display text-lg font-semibold tracking-[-0.02em] text-ink">{title}</h3>
       <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>
       <div className="mt-4">{children}</div>

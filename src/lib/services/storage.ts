@@ -20,6 +20,8 @@ export interface JournalPayload {
   /** Payload schema version. v1 payloads simply omit it. */
   version?: number;
   exportedAt?: number;
+  /** Server write marker, returned by Drive so a local recovery copy can be compared safely. */
+  storedAt?: number;
 }
 
 export interface DataStore {
@@ -101,12 +103,9 @@ export class GoogleDriveDataStore implements DataStore {
   }
 
   async saveJournal(_userId: string, payload: JournalPayload): Promise<void> {
-    const res = await fetch("/api/drive/data", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`drive_write_failed:${res.status}`);
+    assertJsonSafe(payload);
+    saveJournalMirror(_userId, payload);
+    await journalWriteQueue.enqueue(_userId, payload);
   }
 
   async putImage(imageId: string, blob: Blob): Promise<void> {
@@ -132,6 +131,145 @@ export class GoogleDriveDataStore implements DataStore {
     return null; // Drive quota is not surfaced per-app; the Settings meter stays local.
   }
 }
+
+/* ------------------ Drive journal write/recovery queue ------------------ */
+
+const MIRROR_PREFIX = "edgebook:drive-journal:";
+const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
+const RETRYABLE_STATUSES = new Set([403, 429, 500, 501, 502, 503, 504]);
+
+export class DriveSyncError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+    public readonly reason?: string,
+  ) {
+    super(message);
+    this.name = "DriveSyncError";
+  }
+}
+
+type PendingWrite = {
+  userId: string;
+  payload: JournalPayload;
+  waiters: Array<{ resolve: () => void; reject: (error: unknown) => void }>;
+};
+
+function mirrorKey(userId: string) { return `${MIRROR_PREFIX}${userId}`; }
+
+/** A browser-only safety copy. It is written before every network attempt. */
+export function saveJournalMirror(userId: string, payload: JournalPayload): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(mirrorKey(userId), JSON.stringify({ savedAt: Date.now(), payload }));
+  } catch (err) {
+    console.warn("[DRIVE] local journal mirror failed", err);
+  }
+}
+
+/** Used only for a safe, read-only recovery view when Drive cannot be loaded. */
+export function loadJournalMirror(userId: string): JournalPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(mirrorKey(userId));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as { payload?: JournalPayload };
+    return value.payload && Array.isArray(value.payload.entries) && typeof value.payload.settings === "object"
+      ? value.payload
+      : null;
+  } catch (err) {
+    console.warn("[DRIVE] local journal mirror could not be read", err);
+    return null;
+  }
+}
+
+function assertJsonSafe(value: unknown, path = "payload", seen = new WeakSet<object>()): void {
+  if (value === undefined || value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new DriveSyncError(400, `${path} contains a non-finite number`, "invalid_payload");
+    return;
+  }
+  if (typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") {
+    throw new DriveSyncError(400, `${path} contains a non-JSON value`, "invalid_payload");
+  }
+  if (!(typeof value === "object")) return;
+  if (value instanceof Date || value instanceof Set || value instanceof Map) {
+    throw new DriveSyncError(400, `${path} contains ${value.constructor.name}, which cannot be saved as journal JSON`, "invalid_payload");
+  }
+  if (seen.has(value)) throw new DriveSyncError(400, `${path} contains a circular reference`, "invalid_payload");
+  seen.add(value);
+  if (Array.isArray(value)) value.forEach((item, index) => assertJsonSafe(item, `${path}[${index}]`, seen));
+  else Object.entries(value).forEach(([key, item]) => assertJsonSafe(item, `${path}.${key}`, seen));
+  seen.delete(value);
+}
+
+class JournalWriteQueue {
+  private pending: PendingWrite | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private writing = false;
+
+  enqueue(userId: string, payload: JournalPayload): Promise<void> {
+    assertJsonSafe(payload);
+    return new Promise((resolve, reject) => {
+      if (this.pending && this.pending.userId === userId) {
+        this.pending.payload = payload;
+        this.pending.waiters.push({ resolve, reject });
+      } else {
+        // A signed-in browser has one journal. Flush a previous account before
+        // accepting a different one, rather than allowing concurrent writes.
+        if (this.pending) {
+          this.pending.waiters.forEach((w) => w.reject(new Error("Superseded by a different user write")));
+        }
+        this.pending = { userId, payload, waiters: [{ resolve, reject }] };
+      }
+      if (!this.writing) {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = setTimeout(() => { void this.flush(); }, 1500);
+      }
+    });
+  }
+
+  private async flush(): Promise<void> {
+    this.timer = null;
+    if (this.writing || !this.pending) return;
+    this.writing = true;
+    const job = this.pending;
+    this.pending = null;
+    try {
+      await this.writeWithRetry(job.payload);
+      job.waiters.forEach(({ resolve }) => resolve());
+    } catch (err) {
+      job.waiters.forEach(({ reject }) => reject(err));
+    } finally {
+      this.writing = false;
+      if (this.pending && !this.timer) this.timer = setTimeout(() => { void this.flush(); }, 1500);
+    }
+  }
+
+  private async writeWithRetry(payload: JournalPayload): Promise<void> {
+    const body = JSON.stringify(payload);
+    const bytes = new TextEncoder().encode(body).byteLength;
+    if (bytes > MAX_JOURNAL_BYTES) throw new DriveSyncError(413, `Journal payload is ${(bytes / 1024 / 1024).toFixed(2)} MB; the 4 MB sync limit was exceeded`, "payload_too_large");
+    let last: DriveSyncError | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const res = await fetch("/api/drive/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+        if (res.ok) return;
+        const detail = await res.json().catch(() => ({})) as { message?: string; detail?: string; googleStatus?: number };
+        const status = detail.googleStatus ?? res.status;
+        last = new DriveSyncError(status, detail.message ?? `Drive write failed (${status})`, detail.detail);
+      } catch (err) {
+        last = new DriveSyncError(0, err instanceof Error ? err.message : "Network error while saving to Drive", "network_error");
+      }
+      if (!last || (!RETRYABLE_STATUSES.has(last.status) && last.status !== 0) || attempt === 4) throw last;
+      const delay = Math.min(8_000, 500 * 2 ** attempt) + Math.round(Math.random() * 250);
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+    throw last ?? new DriveSyncError(0, "Drive write failed", "unknown");
+  }
+}
+
+const journalWriteQueue = new JournalWriteQueue();
 
 /* ------------------------------ store switch ------------------------------ */
 

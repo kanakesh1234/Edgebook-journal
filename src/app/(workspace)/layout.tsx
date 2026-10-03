@@ -77,7 +77,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
       <main
         id="content"
         tabIndex={-1}
-        className="relative mx-auto min-h-dvh w-full max-w-6xl px-4 pb-24 pt-6 outline-none sm:px-6 lg:pb-12 lg:pl-[264px] lg:pr-8 xl:pl-[272px]"
+        className="relative mx-auto min-h-dvh w-full max-w-6xl px-4 pb-12 pt-6 outline-none sm:px-6 lg:pl-[264px] lg:pr-8 xl:pl-[272px]"
       >
         <AppErrorBoundary>{children}</AppErrorBoundary>
       </main>

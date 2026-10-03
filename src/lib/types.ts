@@ -58,6 +58,8 @@ export interface JournalEntry {
   setup: string;
   notes: string;
   images: EntryImage[]; // max MAX_IMAGES_PER_ENTRY
+  /** Optional chart for a related/compare symbol. Kept separate from the trade's own evidence. */
+  compareImage?: EntryImage;
   /** Structured post-trade reflection (optional; older entries may not have one). */
   reflection?: TradeReflection;
   /** Challenge this trade belongs to. */
@@ -113,6 +115,11 @@ export interface JournalSettings {
   primaryChallengeId?: string | null;
   /** AI companion preferences. */
   aiPrefs?: AiPrefs;
+  /** Trade Time Machine progression. Answers stay local to the journal; raw
+   * trade evidence is never replaced or inferred by game state. */
+  practiceProgress?: PracticeProgress;
+  /** Matrix learning metadata, persisted separately from canonical trade evidence. */
+  matrixProgress?: MatrixProgress;
   /** Trading challenges — distinct trading periods/objectives. */
   challenges?: Challenge[];
 }
@@ -413,6 +420,87 @@ export function setupRules(setup: Pick<PlaybookSetup, "rules" | "entryConditions
 export interface AiPrefs {
   /** May the companion read journal notes/reflections when building context? */
   includeNotes: boolean;
+  /** Preferred maximum size for a single MINATO reply. The provider may impose a lower ceiling. */
+  responseTokenLimit?: number;
+}
+
+export interface PracticeProgress {
+  xp: number;
+  streak: number;
+  lastMissionDate?: string;
+  masteryByTag?: Record<string, number>;
+  completedMissionDates?: string[];
+  /** A single missed mission can be protected without resetting momentum. */
+  freezeDays?: number;
+  futureSelfPredictions?: { date: string; rule: string; createdAt: number; outcome?: "hit" | "miss" }[];
+  /** Rules captured by Minato's first-session interview. These power Kunai
+   * drills before a trader has enough journal evidence for trade replays. */
+  seedLessons?: string[];
+  /** Number of missions cleared without a miss; displayed as earned domino sets. */
+  perfectSets?: number;
+  /** Local accuracy history used to prioritize weak drills without inventing trade data. */
+  modePerformance?: Record<string, { correct: number; attempts: number }>;
+  /** Variants already shown to the trader. Kept small so practice history is
+   * useful without becoming a second copy of the journal. */
+  seenQuestions?: { factId: string; format: string; variant: number; date: string }[];
+  /** Evidence-validated AI batches. The client may reuse these while offline. */
+  questionBank?: { key: string; cards: unknown[]; createdAt: number }[];
+  mathDuel?: { ratings?: Record<string, { level: 1 | 2 | 3 | 4; weakRounds: number }>; recentSignatures?: string[]; dailyAwards?: Record<string, number>; lastRunDate?: string };
+}
+
+export type MatrixScreenshotRole = "pre-entry" | "management" | "exit";
+export type MatrixChartPrediction = "long" | "short" | "skip";
+
+/** A study-mode prediction attached to a chart, never to the trade evidence. */
+export interface MatrixPredictionRecord {
+  imageId: string;
+  prediction: MatrixChartPrediction;
+  recordedAt: number;
+}
+
+export interface MatrixAttemptRecord {
+  accuracy: number;
+  completedOn: string;
+  correct?: number;
+  total?: number;
+  durationSeconds?: number;
+  questions?: MatrixAttemptQuestionResult[];
+  /** The rule set used for this completed attempt. Older attempts are Classic. */
+  mode?: "classic" | "time-attack" | "what-if" | "pro";
+}
+
+export interface MatrixAttemptQuestionResult {
+  signature: string;
+  type: string;
+  prompt: string;
+  answer: string | number | null;
+  expected: string | number;
+  correct: boolean;
+  explanation: string;
+}
+
+/** Matrix-only learning metadata. Trade evidence itself remains on JournalEntry. */
+export interface MatrixTradeState {
+  bookmarked?: boolean;
+  imageRoles?: Record<string, MatrixScreenshotRole>;
+  /** Predictions made while studying pre-entry screenshots. */
+  chartPredictions?: Record<string, MatrixPredictionRecord>;
+  /** Asked-question signatures, used to keep Matrix retries fresh. */
+  questionSignatures?: string[];
+  attempts?: MatrixAttemptRecord[];
+  stars?: 0 | 1 | 2 | 3;
+  dueOn?: string;
+}
+
+export interface MatrixProgress {
+  xp: number;
+  tokens: number;
+  /** Global Matrix history. Unlike per-trade state, this prevents retries on
+   * other trades from reusing a question signature. */
+  questionSignatures?: string[];
+  topicMastery?: Record<string, { correct: number; total: number }>;
+  takeaways?: Array<{ signature: string; text: string; createdAt: number }>;
+  tradeStates?: Record<string, MatrixTradeState>;
 }
 
 /* ------------------------------------------------------------------ */

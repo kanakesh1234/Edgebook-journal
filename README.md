@@ -19,7 +19,6 @@ Files updated to `await` the now-async functions above:
 - `src/app/api/profile/handle/route.ts`
 - `src/app/api/friends/route.ts`
 - `src/app/api/friends/competition/route.ts`
-- `src/app/api/ranking/route.ts`
 - `src/app/api/debug/google-drive/route.ts`
 - `src/lib/server/metrics.ts`
 - `src/lib/server/authed-drive.ts`
@@ -30,7 +29,7 @@ Files updated to `await` the now-async functions above:
 2. Run once, locally: `node scripts/get-store-refresh-token.mjs`
    (needs `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` — it reads `.env.local` automatically)
 3. Sign in with whichever Google account you want to hold app data (your own is fine).
-4. It prints `EDGEBOOK_STORE_REFRESH_TOKEN=...` — add that to `.env.local` locally,
+4. It prints `ADMIN_GOOGLE_REFRESH_TOKEN=...` — add that to `.env.local` locally,
    and to Vercel → Project Settings → Environment Variables → redeploy.
 
 Without step 2–4, account/friend data has nowhere to write and every sign-in will fail.

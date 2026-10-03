@@ -1,0 +1,2 @@
+export function hash(input: string): string { let value = 2166136261; for (let i = 0; i < input.length; i++) value = Math.imul(value ^ input.charCodeAt(i), 16777619); return (value >>> 0).toString(36); }
+export function signature(family: string, unknown: string, params: Record<string, number>) { return hash(`${family}|${unknown}|${Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}:${Math.round(value * 10000) / 10000}`).join("|")}`); }

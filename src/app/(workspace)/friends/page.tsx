@@ -62,10 +62,6 @@ export default function FriendsPage() {
   const doSearch = async () => {
     setSearchError(null);
     setSearchResult(null);
-    if (!search.trim().startsWith("@")) {
-      setSearchError("Handles start with @ — e.g. @trader_001");
-      return;
-    }
     setBusy(true);
     try {
       const res = await fetch(`/api/friends?search=${encodeURIComponent(search.trim())}`, { cache: "no-store" });
@@ -150,7 +146,7 @@ export default function FriendsPage() {
         <div className="mt-2.5 flex gap-2.5">
           <TextInput
             aria-label="Friend handle"
-            placeholder="@trader_001"
+            placeholder="Connection ID, e.g. trader_001"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void doSearch()}
@@ -232,7 +228,7 @@ export default function FriendsPage() {
         <EmptyState
           icon={<TrophyIcon className="h-7 w-7" />}
           title="No friends added yet"
-          body="Add friends by their @handle to compare process scores, challenge progress and Edge Points."
+          body="Add friends by their Connection ID to compare process scores, challenge progress and Edge Points."
         />
       ) : (
         <div className="space-y-3">

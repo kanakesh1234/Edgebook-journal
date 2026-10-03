@@ -14,10 +14,10 @@ export function timeframeToSeconds(tf: string): number {
   const match = /^(\d+)(s|m|h|D|W)$/i.exec(tf);
   if (!match) return 60; // default 1m
   const n = Number(match[1]);
-  switch (match[2]) {
-    case 's': return n;
-    case 'm': return n * 60;
-    case 'h': return n * 3600;
+  switch (match[2].toUpperCase()) {
+    case 'S': return n;
+    case 'M': return n * 60;
+    case 'H': return n * 3600;
     case 'D': return n * 86400;
     case 'W': return n * 604800;
     default: return 60;

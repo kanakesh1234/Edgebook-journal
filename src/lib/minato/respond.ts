@@ -274,7 +274,7 @@ export function respond(ctx: EdgeBookContext, input: string): string {
   if (/similar|history|same setup/.test(q)) {
     const name = ctx.focus?.entry.setup ?? ctx.recentTrades.find((e) => e.setup)?.setup;
     if (!name) return "No setup label found. Tag your trades with a setup name to enable historical comparison.";
-    const matches = ctx.recentTrades.filter((e) => e.setup.toLowerCase() === name.toLowerCase());
+    const matches = ctx.recentTrades.filter((e) => e.setup?.toLowerCase() === name.toLowerCase());
     if (matches.length <= 1) return `No other recorded trades match "${name}" yet.`;
     const wins = matches.filter((e) => e.pnl > 0).length;
     return `"${name}" — ${matches.length} recorded trades. ${wins}/${matches.length} profitable. Combined P&L: ${money(matches.reduce((s, e) => s + e.pnl, 0))}.`;

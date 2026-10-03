@@ -99,7 +99,7 @@ export function normalizeImportedTimestamp(
   const [, a, b, y, hh = "0", mm = "0", ss = "0"] = m;
   // Detect whether the shape is ISO (year first) or US (month first)
   const iso = a.length === 4;
-  const dateStr = iso ? `${a}-${b.padStart(2, "0")}` : `${y}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
+  const dateStr = iso ? `${a}-${b.padStart(2, "0")}-${y.padStart(2, "0")}` : `${y}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
   const timeStr = `${hh.padStart(2, "0")}:${mm}:${ss}`;
 
   const utc = zonedToUtc(dateStr, timeStr, sourceTz);
