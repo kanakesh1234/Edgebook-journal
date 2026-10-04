@@ -207,7 +207,7 @@ function BacktestWorkspaceInner() {
         <div className="space-y-4 text-center">
           <CandlestickIcon className="mx-auto h-8 w-8 text-white/30" />
           <p className="text-sm text-white/50">No backtesting session configured.</p>
-          <Button variant="outline" size="sm" onClick={() => router.push("/backtesting")}>
+          <Button variant="outline" size="sm" onClick={() => router.push("/lab#backtesting")}>
             Back to sessions
           </Button>
         </div>
@@ -221,7 +221,7 @@ function BacktestWorkspaceInner() {
       <TopToolbar
         onBack={() => {
           saveSession();
-          router.push("/backtesting");
+          router.push("/lab#backtesting");
         }}
       />
 
@@ -308,7 +308,7 @@ function BacktestWorkspaceInner() {
         <SessionResults
           onReturnToSessions={() => {
             saveSession();
-            router.push("/backtesting");
+            router.push("/lab#backtesting");
           }}
         />
       )}

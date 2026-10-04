@@ -11,7 +11,6 @@ import { formatMoney } from "@/lib/format";
 import { Wordmark } from "@/components/landing/logo";
 import {
   BookOpenIcon,
-  CandlestickIcon,
   ChartLineIcon,
   FlaskIcon,
   LogoutIcon,
@@ -19,24 +18,55 @@ import {
   PlusIcon,
   RouteIcon,
   SettingsIcon,
-  TargetIcon,
   XIcon,
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { UserIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
+import { LessonsIcon } from "@/components/lessons/lessons-icon";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", icon: ChartLineIcon },
-  { href: "/challenges", label: "Challenges", icon: TargetIcon },
   { href: "/journal", label: "Journal", icon: BookOpenIcon },
   { href: "/lab", label: "Trading Lab", icon: FlaskIcon },
-  { href: "/backtesting", label: "Backtesting", icon: CandlestickIcon },
   { href: "/practice", label: "Practise", icon: RouteIcon },
+  { href: "/lessons", label: "Lessons", icon: LessonsIcon },
   { href: "/friends", label: "Friends", icon: UserIcon },
-  { href: "/settings", label: "Settings", icon: SettingsIcon },
 ] as const;
+
+/** Routes that belong to a nav item without sharing its URL prefix (Backtesting now lives in the Trading Lab). */
+const NAV_ALIASES: Record<string, string[]> = { "/lab": ["/backtesting"] };
+const isActive = (pathname: string, href: string) =>
+  pathname.startsWith(href) || (NAV_ALIASES[href] ?? []).some((p) => pathname.startsWith(p));
+
+/**
+ * Settings gear. A generous 44px tap target, always visible in the bottom-left corner
+ * of the sidebar / drawer, with a clear focus ring and an active state.
+ */
+function SettingsGear({ onNavigate, className }: { onNavigate?: () => void; className?: string }) {
+  const pathname = usePathname();
+  const active = pathname.startsWith("/settings");
+  return (
+    <Link
+      href="/settings"
+      onClick={onNavigate}
+      aria-label="Settings"
+      aria-current={active ? "page" : undefined}
+      title="Settings"
+      className={cn(
+        "group grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition-colors duration-200",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60",
+        active
+          ? "border-gold/40 bg-raised text-gold"
+          : "border-line bg-raised/60 text-muted hover:border-line-strong hover:bg-raised hover:text-ink",
+        className,
+      )}
+    >
+      <SettingsIcon className="h-5 w-5 transition-transform duration-500 group-hover:rotate-90" />
+    </Link>
+  );
+}
 
 function NavLink({ item, active }: { item: (typeof NAV_ITEMS)[number]; active: boolean }) {
   const Icon = item.icon;
@@ -103,7 +133,7 @@ export function Sidebar() {
 
       <nav aria-label="Primary" className="mt-5 flex-1 space-y-1 px-4">
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.href} item={item} active={pathname.startsWith(item.href)} />
+          <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
         ))}
       </nav>
 
@@ -144,7 +174,7 @@ export function Sidebar() {
         <div className="mx-4 mb-3 rounded-control border border-dashed border-line-strong p-3.5">
           <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Journey</p>
           <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            No primary challenge selected. Create one in Challenges and mark it primary to track progress here.
+            No primary challenge selected. Create one in the Trading Lab and mark it primary to track progress here.
           </p>
         </div>
       )}
@@ -152,8 +182,11 @@ export function Sidebar() {
       {/* Theme + User */}
       <div className="border-t border-line p-4">
         <div className="flex items-center justify-between pb-3">
-          <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Theme</span>
-          <ThemeToggle />
+          <SettingsGear />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Theme</span>
+            <ThemeToggle />
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line-strong bg-raised text-xs font-semibold text-gold">
@@ -181,7 +214,8 @@ export function Sidebar() {
 
 export function MobileTopBar({ title }: { title?: string }) {
   const pathname = usePathname();
-  const current = NAV_ITEMS.find((i) => pathname.startsWith(i.href));
+  const current = NAV_ITEMS.find((i) => isActive(pathname, i.href));
+  const heading = title ?? current?.label ?? (pathname.startsWith("/settings") ? "Settings" : undefined);
   const [menuOpen, setMenuOpen] = useState(false);
   const openNewEntry = useUi((s) => s.openNewEntry);
   const user = useApp((s) => s.user);
@@ -197,15 +231,18 @@ export function MobileTopBar({ title }: { title?: string }) {
   return (
     <>
       <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-line bg-canvas/85 px-4 backdrop-blur-xl lg:hidden">
-        <button
-          onClick={() => setMenuOpen(true)}
-          aria-label="Open navigation menu"
-          className="grid h-9 w-9 place-items-center rounded-lg text-faint transition-colors hover:bg-ink/[0.06] hover:text-ink active:scale-90"
-        >
-          <MenuIcon className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open navigation menu"
+            className="grid h-11 w-11 place-items-center rounded-lg text-faint transition-colors hover:bg-ink/[0.06] hover:text-ink active:scale-90"
+          >
+            <MenuIcon className="h-5 w-5" />
+          </button>
+          <SettingsGear className="h-11 w-11 border-transparent bg-transparent" />
+        </div>
         <p className="absolute left-1/2 -translate-x-1/2 font-display text-sm font-semibold text-muted">
-          {title ?? current?.label}
+          {heading}
         </p>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -265,7 +302,7 @@ export function MobileTopBar({ title }: { title?: string }) {
               <nav aria-label="Mobile navigation" className="mt-4 flex-1 space-y-1 overflow-y-auto px-4">
                 {NAV_ITEMS.map((item) => {
                   const Icon = item.icon;
-                  const active = pathname.startsWith(item.href);
+                  const active = isActive(pathname, item.href);
                   return (
                     <Link
                       key={item.href}
@@ -284,8 +321,11 @@ export function MobileTopBar({ title }: { title?: string }) {
                 })}
               </nav>
 
-              {/* User + sign out */}
+              {/* Settings gear (bottom-left), then user + sign out */}
               <div className="border-t border-line p-4">
+                <div className="pb-3">
+                  <SettingsGear onNavigate={() => setMenuOpen(false)} />
+                </div>
                 <div className="flex items-center gap-3">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-line-strong bg-raised text-xs font-semibold text-gold">
                     {initials}

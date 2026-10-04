@@ -41,8 +41,8 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const pathname = usePathname();
 
-  // Fullscreen mode for backtesting workspace
-  const isBacktestingWorkspace = pathname.startsWith("/backtesting/session");
+  // Fullscreen mode for the backtesting workspace and the lesson writer
+  const isBacktestingWorkspace = pathname.startsWith("/backtesting/session") || pathname === "/lessons/new";
 
   useEffect(() => {
     if (status === "guest") router.replace("/login");

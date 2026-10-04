@@ -57,7 +57,7 @@ export function ChallengeCard() {
       ) : (
         <div className="mt-2.5">
           <p className="text-sm text-muted">No primary challenge yet.</p>
-          <p className="mt-1 text-xs text-faint">Create one from the Challenges page and mark it primary.</p>
+          <p className="mt-1 text-xs text-faint">Create one in the Trading Lab and mark it primary.</p>
         </div>
       )}
     </Link>
