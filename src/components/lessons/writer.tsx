@@ -18,6 +18,7 @@ import "@fontsource/spectral/400-italic.css";
 import "@fontsource/spectral/600.css";
 import "@fontsource/spectral/700.css";
 import "@/components/lessons/lessons.css";
+import { upload } from "@vercel/blob/client";
 import { ImageError, imageTypeOf, prepareLessonImage } from "@/lib/images";
 import "@/components/lessons/writer.css";
 
@@ -40,7 +41,7 @@ const ERR_TEXT: Record<string, string> = {
   unsupported_type: "That file type isn't supported.",
   too_large: "That file is over 50 MB.",
   bad_content: "That file doesn't look like a valid image, video or audio file.",
-  storage_failed: "The server couldn't save the file. Check that the app can write to its .data folder.",
+  storage_failed: "The server couldn't save the file. Check that the Blob store is connected to this project.",
 };
 
 const TEXT_COLORS = ["#e03131", "#f76707", "#f59f00", "#2f9e44", "#1c7ed6", "#7048e8", "#d6336c", "#868e96"];
@@ -231,15 +232,17 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
         try { file = await prepareLessonImage(picked); }
         catch (err) { return say(err instanceof ImageError ? err.message : "That image could not be read."); }
       }
-      const fd = new FormData(); fd.append("file", file);
-      const r = await fetch("/api/lessons/media", { method: "POST", body: fd }).catch(() => null);
-      if (!r) return say("Upload failed — check your connection and try again.");
-      if (!r.ok) {
-        const code = ((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? "";
-        return say(r.status === 413 ? "That file is too large to upload." : ERR_TEXT[code] ?? `Upload failed (${r.status}). Try again.`);
+      if (file.size > 50 * 1024 * 1024) return say(ERR_TEXT.too_large);
+      const kind: "image" | "video" | "audio" = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image";
+      const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-60) || "media";
+      try {
+        // Straight from the browser to Vercel Blob; /api/lessons/media only issues the upload token.
+        const blob = await upload(`lessons/${safe}`, file, { access: "public", handleUploadUrl: "/api/lessons/media", contentType: file.type });
+        ed.chain().focus().insertContent([{ type: kind, attrs: { src: blob.url } }, { type: "paragraph" }]).run();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        return say(msg.includes("not_logged_in") ? ERR_TEXT.not_logged_in : `Upload failed${msg ? `: ${msg}` : ""}. Try again.`);
       }
-      const d = (await r.json()) as { url: string; kind: "image" | "video" | "audio" };
-      ed.chain().focus().insertContent([{ type: d.kind, attrs: { src: d.url } }, { type: "paragraph" }]).run();
     } finally {
       setUploading(false);
     }

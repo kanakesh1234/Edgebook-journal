@@ -1,6 +1,6 @@
 import "server-only";
 import sanitizeHtml from "sanitize-html";
-import type { Block } from "./lessons-store";
+import { MEDIA_URL_EXACT, type Block } from "./lessons-store";
 
 const COLOR = /^(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$/i;
 
@@ -27,7 +27,7 @@ export function cleanHtml(dirty: string): string {
     transformTags: { a: sanitizeHtml.simpleTransform("a", { target: "_blank", rel: "noopener noreferrer" }) },
     // Images and videos must be files uploaded through Lessons.
     exclusiveFilter: (f) =>
-      ((f.tag === "img" || f.tag === "video" || f.tag === "audio") && !/^\/api\/lessons\/media\?id=[a-z0-9]+\.(png|jpg|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg)$/.test(f.attribs.src ?? "")) ||
+      ((f.tag === "img" || f.tag === "video" || f.tag === "audio") && !MEDIA_URL_EXACT.test(f.attribs.src ?? "")) ||
       (f.tag === "iframe" && !f.attribs.src),
   });
 }
