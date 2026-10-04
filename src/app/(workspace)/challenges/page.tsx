@@ -30,6 +30,10 @@ export default function ChallengesPage() {
   const [editing, setEditing] = useState<Challenge | null>(null);
   const [deleting, setDeleting] = useState<Challenge | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const deletingTradeCount = useMemo(
+    () => (deleting ? entries.filter((e) => e.challengeId === deleting.id).length : 0),
+    [deleting, entries],
+  );
 
   const progressList = useMemo(
     () => challenges.map((c) => ({ challenge: c, progress: challengeProgress(c, entries) })),
@@ -53,9 +57,12 @@ export default function ChallengesPage() {
     setDeleteBusy(true);
     const t0 = Date.now();
     try {
-      await useApp.getState().deleteChallenge(deleting.id);
+      const wiped = await useApp.getState().deleteChallenge(deleting.id);
       if (!persistFailedSince(t0)) {
-        toast.success("Challenge deleted", "Your journal trades were not touched.");
+        toast.success(
+          "Challenge deleted",
+          wiped > 0 ? `${wiped} linked trade${wiped === 1 ? "" : "s"} and all their data were removed.` : "No trades were linked to it.",
+        );
       }
       setDeleting(null);
     } catch {
@@ -128,8 +135,12 @@ export default function ChallengesPage() {
         onConfirm={() => void confirmDelete()}
         busy={deleteBusy}
         title={`Delete "${deleting?.name ?? ""}"?`}
-        body="Only the challenge is removed — journal trades are never deleted by this action."
-        confirmLabel="Delete challenge"
+        body={
+          deletingTradeCount > 0
+            ? `This permanently deletes the challenge AND its ${deletingTradeCount} linked trade${deletingTradeCount === 1 ? "" : "s"} — notes, screenshots, reviews, plans and Practise history for them. This cannot be undone.`
+            : "No trades are linked to this challenge. Only the challenge itself will be removed."
+        }
+        confirmLabel={deletingTradeCount > 0 ? `Delete challenge + ${deletingTradeCount} trade${deletingTradeCount === 1 ? "" : "s"}` : "Delete challenge"}
       />
     </div>
   );

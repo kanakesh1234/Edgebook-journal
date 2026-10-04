@@ -17,11 +17,19 @@ export function EntryCard({
   entry,
   index = 0,
   onOpen,
+  selectMode = false,
+  selected = false,
+  onToggle,
 }: {
   entry: JournalEntry;
   index?: number;
   onOpen: (entry: JournalEntry) => void;
+  /** Multi-select mode: clicking toggles selection instead of opening. */
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggle?: (entry: JournalEntry) => void;
 }) {
+  const activate = () => (selectMode && onToggle ? onToggle(entry) : onOpen(entry));
   const urls = useImageUrls(entry.images.map((i) => i.id));
   const rel = relativeDayLabel(entry.date);
   const d = new Date(entry.date + "T00:00:00");
@@ -37,16 +45,20 @@ export function EntryCard({
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{ duration: 0.45, delay: Math.min(index * 0.05, 0.3), ease: EASE }}
       whileHover={{ y: -4 }}
-      className="panel panel-hover group flex cursor-pointer flex-col overflow-hidden"
-      onClick={() => onOpen(entry)}
+      className={cn(
+        "panel panel-hover group relative flex cursor-pointer flex-col overflow-hidden",
+        selectMode && selected && "!border-gold-strong ring-2 ring-gold-strong/60",
+      )}
+      onClick={activate}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen(entry);
+          activate();
         }
       }}
+      aria-pressed={selectMode ? selected : undefined}
       aria-label={`Journal entry ${entry.date}, ${formatSignedMoney(entry.pnl)}`}
     >
       {/* Visual */}
@@ -88,6 +100,18 @@ export function EntryCard({
               {Math.abs(Math.round(entry.pnl))}
             </span>
           </div>
+        )}
+
+        {selectMode && (
+          <span
+            aria-hidden
+            className={cn(
+              "absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-md border-2 text-xs font-bold transition-colors",
+              selected ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line-strong bg-canvas/80 text-transparent",
+            )}
+          >
+            ✓
+          </span>
         )}
 
         {/* P&L badge */}

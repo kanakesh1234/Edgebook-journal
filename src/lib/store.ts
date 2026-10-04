@@ -7,6 +7,7 @@ import { dataStore, DriveSyncError, loadJournalMirror, type JournalPayload } fro
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl } from "./images";
 import { uid } from "./utils";
+import { purgeTradeTraces } from "./cleanup";
 import { generateDemoEntries } from "./seed";
 import { toast } from "@/components/ui/toast";
 
@@ -60,6 +61,8 @@ interface AppState {
   createEntry(draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   updateEntry(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   deleteEntry(id: string): Promise<void>;
+  /** Delete many trades in ONE save (screenshots, plan links and practice history included). Returns how many were removed. */
+  deleteEntries(ids: string[]): Promise<number>;
 
   /** Attach or update the post-trade reflection on an entry. */
   saveReflection(entryId: string, reflection: TradeReflection): Promise<void>;
@@ -71,7 +74,8 @@ interface AppState {
   deletePlan(id: string): Promise<void>;
   linkPlanToTrade(planId: string, tradeId: string): Promise<void>;
   saveChallenge(challenge: Challenge): Promise<void>;
-  deleteChallenge(id: string): Promise<void>;
+  /** Deletes the challenge AND every trade, screenshot, plan and practice record tied to it. Returns the number of trades wiped. */
+  deleteChallenge(id: string): Promise<number>;
   /** Select the challenge the whole app (Home, calendar, MINATO) is scoped to. */
   setPrimaryChallenge(id: string | null): Promise<void>;
   /** Create or update a playbook setup (canonical setup entity). */
@@ -149,6 +153,18 @@ async function persist(userId: string, entries: JournalEntry[], settings: Journa
       { label: "Retry", onClick: () => { void persist(userId, entries, settings, dayLogs, plans); } },
     );
   }
+}
+
+
+/** Remove image binaries for entries (best effort — one failure never blocks the rest). */
+async function dropEntryImages(list: JournalEntry[]) {
+  const imgs = list.flatMap((e) => [...e.images, ...(e.compareImage ? [e.compareImage] : [])]);
+  await Promise.all(
+    imgs.map(async (img) => {
+      try { await dataStore.deleteImage(img.id); } catch { /* orphaned blob is harmless */ }
+      dropImageUrl(img.id);
+    }),
+  );
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -298,21 +314,21 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async deleteEntry(id) {
-    const { user, entries, settings, dayLogs } = get();
+    await get().deleteEntries([id]);
+  },
+
+  async deleteEntries(ids) {
+    const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    const target = entries.find((e) => e.id === id);
-    if (target?.images.length || target?.compareImage) {
-      for (const img of [...(target?.images ?? []), ...(target?.compareImage ? [target.compareImage] : [])]) {
-        await dataStore.deleteImage(img.id);
-        dropImageUrl(img.id);
-      }
-    }
-    const next = entries.filter((e) => e.id !== id);
-    const plans = get().plans.map((p) =>
-      p.linkedTradeId === id ? { ...p, linkedTradeId: undefined, status: "planned" as const } : p,
-    );
-    set({ entries: next, plans });
-    await persist(user.id, next, settings, dayLogs, plans);
+    const idSet = new Set(ids);
+    const targets = entries.filter((e) => idSet.has(e.id));
+    if (targets.length === 0) return 0;
+    await dropEntryImages(targets);
+    const nextEntries = entries.filter((e) => !idSet.has(e.id));
+    const cleaned = purgeTradeTraces(idSet, settings, plans);
+    set({ entries: nextEntries, settings: cleaned.settings, plans: cleaned.plans });
+    await persist(user.id, nextEntries, cleaned.settings, dayLogs, cleaned.plans);
+    return targets.length;
   },
 
   async saveReflection(entryId, reflection) {
@@ -386,18 +402,24 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async deleteChallenge(id) {
-    const { user, entries, settings, dayLogs } = get();
+    const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    const challenges = (settings.challenges ?? []).filter((c) => c.id !== id);
-    // Deleting a challenge never touches journal trades — they keep their
-    // challengeId as a historical record and render as "removed challenge".
+    // Cascade: the challenge, every trade tagged to it, those trades'
+    // screenshots, plans made for it, and their Matrix / Practise history.
+    const doomed = entries.filter((e) => e.challengeId === id);
+    const doomedIds = new Set(doomed.map((e) => e.id));
+    await dropEntryImages(doomed);
+    const nextEntries = entries.filter((e) => !doomedIds.has(e.id));
+    const cleaned = purgeTradeTraces(doomedIds, settings, plans);
+    const nextPlans = cleaned.plans.filter((p) => p.challengeId !== id);
     const next = {
-      ...settings,
-      challenges,
+      ...cleaned.settings,
+      challenges: (settings.challenges ?? []).filter((c) => c.id !== id),
       primaryChallengeId: settings.primaryChallengeId === id ? null : settings.primaryChallengeId,
     };
-    set({ settings: next });
-    await persist(user.id, entries, next, dayLogs, get().plans);
+    set({ entries: nextEntries, settings: next, plans: nextPlans });
+    await persist(user.id, nextEntries, next, dayLogs, nextPlans);
+    return doomed.length;
   },
 
   async setPrimaryChallenge(id) {

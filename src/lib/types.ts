@@ -446,6 +446,9 @@ export interface PracticeProgress {
   /** Evidence-validated AI batches. The client may reuse these while offline. */
   questionBank?: { key: string; cards: unknown[]; createdAt: number }[];
   mathDuel?: { ratings?: Record<string, { level: 1 | 2 | 3 | 4; weakRounds: number }>; recentSignatures?: string[]; dailyAwards?: Record<string, number>; lastRunDate?: string };
+  /** Per-day practice totals (YYYY-MM-DD). Powers the Home arcade card so it
+   * always matches what the Practise page recorded. Trimmed to ~45 days. */
+  dailyStats?: Record<string, { xp: number; correct: number; total: number }>;
 }
 
 export type MatrixScreenshotRole = "pre-entry" | "management" | "exit";

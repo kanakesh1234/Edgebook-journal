@@ -1,177 +1,271 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
-import { addDays, todayKey } from "@/lib/format";
-import { buildDailyMission, factAtoms, logLessonBackfillDiagnostics, modeLabel, type TimeMachineCard } from "@/lib/practice/time-machine";
+import { todayKey } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { CheckIcon, SparklesIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { MathDuel } from "@/components/practice/MathDuel";
-import type { JournalSettings, PracticeProgress } from "@/lib/types";
-import type { JournalEntry } from "@/lib/types";
+import { DrillRunner, type DrillResult } from "@/components/practice/DrillRunner";
+import {
+  LEVELS, LEVEL_MASTERY_KEY, buildPool, displayStreak, fmtMoney, isUsable, levelFromProgress, nextStreak, rankOf, tradeLabel, weekTrades,
+  type GameMode, type Level, type PracticeQuestion,
+} from "@/lib/practice/engine";
+import { orderByFreshness, recentPrompts, recordAnswers, rememberPrompts } from "@/lib/practice/history";
+import { addDailyStats } from "@/lib/practice/daily";
+import { fetchAiQuestions } from "@/lib/practice/ai-client";
+import type { JournalEntry, PracticeProgress } from "@/lib/types";
 
-type QuestionCount = 3 | 5 | 10 | 15;
-function rankOf(xp: number) { return xp >= 2500 ? "Jonin" : xp >= 1200 ? "Chunin" : "Genin"; }
+type Mode = "matrix" | "time-machine" | "math-duel" | "boss";
+type LevelPick = 0 | Level;
+type MatrixFilter = "all" | "untested" | "needs-work" | "strong";
+
+const MODES: { id: Mode; title: string; blurb: string; icon: string; tone: string }[] = [
+  { id: "matrix", title: "Matrix", blurb: "Revisit and test your real trades.", icon: "✦", tone: "border-indigo-400/40 bg-indigo-500/10" },
+  { id: "time-machine", title: "Time Machine", blurb: "Practice recorded process decisions.", icon: "◎", tone: "border-emerald-400/40 bg-emerald-500/10" },
+  { id: "math-duel", title: "Math Duel", blurb: "Calculation fluency from your risk data.", icon: "♜", tone: "border-amber-400/50 bg-amber-500/10" },
+  { id: "boss", title: "Weekend Boss", blurb: "Combine this week's real trades.", icon: "◈", tone: "border-rose-400/40 bg-rose-500/10" },
+];
+const COUNTS = [5, 8, 10, 15] as const;
+const FILTERS: { id: MatrixFilter; label: string }[] = [
+  { id: "all", label: "All trades" }, { id: "untested", label: "Untested" }, { id: "needs-work", label: "Needs work" }, { id: "strong", label: "Strong" },
+];
+
+function modeFromUrl(): Mode {
+  const raw = new URLSearchParams(window.location.search).get("mode");
+  if (raw === "time-machine" || raw === "timemachine") return "time-machine";
+  if (raw === "math-duel" || raw === "math" || raw === "duel") return "math-duel";
+  if (raw === "boss" || raw === "weekend-boss") return "boss";
+  return "matrix";
+}
+
+interface Session {
+  title: string;
+  kind: GameMode;
+  pool: PracticeQuestion[];
+  count: number;
+  startLevel: Level;
+  tradeId?: string;
+  retry: () => void;
+}
 
 export default function PracticePage() {
   const allEntries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
+
   const { entries, challenge } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
-  const progress = settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 };
-  const mastery = progress.masteryByTag ?? {};
-  const totalMastery = Object.values(mastery).reduce((a, b) => a + b, 0);
-  const difficulty = totalMastery >= 18 ? "prediction" : totalMastery >= 10 ? "application" : totalMastery >= 4 ? "recall" : "recognition";
-  const [replayDate, setReplayDate] = useState<string | null>(null);
-  const [revisionEntry, setRevisionEntry] = useState<JournalEntry | null>(null);
-  const [combinedEntry, setCombinedEntry] = useState<JournalEntry | null>(null);
-  const [revisionDate, setRevisionDate] = useState("");
-  const drawdownLeft = useMemo(() => { const limit = challenge?.maxDrawdown ?? settings.maxDrawdown; return limit > 0 ? Math.max(0, limit - stats.drawdown) : null; }, [challenge?.maxDrawdown, settings.maxDrawdown, stats.drawdown]);
-  const replayEntries = useMemo(() => replayDate ? entries.filter((entry) => entry.date === replayDate) : entries, [entries, replayDate]);
-  const [runSeed, setRunSeed] = useState("preview");
-  const allCards = useMemo(() => buildDailyMission(replayEntries, { drawdownLeft, dailyLossLimit: challenge?.dailyLossLimit ?? null, difficulty, seedLessons: replayDate ? [] : progress.seedLessons, modePerformance: progress.modePerformance, runSeed, seenQuestions: progress.seenQuestions }), [replayEntries, drawdownLeft, challenge?.dailyLossLimit, difficulty, progress.seedLessons, progress.modePerformance, progress.seenQuestions, replayDate, runSeed]);
-  const [requestedCount, setRequestedCount] = useState<QuestionCount>(3);
-  const [customCount, setCustomCount] = useState("");
-  const [focus, setFocus] = useState(false);
-  const daysAway = progress.lastMissionDate ? Math.max(0, Math.round((new Date(`${todayKey()}T12:00:00`).getTime() - new Date(`${progress.lastMissionDate}T12:00:00`).getTime()) / 86_400_000)) : 0;
-  const comeback = daysAway >= 7;
-  const requested = customCount.trim() ? Math.max(1, Math.round(Number(customCount))) : requestedCount;
-  const cappedCount = Math.min(Number.isFinite(requested) ? requested : requestedCount, allCards.length);
-  const [aiTail, setAiTail] = useState<TimeMachineCard[]>([]);
-  const [pendingQuestionBank, setPendingQuestionBank] = useState<TimeMachineCard[] | null>(null);
-  // The opening three are local and instantaneous. The remaining batch is
-  // requested after the run begins, so a provider outage never blocks play.
-  // Keep a deterministic local tail ready if the player reaches round four
-  // before the AI batch returns; the server result replaces it when ready.
-  const cards = focus ? [...allCards.slice(0, Math.min(3, cappedCount)), ...(aiTail.length ? aiTail : allCards.slice(3, cappedCount))].slice(0, cappedCount) : allCards.slice(0, cappedCount);
-  const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [score, setScore] = useState(0);
-  const [earnedXp, setEarnedXp] = useState(0);
-  const [earnedTags, setEarnedTags] = useState<string[]>([]);
-  const [hp, setHp] = useState(100);
-  const [combo, setCombo] = useState(0);
-  const [clock, setClock] = useState(59);
-  const [sound, setSound] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [backfilled, setBackfilled] = useState(false);
-  const [rankUp, setRankUp] = useState<string | null>(null);
-  const [roundResults, setRoundResults] = useState<Array<{ mode: string; correct: boolean }>>([]);
-  const active = cards[index];
-  const rank = rankOf(progress.xp);
+  const progress: PracticeProgress = settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 };
+  const today = todayKey();
 
-  useEffect(() => {
-    if (!focus || selected || !active) return;
-    const timer = window.setInterval(() => setClock((value) => value > 0 ? value - 1 : 59), 1000);
-    return () => window.clearInterval(timer);
-  }, [focus, selected, active]);
+  const [mode, setModeState] = useState<Mode>("matrix");
+  const [levelPick, setLevelPick] = useState<LevelPick>(0);
+  const [count, setCount] = useState<number>(8);
+  const [aiOn, setAiOn] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [filter, setFilter] = useState<MatrixFilter>("all");
+  const [shown, setShown] = useState(25);
 
-  const reset = () => { setIndex(0); setSelected(null); setScore(0); setEarnedXp(0); setEarnedTags([]); setHp(100); setCombo(0); setClock(59); setSaved(false); setRoundResults([]); };
-  const start = () => { setRunSeed(`${Date.now()}:${crypto.randomUUID?.() ?? Math.random()}`); setAiTail([]); setPendingQuestionBank(null); reset(); setFocus(true); };
-  useEffect(() => {
-    if (!focus || cappedCount <= 3) return;
-    const controller = new AbortController();
-    void fetch("/api/minato/questions", { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ atoms: factAtoms(replayEntries, replayDate ? [] : progress.seedLessons), doNotRepeat: progress.seenQuestions ?? [], count: cappedCount - 3, seed: runSeed }) })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("question batch unavailable")))
-      .then((payload: { cards?: TimeMachineCard[] }) => { const tail = Array.isArray(payload.cards) ? payload.cards : []; setAiTail(tail); setPendingQuestionBank(tail); })
-      .catch(() => { const tail = allCards.slice(3, cappedCount); setAiTail(tail); setPendingQuestionBank(tail); });
-    return () => controller.abort();
-  }, [focus, cappedCount, replayEntries, replayDate, progress.seedLessons, progress.seenQuestions, runSeed, allCards]);
-  const choose = (choice: string) => { if (!active || selected) return; const correct = choice === active.answer; setSelected(choice); setRoundResults((results) => [...results, { mode: active.mode, correct }]); if (correct) { setScore((n) => n + 1); setCombo((n) => n + 1); setEarnedXp((n) => n + active.xp); setEarnedTags((tags) => [...tags, active.masteryTag]); } else { setCombo(0); setHp((n) => Math.max(0, n - 34)); } };
-  const advance = () => {
-    if (!active) return;
-    const correct = selected === active.answer;
-    if (index + 1 < cards.length) { setIndex((n) => n + 1); setSelected(null); setClock(59); return; }
-    if (!saved) {
-      const date = todayKey(); const done = progress.lastMissionDate === date; const nextMastery = { ...mastery };
-      // Correct answers are recorded when selected, including the final one;
-      // do not award that final card twice when its result is confirmed.
-      earnedTags.forEach((tag) => { nextMastery[tag] = (nextMastery[tag] ?? 0) + 1; });
-      const nextXp = progress.xp + (done ? 0 : earnedXp);
-      const nextRank = rankOf(nextXp);
-      if (nextRank !== rank) setRankUp(nextRank);
-      const modePerformance = { ...(progress.modePerformance ?? {}) };
-      roundResults.forEach((result) => { const current = modePerformance[result.mode] ?? { correct: 0, attempts: 0 }; modePerformance[result.mode] = { correct: current.correct + (result.correct ? 1 : 0), attempts: current.attempts + 1 }; });
-      const perfect = earnedTags.length === cards.length;
-      const seenQuestions = [...(progress.seenQuestions ?? []), ...cards.filter((card) => card.factId && card.format != null && card.variant != null).map((card) => ({ factId: card.factId!, format: card.format!, variant: card.variant!, date }))].slice(-500);
-      // One settings write at completion seals XP, outcomes, and shown variants together.
-      const questionBank = pendingQuestionBank?.length ? [...(progress.questionBank ?? []), { key: runSeed, cards: pendingQuestionBank, createdAt: Date.now() }].slice(-12) : progress.questionBank;
-      void updateSettings({ practiceProgress: { ...progress, xp: nextXp, streak: done ? progress.streak : progress.lastMissionDate ? progress.streak + 1 : 1, lastMissionDate: date, masteryByTag: nextMastery, modePerformance, seenQuestions, questionBank, perfectSets: done || !perfect ? progress.perfectSets : (progress.perfectSets ?? 0) + 1, completedMissionDates: done ? progress.completedMissionDates : [...new Set([...(progress.completedMissionDates ?? []), date])].slice(-90) } });
-      setSaved(true);
-    }
-    setIndex((n) => n + 1);
+  useEffect(() => { setModeState(modeFromUrl()); }, []);
+  const setMode = (next: Mode) => {
+    setModeState(next);
+    setNotice(null);
+    try { window.history.replaceState(null, "", `/practice?mode=${next}`); } catch { /* optional */ }
   };
 
-  const name = settings.fullName || settings.traderName || "trader";
-  const usableTrades = useMemo(() => entries.map((entry) => ({ entry, r: tradeR(entry) })).filter((item): item is { entry: JournalEntry; r: number } => item.r != null), [entries]);
-  const revisionTrades = revisionDate ? usableTrades.filter((item) => item.entry.date === revisionDate) : usableTrades;
-  const best = revisionTrades.filter((item) => item.r > .1).sort((a, b) => b.r - a.r);
-  const even = revisionTrades.filter((item) => Math.abs(item.r) <= .1).sort((a, b) => b.entry.date.localeCompare(a.entry.date));
-  const worst = revisionTrades.filter((item) => item.r < -.1).sort((a, b) => a.r - b.r);
-  const openRevision = (entry: JournalEntry) => { setRevisionEntry(entry); setReplayDate(entry.date); reset(); };
-  return <div className="mx-auto max-w-[720px] space-y-8 pb-10">
-    <header className="flex items-start justify-between gap-4 pt-2"><div><h1 className="text-2xl font-semibold tracking-tight text-ink">Hello, {name}</h1><p className="mt-2 max-w-md text-sm leading-relaxed text-muted">Sweat more in training, to lose less blood in war.</p></div><p className="shrink-0 text-right text-xs text-muted">{progress.streak} day streak · {progress.xp.toLocaleString()} XP · {rank}</p></header>
+  const autoLevel = levelFromProgress(progress);
+  const level: Level = levelPick || autoLevel;
+  const usable = useMemo(() => entries.filter(isUsable).sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt), [entries]);
+  const week = useMemo(() => weekTrades(entries), [entries]);
+  const drawdownLeft = useMemo(() => {
+    const limit = challenge?.maxDrawdown ?? settings.maxDrawdown;
+    return limit > 0 ? Math.max(0, limit - stats.drawdown) : null;
+  }, [challenge?.maxDrawdown, settings.maxDrawdown, stats.drawdown]);
 
-    <section className="grid gap-px overflow-hidden border border-line sm:grid-cols-3" aria-label="Practice choices">
-      <button onClick={() => document.getElementById("math-duel")?.scrollIntoView({ behavior: "smooth" })} className="p-5 text-left transition-colors hover:bg-raised"><p className="text-sm font-medium text-ink">Math</p><p className="mt-1 text-xs leading-relaxed text-muted">Math Duel</p></button>
-      <button onClick={() => document.getElementById("revision")?.scrollIntoView({ behavior: "smooth" })} className="border-t border-line p-5 text-left transition-colors hover:bg-raised sm:border-l sm:border-t-0"><p className="text-sm font-medium text-ink">Revision</p><p className="mt-1 text-xs leading-relaxed text-muted">Review recorded decisions</p></button>
-      <button onClick={() => document.getElementById("math-revision")?.scrollIntoView({ behavior: "smooth" })} className="border border-gold p-5 text-left transition-colors hover:bg-gold/[.04]"><p className="text-sm font-medium text-ink">Math + revision</p><p className="mt-1 text-xs leading-relaxed text-muted">Recall, then risk math</p></button>
-    </section>
+  const weakTags = useMemo(() => [...new Set((progress.seenQuestions ?? []).filter((s) => s.variant === 1).map((s) => s.format))].slice(-5), [progress.seenQuestions]);
+  const perf = progress.modePerformance ?? {};
 
-    <section id="revision" className="scroll-mt-6 border-t border-line pt-6">
-      <div className="flex items-baseline justify-between gap-3"><div><h2 className="text-sm font-medium text-ink">Revision</h2><p className="mt-1 text-xs text-muted">{revisionTrades.length} of {entries.length} trades usable</p></div><label className="text-xs text-muted">Date <input aria-label="Filter revision by date" type="date" value={revisionDate} onChange={(event) => setRevisionDate(event.target.value)} className="ml-1 border-b border-line bg-transparent py-1 text-ink outline-none" /></label></div>
-      <div className="mt-4 divide-y divide-line border-y border-line">
-        {([["Best setup", best], ["Break even", even], ["Worst setup", worst]] as const).map(([label, rows]) => (
-          <div key={label} className="py-3"><div className="flex items-center justify-between"><p className="text-sm text-ink">{label}</p><span className="text-xs text-muted">{rows.length}</span></div>{rows[0] ? <button onClick={() => openRevision(rows[0].entry)} className="mt-2 text-left text-xs text-gold hover:underline">{rows[0].entry.instrument} · {rows[0].r.toFixed(2)}R · {rows[0].entry.date}</button> : <p className="mt-2 text-xs text-faint">No usable trade yet.</p>}{label === "Worst setup" && <p className="mt-2 text-xs text-muted">Weekend Boss lessons now live here.</p>}</div>
+  const launch = async (kind: GameMode, trades: JournalEntry[], title: string, n: number, tradeId?: string) => {
+    setBusy(title);
+    setNotice(null);
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
+    const local = buildPool({ mode: kind, trades, all: entries, seed, drawdownLeft });
+    let ai: PracticeQuestion[] = [];
+    if (aiOn) {
+      const evidenceTrades = kind === "matrix" ? trades.slice(0, 1) : [...trades].sort((a, b) => Number(!!b.notes || !!b.reflection?.lesson) - Number(!!a.notes || !!a.reflection?.lesson) || b.date.localeCompare(a.date)).slice(0, 8);
+      const result = await fetchAiQuestions({ mode: kind, level, count: Math.max(8, n), trades: evidenceTrades, avoid: recentPrompts(), weakTags });
+      ai = result.questions;
+      if (result.note) setNotice(result.note);
+    }
+    const blended: PracticeQuestion[] = [];
+    for (let i = 0; i < Math.max(ai.length, local.length); i++) { if (ai[i]) blended.push(ai[i]!); if (local[i]) blended.push(local[i]!); }
+    const pool = orderByFreshness(blended, progress, today);
+    setBusy(null);
+    if (pool.length < 3) { setNotice("Not enough recorded data for that selection yet. Add a few more trades and try again."); return; }
+    setSession({ title, kind, pool, count: n, startLevel: level, tradeId, retry: () => { setSession(null); void launch(kind, trades, title, n, tradeId); } });
+  };
+
+  const finish = (result: DrillResult) => {
+    if (!session) return;
+    const mastery = { ...(progress.masteryByTag ?? {}) };
+    result.correctTags.forEach((tag) => { mastery[tag] = (mastery[tag] ?? 0) + 1; });
+    if (levelPick === 0) mastery[LEVEL_MASTERY_KEY] = result.finalLevel;
+    const modePerformance = { ...(progress.modePerformance ?? {}) };
+    const bump = (key: string) => { const c = modePerformance[key] ?? { correct: 0, attempts: 0 }; modePerformance[key] = { correct: c.correct + result.correct, attempts: c.attempts + result.total }; };
+    bump(session.kind);
+    if (session.tradeId) bump(`matrix:${session.tradeId}`);
+    const { streak, freezeDays } = nextStreak(progress, today);
+    rememberPrompts(result.answers.filter((a) => a.prompt).map((a) => a.prompt));
+    void updateSettings({
+      practiceProgress: {
+        ...progress,
+        xp: progress.xp + result.xp,
+        streak, freezeDays, lastMissionDate: today,
+        completedMissionDates: [...new Set([...(progress.completedMissionDates ?? []), today])].slice(-90),
+        masteryByTag: mastery,
+        modePerformance,
+        seenQuestions: recordAnswers(progress, result.answers.map((a) => ({ fp: a.fp, tag: a.tag, correct: a.correct })), today),
+        perfectSets: (progress.perfectSets ?? 0) + (result.total >= 3 && result.correct === result.total ? 1 : 0),
+        dailyStats: addDailyStats(progress, today, { xp: result.xp, correct: result.correct, total: result.total }),
+      },
+    });
+  };
+
+  const matrixRows = useMemo(() => usable.filter((t) => {
+    const p = perf[`matrix:${t.id}`];
+    const accuracy = p && p.attempts ? p.correct / p.attempts : null;
+    if (filter === "untested") return accuracy == null;
+    if (filter === "needs-work") return accuracy != null && accuracy < 0.7;
+    if (filter === "strong") return accuracy != null && accuracy >= 0.85;
+    return true;
+  }), [usable, perf, filter]);
+  const nextUp = usable.find((t) => !perf[`matrix:${t.id}`]) ?? usable[0];
+
+  const mastery = Object.entries(progress.masteryByTag ?? {}).filter(([tag]) => tag !== LEVEL_MASTERY_KEY).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const topScore = Math.max(10, ...mastery.map(([, v]) => v));
+  const name = settings.fullName || settings.traderName || "Trader";
+  const needData = usable.length === 0;
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-7 pb-20">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[.16em] text-gold">Practice arcade</p>
+          <h1 className="mt-1 font-display text-3xl font-semibold text-ink">Train with your recorded trades</h1>
+          <p className="mt-1 text-sm text-muted">{name} · every question is drawn from your journal.</p>
+        </div>
+        <p className="text-xs text-muted">{displayStreak(progress, today)} day streak · {progress.xp.toLocaleString()} XP · {rankOf(progress.xp)}</p>
+      </header>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {MODES.map((m) => (
+          <button key={m.id} onClick={() => setMode(m.id)} className={cn("rounded-xl border p-4 text-left transition", m.tone, mode === m.id ? "ring-2 ring-gold-strong" : "opacity-80 hover:opacity-100")}>
+            <span className="text-lg">{m.icon}</span>
+            <p className="mt-2 text-sm font-semibold text-ink">{m.title}</p>
+            <p className="mt-1 text-xs text-muted">{m.blurb}</p>
+          </button>
         ))}
       </div>
-      {revisionEntry && <RevisionSession entry={revisionEntry} close={() => setRevisionEntry(null)} />}
-    </section>
 
-    <section id="math-revision" className="scroll-mt-6 border-t border-line pt-6"><h2 className="text-sm font-medium text-ink">Math + revision</h2><p className="mt-1 text-xs text-muted">Uses only recorded fields, never prices read from a chart.</p><div className="mt-3 flex flex-wrap gap-2">{usableTrades.slice(0, 6).map(({ entry }) => <button key={entry.id} onClick={() => setCombinedEntry(entry)} className="border border-line px-3 py-2 text-xs text-muted hover:border-gold hover:text-ink">{entry.instrument} · {entry.date}</button>)}</div>{combinedEntry && <CombinedSession entry={combinedEntry} close={() => setCombinedEntry(null)} />}</section>
+      <section className="panel flex flex-wrap items-center justify-between gap-4 p-4">
+        <div className="min-w-[14rem]">
+          <p className="text-sm font-semibold text-ink">Difficulty</p>
+          <p className="mt-0.5 text-xs text-muted">{levelPick === 0 ? `Auto · starts at ${LEVELS[autoLevel - 1]!.name} and adjusts live as you answer.` : `Locked to ${LEVELS[levelPick - 1]!.name}.`}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setLevelPick(0)} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", levelPick === 0 ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>Auto L{autoLevel}</button>
+          {LEVELS.map((l) => <button key={l.level} onClick={() => setLevelPick(l.level)} title={l.blurb} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", levelPick === l.level ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>L{l.level}</button>)}
+          {mode !== "math-duel" && (
+            <>
+              <span className="mx-2 h-5 w-px bg-line" />
+              {COUNTS.map((n) => <button key={n} onClick={() => setCount(n)} className={cn("rounded-md border px-2 py-1.5 text-xs font-bold", count === n ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>{n}</button>)}
+              <label className="ml-2 flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={aiOn} onChange={(e) => setAiOn(e.target.checked)} /> AI questions</label>
+            </>
+          )}
+        </div>
+      </section>
 
-    <section id="math-duel" className="scroll-mt-6 border-t border-line pt-6"><h2 className="text-sm font-medium text-ink">Math Duel</h2><div className="mt-4"><MathDuel progress={progress} updateSettings={updateSettings} /></div></section>
-    <details className="border-t border-line pt-5"><summary className="cursor-pointer text-sm text-muted hover:text-ink">More drills</summary><div className="mt-4"><GameHub cards={allCards} start={start} /></div></details>
-    <div className="flex gap-5"><Link href="/practice/matrix" className="text-sm text-muted underline underline-offset-4 hover:text-ink">Matrix</Link><Link href="/practice/progress" className="text-sm text-muted underline underline-offset-4 hover:text-ink">Progress</Link></div>
-    <AnimatePresence>{focus && active && <FocusRound active={active} index={index} total={cards.length} selected={selected} choose={choose} advance={advance} hp={hp} combo={combo} clock={clock} sound={sound} setSound={setSound} close={() => { setFocus(false); setRankUp(null); }} complete={index >= cards.length} score={score} rankUp={rankUp} />}</AnimatePresence>
-  </div>;
-}
+      {notice && <p className="rounded-lg bg-gold/10 px-4 py-3 text-sm text-ink">{notice}</p>}
+      {busy && <p className="rounded-lg border border-line bg-raised px-4 py-3 text-sm text-muted">Writing fresh questions for {busy}… this can take up to 40 seconds with the free AI model.</p>}
 
-function tradeR(entry: JournalEntry): number | null { if (entry.entryPrice == null || entry.exitPrice == null || entry.stopLoss == null || entry.entryPrice === entry.stopLoss) return null; const risk = Math.abs(entry.entryPrice - entry.stopLoss); const move = entry.direction === "short" ? entry.entryPrice - entry.exitPrice : entry.exitPrice - entry.entryPrice; return move / risk; }
-function Chart({ image, label }: { image?: { id: string; name: string }; label: string }) { return <div className="relative aspect-[16/8] border border-line bg-raised">{image ? <img src={`/api/drive/image/${image.id}`} alt={image.name} className="h-full w-full object-contain" /> : <p className="grid h-full place-items-center text-xs text-faint">No {label.toLowerCase()} saved</p>}<span className="absolute left-2 top-2 border border-gold bg-canvas px-1.5 py-0.5 text-[10px] text-gold">Decision point</span></div>; }
-function RevisionSession({ entry, close }: { entry: JournalEntry; close: () => void }) { const [compare, setCompare] = useState(false); const field = entry.stopLoss != null ? `What was the recorded stop loss for ${entry.instrument}?` : `Which setup was recorded for ${entry.instrument}?`; const answer = entry.stopLoss != null ? String(entry.stopLoss) : entry.setup || "Not recorded"; return <div className="mt-4 border border-line p-4"><div className="flex justify-between"><p className="text-xs text-muted">Minato asks one recall question</p><button onClick={close} className="text-xs text-muted">Close</button></div><div className={cn("mt-3 grid gap-3", compare && entry.compareImage ? "sm:grid-cols-2" : "grid-cols-1")}><Chart image={entry.images[0]} label="trade chart" />{compare && entry.compareImage && <Chart image={entry.compareImage} label="compare chart" />}</div>{entry.compareImage && <button onClick={() => setCompare(!compare)} className="mt-3 text-xs text-gold underline underline-offset-4">Compare: {compare ? "side by side" : "single"}</button>}<p className="mt-4 text-sm text-ink">{field}</p><details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">Show answer</summary><p className="mt-1">{answer}</p></details></div>; }
-function CombinedSession({ entry, close }: { entry: JournalEntry; close: () => void }) { const [shown, setShown] = useState(false); const risk = entry.entryPrice != null && entry.stopLoss != null ? Math.abs(entry.entryPrice - entry.stopLoss) : null; const reward = entry.entryPrice != null && entry.takeProfit != null ? Math.abs(entry.takeProfit - entry.entryPrice) : null; const rr = risk && reward != null ? reward / risk : null; const winRate = rr != null ? 100 / (1 + rr) : null; return <div className="mt-4 border border-gold p-4"><div className="flex justify-between"><p className="text-xs text-muted">Compare mode · one recall, then math</p><button onClick={close} className="text-xs text-muted">Close</button></div><div className={cn("mt-3 grid gap-3", entry.compareImage ? "sm:grid-cols-2" : "grid-cols-1")}><Chart image={entry.images[0]} label="trade chart" />{entry.compareImage && <Chart image={entry.compareImage} label="compare chart" />}</div><p className="mt-4 text-sm text-ink">Recall: what was the recorded target?</p><button onClick={() => setShown(true)} className="mt-2 text-xs text-gold underline underline-offset-4">{shown ? `Target: ${entry.takeProfit ?? "not recorded"}` : "Reveal answer"}</button>{shown && <p className="mt-4 text-sm text-ink">Planned R:R: {rr?.toFixed(2) ?? "not available"} · required win rate: {winRate != null ? `${winRate.toFixed(1)}%` : "not available"}</p>}</div>; }
+      {needData && mode !== "math-duel" && <p className="panel p-5 text-sm text-muted">No trades with a P&amp;L yet. Add or import a trade and questions appear here straight away. Math Duel works without any data.</p>}
 
-function Hero({ card, start, entries, backfilled, backfill }: { card: TimeMachineCard; start: () => void; entries: number; backfilled: boolean; backfill: () => void }) { return <section className="relative overflow-hidden rounded-panel border border-gold/30 bg-ink px-6 py-8 text-canvas shadow-lift sm:px-9 sm:py-10"><div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full bg-gold/20 blur-3xl" /><motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .55 }} className="font-mono text-[11px] font-bold tracking-[.18em] text-gold-strong">⏪ REWINDING TO…</motion.p><p className="mt-4 font-mono text-xs uppercase tracking-wider text-canvas/60">{card.source.pin}</p><h2 className="mt-3 font-display text-2xl text-canvas sm:text-3xl">{card.title}</h2><p className="mt-2 max-w-xl text-sm leading-relaxed text-canvas/70">{card.prompt}</p><div className="mt-7 flex flex-wrap items-center gap-4"><Button size="lg" variant="gold" onClick={start}>▶ Enter the moment</Button><p className="text-sm text-canvas/70"><b className="text-gold-strong">Minato:</b> “Ready? Trust the evidence.”</p></div><div className="mt-5 flex items-center gap-3 text-xs text-canvas/60"><button onClick={backfill} className="underline decoration-gold/60 underline-offset-4 hover:text-canvas">Backfill from Journal</button><span>{backfilled ? `Scanned ${entries} trade${entries === 1 ? "" : "s"} · deck refreshed` : "Scan past lessons and reviews into this deck"}</span></div></section>; }
-function Path({ cards, requested, cappedCount, available, comeback, selected, custom, setSelected, setCustom }: { cards: TimeMachineCard[]; requested: number; cappedCount: number; available: number; comeback: boolean; selected: QuestionCount; custom: string; setSelected: (count: QuestionCount) => void; setCustom: (value: string) => void }) { const estimate = Math.max(1, Math.ceil(cappedCount * 0.55)); return <section className="panel p-5"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-semibold text-ink">Minato question count</p><p className="mt-1 text-xs text-muted">{comeback ? "Welcome back — choose the amount of evidence you want to test." : `${cappedCount} evidence-backed questions · about ${estimate} min.`}</p></div><div className="flex flex-wrap gap-1.5">{([3, 5, 10, 15] as QuestionCount[]).map((count) => <button key={count} onClick={() => setSelected(count)} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", !custom && selected === count ? "border-ink bg-ink text-canvas" : "border-line bg-raised text-muted")}>{count}<span className="ml-1 opacity-70">~{Math.ceil(count * .55)}m</span></button>)}<label className={cn("flex items-center rounded-lg border px-2 text-xs", custom ? "border-ink" : "border-line")}><span className="mr-1 text-muted">Custom</span><input value={custom} inputMode="numeric" onChange={(event) => setCustom(event.target.value.replace(/\D/g, ""))} className="w-8 bg-transparent py-1.5 text-center font-bold outline-none" /></label></div></div>{requested > available && <p className="mt-3 rounded-lg bg-gold/10 px-3 py-2 text-xs text-ink">Minato can honestly support {available} question{available === 1 ? "" : "s"} from your current evidence, so this run is capped there.</p>}<div className="mt-6 flex items-center">{cards.map((card, i) => <div key={card.id} className="flex flex-1 items-center last:flex-none"><div className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-full border text-xs font-bold", i === 0 ? "border-gold bg-gold text-on-gold" : i === cards.length - 1 ? "border-loss/60 bg-loss/10 text-loss" : "border-line bg-raised text-muted")}>{i === cards.length - 1 ? "♛" : i + 1}</div>{i < cards.length - 1 && <div className="mx-2 h-px flex-1 bg-line" />}</div>)}</div></section>; }
-function SetsShelf({ count }: { count: number }) { return <section className="panel flex flex-wrap items-center justify-between gap-4 p-5"><div><p className="text-sm font-semibold text-ink">Sets won</p><p className="mt-1 text-xs text-muted">Perfect domino chains become a lasting collection.</p></div><div className="flex items-center gap-1.5">{Array.from({ length: Math.max(3, Math.min(count + 1, 8)) }, (_, index) => <span key={index} className={cn("grid h-9 w-6 place-items-center rounded-sm border text-xs", index < count ? "border-gold bg-gold text-on-gold" : "border-line bg-raised text-faint")}>{index < count ? "●" : "◌"}</span>)}<span className="ml-2 text-xs font-bold text-gold">{count}</span></div></section>; }
-function GameHub({ cards, start }: { cards: TimeMachineCard[]; start: () => void }) { const modes = [["Kunai", "kunai", "Cloze from your lessons"], ["Risk Math", "risk-math", "Number sprint from entry, stop, and target"], ["Mistake Hunter", "mistake-hunter", "Find the planted flaw"], ["Stat Prophecy", "stat-prophecy", "Predict a real trading window"], ["Circuit Breaker", "circuit-breaker", "Call the stop point"], ["Odd One Out", "odd-one-out", "Spot the broken process"], ["Weekend Boss", "weekend-boss", "Face the week’s hardest trade"]] as const; const available = new Set(cards.map((card) => card.mode)); return <section className="panel p-5"><div className="flex items-end justify-between gap-4"><div><p className="text-sm font-semibold text-ink">Game hub</p><p className="mt-1 text-xs text-muted">Every game is unlocked by your journal evidence.</p></div><Button size="sm" variant="outline" onClick={start}>Play today&apos;s deck</Button></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{modes.map(([name, mode, detail]) => { const card = cards.find((item) => item.mode === mode); return <div key={mode} className={cn("rounded-xl border p-3", card ? "border-gold/35 bg-gold/[.045]" : "border-line bg-raised") }><div className="flex items-center justify-between"><p className="text-xs font-bold text-ink">{name}</p><span className={cn("text-[10px] font-bold", card ? "text-gold" : "text-faint")}>{card ? `+${card.xp} XP` : "LOCKED"}</span></div><p className="mt-1.5 min-h-8 text-[11px] leading-relaxed text-muted">{card ? detail : lockReason(mode)}</p><p className="mt-2 text-[10px] text-faint">Best: — · {available.has(mode) ? "ready now" : "needs evidence"}</p></div>; })}</div></section>; }
-function lockReason(mode: string) { if (mode === "risk-math") return "Add entry, stop, and target."; if (mode === "stat-prophecy") return "Record three matching time windows."; if (mode === "circuit-breaker") return "Set a daily loss limit and log a breach."; if (mode === "weekend-boss") return "Log a losing trade to unlock the boss."; return "Save a reviewed trade with process evidence."; }
-function Calendar({ entries, done, selected, select }: { entries: { date: string }[]; done: string[]; selected: string | null; select: (date: string | null) => void }) { const tradeDays = new Set(entries.map((entry) => entry.date)); return <div className="panel p-5"><p className="text-sm font-semibold text-ink">Replay level select</p><p className="mt-1 text-xs text-muted">Tap a trade day to replay its evidence. Gold means mastered.</p><div className="mt-4 grid grid-cols-7 gap-1.5">{Array.from({ length: 28 }, (_, i) => { const date = addDays(todayKey(), i - 27); const playable = tradeDays.has(date); return <button key={date} disabled={!playable} title={playable ? `Replay ${date}` : "No trade recorded"} onClick={() => select(date)} className={cn("grid aspect-square place-items-center rounded-md border text-[10px] transition", done.includes(date) ? "border-gold bg-gold text-on-gold" : playable ? "border-gold/50 bg-gold/5 text-gold hover:bg-gold/15" : "border-line bg-raised text-faint opacity-55", selected === date && "ring-2 ring-ink ring-offset-2 ring-offset-surface")}>{date.slice(-2)}</button>; })}</div>{selected && <button onClick={() => select(null)} className="mt-4 text-xs font-semibold text-gold underline underline-offset-4">Back to today&apos;s deck</button>}</div>; }
-function Scrolls({ mastery }: { mastery: Record<string, number> }) { const collections = [["News Days", "news-day-boss"], ["FOMO", "mistake-hunter"], ["Sizing", "risk-math"], ["Early Exit", "kunai"]] as const; return <div className="panel p-5"><p className="text-sm font-semibold text-ink">Scroll collection</p><p className="mt-1 text-xs text-muted">Fill five slots to collect each scroll.</p><div className="mt-4 grid grid-cols-2 gap-2">{collections.map(([label, tag]) => { const value = mastery[tag] ?? 0; const degree = Math.min(100, value * 20); return <div key={tag} className="flex items-center gap-2 rounded-lg bg-raised p-2"><span className="grid h-8 w-8 place-items-center rounded-full text-[10px] font-bold text-gold" style={{ background: `conic-gradient(var(--gold) ${degree}%, var(--line-soft) 0)` }}><span className="grid h-6 w-6 place-items-center rounded-full bg-raised">{value}/5</span></span><span className={cn("text-xs font-medium", value ? "text-ink" : "text-faint")}>{value ? label : `◒ ${label}`}</span></div>; })}</div></div>; }
-function FutureSelf({ progress, updateSettings }: { progress: PracticeProgress; updateSettings: (patch: Partial<JournalSettings>) => Promise<void> }) { const [rule, setRule] = useState(""); const today = progress.futureSelfPredictions?.find((prediction) => prediction.date === todayKey()); const unsealed = today && progress.lastMissionDate === todayKey(); const resolve = (outcome: "hit" | "miss") => void updateSettings({ practiceProgress: { ...progress, futureSelfPredictions: (progress.futureSelfPredictions ?? []).map((prediction) => prediction.date === todayKey() ? { ...prediction, outcome } : prediction) } }); return <div className="panel p-5"><p className="text-sm font-semibold text-ink">Future Self ritual</p><p className="mt-1 text-xs text-muted">Seal an intention before you enter. It opens after your session.</p>{today ? <div className="mt-4 rounded-lg bg-raised p-3 text-sm"><span className="text-gold">{today.outcome ? `Marked ${today.outcome}` : unsealed ? "Unsealed" : "Sealed"}</span><p className="mt-1 font-medium text-ink">“{today.rule}”</p>{unsealed && !today.outcome ? <div className="mt-3 flex gap-2"><Button size="sm" variant="gold" onClick={() => resolve("hit")}>I kept it</Button><Button size="sm" variant="outline" onClick={() => resolve("miss")}>I missed it</Button></div> : <p className="mt-2 text-xs text-muted">{today.outcome ? "This reflection is sealed into today’s practice record." : "This stays closed until today’s mission is complete."}</p>}</div> : <div className="mt-4"><div className="mb-2 flex flex-wrap gap-1.5">{["No chasing", "Respect max loss", "Wait for confirmation"].map((chip) => <button key={chip} onClick={() => setRule(chip)} className="rounded-full bg-raised px-2 py-1 text-[11px] text-muted hover:text-ink">{chip}</button>)}</div><div className="flex gap-2"><input value={rule} onChange={(event) => setRule(event.target.value)} placeholder="My pre-market intention…" className="min-w-0 flex-1 rounded-control border border-line bg-raised px-3 py-2 text-sm" /><Button size="sm" variant="gold" disabled={!rule.trim()} onClick={() => void updateSettings({ practiceProgress: { ...progress, futureSelfPredictions: [...(progress.futureSelfPredictions ?? []).filter((prediction) => prediction.date !== todayKey()), { date: todayKey(), rule: rule.trim(), createdAt: Date.now() }] } })}>Seal</Button></div></div>}</div>; }
-function WeekendBoss({ entries }: { entries: JournalEntry[] }) { const worst = useMemo(() => [...entries].sort((a, b) => a.pnl - b.pnl)[0], [entries]); const now = new Date(); const days = (6 - now.getDay() + 7) % 7 || 7; const label = `${days} day${days === 1 ? "" : "s"}`; return <section className="relative overflow-hidden rounded-panel border border-loss/25 bg-ink p-6 text-canvas"><div className="pointer-events-none absolute -right-8 -top-12 text-[12rem] leading-none text-canvas/[.035]">♛</div><p className="text-[11px] font-bold uppercase tracking-[.18em] text-loss">Weekend Boss · locked</p><div className="mt-4 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><h2 className="font-display text-2xl">Face the week&apos;s hardest lesson</h2><p className="mt-2 max-w-xl text-sm text-canvas/65">{worst && worst.pnl < 0 ? "A silhouette of your lowest-P&L trade is waiting. The full evidence unlocks with the Weekend Boss." : "Your toughest documented pattern will become the first boss when the week closes."}</p></div><div className="rounded-lg border border-canvas/15 bg-canvas/5 px-4 py-3 text-right"><p className="font-mono text-xl text-gold-strong">{label}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-canvas/45">until unlock</p></div></div></section>; }
-function DifficultyLadder({ difficulty }: { difficulty: string }) { const steps = ["recognition", "recall", "application", "prediction"]; return <div className="panel p-5"><p className="text-sm font-semibold text-ink">Difficulty ladder</p><p className="mt-1 text-xs text-muted">Build durable recognition before prediction.</p><div className="mt-5 flex items-start justify-between gap-1">{steps.map((step, index) => { const active = step === difficulty; const unlocked = steps.indexOf(difficulty) >= index; return <div key={step} className="flex flex-1 flex-col items-center text-center"><span className={cn("grid h-7 w-7 place-items-center rounded-full border text-[10px] font-bold", active ? "border-gold bg-gold text-on-gold" : unlocked ? "border-gold/50 text-gold" : "border-line text-faint")}>{index + 1}</span><span className={cn("mt-2 text-[10px] font-semibold capitalize", active ? "text-ink" : "text-faint")}>{step}</span></div>; })}</div><p className="mt-4 text-xs text-muted">You are at <b className="capitalize text-gold">{difficulty}</b>. {difficulty === "prediction" ? "You’ve reached the summit." : "Correct more rounds to climb."}</p></div>; }
-function DominoChain({ combo, total }: { combo: number; total: number }) { return <div className="mt-5 flex items-center justify-center gap-1.5"><span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-canvas/45">Chain</span>{Array.from({ length: total }, (_, index) => <motion.span key={index} animate={index < combo ? { rotate: [0, -8, 0], scale: [1, 1.15, 1] } : { rotate: 0, scale: 1 }} className={cn("grid h-7 w-5 place-items-center rounded-sm border text-[9px]", index < combo ? "border-gold-strong bg-gold text-on-gold" : "border-canvas/20 bg-canvas/5 text-canvas/35")}>{index < combo ? "●" : "·"}</motion.span>)}{combo >= total && <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-gold-strong">Perfect set</span>}</div>; }
-function AnswerFx({ correct, sound }: { correct: boolean; sound: boolean }) { useEffect(() => { if (!sound || typeof window === "undefined") return; const Audio = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext; if (!Audio) return; const context = new Audio(); const tones = correct ? [440, 554, 659] : [130]; tones.forEach((frequency, index) => { const oscillator = context.createOscillator(); const gain = context.createGain(); oscillator.type = correct ? "sine" : "sawtooth"; oscillator.frequency.value = frequency; gain.gain.setValueAtTime(correct ? .055 : .08, context.currentTime + index * .08); gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + index * .08 + .2); oscillator.connect(gain).connect(context.destination); oscillator.start(context.currentTime + index * .08); oscillator.stop(context.currentTime + index * .08 + .22); }); return () => void context.close(); }, [correct, sound]); return <div className="pointer-events-none absolute inset-x-0 top-1/2 grid place-items-center">{Array.from({ length: correct ? 14 : 7 }, (_, index) => <motion.i key={index} initial={{ opacity: 1, x: 0, y: 0, scale: .5 }} animate={{ opacity: 0, x: ((index % 5) - 2) * 54, y: -40 - (index % 3) * 38, scale: 1 }} transition={{ duration: .55, ease: "easeOut" }} className={cn("absolute h-2 w-2 rounded-full", correct ? "bg-gold-strong" : "bg-loss")} />)}</div>; }
-function ModeInput({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { if (card.mode === "risk-math") return <RiskMathSprint card={card} choose={choose} />; if (card.mode === "mistake-hunter") return <MistakeHunter card={card} choose={choose} />; if (card.mode === "stat-prophecy") return <StatProphecy card={card} choose={choose} />; if (card.mode === "circuit-breaker") return <CircuitBreaker card={card} choose={choose} />; if (card.mode === "odd-one-out") return <OddOneOut card={card} choose={choose} />; if (card.mode === "weekend-boss") return <WeekendBossRound card={card} choose={choose} />; if (card.mode === "rewind") return <ScreenshotRewind card={card} choose={choose} />; return <div className="mt-8 grid gap-3">{card.choices.map((choice) => <button key={choice} onClick={() => choose(choice)} className="rounded-xl border border-canvas/15 bg-canvas/5 px-5 py-4 text-left text-sm transition hover:border-gold-strong hover:bg-canvas/10">{choice}</button>)}</div>; }
-function RiskMathSprint({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { const [value, setValue] = useState(""); const submit = () => { const expected = Number.parseFloat(card.answer); const right = Math.abs(Number.parseFloat(value) - expected) < .01; choose(right ? card.answer : card.choices.find((choice) => choice !== card.answer) ?? ""); }; return <div className="mt-8 rounded-xl border border-gold/35 bg-gold/[.06] p-4"><div className="flex items-end justify-between"><p className="text-xs font-bold uppercase tracking-wider text-gold-strong">R-multiple keypad</p><p className="font-mono text-2xl text-canvas">{value || "—"}<span className="text-sm text-canvas/45">R</span></p></div><div className="mt-4 grid grid-cols-3 gap-2">{["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"].map((key) => <button key={key} onClick={() => setValue((current) => key === "⌫" ? current.slice(0, -1) : current.length < 5 ? current + key : current)} className="rounded-lg bg-canvas/10 py-3 text-sm font-bold hover:bg-canvas/20">{key}</button>)}</div><Button className="mt-3 w-full" variant="gold" disabled={!value || Number.isNaN(Number.parseFloat(value))} onClick={submit}>Lock answer</Button></div>; }
-function MistakeHunter({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="mt-8 rounded-xl border border-canvas/15 bg-canvas/[.035] p-4"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-canvas/45">Tap the flaw in this review</p><div className="mt-3 space-y-2">{card.choices.map((choice, index) => <button key={choice} onClick={() => choose(choice)} className="flex w-full items-start gap-3 rounded-lg border border-canvas/10 p-3 text-left text-sm text-canvas/75 hover:border-gold-strong hover:bg-canvas/5"><span className="font-mono text-gold-strong">0{index + 1}</span><span>{choice}</span></button>)}</div></div>; }
-function StatProphecy({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="mt-8 rounded-xl border border-info/40 bg-info/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-info">Forecast before reveal</p><div className="mt-4 grid gap-2 sm:grid-cols-3">{card.choices.map((choice, index) => <button key={choice} onClick={() => choose(choice)} className="rounded-lg border border-canvas/10 bg-ink/20 p-3 text-left hover:border-info"><span className="block text-[10px] font-bold text-info">FORECAST 0{index + 1}</span><span className="mt-2 block text-xs leading-relaxed text-canvas/80">{choice}</span></button>)}</div></div>; }
-function CircuitBreaker({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="mt-8 rounded-xl border border-loss/35 bg-loss/[.08] p-4"><div className="flex items-center justify-between"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-loss">Circuit console</p><span className="rounded bg-loss/15 px-2 py-1 text-[10px] font-bold text-loss">STOP REQUIRED</span></div><p className="mt-3 text-xs text-canvas/65">Choose the exact point where discipline should have ended the session.</p><div className="mt-4 flex flex-wrap gap-2">{card.choices.map((choice) => <button key={choice} onClick={() => choose(choice)} className="rounded-lg border border-canvas/15 px-3 py-2 text-xs font-bold text-canvas/80 hover:border-loss hover:bg-loss/15">{choice}</button>)}</div></div>; }
-function OddOneOut({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="mt-8"><p className="mb-3 text-[10px] font-bold uppercase tracking-[.15em] text-canvas/45">Open the file that breaks the process</p><div className="grid gap-2 sm:grid-cols-3">{card.choices.map((choice, index) => <button key={choice} onClick={() => choose(choice)} className="rounded-xl border border-canvas/15 bg-canvas/[.04] p-3 text-left hover:border-gold-strong hover:bg-canvas/[.08]"><span className="text-[10px] font-bold text-gold-strong">CASE 0{index + 1}</span><span className="mt-2 block text-xs leading-relaxed text-canvas/75">{choice}</span></button>)}</div></div>; }
-function WeekendBossRound({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="relative mt-8 overflow-hidden rounded-xl border border-loss/50 bg-loss/[.08] p-5"><div className="pointer-events-none absolute -right-2 -top-10 text-[9rem] text-canvas/[.05]">♛</div><p className="relative text-[10px] font-bold uppercase tracking-[.18em] text-loss">Weekend Boss · one true record</p><p className="relative mt-2 max-w-lg text-sm text-canvas/70">This is the trade that cost the most. Name the number without softening it.</p><div className="relative mt-5 grid gap-2 sm:grid-cols-3">{card.choices.map((choice) => <button key={choice} onClick={() => choose(choice)} className="rounded-lg border border-canvas/15 bg-ink/30 px-3 py-4 font-mono text-sm text-canvas hover:border-loss hover:bg-loss/20">{choice}</button>)}</div></div>; }
-function ScreenshotRewind({ card, choose }: { card: TimeMachineCard; choose: (choice: string) => void }) { return <div className="mt-8 overflow-hidden rounded-xl border border-gold/35 bg-gold/[.05]"><div className="flex items-center justify-between border-b border-gold/20 px-4 py-2"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-gold-strong">Saved chart · decision point</p><span className="font-mono text-[10px] text-canvas/45">NO CANDLE PATH INVENTED</span></div>{card.source.imageId && <img src={`/api/drive/image/${card.source.imageId}`} alt="Saved chart for this documented trade" className="max-h-72 w-full bg-ink object-contain" />}<div className="p-4"><p className="text-xs text-canvas/65">Use the chart and the documented process outcome. This is a screenshot replay, not simulated market data.</p><div className="mt-4 grid grid-cols-3 gap-2">{card.choices.map((choice) => <button key={choice} onClick={() => choose(choice)} className="rounded-lg border border-canvas/15 bg-ink/30 px-3 py-3 text-xs font-bold hover:border-gold-strong">{choice}</button>)}</div></div></div>; }
-function ColdStart({ entries, saveSeeds }: { entries: number; saveSeeds: (lessons: string[]) => void }) { const [answers, setAnswers] = useState(["", "", ""]); const ready = answers.filter((answer) => answer.trim()).length > 0; return <section className="panel border-dashed p-8 sm:p-10"><SparklesIcon className="h-7 w-7 text-gold" /><h2 className="mt-3 text-xl font-semibold text-ink">Minato can build your first deck now</h2><p className="mt-2 max-w-2xl text-sm text-muted">{entries ? "No usable lesson fields were found yet. Backfill a lesson below, then add an entry time for Rewind or a stop and target for Risk Math." : "No journal needed. Give Minato one rule and he will turn it into your first Kunai drill."}</p><div className="mt-5 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-raised px-3 py-2 text-muted">Lesson → Kunai</span><span className="rounded-full bg-raised px-3 py-2 text-muted">Entry time → Rewind</span><span className="rounded-full bg-raised px-3 py-2 text-muted">Stop + target → Risk Math</span></div><div className="mt-7 max-w-xl space-y-2"><p className="text-xs font-bold uppercase tracking-wider text-gold">Minato&apos;s first three questions</p>{["What rule keeps you from chasing?", "What must be true before entry?", "When do you stop for the day?"].map((prompt, index) => <label key={prompt} className="block"><span className="text-xs text-muted">{prompt}</span><input value={answers[index]} onChange={(event) => setAnswers((current) => current.map((answer, i) => i === index ? event.target.value : answer))} className="mt-1 w-full rounded-control border border-line bg-raised px-3 py-2 text-sm text-ink" /></label>)}<Button variant="gold" disabled={!ready} onClick={() => saveSeeds(answers.map((answer) => answer.trim()).filter(Boolean))}>Forge my first deck</Button></div></section>; }
-function FocusRound({ active, index, total, selected, choose, advance, hp, combo, clock, sound, setSound, close, complete, score, rankUp }: { active: TimeMachineCard; index: number; total: number; selected: string | null; choose: (choice: string) => void; advance: () => void; hp: number; combo: number; clock: number; sound: boolean; setSound: (value: boolean) => void; close: () => void; complete: boolean; score: number; rankUp: string | null }) {
-  if (complete) return <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-ink p-6 text-center text-canvas"><motion.div initial={{ scale: .85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="relative"><div className="pointer-events-none absolute -inset-16 rounded-full bg-gold/20 blur-3xl" /><span className="relative mx-auto grid h-14 w-14 place-items-center rounded-full bg-profit/20 text-profit"><CheckIcon className="h-7 w-7" /></span>{rankUp ? <><p className="relative mt-6 text-[11px] font-bold uppercase tracking-[.2em] text-gold-strong">Rank earned</p><h2 className="relative mt-2 font-display text-4xl text-canvas">{rankUp}</h2><p className="relative mt-3 max-w-sm text-canvas/65">Minato: “You earned this with evidence, not luck. Carry the standard into the next session.”</p></> : <><h2 className="relative mt-5 text-2xl font-semibold">Mission complete</h2><p className="relative mt-2 text-canvas/65">{score} of {total} calls landed. Your progress is sealed.</p></>}<Button className="relative mt-6" variant="gold" onClick={close}>Return to training</Button></motion.div></motion.div>;
-  const correct = selected === active.answer;
-  const reaction = correct ? `Minato: “You stayed with the evidence pinned to ${active.source.pin}. Keep that discipline.”` : `Minato: “The record says ${active.source.pin}. Don’t let a familiar pattern overwrite what you wrote down.”`;
-  return <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 overflow-y-auto bg-ink text-canvas"><div className="mx-auto min-h-screen max-w-3xl px-5 py-6 sm:px-8"><div className="flex items-center gap-4"><button onClick={close} className="text-xs text-canvas/55">Exit round</button><div className="h-2 flex-1 overflow-hidden rounded-full bg-canvas/10"><motion.div animate={{ width: `${hp}%` }} className="h-full bg-loss" /></div><span className="font-mono text-xs text-canvas/70">{String(Math.floor(clock / 60)).padStart(2, "0")}:{String(clock % 60).padStart(2, "0")}</span><button aria-pressed={sound} onClick={() => setSound(!sound)} className="rounded border border-canvas/15 px-2 py-1 text-[11px] text-canvas/70">{sound ? "Sound on" : "Sound off"}</button></div><div className="mt-4 flex justify-between text-[10px] font-bold uppercase tracking-wider text-canvas/55"><span>Drawdown buffer · {hp}%</span><span>Combo ×{combo}</span><span>Round {index + 1}/{total}</span></div><DominoChain combo={combo} total={total} /><motion.main animate={selected && !correct ? { x: [0, -8, 8, -5, 0] } : { x: 0 }} className="mx-auto mt-16 max-w-2xl"><p className="text-[11px] font-bold uppercase tracking-[.16em] text-gold-strong">{modeLabel(active.mode)}</p><p className="mt-4 font-mono text-xs uppercase tracking-wider text-canvas/50">{active.source.pin}</p><h2 className="mt-5 text-2xl font-semibold leading-snug sm:text-3xl">{active.prompt}</h2>{!selected && <ModeInput card={active} choose={choose} />}{selected && <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={cn("relative mt-6 overflow-hidden rounded-xl border p-5", correct ? "border-profit/50 bg-profit/10" : "border-loss/50 bg-loss/10")}><AnswerFx correct={correct} sound={sound} /><p className={cn("font-semibold", correct ? "text-profit" : "text-loss")}>{correct ? "Clean call." : "The buffer takes a hit."}</p><p className="mt-2 text-sm leading-relaxed text-canvas/70">{active.explanation}</p><p className="mt-3 border-t border-canvas/10 pt-3 text-sm italic leading-relaxed text-gold-strong">{reaction}</p><Button className="mt-5" variant="gold" onClick={advance}>{index + 1 === total ? "Finish mission" : "Next moment"}</Button></motion.div>}</motion.main></div></motion.div>;
+      {mode === "math-duel" && <MathDuel progress={progress} updateSettings={updateSettings} levelOverride={levelPick} />}
+
+      {mode === "matrix" && !needData && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {FILTERS.map((f) => <button key={f.id} onClick={() => { setFilter(f.id); setShown(25); }} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", filter === f.id ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>{f.label}</button>)}
+          </div>
+          {nextUp && (
+            <div className="panel flex items-center justify-between gap-4 p-4">
+              <div><p className="text-xs font-bold text-gold">Next up</p><p className="mt-1 text-sm text-ink">{tradeLabel(nextUp)}</p></div>
+              <Button variant="gold" disabled={!!busy} onClick={() => void launch("matrix", [nextUp], `Test · ${tradeLabel(nextUp)}`, 8, nextUp.id)}>Take 8-question test</Button>
+            </div>
+          )}
+          <div className="panel divide-y divide-line overflow-hidden">
+            {matrixRows.slice(0, shown).map((t) => {
+              const p = perf[`matrix:${t.id}`];
+              return (
+                <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{tradeLabel(t)}</p><p className="mt-0.5 text-xs text-muted">{t.setup?.trim() || "No recorded setup"}</p></div>
+                  <div className="flex items-center gap-3">
+                    <span className={cn("font-mono text-sm", t.pnl > 0 ? "text-profit" : t.pnl < 0 ? "text-loss" : "text-muted")}>{fmtMoney(t.pnl)}</span>
+                    <span className="w-16 text-right text-xs text-muted">{p && p.attempts ? `${Math.round((p.correct / p.attempts) * 100)}% · ${p.attempts}q` : "untested"}</span>
+                    <Button size="sm" variant="outline" disabled={!!busy} onClick={() => void launch("matrix", [t], `Test · ${tradeLabel(t)}`, 8, t.id)}>Test</Button>
+                  </div>
+                </div>
+              );
+            })}
+            {!matrixRows.length && <p className="px-4 py-6 text-sm text-muted">No trades match this filter yet.</p>}
+          </div>
+          {matrixRows.length > shown && <Button variant="outline" onClick={() => setShown((n) => n + 25)}>Show more</Button>}
+        </section>
+      )}
+
+      {mode === "time-machine" && !needData && (
+        <section className="space-y-4">
+          <div className="panel p-5">
+            <h2 className="text-base font-semibold text-ink">Process drill across all {usable.length} trades</h2>
+            <p className="mt-1 text-sm text-muted">Recall what you decided and why — sides, setups, time windows, lessons, plan-following. New and previously-missed questions come first; nothing repeats until you have seen everything.</p>
+            <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("time-machine", usable, "Time Machine", count)}>Train · {count} questions</Button>
+          </div>
+          {mastery.length > 0 && (
+            <div className="panel p-5">
+              <p className="text-sm font-semibold text-ink">Topics mastery</p>
+              <div className="mt-3 space-y-2">
+                {mastery.map(([tag, value]) => (
+                  <div key={tag} className="grid grid-cols-[8rem_1fr_2rem] items-center gap-3 text-xs text-muted">
+                    <span className="truncate capitalize">{tag.replace(/-/g, " ")}</span>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-gold-strong" style={{ width: `${Math.min(100, (value / topScore) * 100)}%` }} /></div>
+                    <span className="font-mono">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {mode === "boss" && !needData && (
+        <section className="panel p-5">
+          <h2 className="text-base font-semibold text-ink">Weekend Boss</h2>
+          {week.trades.length >= 2 ? (
+            <>
+              <p className="mt-1 text-sm text-muted">{week.label} · {week.trades.length} trades · net <b className={cn("font-mono", week.trades.reduce((s, t) => s + t.pnl, 0) >= 0 ? "text-profit" : "text-loss")}>{fmtMoney(week.trades.reduce((s, t) => s + t.pnl, 0))}</b></p>
+              <p className="mt-2 text-sm text-muted">Cross-trade questions: totals, spread, best and worst days, profit factor, break-even win rate, and net R.</p>
+              <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("boss", week.trades, "Weekend Boss", Math.max(count, 10))}>Play Boss</Button>
+            </>
+          ) : <p className="mt-1 text-sm text-muted">The boss needs at least 2 trades in the same week. Record another trade and come back.</p>}
+        </section>
+      )}
+
+      {session && <DrillRunner key={session.pool.map((q) => q.id).join("|")} title={session.title} pool={session.pool} count={session.count} startLevel={session.startLevel} lockLevel={levelPick !== 0} onFinish={finish} onClose={() => setSession(null)} onRetry={session.retry} />}
+    </div>
+  );
 }

@@ -40,6 +40,12 @@ export default function JournalPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Multi-select + bulk delete
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   // Press "/" anywhere on the page to jump into search
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,6 +113,44 @@ export default function JournalPage() {
   );
   const openSetup = openSetupId ? setupInfos.find((i) => i.setup.id === openSetupId) : null;
 
+  // Only ever act on selected trades that still exist.
+  const selectedCount = useMemo(() => entries.filter((e) => selectedIds.has(e.id)).length, [entries, selectedIds]);
+  const allInViewSelected = filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
+  const toggleSelected = (entry: JournalEntry) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entry.id)) next.delete(entry.id);
+      else next.add(entry.id);
+      return next;
+    });
+  const toggleAllInView = () =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (filtered.every((e) => next.has(e.id))) filtered.forEach((e) => next.delete(e.id));
+      else filtered.forEach((e) => next.add(e.id));
+      return next;
+    });
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+  const confirmBulkDelete = async () => {
+    const ids = entries.filter((e) => selectedIds.has(e.id)).map((e) => e.id);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    const t0 = Date.now();
+    try {
+      const removed = await useApp.getState().deleteEntries(ids);
+      if (!persistFailedSince(t0)) toast.success(`${removed} ${removed === 1 ? "entry" : "entries"} deleted`);
+      setBulkOpen(false);
+      exitSelectMode();
+    } catch {
+      toast.error("Could not delete the selected entries");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleting) return;
     setDeleteBusy(true);
@@ -145,7 +189,29 @@ export default function JournalPage() {
             )}
           </p>
         </div>
+        {view === "trades" && entries.length > 0 && (
+          <Button variant={selectMode ? "subtle" : "outline"} size="sm" onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}>
+            {selectMode ? "Cancel selection" : "Select"}
+          </Button>
+        )}
       </header>
+
+      {/* Selection bar */}
+      {view === "trades" && selectMode && (
+        <div className="panel sticky top-2 z-20 flex flex-wrap items-center justify-between gap-3 border-gold/40 p-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <button onClick={toggleAllInView} className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-bold text-ink hover:border-gold-strong">
+              {allInViewSelected ? "Clear selection" : `Select all ${filtered.length} in view`}
+            </button>
+            <span className="text-muted">
+              <b className="text-ink">{selectedCount}</b> selected
+            </span>
+          </div>
+          <Button variant="danger" size="sm" disabled={selectedCount === 0} onClick={() => setBulkOpen(true)}>
+            Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
+          </Button>
+        </div>
+      )}
 
       {/* View tabs — trades or setup folders */}
       <div
@@ -316,7 +382,15 @@ export default function JournalPage() {
         <motion.div layout className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence mode="popLayout">
             {filtered.map((entry, i) => (
-              <EntryCard key={entry.id} entry={entry} index={i} onOpen={(e) => setViewingId(e.id)} />
+              <EntryCard
+                key={entry.id}
+                entry={entry}
+                index={i}
+                onOpen={(e) => setViewingId(e.id)}
+                selectMode={selectMode}
+                selected={selectedIds.has(entry.id)}
+                onToggle={toggleSelected}
+              />
             ))}
           </AnimatePresence>
         </motion.div>
@@ -364,6 +438,16 @@ export default function JournalPage() {
             ? `${deleting.date} · ${formatSignedMoney(deleting.pnl, settings.currency)} will be permanently removed along with its screenshots.`
             : ""
         }
+      />
+
+      <ConfirmDialog
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onConfirm={() => void confirmBulkDelete()}
+        busy={bulkBusy}
+        title={`Delete ${selectedCount} ${selectedCount === 1 ? "entry" : "entries"}?`}
+        body="These trades are permanently removed along with their screenshots, reviews and Practise history. This cannot be undone."
+        confirmLabel={`Delete ${selectedCount}`}
       />
     </div>
   );
