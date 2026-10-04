@@ -59,6 +59,9 @@ export function updateLessons<R>(fn: (all: Lesson[]) => { next?: Lesson[]; resul
 
 export const uid = () => randomBytes(9).toString("base64url").replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, 12) + Date.now().toString(36);
 
+/** Exact match for one uploaded-media URL (used by lessons-html.ts to keep only files uploaded through Lessons). Not global, so .test() is safe to reuse. */
+export const MEDIA_URL_EXACT = /^\/api\/lessons\/media\?id=[a-z0-9]+\.(png|jpg|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg)$/;
+
 const MEDIA_REF = /\/api\/lessons\/media\?id=([a-z0-9]+\.(?:png|jpg|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg))/g;
 
 /** Delete the uploaded files that belonged to removed lessons. Best effort — a failed cleanup never blocks a delete. */
