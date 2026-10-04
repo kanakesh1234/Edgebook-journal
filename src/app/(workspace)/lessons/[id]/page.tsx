@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { btnDanger, btnPrimary, pill } from "@/components/lessons/buttons";
+import { ConfirmDialog } from "@/components/ui/confirm";
+import { toast } from "@/components/ui/toast";
 import "@/components/lessons/lessons.css";
 import { BookmarkIcon } from "@/components/lessons/bookmark-icon";
 import type { LessonView } from "../page";
@@ -13,6 +15,8 @@ export default function LessonPage() {
   const router = useRouter();
   const [l, setL] = useState<LessonView | null | undefined>(undefined);
   const [text, setText] = useState("");
+  const [askDelete, setAskDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     fetch(`/api/lessons?id=${id}`, { cache: "no-store" })
@@ -27,9 +31,16 @@ export default function LessonPage() {
     load();
   };
   const remove = async () => {
-    if (!confirm("Delete this lesson? This can’t be undone.")) return;
-    await fetch("/api/lessons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", ids: [id] }) });
-    router.push("/lessons");
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/lessons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", ids: [id] }) });
+      if (!res.ok) throw new Error(res.status === 401 ? "Please log in again." : `Server said ${res.status}.`);
+      toast.success("Lesson deleted");
+      router.push("/lessons");
+    } catch (e) {
+      toast.error("Couldn't delete", e instanceof Error ? e.message : "Try again.");
+      setDeleting(false); setAskDelete(false);
+    }
   };
 
   if (l === undefined) return <p className="p-8 text-sm text-faint">Loading…</p>;
@@ -39,7 +50,7 @@ export default function LessonPage() {
     <div className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="flex items-center justify-between">
         <Link href="/lessons" className="text-sm text-faint hover:text-ink">← Lessons</Link>
-        {l.mine && <button className={btnDanger} onClick={remove}>Delete</button>}
+        {l.mine && <button className={btnDanger} onClick={() => setAskDelete(true)}>Delete</button>}
       </div>
       <h1 className="mt-4 font-display text-3xl font-semibold text-ink">{l.title}</h1>
       {l.subtitle && <p className="mt-2 text-lg text-muted">{l.subtitle}</p>}
@@ -63,6 +74,14 @@ export default function LessonPage() {
           className="mt-4 min-h-[72px] w-full rounded-xl border border-line bg-surface p-3 text-sm text-ink outline-none focus:border-line-strong" />
         <button onClick={() => { if (text.trim()) { void post("comment", text); setText(""); } }} className={btnPrimary + " mt-3"}>Comment</button>
       </section>}
+      <ConfirmDialog
+        open={askDelete}
+        onClose={() => !deleting && setAskDelete(false)}
+        onConfirm={remove}
+        busy={deleting}
+        title="Delete this lesson?"
+        body="This can't be undone."
+      />
     </div>
   );
 }

@@ -46,7 +46,7 @@ async function present(l: Lesson, me: string) {
     author: await who(l.author),
     bylines: l.bylines ?? [],
     settings: { comments: l.settings?.comments !== false, reposts: l.settings?.reposts !== false },
-    mine: l.author === me,
+    mine: l.author.toLowerCase() === me.toLowerCase(),
     likes: l.likes.length,
     likedByMe: l.likes.includes(me),
     reposts: l.reposts.length,
@@ -98,7 +98,8 @@ export async function POST(request: Request) {
 
   if (b.action === "delete") {
     const ids = new Set(Array.isArray(b.ids) ? b.ids : []);
-    const gone = all.filter((l) => ids.has(l.id) && l.author === me); // you can only delete your own
+    const gone = all.filter((l) => ids.has(l.id) && l.author.toLowerCase() === me.toLowerCase()); // you can only delete your own
+    if (!gone.length) return NextResponse.json({ error: "nothing_deleted" }, { status: 404 });
     await writeLessons(all.filter((l) => !gone.includes(l)));
     await removeMedia(gone);
     return NextResponse.json({ ok: true, deleted: gone.length });

@@ -1,0 +1,2321 @@
+{
+  "version": 2,
+  "notes": "Static question bank + generator spec. The AI uses 'bank' as reference and backup; if it cannot generate a good question it falls back along generation.fallback_chain. Asked-history is stored per user in Google Drive, NOT in this file. Math duel answers are computed by the app. Assumptions to check: mode names (math_duel, weekly_boss, matrix) and their behaviour match your app; edit 'modes' if not.",
+  "settings": {
+    "questions_per_trade": 3,
+    "cooldown_trades": 8,
+    "min_categories": 2,
+    "min_types_per_session": 2,
+    "wildcard_chance": 0.15
+  },
+  "context_fields": {
+    "outcome": [
+      "win",
+      "loss",
+      "breakeven",
+      "no_trade"
+    ],
+    "followed_plan": [
+      true,
+      false
+    ],
+    "grade": [
+      "A+",
+      "B",
+      "C"
+    ],
+    "session": [
+      "london",
+      "ny_am",
+      "ny_pm",
+      "asia"
+    ],
+    "r_multiple": "number (e.g. -1, 0, 2.5)",
+    "held_past_target": [
+      true,
+      false
+    ],
+    "moved_stop": [
+      true,
+      false
+    ],
+    "emotion_before": [
+      "calm",
+      "anxious",
+      "fomo",
+      "revenge",
+      "bored",
+      "confident"
+    ],
+    "trade_number_today": "integer",
+    "mode": [
+      "journal_pre_market",
+      "journal_post_trade",
+      "chart_display",
+      "math_duel",
+      "weekly_boss",
+      "matrix"
+    ],
+    "boss_type": [
+      "overtrading",
+      "moving_stops",
+      "revenge_trading",
+      "early_exits",
+      "fomo_entries",
+      "oversizing",
+      "session_drift",
+      "ignoring_plan"
+    ],
+    "r_multiple_min": "number (rule helper: matches if r_multiple >= value)",
+    "r_multiple_max": "number (rule helper: matches if r_multiple <= value)",
+    "trade_number_min": "integer (rule helper: matches if trade_number_today >= value)"
+  },
+  "categories": {
+    "setup": "Was the setup actually valid?",
+    "execution": "Entry, stop, target, management",
+    "psychology": "State of mind and discipline",
+    "context": "Higher timeframe, news, session",
+    "process": "Journaling, rules, improvement"
+  },
+  "selection_rules": [
+    "1. Pick the mode from where the user is in the app (journal, chart view, math duel, weekly boss, matrix).",
+    "2. Keep bank questions whose mode matches (or 'any') and whose 'when' matches the context. Empty 'when' always matches.",
+    "3. Remove questions asked in the last 'cooldown_trades' trades (asked-history lives in the user's Google Drive data).",
+    "4. Multiply weight by 0.5 for each time a question was asked in the last 30 days.",
+    "5. Weighted-random pick, with at least 'min_categories' categories and at least 2 different question types per session.",
+    "6. With probability 'wildcard_chance', swap one pick for a wildcard.",
+    "7. Run the fallback_chain in 'generation'. Always have a question to show.",
+    "8. Save asked ids, generated-question hashes and dates to asked-history."
+  ],
+  "modes": {
+    "journal_pre_market": {
+      "purpose": "Plan the day before trading.",
+      "questions_per_session": 4,
+      "preferred_types": [
+        "open_reflection",
+        "probability_estimate",
+        "multiple_choice",
+        "what_if"
+      ],
+      "tone": "calm, planning"
+    },
+    "journal_post_trade": {
+      "purpose": "Review a single trade.",
+      "questions_per_session": 3,
+      "preferred_types": [
+        "open_reflection",
+        "rating_scale",
+        "what_if",
+        "devils_advocate",
+        "multiple_choice",
+        "true_false",
+        "error_spotting"
+      ],
+      "tone": "direct, curious"
+    },
+    "chart_display": {
+      "purpose": "Questions shown while a chart (live or replay) is on screen. Prefer interactive types.",
+      "questions_per_session": 3,
+      "preferred_types": [
+        "chart_annotate",
+        "chart_choose_level",
+        "predict_next",
+        "what_if"
+      ],
+      "tone": "short and visual, one action per question"
+    },
+    "math_duel": {
+      "purpose": "Timed trading-maths rounds (position size, R, expectancy, P&L). Answers are computed by the APP, not the AI.",
+      "rounds": 10,
+      "seconds_per_question": {
+        "easy": 20,
+        "medium": 35,
+        "hard": 60
+      },
+      "scoring": {
+        "correct": 10,
+        "speed_bonus_max": 5,
+        "streak_bonus_per_3": 5,
+        "wrong": 0
+      },
+      "difficulty_ramp": "start easy, move up a level after 3 correct in a row, down after 2 wrong",
+      "tone": "fast, no explanations until the round ends"
+    },
+    "weekly_boss": {
+      "purpose": "Once a week the user fights their biggest recurring mistake of the week, in 3 phases: scout (see the pattern), weak_point (find the trigger), final_blow (commit to one rule). Optional reward phase.",
+      "phases": [
+        "scout",
+        "weak_point",
+        "final_blow",
+        "reward"
+      ],
+      "boss_selection": "Pick boss_type from the week's data (most R lost or most frequent). If data is unclear, ask boss-90 and use the answer. If still unclear, rotate through boss types not used in the last 3 weeks.",
+      "tone": "game-like and serious about the lesson"
+    },
+    "matrix": {
+      "purpose": "Place trades in a grid and read the pattern.",
+      "layouts": {
+        "plan_vs_result": {
+          "rows": [
+            "Good process",
+            "Bad process"
+          ],
+          "cols": [
+            "Good result",
+            "Bad result"
+          ]
+        },
+        "session_vs_grade": {
+          "rows": [
+            "London",
+            "NY AM",
+            "NY PM"
+          ],
+          "cols": [
+            "A+",
+            "B",
+            "C"
+          ]
+        },
+        "emotion_vs_outcome": {
+          "rows": [
+            "Calm",
+            "Anxious",
+            "FOMO",
+            "Revenge",
+            "Bored",
+            "Confident"
+          ],
+          "cols": [
+            "Win",
+            "Loss",
+            "Breakeven"
+          ]
+        },
+        "stop_vs_r": {
+          "rows": [
+            "Stop respected",
+            "Stop moved"
+          ],
+          "cols": [
+            "R >= 1",
+            "0 to 1",
+            "Negative"
+          ]
+        }
+      },
+      "questions_per_session": 3,
+      "tone": "analytical"
+    }
+  },
+  "question_types": [
+    {
+      "id": "open_reflection",
+      "how_to_ask": "Free text. Ask for specific details, not general feelings.",
+      "answer": "text"
+    },
+    {
+      "id": "rating_scale",
+      "how_to_ask": "Ask for a 1-10 score, then ask what caused the missing points.",
+      "answer": "number + text"
+    },
+    {
+      "id": "multiple_choice",
+      "how_to_ask": "Give 3-5 plausible options including an honest-but-uncomfortable one.",
+      "answer": "single choice"
+    },
+    {
+      "id": "true_false",
+      "how_to_ask": "A direct claim about the trade. Follow with one 'why' line.",
+      "answer": "boolean + text"
+    },
+    {
+      "id": "ranking",
+      "how_to_ask": "Ask the user to order factors by responsibility for the result.",
+      "answer": "ordered list"
+    },
+    {
+      "id": "fill_blank",
+      "how_to_ask": "Sentence with blanks the user completes. Good for rules and plans.",
+      "answer": "text"
+    },
+    {
+      "id": "one_word",
+      "how_to_ask": "Ask for a single word, then ask why.",
+      "answer": "word + text"
+    },
+    {
+      "id": "probability_estimate",
+      "how_to_ask": "Ask for a percentage before and after the outcome, then compare.",
+      "answer": "number"
+    },
+    {
+      "id": "what_if",
+      "how_to_ask": "Change one variable (size, stop, entry, wait) and ask what would change.",
+      "answer": "text"
+    },
+    {
+      "id": "devils_advocate",
+      "how_to_ask": "Ask the user to argue against their own trade.",
+      "answer": "text"
+    },
+    {
+      "id": "perspective_shift",
+      "how_to_ask": "Ask how a risk manager, a friend, or future-you would see the trade.",
+      "answer": "text"
+    },
+    {
+      "id": "compare_two_trades",
+      "how_to_ask": "Put two trades side by side and ask what differs.",
+      "answer": "text"
+    },
+    {
+      "id": "error_spotting",
+      "how_to_ask": "Ask the user to find the mistake and write it as a rule.",
+      "answer": "text"
+    },
+    {
+      "id": "chart_annotate",
+      "how_to_ask": "Ask the user to mark a zone, point or candle on the chart.",
+      "answer": "chart marks"
+    },
+    {
+      "id": "chart_choose_level",
+      "how_to_ask": "Show several marked levels and ask which one mattered.",
+      "answer": "single choice"
+    },
+    {
+      "id": "predict_next",
+      "how_to_ask": "Pause the replay and ask what happens next.",
+      "answer": "choice + text"
+    },
+    {
+      "id": "matrix_classify",
+      "how_to_ask": "Ask the user to place trades into a grid.",
+      "answer": "grid placement"
+    },
+    {
+      "id": "math_calc",
+      "how_to_ask": "Give numbers, ask for one calculated value. App computes the right answer.",
+      "answer": "number"
+    }
+  ],
+  "slot_pools": {
+    "criterion": [
+      "liquidity sweep",
+      "displacement",
+      "fair value gap",
+      "market structure shift",
+      "kill zone timing",
+      "higher timeframe bias",
+      "premium/discount location"
+    ],
+    "time_ref": [
+      "before entry",
+      "at entry",
+      "while the trade was open",
+      "at your stop decision",
+      "at exit",
+      "right after exit",
+      "the next morning"
+    ],
+    "emotion": [
+      "fear",
+      "greed",
+      "impatience",
+      "doubt",
+      "overconfidence",
+      "frustration",
+      "calm",
+      "boredom"
+    ],
+    "perspective": [
+      "a friend who trades",
+      "a risk manager",
+      "future you in six months",
+      "a coach who has never seen your result",
+      "a stranger reading your journal",
+      "you on your best trading day"
+    ],
+    "lens": [
+      "probability",
+      "risk",
+      "patience",
+      "evidence",
+      "timing",
+      "location",
+      "narrative",
+      "discipline",
+      "size"
+    ],
+    "variable": [
+      "position size",
+      "stop distance",
+      "entry candle",
+      "target",
+      "session",
+      "number of trades today",
+      "time of day"
+    ],
+    "action": [
+      "entered",
+      "exited",
+      "moved the stop",
+      "added size",
+      "skipped a setup",
+      "held through a drawdown",
+      "took partial profit"
+    ],
+    "level_kind": [
+      "the liquidity you expected to be taken",
+      "your invalidation level",
+      "the draw on liquidity",
+      "the imbalance you traded from",
+      "the swing that shifted structure"
+    ],
+    "outcome_word": [
+      "won",
+      "lost",
+      "broke even",
+      "did not trade"
+    ]
+  },
+  "templates": [
+    {
+      "id": "t-01",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "pattern": "{time_ref}, what were you telling yourself about the {criterion}?"
+    },
+    {
+      "id": "t-02",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "pattern": "Looking at {lens}, what is the biggest thing {perspective} would point out about this trade?"
+    },
+    {
+      "id": "t-03",
+      "mode": "journal_post_trade",
+      "type": "what_if",
+      "pattern": "What if you had changed only the {variable}? How would the trade have played out?"
+    },
+    {
+      "id": "t-04",
+      "mode": "journal_post_trade",
+      "type": "rating_scale",
+      "pattern": "Rate your {lens} on this trade from 1 to 10. What would a 10 have looked like?"
+    },
+    {
+      "id": "t-05",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "pattern": "You {action} on this trade. What was the {emotion} level at that moment and what did you do with it?"
+    },
+    {
+      "id": "t-06",
+      "mode": "journal_post_trade",
+      "type": "devils_advocate",
+      "pattern": "Make the case, as {perspective}, that the {criterion} was not actually there."
+    },
+    {
+      "id": "t-07",
+      "mode": "journal_post_trade",
+      "type": "true_false",
+      "pattern": "True or false: your {criterion} was clear {time_ref}. What is your evidence?"
+    },
+    {
+      "id": "t-08",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "pattern": "What would make you skip a trade today even if the {criterion} looks good?"
+    },
+    {
+      "id": "t-09",
+      "mode": "journal_pre_market",
+      "type": "what_if",
+      "pattern": "What will you do if {emotion} shows up on your first trade today?"
+    },
+    {
+      "id": "t-10",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "pattern": "Mark {level_kind} on this chart."
+    },
+    {
+      "id": "t-11",
+      "mode": "chart_display",
+      "type": "predict_next",
+      "pattern": "Replay is paused. Based on the {criterion}, what do you expect next, and what would prove you wrong?"
+    },
+    {
+      "id": "t-12",
+      "mode": "chart_display",
+      "type": "what_if",
+      "pattern": "If you had waited one more candle, how would {level_kind} have changed your plan?"
+    },
+    {
+      "id": "t-13",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "pattern": "This week, in the moments you {action}, what was the {emotion} telling you, and was it right?"
+    },
+    {
+      "id": "t-14",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "pattern": "In the grid, which cell shows the biggest gap between how you feel about your {lens} and what the data says?"
+    }
+  ],
+  "math_duel": {
+    "contract_spec_note": "MNQ: $2 per index point, tick size 0.25 points = $0.50 per tick per contract. Verify against the contract spec in the app and change here if different.",
+    "constants": {
+      "point_value": 2.0,
+      "tick_size": 0.25
+    },
+    "evaluation": "APP evaluates 'answer' with its own safe expression evaluator after sampling params. The AI must never compute or reveal answers.",
+    "items": [
+      {
+        "id": "md-01",
+        "level": "easy",
+        "text": "MNQ long {contracts} contract(s): entry {entry}, exit {exit}. What is the P&L in $?",
+        "params": {
+          "contracts": {
+            "int": [
+              1,
+              10
+            ]
+          },
+          "entry": {
+            "price": [
+              20000,
+              26000
+            ],
+            "step": 0.25
+          },
+          "move": {
+            "float": [
+              -60,
+              80
+            ],
+            "step": 0.25
+          }
+        },
+        "derive": {
+          "exit": "entry + move"
+        },
+        "answer": "move * point_value * contracts",
+        "unit": "$",
+        "tolerance": 0.01
+      },
+      {
+        "id": "md-02",
+        "level": "easy",
+        "text": "MNQ short {contracts} contract(s): entry {entry}, exit {exit}. What is the P&L in $?",
+        "params": {
+          "contracts": {
+            "int": [
+              1,
+              10
+            ]
+          },
+          "entry": {
+            "price": [
+              20000,
+              26000
+            ],
+            "step": 0.25
+          },
+          "move": {
+            "float": [
+              -60,
+              80
+            ],
+            "step": 0.25
+          }
+        },
+        "derive": {
+          "exit": "entry - move"
+        },
+        "answer": "move * point_value * contracts",
+        "unit": "$",
+        "tolerance": 0.01
+      },
+      {
+        "id": "md-03",
+        "level": "easy",
+        "text": "Price moves {points} points. How many ticks is that on MNQ?",
+        "params": {
+          "points": {
+            "float": [
+              1,
+              50
+            ],
+            "step": 0.25
+          }
+        },
+        "answer": "points / tick_size",
+        "unit": "ticks",
+        "tolerance": 0
+      },
+      {
+        "id": "md-04",
+        "level": "easy",
+        "text": "You risk {risk} points on a trade and make {reward} points. What is the R multiple?",
+        "params": {
+          "risk": {
+            "float": [
+              5,
+              40
+            ],
+            "step": 0.25
+          },
+          "reward": {
+            "float": [
+              -40,
+              120
+            ],
+            "step": 0.25
+          }
+        },
+        "answer": "reward / risk",
+        "unit": "R",
+        "tolerance": 0.05
+      },
+      {
+        "id": "md-05",
+        "level": "medium",
+        "text": "Your stop is {stop_pts} points away and you can risk ${risk_usd}. How many MNQ contracts can you trade (round down)?",
+        "params": {
+          "stop_pts": {
+            "float": [
+              5,
+              40
+            ],
+            "step": 0.25
+          },
+          "risk_usd": {
+            "int": [
+              50,
+              400
+            ],
+            "step": 10
+          }
+        },
+        "answer": "floor(risk_usd / (stop_pts * point_value))",
+        "unit": "contracts",
+        "tolerance": 0
+      },
+      {
+        "id": "md-06",
+        "level": "medium",
+        "text": "With a {rr}:1 reward-to-risk ratio, what win rate (%) do you need to break even?",
+        "params": {
+          "rr": {
+            "float": [
+              1,
+              5
+            ],
+            "step": 0.5
+          }
+        },
+        "answer": "100 / (1 + rr)",
+        "unit": "%",
+        "tolerance": 0.5
+      },
+      {
+        "id": "md-07",
+        "level": "medium",
+        "text": "Win rate {wr}%, average win {avg_win}R, average loss 1R. What is your expectancy in R per trade?",
+        "params": {
+          "wr": {
+            "int": [
+              30,
+              70
+            ],
+            "step": 5
+          },
+          "avg_win": {
+            "float": [
+              1,
+              4
+            ],
+            "step": 0.5
+          }
+        },
+        "answer": "(wr/100) * avg_win - (1 - wr/100) * 1",
+        "unit": "R",
+        "tolerance": 0.02
+      },
+      {
+        "id": "md-08",
+        "level": "medium",
+        "text": "Your account is down {dd}%. What percent gain do you need to get back to even?",
+        "params": {
+          "dd": {
+            "int": [
+              5,
+              50
+            ],
+            "step": 5
+          }
+        },
+        "answer": "(dd / (100 - dd)) * 100",
+        "unit": "%",
+        "tolerance": 0.5
+      },
+      {
+        "id": "md-09",
+        "level": "medium",
+        "text": "Your win probability is {wr}%. What is the probability (%) of {n} losses in a row?",
+        "params": {
+          "wr": {
+            "int": [
+              30,
+              70
+            ],
+            "step": 5
+          },
+          "n": {
+            "int": [
+              2,
+              6
+            ]
+          }
+        },
+        "answer": "((100 - wr)/100) ^ n * 100",
+        "unit": "%",
+        "tolerance": 0.5
+      },
+      {
+        "id": "md-10",
+        "level": "medium",
+        "text": "Gross profit ${gp}, gross loss ${gl}. What is the profit factor?",
+        "params": {
+          "gp": {
+            "int": [
+              500,
+              5000
+            ],
+            "step": 50
+          },
+          "gl": {
+            "int": [
+              300,
+              4000
+            ],
+            "step": 50
+          }
+        },
+        "answer": "gp / gl",
+        "unit": "",
+        "tolerance": 0.02
+      },
+      {
+        "id": "md-11",
+        "level": "hard",
+        "text": "You take half off at +{r1}R and let the rest hit +{r2}R. What is the blended R on the full position?",
+        "params": {
+          "r1": {
+            "float": [
+              0.5,
+              2
+            ],
+            "step": 0.5
+          },
+          "r2": {
+            "float": [
+              2,
+              6
+            ],
+            "step": 0.5
+          }
+        },
+        "answer": "0.5 * r1 + 0.5 * r2",
+        "unit": "R",
+        "tolerance": 0.05
+      },
+      {
+        "id": "md-12",
+        "level": "hard",
+        "text": "Daily loss limit is ${limit}. You have lost ${lost}. With a {stop_pts}-point stop, how many 1-contract MNQ losses can you take before hitting the limit (round down)?",
+        "params": {
+          "limit": {
+            "int": [
+              500,
+              1500
+            ],
+            "step": 100
+          },
+          "lost": {
+            "int": [
+              0,
+              400
+            ],
+            "step": 50
+          },
+          "stop_pts": {
+            "float": [
+              8,
+              40
+            ],
+            "step": 0.25
+          }
+        },
+        "answer": "floor((limit - lost) / (stop_pts * point_value))",
+        "unit": "trades",
+        "tolerance": 0
+      },
+      {
+        "id": "md-13",
+        "level": "hard",
+        "text": "You risk {risk_pct}% per trade on a ${acct} account with a {stop_pts}-point stop. How many MNQ contracts (round down)?",
+        "params": {
+          "risk_pct": {
+            "float": [
+              0.25,
+              2
+            ],
+            "step": 0.25
+          },
+          "acct": {
+            "int": [
+              10000,
+              50000
+            ],
+            "step": 5000
+          },
+          "stop_pts": {
+            "float": [
+              8,
+              40
+            ],
+            "step": 0.25
+          }
+        },
+        "answer": "floor((acct * risk_pct / 100) / (stop_pts * point_value))",
+        "unit": "contracts",
+        "tolerance": 0
+      },
+      {
+        "id": "md-14",
+        "level": "hard",
+        "text": "A trade makes ${pnl} with {contracts} contract(s) and a {stop_pts}-point stop. What was the R multiple?",
+        "params": {
+          "pnl": {
+            "int": [
+              -500,
+              1500
+            ],
+            "step": 10
+          },
+          "contracts": {
+            "int": [
+              1,
+              8
+            ]
+          },
+          "stop_pts": {
+            "float": [
+              5,
+              40
+            ],
+            "step": 0.25
+          }
+        },
+        "answer": "pnl / (stop_pts * point_value * contracts)",
+        "unit": "R",
+        "tolerance": 0.05
+      }
+    ]
+  },
+  "generation": {
+    "formula": "question = mode x focus x type x lens x time_ref x perspective, then fill with the trade's real data.",
+    "focus_options": [
+      "setup validity",
+      "entry timing",
+      "stop placement",
+      "target and exit",
+      "position size",
+      "emotion",
+      "plan adherence",
+      "session and time",
+      "market context",
+      "discipline",
+      "risk",
+      "probability thinking",
+      "journaling quality",
+      "patience",
+      "recovery after a loss"
+    ],
+    "anti_repeat": {
+      "key": "focus|type|lens",
+      "rule": "Never reuse the same key within the last 8 sessions of the same mode. Never reuse the exact same wording within 30 days.",
+      "if_exhausted": "Change the type first, then the lens, then the perspective, then the focus."
+    },
+    "must_include": [
+      "At least one concrete detail from the trade (time, level, session, R, size, or emotion tag).",
+      "One clear thing to answer, not two questions in one.",
+      "Wording that is different from the last 5 questions asked."
+    ],
+    "must_avoid": [
+      "Generic praise or reassurance.",
+      "Yes/no questions with no follow-up.",
+      "Questions answerable without looking at the trade.",
+      "Asking about data the user has not provided (do not invent trade details)."
+    ],
+    "precision_rules": [
+      "If trade data is missing a field, ask about the field instead of guessing it.",
+      "Match the mode: chart questions must name one action on the chart; math duel questions must be numeric and unambiguous; weekly boss questions must reference the week, not a single trade.",
+      "Keep questions under 30 words unless the type needs options."
+    ],
+    "fallback_chain": [
+      "1. Rewrite a matching bank question with the trade's details.",
+      "2. Fill a template with slot pools, choosing slots that match the trade.",
+      "3. Free-generate using the formula and rules above, using the bank as style reference.",
+      "4. Use a bank question unchanged (lowest-used one matching 'when').",
+      "5. Use an evergreen question."
+    ]
+  },
+  "ai_prompts": {
+    "rewrite": "You are a trading coach. Trade: {trade_json}. Base questions: {questions_json}. Rewrite each as a short, specific question using real details from this trade. Keep what each question tests. No praise. Return JSON: [{\"id\":\"...\",\"question\":\"...\"}].",
+    "generate_new": "You are a trading coach. Mode: {mode}. Trade/context: {trade_json}. Recently asked: {recent_questions}. Generate {n} NEW questions using focus x type x lens from the generation rules. Use these example questions as style reference: {bank_samples}. Do not repeat or lightly reword recent questions. Return JSON: [{\"type\":\"...\",\"question\":\"...\",\"options\":[]}].",
+    "chart_display": "A chart is on screen with these marks: {chart_context}. Ask {n} questions, each requiring ONE action on the chart (mark, choose, predict). Return JSON with a 'chart_action' field for each.",
+    "math_duel": "Do NOT compute answers. Only add a one-line flavour intro for the round if asked. The app samples numbers and checks answers itself.",
+    "weekly_boss": "Week data: {week_json}. Boss type: {boss_type}. Write a short boss intro (2 sentences, game-like) naming the actual pattern from the data. Then ask the phase questions for the current phase: {phase}. Reference the week, not one trade.",
+    "matrix": "Grid: {layout}. Trades placed: {placements_json}. Ask {n} questions about the pattern in the grid, naming the actual cells and counts."
+  },
+  "bank": [
+    {
+      "id": "setup-01",
+      "category": "setup",
+      "text": "Which of your A+ criteria were fully met, and which were you bending?",
+      "weight": 10,
+      "when": {
+        "grade": [
+          "B",
+          "C"
+        ]
+      },
+      "ai_hint": "Name the specific criteria that were weak on this trade.",
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "setup-02",
+      "category": "setup",
+      "text": "If you replayed this chart with the right side hidden, would you still take this entry?",
+      "weight": 8,
+      "when": {},
+      "ai_hint": "Reference the entry time and the level used.",
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "setup-03",
+      "category": "setup",
+      "text": "Where was the liquidity you were targeting, and where was the liquidity that could trap you?",
+      "weight": 7,
+      "when": {},
+      "ai_hint": "Use the actual highs/lows around the entry if available.",
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "setup-04",
+      "category": "setup",
+      "text": "What would have invalidated this idea before you entered? Was that level clear in your pre-market plan?",
+      "weight": 7,
+      "when": {
+        "outcome": [
+          "loss"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "setup-05",
+      "category": "setup",
+      "text": "Was this setup in your pre-market anticipation, or did you find it live?",
+      "weight": 6,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-01",
+      "category": "execution",
+      "text": "Was your stop placed where the idea is wrong, or where it felt comfortable?",
+      "weight": 8,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-02",
+      "category": "execution",
+      "text": "You moved your stop. What exactly did you see or feel at that moment?",
+      "weight": 12,
+      "when": {
+        "moved_stop": [
+          true
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-03",
+      "category": "execution",
+      "text": "You held past your target. Was that a planned runner or a decision made in the moment?",
+      "weight": 10,
+      "when": {
+        "held_past_target": [
+          true
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-04",
+      "category": "execution",
+      "text": "You are good at letting winners run. What specifically told you to stay in this one?",
+      "weight": 6,
+      "when": {
+        "outcome": [
+          "win"
+        ],
+        "r_multiple_min": 2
+      },
+      "ai_hint": "Tie this to the R multiple achieved.",
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-05",
+      "category": "execution",
+      "text": "Could you have gotten a better entry by waiting one more candle or confirmation? What did it cost you?",
+      "weight": 6,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "exec-06",
+      "category": "execution",
+      "text": "You exited early. What was the fear, and did price justify it?",
+      "weight": 9,
+      "when": {
+        "outcome": [
+          "win"
+        ],
+        "r_multiple_max": 1
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-01",
+      "category": "psychology",
+      "text": "Rate your state before entry from 1 to 10. What was driving that number?",
+      "weight": 8,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-02",
+      "category": "psychology",
+      "text": "Did the previous trade influence this one? If yes, how?",
+      "weight": 9,
+      "when": {
+        "trade_number_min": 2
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-03",
+      "category": "psychology",
+      "text": "You entered feeling FOMO. What did you think you would miss, and what actually happened to that move?",
+      "weight": 12,
+      "when": {
+        "emotion_before": [
+          "fomo"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-04",
+      "category": "psychology",
+      "text": "This looks like a revenge entry. What would you tell a friend who just did this?",
+      "weight": 14,
+      "when": {
+        "emotion_before": [
+          "revenge"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-05",
+      "category": "psychology",
+      "text": "You were bored before this trade. Was the setup real, or did you manufacture one?",
+      "weight": 10,
+      "when": {
+        "emotion_before": [
+          "bored"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-06",
+      "category": "psychology",
+      "text": "You felt very confident. What evidence, not feeling, supported that confidence?",
+      "weight": 7,
+      "when": {
+        "emotion_before": [
+          "confident"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-07",
+      "category": "psychology",
+      "text": "At what point in the trade did you feel the most pressure to act, and what did you do about it?",
+      "weight": 6,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "psy-08",
+      "category": "psychology",
+      "text": "You broke your plan on this trade. What was the exact moment you decided to deviate?",
+      "weight": 14,
+      "when": {
+        "followed_plan": [
+          false
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "ctx-01",
+      "category": "context",
+      "text": "What was the higher timeframe bias, and did this trade align with it?",
+      "weight": 8,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "ctx-02",
+      "category": "context",
+      "text": "Was there news or a session open close to your entry? How did you account for it?",
+      "weight": 6,
+      "when": {
+        "session": [
+          "ny_am"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "ctx-03",
+      "category": "context",
+      "text": "Is this session where you usually perform best? What does your own data say?",
+      "weight": 5,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "ctx-04",
+      "category": "context",
+      "text": "Was the market trending or ranging, and did your setup fit that condition?",
+      "weight": 6,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-01",
+      "category": "process",
+      "text": "If you took this exact trade 20 more times, what outcome distribution would you expect?",
+      "weight": 7,
+      "when": {},
+      "ai_hint": "Encourage thinking in probabilities, not single outcomes.",
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-02",
+      "category": "process",
+      "text": "This loss followed your plan. What makes it a good loss, if anything?",
+      "weight": 10,
+      "when": {
+        "outcome": [
+          "loss"
+        ],
+        "followed_plan": [
+          true
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-03",
+      "category": "process",
+      "text": "This win broke your rules. Why should it not count as a good trade?",
+      "weight": 14,
+      "when": {
+        "outcome": [
+          "win"
+        ],
+        "followed_plan": [
+          false
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-04",
+      "category": "process",
+      "text": "What is the one rule you will tighten before your next trade?",
+      "weight": 8,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-05",
+      "category": "process",
+      "text": "You took no trade. Was that patience or hesitation? How can you tell?",
+      "weight": 12,
+      "when": {
+        "outcome": [
+          "no_trade"
+        ]
+      },
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "proc-06",
+      "category": "process",
+      "text": "Which part of your journal for this trade will you not be able to reconstruct a week from now? Write it down now.",
+      "weight": 4,
+      "when": {},
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "wild-01",
+      "category": "process",
+      "text": "What is one thing about how you trade that you have been avoiding looking at?",
+      "weight": 3,
+      "when": {},
+      "wildcard": true,
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "wild-02",
+      "category": "psychology",
+      "text": "If this trade had to be explained to someone who has never traded, what would you be embarrassed or proud to say?",
+      "weight": 3,
+      "when": {},
+      "wildcard": true,
+      "mode": "journal_post_trade",
+      "type": "open_reflection"
+    },
+    {
+      "id": "post-20",
+      "mode": "journal_post_trade",
+      "type": "rating_scale",
+      "category": "execution",
+      "text": "Rate how closely your execution matched your plan, 1 to 10. What cost you the missing points?",
+      "weight": 8,
+      "when": {},
+      "ai_hint": "Ask for the single biggest deviation."
+    },
+    {
+      "id": "post-21",
+      "mode": "journal_post_trade",
+      "type": "multiple_choice",
+      "category": "psychology",
+      "text": "What best describes why you entered?",
+      "weight": 7,
+      "when": {},
+      "options": [
+        "Setup was fully formed",
+        "Fear of missing the move",
+        "Trying to recover a loss",
+        "Boredom",
+        "Gut feeling with no clear reason"
+      ]
+    },
+    {
+      "id": "post-22",
+      "mode": "journal_post_trade",
+      "type": "true_false",
+      "category": "process",
+      "text": "True or false: you would take this exact trade again tomorrow with the same information.",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "post-23",
+      "mode": "journal_post_trade",
+      "type": "ranking",
+      "category": "process",
+      "text": "Rank these from most to least responsible for the result: setup quality, entry timing, stop placement, target, management, luck.",
+      "weight": 6,
+      "when": {},
+      "options": [
+        "Setup quality",
+        "Entry timing",
+        "Stop placement",
+        "Target",
+        "Management",
+        "Luck"
+      ]
+    },
+    {
+      "id": "post-24",
+      "mode": "journal_post_trade",
+      "type": "what_if",
+      "category": "execution",
+      "text": "What if you had risked half the size? Would your decisions in the trade have changed?",
+      "weight": 6,
+      "when": {
+        "outcome": [
+          "loss"
+        ]
+      }
+    },
+    {
+      "id": "post-25",
+      "mode": "journal_post_trade",
+      "type": "what_if",
+      "category": "execution",
+      "text": "What if your stop had been hit 2 ticks earlier or later? Was your stop placement robust or lucky?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "post-26",
+      "mode": "journal_post_trade",
+      "type": "probability_estimate",
+      "category": "process",
+      "text": "Before you entered, what win probability did you give this trade? What do you give it now, honestly?",
+      "weight": 8,
+      "when": {},
+      "ai_hint": "Compare the two numbers and point out any gap."
+    },
+    {
+      "id": "post-27",
+      "mode": "journal_post_trade",
+      "type": "devils_advocate",
+      "category": "setup",
+      "text": "Argue against your own trade for 3 sentences. What is the strongest reason it should have been skipped?",
+      "weight": 8,
+      "when": {}
+    },
+    {
+      "id": "post-28",
+      "mode": "journal_post_trade",
+      "type": "perspective_shift",
+      "category": "psychology",
+      "text": "A risk manager is reading this trade. What is the first thing they flag?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "post-29",
+      "mode": "journal_post_trade",
+      "type": "one_word",
+      "category": "psychology",
+      "text": "One word for how you felt while the trade was open. Why that word?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "post-30",
+      "mode": "journal_post_trade",
+      "type": "compare_two_trades",
+      "category": "process",
+      "text": "Compare this trade with your best A+ trade this month. What is different in setup, state and management?",
+      "weight": 7,
+      "when": {
+        "grade": [
+          "B",
+          "C"
+        ]
+      },
+      "ai_hint": "Use the user's actual best A+ trade from the journal if available."
+    },
+    {
+      "id": "post-31",
+      "mode": "journal_post_trade",
+      "type": "error_spotting",
+      "category": "execution",
+      "text": "If this trade had one mistake you could fix with a rule, which rule would it be, written as a single sentence?",
+      "weight": 9,
+      "when": {}
+    },
+    {
+      "id": "post-32",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "What did the market do right after you exited, and what does that say about your exit?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "post-33",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "psychology",
+      "text": "You had more than one trade today. At which trade did your decision quality start to drop, if at all?",
+      "weight": 7,
+      "when": {
+        "trade_number_min": 3
+      }
+    },
+    {
+      "id": "post-34",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "execution",
+      "text": "You were stopped out fast. Was the entry too early, the stop too tight, or the idea wrong?",
+      "weight": 9,
+      "when": {
+        "outcome": [
+          "loss"
+        ],
+        "r_multiple_max": -0.8
+      }
+    },
+    {
+      "id": "post-35",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "You finished breakeven. Was that management skill or fear? What would an A+ version of this trade have looked like?",
+      "weight": 8,
+      "when": {
+        "outcome": [
+          "breakeven"
+        ]
+      }
+    },
+    {
+      "id": "post-36",
+      "mode": "journal_post_trade",
+      "type": "rating_scale",
+      "category": "psychology",
+      "text": "How easy was it to sit through the drawdown in this trade, 1 to 10? What does that say about your size?",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "post-37",
+      "mode": "journal_post_trade",
+      "type": "fill_blank",
+      "category": "process",
+      "text": "Complete the sentence: \"I took this trade because ______, and I will exit when ______.\" Was the second blank decided before entry?",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "post-38",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "In what way was this trade different from your usual setups in this session?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "post-39",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "psychology",
+      "text": "Anxious before entry: what exactly were you worried about, and was the worry about the trade or about money?",
+      "weight": 8,
+      "when": {
+        "emotion_before": [
+          "anxious"
+        ]
+      }
+    },
+    {
+      "id": "post-40",
+      "mode": "journal_post_trade",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is one thing you did well in this trade regardless of the result?",
+      "weight": 6,
+      "when": {
+        "outcome": [
+          "loss"
+        ]
+      }
+    },
+    {
+      "id": "pre-01",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "What is the higher timeframe narrative today, in two sentences, and what would prove it wrong?",
+      "weight": 9,
+      "when": {}
+    },
+    {
+      "id": "pre-02",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "setup",
+      "text": "Which two levels will you watch most today, and what exactly must happen at each before you act?",
+      "weight": 9,
+      "when": {}
+    },
+    {
+      "id": "pre-03",
+      "mode": "journal_pre_market",
+      "type": "probability_estimate",
+      "category": "process",
+      "text": "Give today's bullish, bearish and choppy scenarios a probability each. They must add to 100.",
+      "weight": 8,
+      "when": {},
+      "ai_hint": "Check that the numbers add up to 100."
+    },
+    {
+      "id": "pre-04",
+      "mode": "journal_pre_market",
+      "type": "multiple_choice",
+      "category": "psychology",
+      "text": "How are you arriving at the market today?",
+      "weight": 6,
+      "when": {},
+      "options": [
+        "Calm and rested",
+        "Tired",
+        "Distracted by something outside trading",
+        "Eager to make back a loss",
+        "Overconfident after wins"
+      ]
+    },
+    {
+      "id": "pre-05",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is your maximum number of trades and maximum loss today? What will you do if you hit it by 10:30?",
+      "weight": 8,
+      "when": {}
+    },
+    {
+      "id": "pre-06",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "setup",
+      "text": "Is there any news or session event that could invalidate your plan? What is your rule around it?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "pre-07",
+      "mode": "journal_pre_market",
+      "type": "what_if",
+      "category": "execution",
+      "text": "What will you do if price runs straight to your target without giving you an entry?",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "pre-08",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "psychology",
+      "text": "What mistake did you make most recently, and what is the specific cue that will warn you today?",
+      "weight": 9,
+      "when": {}
+    },
+    {
+      "id": "pre-09",
+      "mode": "journal_pre_market",
+      "type": "rating_scale",
+      "category": "psychology",
+      "text": "Rate your readiness 1 to 10. If it is below 6, what is the plan?",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "pre-10",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "setup",
+      "text": "Which of your A+ criteria is most likely to be missing today, and will you accept a B setup if it is?",
+      "weight": 8,
+      "when": {}
+    },
+    {
+      "id": "pre-11",
+      "mode": "journal_pre_market",
+      "type": "true_false",
+      "category": "process",
+      "text": "True or false: you can name today's best-case trade and your cleanest invalidation right now.",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "pre-12",
+      "mode": "journal_pre_market",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "If today turns into a no-trade day, how will you spend the session?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "chart-01",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "category": "setup",
+      "text": "Mark where you think the liquidity was resting before price moved.",
+      "weight": 9,
+      "when": {},
+      "chart_action": "mark_zone"
+    },
+    {
+      "id": "chart-02",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "category": "execution",
+      "text": "Mark your entry, stop and target on this chart before you see what you actually did.",
+      "weight": 9,
+      "when": {},
+      "chart_action": "mark_three_points"
+    },
+    {
+      "id": "chart-03",
+      "mode": "chart_display",
+      "type": "chart_choose_level",
+      "category": "setup",
+      "text": "Which of these highlighted levels was the real draw on liquidity?",
+      "weight": 7,
+      "when": {},
+      "chart_action": "choose_one_of_marked"
+    },
+    {
+      "id": "chart-04",
+      "mode": "chart_display",
+      "type": "predict_next",
+      "category": "setup",
+      "text": "The chart is paused here. What happens next: continuation, reversal, or chop? Pick one and give one reason.",
+      "weight": 9,
+      "when": {},
+      "options": [
+        "Continuation",
+        "Reversal",
+        "Chop"
+      ],
+      "chart_action": "pause_replay"
+    },
+    {
+      "id": "chart-05",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "category": "execution",
+      "text": "Where would an A+ entry have been on this move? Mark it and compare it with your own.",
+      "weight": 8,
+      "when": {},
+      "chart_action": "mark_point"
+    },
+    {
+      "id": "chart-06",
+      "mode": "chart_display",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "What was the higher timeframe doing when this chart was printed?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "chart-07",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "category": "setup",
+      "text": "Mark the swing that shifted structure. Which candle confirmed it for you?",
+      "weight": 7,
+      "when": {},
+      "chart_action": "mark_candle"
+    },
+    {
+      "id": "chart-08",
+      "mode": "chart_display",
+      "type": "what_if",
+      "category": "execution",
+      "text": "If you had waited for the next candle close, where would your entry and stop have been?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "chart-09",
+      "mode": "chart_display",
+      "type": "error_spotting",
+      "category": "execution",
+      "text": "Find the candle where you would have been most tempted to break your plan. What would you do there?",
+      "weight": 8,
+      "when": {}
+    },
+    {
+      "id": "chart-10",
+      "mode": "chart_display",
+      "type": "chart_annotate",
+      "category": "setup",
+      "text": "Mark where a trapped trader would be sitting right now, and where their stop is.",
+      "weight": 6,
+      "when": {},
+      "chart_action": "mark_zone"
+    },
+    {
+      "id": "chart-11",
+      "mode": "chart_display",
+      "type": "multiple_choice",
+      "category": "setup",
+      "text": "What is the best label for this price area?",
+      "weight": 5,
+      "when": {},
+      "options": [
+        "Premium",
+        "Discount",
+        "Equilibrium",
+        "Imbalance",
+        "No clear label"
+      ]
+    },
+    {
+      "id": "chart-12",
+      "mode": "chart_display",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Look at only the left side of the chart. List the reasons you would have taken a trade. Now reveal the right side: which reasons held?",
+      "weight": 8,
+      "when": {},
+      "chart_action": "hide_right_side"
+    },
+    {
+      "id": "chart-13",
+      "mode": "chart_display",
+      "type": "compare_two_trades",
+      "category": "process",
+      "text": "Two charts are shown side by side. Which one is the cleaner A+ setup, and why?",
+      "weight": 7,
+      "when": {},
+      "chart_action": "side_by_side"
+    },
+    {
+      "id": "chart-14",
+      "mode": "chart_display",
+      "type": "open_reflection",
+      "category": "execution",
+      "text": "Where on this chart did you feel the urge to exit early or move your stop? What did price do afterwards?",
+      "weight": 7,
+      "when": {}
+    },
+    {
+      "id": "boss-01",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "How many trades did you take on your busiest day, and how many were genuine A+ setups?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "overtrading"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-02",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What was the trigger for the 3rd, 4th or 5th trade of the day: setup, boredom, or recovery?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "overtrading"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-03",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "If you had a hard cap of 2 trades per day this week, which trades would you have cut?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "overtrading"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-04",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which trades this week had a stop moved, and which of them would have been better if you had not?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "moving_stops"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-05",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is the thought you have right before you move a stop? Write it exactly.",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "moving_stops"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-06",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What physical rule (an order type, an alert, a pause) can make moving a stop harder next week?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "moving_stops"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-07",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which trades came within 10 minutes of a loss, and what were they worth in total?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "revenge_trading"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-08",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What does the first 60 seconds after a loss feel like, and what do you do with them?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "revenge_trading"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-09",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is your cooling-off rule after a loss, and did you follow it every time this week?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "revenge_trading"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-10",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "How many winners did you exit before your target, and how much R did that leave on the table?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "early_exits"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-11",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What were you afraid of at the moment of each early exit?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "early_exits"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-12",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What would a partial-profit plan look like that lets you take money but still run the rest?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "early_exits"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-13",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which entries happened after price had already moved a long way? What was the entry rule you ignored?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "fomo_entries"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-14",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What do you tell yourself when you see a move without you? Write the exact sentence.",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "fomo_entries"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-15",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is your rule for a missed move, and how would it have changed this week?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "fomo_entries"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-16",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "On which trades was your size above plan, and what was the reason in the moment?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "oversizing"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-17",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "How did a larger size change your behaviour inside the trade?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "oversizing"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-18",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What size would let you sleep and execute well on your worst day?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "oversizing"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-19",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which trades were outside your planned session window, and how did they perform?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "session_drift"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-20",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What pulled you into the market outside your window?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "session_drift"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-21",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What does your data say is your best 2-hour window, and are you trading it?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "session_drift"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-22",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which trades this week were not in your pre-market plan?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "ignoring_plan"
+        ]
+      },
+      "phase": "scout"
+    },
+    {
+      "id": "boss-23",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What was the first rule you broke this week, and what happened right after?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "ignoring_plan"
+        ]
+      },
+      "phase": "weak_point"
+    },
+    {
+      "id": "boss-24",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which single rule, if followed perfectly next week, would improve your results the most?",
+      "weight": 8,
+      "when": {
+        "boss_type": [
+          "ignoring_plan"
+        ]
+      },
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-90",
+      "mode": "weekly_boss",
+      "type": "multiple_choice",
+      "category": "process",
+      "text": "Which behaviour cost you the most R this week?",
+      "weight": 7,
+      "when": {},
+      "ai_hint": "Use this answer to pick next week's boss if data is unclear.",
+      "options": [
+        "Overtrading",
+        "Moving stops",
+        "Revenge trading",
+        "Early exits",
+        "FOMO entries",
+        "Oversizing",
+        "Trading outside session",
+        "Ignoring the plan"
+      ],
+      "phase": "scout"
+    },
+    {
+      "id": "boss-91",
+      "mode": "weekly_boss",
+      "type": "rating_scale",
+      "category": "process",
+      "text": "Rate your discipline this week, 1 to 10, then tell the score your journal would give you.",
+      "weight": 6,
+      "when": {},
+      "phase": "scout"
+    },
+    {
+      "id": "boss-92",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Write the one sentence rule you commit to next week to defeat this boss.",
+      "weight": 12,
+      "when": {},
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-93",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is the earliest warning sign that the boss is about to show up, and what will you do the moment you see it?",
+      "weight": 10,
+      "when": {},
+      "phase": "final_blow"
+    },
+    {
+      "id": "boss-94",
+      "mode": "weekly_boss",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What went right this week that you want to repeat?",
+      "weight": 5,
+      "when": {},
+      "phase": "reward"
+    },
+    {
+      "id": "mx-01",
+      "mode": "matrix",
+      "type": "matrix_classify",
+      "category": "process",
+      "text": "Place each of this week's trades in the grid: good process or bad process, good result or bad result.",
+      "weight": 9,
+      "when": {},
+      "layout": "plan_vs_result"
+    },
+    {
+      "id": "mx-02",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which cell has the most trades? Does that match how you think you trade?",
+      "weight": 8,
+      "when": {},
+      "layout": "plan_vs_result"
+    },
+    {
+      "id": "mx-03",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Which cell is the most dangerous for you, and why is it dangerous (hint: good result from bad process)?",
+      "weight": 9,
+      "when": {},
+      "layout": "plan_vs_result"
+    },
+    {
+      "id": "mx-04",
+      "mode": "matrix",
+      "type": "matrix_classify",
+      "category": "context",
+      "text": "Place your trades by session and setup grade. Where are your A+ trades happening?",
+      "weight": 7,
+      "when": {},
+      "layout": "session_vs_grade"
+    },
+    {
+      "id": "mx-05",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "Which row or column in the grid has the worst average R? What will you change there?",
+      "weight": 8,
+      "when": {},
+      "layout": "session_vs_grade"
+    },
+    {
+      "id": "mx-06",
+      "mode": "matrix",
+      "type": "matrix_classify",
+      "category": "psychology",
+      "text": "Place your trades by emotion before entry and outcome. Which emotion shows up most before losses?",
+      "weight": 8,
+      "when": {},
+      "layout": "emotion_vs_outcome"
+    },
+    {
+      "id": "mx-07",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "category": "psychology",
+      "text": "Which emotion in the grid has your best results? Can you deliberately enter that state?",
+      "weight": 7,
+      "when": {},
+      "layout": "emotion_vs_outcome"
+    },
+    {
+      "id": "mx-08",
+      "mode": "matrix",
+      "type": "matrix_classify",
+      "category": "execution",
+      "text": "Place your trades by stop respected or moved, and R outcome. What does the grid show?",
+      "weight": 7,
+      "when": {},
+      "layout": "stop_vs_r"
+    },
+    {
+      "id": "mx-09",
+      "mode": "matrix",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Pick one cell to shrink and one cell to grow next week. Why those two?",
+      "weight": 10,
+      "when": {},
+      "layout": "any"
+    },
+    {
+      "id": "mx-10",
+      "mode": "matrix",
+      "type": "true_false",
+      "category": "process",
+      "text": "True or false: your most profitable cell is also the one you trade most often.",
+      "weight": 6,
+      "when": {},
+      "layout": "any"
+    }
+  ],
+  "evergreen_fallback": [
+    {
+      "id": "ever-01",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What is the single most important thing you learned from this trade?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "ever-02",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "Describe this trade in three sentences: setup, decision, result.",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "ever-03",
+      "mode": "any",
+      "type": "rating_scale",
+      "category": "process",
+      "text": "Rate this trade's process 1 to 10, ignoring profit or loss. What made it that number?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "ever-04",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "psychology",
+      "text": "How did you feel at the moment of entry and at the moment of exit? What changed?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "ever-05",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "If you could redo this trade with perfect discipline, what would be different?",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "ever-06",
+      "mode": "any",
+      "type": "true_false",
+      "category": "process",
+      "text": "True or false: you followed your rules on this trade.",
+      "weight": 5,
+      "when": {}
+    },
+    {
+      "id": "ever-07",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "process",
+      "text": "What will you do differently next time you see a similar setup?",
+      "weight": 6,
+      "when": {}
+    },
+    {
+      "id": "ever-08",
+      "mode": "any",
+      "type": "open_reflection",
+      "category": "context",
+      "text": "What was happening in the market right before you decided to trade?",
+      "weight": 4,
+      "when": {}
+    }
+  ],
+  "capacity_estimate": {
+    "static_bank": 125,
+    "template_combinations": 363,
+    "math_duel_items": 14,
+    "note": "Math duel and AI generation are effectively unlimited; counts above are static only."
+  }
+}
