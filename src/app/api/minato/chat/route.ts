@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
+import { rateLimited, sessionOf } from "@/lib/server/auth";
 import { computeStats } from "@/lib/stats";
 import { holdTimeStats, formatHold } from "@/lib/holdtime";
 import { detectPatterns, matchPlanToPatterns } from "@/lib/minato/patterns";
@@ -167,25 +167,31 @@ function deepFacts(entries: RawEntry[]) {
 }
 
 export async function POST(request: Request) {
-  // Parse body first — local users send entries in the body
+  // Every question can spend the OpenRouter key, so this needs a signed-in user (only skipped when Google login isn't configured at all, i.e. local dev).
+  const config = getGoogleConfig();
+  const session = sessionOf(request);
+  if (config && !session) return NextResponse.json({ error: "not_logged_in", text: "Please sign in to talk to Minato." }, { status: 401 });
+  if (rateLimited(`minato:${session?.email ?? "local"}`, 30, 5 * 60_000)) {
+    return NextResponse.json({ error: "rate_limited", text: "You're asking too fast — give me a minute and try again." }, { status: 429 });
+  }
+
   const body = (await request.json().catch(() => ({}))) as {
     messages?: MinatoMessage[];
     entries?: Record<string, unknown>[];
     /** True when the client intentionally supplied the complete in-memory journal, including an empty challenge. */
     journalProvided?: boolean;
-    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode" | "trailingBasis" | "drawdownFloor"> | null;
+    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode"> | null;
     responseTokenLimit?: number;
   };
-  const messages = body.messages ?? [];
-  const clientEntries = Array.isArray(body.entries) ? body.entries : [];
+  // Cap what the client can push into the prompt: last 10 turns, real roles only, bounded length.
+  const messages: MinatoMessage[] = (Array.isArray(body.messages) ? body.messages : [])
+    .filter((m): m is MinatoMessage => !!m && typeof m === "object" && (m.role === "user" || m.role === "buddy") && typeof m.text === "string")
+    .slice(-10)
+    .map((m) => ({ ...m, text: m.text.slice(0, 4000) }));
+  const clientEntries = (Array.isArray(body.entries) ? body.entries : []).slice(0, 5000);
   const selectedChallenge = body.primaryChallenge ?? null;
   const maxTokens = replyTokenLimit(body.responseTokenLimit);
   const question = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
-
-  // Session resolution — Google session or local (client-provided entries)
-  const config = getGoogleConfig();
-  const cookie = readCookie(request, APP_SESSION_COOKIE);
-  const session = config && cookie ? openAppSession(cookie, config.tokenSecret) : null;
 
   const traderName = session?.name.split(" ")[0] ?? "Trader";
 
@@ -235,13 +241,6 @@ export async function POST(request: Request) {
     targetEquity: selectedChallenge?.targetBalance ?? 20000,
     maxDrawdown: selectedChallenge?.maxDrawdown ?? 1000,
     currency: "USD",
-    ...(selectedChallenge
-      ? {
-          drawdownMode: selectedChallenge.drawdownMode ?? "static",
-          trailingBasis: selectedChallenge.trailingBasis ?? null,
-          drawdownFloor: selectedChallenge.drawdownFloor ?? null,
-        }
-      : {}),
   });
   const holds = holdTimeStats(entries as never);
   const patterns = detectPatterns(entries as never);
@@ -323,7 +322,6 @@ export async function POST(request: Request) {
       targetBalance: selectedChallenge.targetBalance ?? null,
       maxDrawdown: selectedChallenge.maxDrawdown ?? null,
       drawdownMode: selectedChallenge.drawdownMode ?? "static",
-      trailingBasis: selectedChallenge.drawdownMode === "dynamic" ? (selectedChallenge.trailingBasis ?? "live") : null,
     } : null,
     trades: stats.tradingDays,
     totalPnl: Math.round(stats.totalPnl),

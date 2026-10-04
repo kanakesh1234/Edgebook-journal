@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { sessionEmail } from '@/lib/server/auth';
 
 /* ------------------------------------------------------------------ */
 /*  LSE catalog proxy — discover available symbols                     */
@@ -10,7 +11,8 @@ let cachedSymbols: string[] | null = null;
 let cachedAt = 0;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!sessionEmail(request)) return NextResponse.json({ error: 'not_logged_in', symbols: [] }, { status: 401 });
   const apiKey = process.env.LSE_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

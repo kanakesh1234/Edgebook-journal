@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
 import { verifyState } from "@/lib/server/tokens";
-import { APP_SESSION_COOKIE, OAUTH_STATE_COOKIE, readCookie, sealAppSession, sessionCookieOptions } from "@/lib/server/session";
+import { APP_SESSION_COOKIE, OAUTH_STATE_COOKIE, readCookie, safeNextPath, sealAppSession, sessionCookieOptions } from "@/lib/server/session";
 import { upsertAccount } from "@/lib/server/accounts";
 import { ensureAppFolders, exchangeCode } from "@/lib/server/drive";
 
@@ -25,7 +25,7 @@ const LOG = (event: string, detail?: Record<string, unknown>) => {
  * refresh token is kept when Google doesn't issue a new one.
  */
 export async function GET(request: Request) {
-  console.log(`[AUTH-TRACE] stage=OAUTH_CALLBACK_ENTERED requestUrl=${request.url} origin=${new URL(request.url).origin} stateCookiePresent=${request.headers.get("cookie")?.includes(OAUTH_STATE_COOKIE) ? "yes" : "no"}`);
+  console.log(`[AUTH-TRACE] stage=OAUTH_CALLBACK_ENTERED origin=${new URL(request.url).origin} stateCookiePresent=${request.headers.get("cookie")?.includes(OAUTH_STATE_COOKIE) ? "yes" : "no"}`);
   const config = getGoogleConfig();
   if (!config) {
     return NextResponse.redirect(new URL("/login?drive=not_configured", request.url));
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   try {
     const parsed = JSON.parse(stateCookie) as { nonce: string; next?: string };
     nonce = parsed.nonce;
-    if (parsed.next?.startsWith("/")) next = parsed.next;
+    next = safeNextPath(parsed.next); // blocks //evil.com style open redirects
   } catch {
     return fail("state_mismatch");
   }
@@ -85,7 +85,15 @@ export async function GET(request: Request) {
       sub?: string;
       name?: string;
       email_verified?: boolean;
+      aud?: string;
+      iss?: string;
+      exp?: number;
     };
+    // Tokens come straight from Google over TLS, but still make sure this one was issued to OUR client and hasn't expired.
+    if (claims.aud !== config.clientId || (claims.exp && claims.exp * 1000 < Date.now()) || (claims.iss && !/^(https:\/\/)?accounts\.google\.com$/.test(claims.iss))) {
+      LOG("ID_TOKEN_REJECTED");
+      return fail("invalid_token");
+    }
     email = (claims.email ?? "").toLowerCase();
     sub = claims.sub ?? "";
     name = claims.name ?? "";
@@ -124,7 +132,7 @@ export async function GET(request: Request) {
   // Edge Book app session — identity only, no tokens.
   const res = NextResponse.redirect(new URL(next, request.url));
   LOG("SESSION_COOKIE_SET", { next });
-  console.log(`[AUTH-TRACE] stage=SESSION_CREATED result=ok redirectTarget=${new URL(next, request.url).toString()}`);
+  console.log(`[AUTH-TRACE] stage=SESSION_CREATED result=ok`);
   res.cookies.set(
     APP_SESSION_COOKIE,
     sealAppSession({ email, name: name || email.split("@")[0], sub }, config.tokenSecret),

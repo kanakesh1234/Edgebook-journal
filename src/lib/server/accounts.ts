@@ -1,7 +1,7 @@
 /* SERVER-ONLY module — import exclusively from route handlers (src/app/api/**). Never import from client components. */
 import crypto from "node:crypto";
 import { decryptToken, encryptToken } from "./tokens";
-import { readMetaJson, writeMetaJson } from "./admin-drive";
+import { readMetaJson, updateMetaJson } from "./admin-drive";
 
 /* ------------------------------------------------------------------ */
 /*  Edge Book account store — server-side, Drive-backed.               */
@@ -40,10 +40,6 @@ async function readAll(): Promise<Record<string, EdgeBookAccount>> {
   return readMetaJson<Record<string, EdgeBookAccount>>(STORE_FILE, {});
 }
 
-async function writeAll(accounts: Record<string, EdgeBookAccount>): Promise<void> {
-  await writeMetaJson(STORE_FILE, accounts);
-}
-
 export async function listAccounts(): Promise<EdgeBookAccount[]> {
   return Object.values(await readAll());
 }
@@ -69,12 +65,24 @@ export async function findByHandle(handle: string): Promise<EdgeBookAccount | nu
 
 export async function addEdgePoints(email: string, points: number): Promise<EdgeBookAccount | null> {
   const key = email.toLowerCase();
-  const accounts = await readAll();
-  const existing = accounts[key];
-  if (!existing) return null;
-  accounts[key] = { ...existing, edgePoints: Math.max(0, (existing.edgePoints ?? 0) + points), updatedAt: Date.now() };
-  await writeAll(accounts);
-  return accounts[key];
+  return updateMetaJson<Record<string, EdgeBookAccount>, EdgeBookAccount | null>(STORE_FILE, {}, (accounts) => {
+    const existing = accounts[key];
+    if (!existing) return { result: null };
+    const updated = { ...existing, edgePoints: Math.max(0, (existing.edgePoints ?? 0) + points), updatedAt: Date.now() };
+    return { next: { ...accounts, [key]: updated }, result: updated };
+  });
+}
+
+/** Atomically give `email` the handle (unique check + write happen under one lock). */
+export async function claimHandle(email: string, handle: string): Promise<"ok" | "taken" | "missing"> {
+  const key = email.toLowerCase();
+  const h = handle.toLowerCase();
+  return updateMetaJson<Record<string, EdgeBookAccount>, "ok" | "taken" | "missing">(STORE_FILE, {}, (accounts) => {
+    const me = accounts[key];
+    if (!me) return { result: "missing" };
+    if (Object.values(accounts).some((a) => a.email !== key && a.handle.toLowerCase() === h)) return { result: "taken" };
+    return { next: { ...accounts, [key]: { ...me, handle: h, updatedAt: Date.now() } }, result: "ok" };
+  });
 }
 
 export async function getAccount(email: string): Promise<EdgeBookAccount | null> {
@@ -91,35 +99,34 @@ export async function upsertAccount(patch: {
   edgePoints?: number;
 }): Promise<EdgeBookAccount> {
   const key = patch.email.toLowerCase();
-  const accounts = await readAll();
-  const existing = accounts[key];
-  const now = Date.now();
-  const account: EdgeBookAccount = {
-    email: key,
-    sub: patch.sub ?? existing?.sub ?? "",
-    name: patch.name ?? existing?.name ?? key.split("@")[0],
-    handle: existing?.handle ?? ensureHandle(patch.handle ?? slugHandle(patch.name ?? key.split("@")[0]), accounts),
-    edgePoints: patch.edgePoints != null ? patch.edgePoints : existing?.edgePoints ?? 0,
-    folderId: patch.folderId ?? existing?.folderId ?? null,
-    encRefreshToken:
-      patch.refreshToken != null ? encryptToken(patch.refreshToken, tokenSecretFor(key)) : existing?.encRefreshToken ?? null,
-    driveAuthorizedAt: patch.refreshToken != null ? now : existing?.driveAuthorizedAt ?? null,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
-  accounts[key] = account;
-  await writeAll(accounts);
-  return account;
+  return updateMetaJson<Record<string, EdgeBookAccount>, EdgeBookAccount>(STORE_FILE, {}, (accounts) => {
+    const existing = accounts[key];
+    const now = Date.now();
+    const account: EdgeBookAccount = {
+      email: key,
+      sub: patch.sub ?? existing?.sub ?? "",
+      name: patch.name ?? existing?.name ?? key.split("@")[0],
+      handle: existing?.handle ?? ensureHandle(patch.handle ?? slugHandle(patch.name ?? key.split("@")[0]), accounts),
+      edgePoints: patch.edgePoints != null ? patch.edgePoints : existing?.edgePoints ?? 0,
+      folderId: patch.folderId ?? existing?.folderId ?? null,
+      encRefreshToken:
+        patch.refreshToken != null ? encryptToken(patch.refreshToken, tokenSecretFor(key)) : existing?.encRefreshToken ?? null,
+      driveAuthorizedAt: patch.refreshToken != null ? now : existing?.driveAuthorizedAt ?? null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    return { next: { ...accounts, [key]: account }, result: account };
+  });
 }
 
 /** Explicit disconnect: revoke happened at Google; drop the stored authorization. */
 export async function clearDriveAuth(email: string): Promise<void> {
   const key = email.toLowerCase();
-  const accounts = await readAll();
-  const existing = accounts[key];
-  if (!existing) return;
-  accounts[key] = { ...existing, encRefreshToken: null, driveAuthorizedAt: null, folderId: null, updatedAt: Date.now() };
-  await writeAll(accounts);
+  await updateMetaJson<Record<string, EdgeBookAccount>, null>(STORE_FILE, {}, (accounts) => {
+    const existing = accounts[key];
+    if (!existing) return { result: null };
+    return { next: { ...accounts, [key]: { ...existing, encRefreshToken: null, driveAuthorizedAt: null, folderId: null, updatedAt: Date.now() } }, result: null };
+  });
 }
 
 /** Decrypt the stored refresh token (server-side only). */

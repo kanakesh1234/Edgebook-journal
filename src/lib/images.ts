@@ -103,13 +103,15 @@ export async function processImageFile(file: File): Promise<ProcessedImage> {
  * - Everything else (HEIC on Safari, AVIF, BMP, or anything too big for a request body)
  *   is converted to a JPEG that fits comfortably under common 4.5 MB request limits.
  */
+/** Hosting rejects request bodies above ~4.5 MB, so lesson media stays under 4 MB. */
+export const MAX_LESSON_MEDIA_BYTES = 4 * 1024 * 1024;
 const LESSON_PASSTHROUGH_BYTES = 3.5 * 1024 * 1024;
 const LESSON_MAX_EDGE = 2400;
 export async function prepareLessonImage(file: File): Promise<File> {
   const type = imageTypeOf(file);
   if (!type) throw new ImageError("Use a PNG, JPG, GIF or WebP image.");
   if (type === "image/gif") {
-    if (file.size > 25 * 1024 * 1024) throw new ImageError("That GIF is over 25 MB.");
+    if (file.size > MAX_LESSON_MEDIA_BYTES) throw new ImageError("That GIF is over 4 MB. Use a shorter or smaller GIF.");
     return file;
   }
   const direct = type === "image/png" || type === "image/jpeg" || type === "image/webp";

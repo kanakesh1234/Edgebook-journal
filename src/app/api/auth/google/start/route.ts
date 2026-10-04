@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig, googleAuthUrl } from "@/lib/server/google-config";
 import { signState, randomNonce } from "@/lib/server/tokens";
-import { OAUTH_STATE_COOKIE, sessionCookieOptions } from "@/lib/server/session";
+import { OAUTH_STATE_COOKIE, safeNextPath, sessionCookieOptions } from "@/lib/server/session";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +23,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const next = new URL(request.url).searchParams.get("next") ?? "/dashboard";
+  const next = safeNextPath(new URL(request.url).searchParams.get("next"));
   const nonce = randomNonce();
   const state = signState(config.tokenSecret, nonce);
 
-  console.log(`[AUTH-TRACE] stage=OAUTH_START_ENTERED requestUrl=${request.url} origin=${new URL(request.url).origin} redirectUri=${config.redirectUri} next=${next}`);
+  console.log(`[AUTH-TRACE] stage=OAUTH_START_ENTERED origin=${new URL(request.url).origin} next=${next}`);
   if (!config.redirectUri.startsWith(new URL(request.url).origin)) {
     console.warn(`[AUTH-TRACE] ORIGIN_MISMATCH appOrigin=${new URL(request.url).origin} redirectUri=${config.redirectUri} → Google will redirect to a DIFFERENT origin than the one serving this page`);
   }

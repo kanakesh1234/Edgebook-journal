@@ -34,7 +34,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ imageId: s
     throw err;
   }
   if (!blob) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return new NextResponse(blob, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=3600" } });
+  return new NextResponse(blob, { headers: { "Content-Type": "image/jpeg", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600" } });
 }
 
 export async function PUT(request: Request, ctx: { params: Promise<{ imageId: string }> }) {
@@ -53,6 +53,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
 
   try {
     const bytes = Buffer.from(await blob.arrayBuffer());
+    // The client always re-encodes screenshots to JPEG, so anything else is not a screenshot.
+    if (!(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) {
+      return NextResponse.json({ error: "invalid_image" }, { status: 400 });
+    }
     await withDrive(authed.drive, "putImage", newRequestId(), (t) =>
       putFile(t, authed.drive.folders.screenshots, screenshotFileName(imageId), bytes, "image/jpeg"),
     );

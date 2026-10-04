@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
-import { getGoogleConfig } from "@/lib/server/google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
-import { getAccount } from "@/lib/server/accounts";
+import { sessionEmail, rateLimited } from "@/lib/server/auth";
+import { listAccounts } from "@/lib/server/accounts";
 import { listFor } from "@/lib/server/friends";
-import { uid, type Lesson } from "@/lib/server/lessons-store";
-import { deleteLessons, getLesson, getLessons, removeMedia, saveLesson } from "@/lib/server/storage";
+import { readLessons, updateLessons, removeMedia, uid, type Lesson } from "@/lib/server/lessons-store";
 import { blocksToHtml, cleanHtml, coverOf, hookOf, readMinutes, textOf } from "@/lib/server/lessons-html";
 
 export const dynamic = "force-dynamic";
 
-function sessionEmail(request: Request): string | null {
-  const config = getGoogleConfig();
-  const cookie = readCookie(request, APP_SESSION_COOKIE);
-  return config && cookie ? openAppSession(cookie, config.tokenSecret)?.email ?? null : null;
-}
+const MAX_HTML = 2_000_000;
+const MAX_COMMENTS_PER_LESSON = 300;
 
 /** Me + accepted friends: the only people whose lessons I may see. */
 async function circle(me: string): Promise<Set<string>> {
@@ -24,16 +19,19 @@ async function circle(me: string): Promise<Set<string>> {
   return set;
 }
 
-async function who(email: string) {
-  const a = await getAccount(email);
-  return { handle: a?.handle ?? "trader", name: a?.name?.split(" ")[0] ?? a?.handle ?? "Trader" };
+type Names = (email: string) => { handle: string; name: string };
+
+/** One accounts read for the whole request (instead of one Drive read per lesson / comment). */
+async function nameLookup(): Promise<Names> {
+  const byEmail = new Map((await listAccounts()).map((a) => [a.email.toLowerCase(), a]));
+  return (email) => {
+    const a = byEmail.get(email.toLowerCase());
+    return { handle: a?.handle ?? "trader", name: a?.name?.split(" ")[0] ?? a?.handle ?? "Trader" };
+  };
 }
 
-async function present(l: Lesson, me: string) {
+function present(l: Lesson, me: string, who: Names) {
   const html = l.html ?? blocksToHtml(l.blocks ?? []);
-  const comments = await Promise.all(
-    l.comments.map(async (c) => ({ id: c.id, body: c.body, at: c.at, by: (await who(c.by)).name })),
-  );
   return {
     id: l.id,
     title: l.title,
@@ -44,90 +42,112 @@ async function present(l: Lesson, me: string) {
     hook: hookOf(html),
     readMins: readMinutes(html),
     createdAt: l.createdAt,
-    author: await who(l.author),
+    author: who(l.author),
     bylines: l.bylines ?? [],
     settings: { comments: l.settings?.comments !== false, reposts: l.settings?.reposts !== false },
-    mine: l.author.toLowerCase() === me.toLowerCase(),
+    mine: l.author === me,
     likes: l.likes.length,
     likedByMe: l.likes.includes(me),
     reposts: l.reposts.length,
     repostedByMe: l.reposts.includes(me),
     savedByMe: (l.saves ?? []).includes(me),
-    repostedBy: await Promise.all(l.reposts.filter((e) => e !== me).slice(0, 2).map(async (e) => (await who(e)).name)),
-    comments,
+    repostedBy: l.reposts.filter((e) => e !== me).slice(0, 2).map((e) => who(e).name),
+    comments: l.comments.map((c) => ({ id: c.id, body: c.body, at: c.at, by: who(c.by).name })),
   };
 }
+
+const unavailable = (err: unknown) => {
+  console.error("[lessons] storage error:", err instanceof Error ? err.message : err);
+  return NextResponse.json({ error: "storage_unavailable" }, { status: 503 });
+};
 
 export async function GET(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
-  const ok = await circle(me);
-  const id = new URL(request.url).searchParams.get("id");
-  const visible = (await getLessons()).filter((l) => ok.has(l.author));
+  try {
+    const [ok, all, who] = await Promise.all([circle(me), readLessons(), nameLookup()]);
+    const id = new URL(request.url).searchParams.get("id");
+    const visible = all.filter((l) => ok.has(l.author));
 
-  if (id) {
-    const l = visible.find((x) => x.id === id);
-    if (!l) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    return NextResponse.json({ lesson: await present(l, me) });
+    if (id) {
+      const l = visible.find((x) => x.id === id);
+      if (!l) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      return NextResponse.json({ lesson: present(l, me, who) });
+    }
+    visible.sort((a, b) => b.createdAt - a.createdAt);
+    return NextResponse.json({ lessons: visible.map((l) => present(l, me, who)) });
+  } catch (err) {
+    return unavailable(err);
   }
-  visible.sort((a, b) => b.createdAt - a.createdAt);
-  return NextResponse.json({ lessons: await Promise.all(visible.map((l) => present(l, me))) });
 }
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
+  if (rateLimited(`lessons:${me}`, 120, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+
   const b = (await request.json().catch(() => ({}))) as {
-    action?: string; id?: string; title?: string; subtitle?: string; html?: string; body?: string; ids?: string[]; bylines?: unknown; settings?: { comments?: unknown; reposts?: unknown };
+    action?: unknown; id?: unknown; title?: unknown; subtitle?: unknown; html?: unknown; body?: unknown; ids?: unknown; bylines?: unknown;
+    settings?: { comments?: unknown; reposts?: unknown };
   };
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+
   try {
     if (b.action === "create") {
-      const title = (b.title ?? "").trim();
+      if (rateLimited(`lessons-create:${me}`, 20, 60 * 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+      const title = str(b.title).trim();
       if (!title) return NextResponse.json({ error: "title_required" }, { status: 400 });
-      if ((b.html ?? "").length > 2_000_000) return NextResponse.json({ error: "too_long" }, { status: 413 });
+      if (str(b.html).length > MAX_HTML) return NextResponse.json({ error: "too_long" }, { status: 413 });
       const lesson: Lesson = {
-        id: uid(), author: me, title: title.slice(0, 200), subtitle: (b.subtitle ?? "").slice(0, 300),
-        blocks: [], html: cleanHtml(b.html ?? ""), createdAt: Date.now(),
+        id: uid(), author: me, title: title.slice(0, 200), subtitle: str(b.subtitle).slice(0, 300),
+        blocks: [], html: cleanHtml(str(b.html)), createdAt: Date.now(),
         bylines: Array.isArray(b.bylines) ? b.bylines.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 60)).filter(Boolean).slice(0, 5) : [],
         settings: { comments: b.settings?.comments !== false, reposts: b.settings?.reposts !== false },
         likes: [], reposts: [], saves: [], comments: [],
       };
-      await saveLesson(lesson);
+      await updateLessons((all) => ({ next: [lesson, ...all], result: null }));
       return NextResponse.json({ ok: true, id: lesson.id });
     }
 
     if (b.action === "delete") {
-      // You can only delete your own lessons; ids that are not yours are ignored.
-      const wanted = new Set(Array.isArray(b.ids) ? b.ids : []);
-      const gone = (await getLessons()).filter((l) => wanted.has(l.id) && l.author.toLowerCase() === me.toLowerCase());
-      if (!gone.length) return NextResponse.json({ error: "nothing_deleted" }, { status: 404 });
-      await deleteLessons(gone.map((l) => l.id));
+      const ids = new Set(Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === "string").slice(0, 200) : []);
+      const gone = await updateLessons((all) => {
+        const removed = all.filter((l) => ids.has(l.id) && l.author === me); // you can only delete your own
+        return { next: removed.length ? all.filter((l) => !removed.includes(l)) : undefined, result: removed };
+      });
       await removeMedia(gone);
       return NextResponse.json({ ok: true, deleted: gone.length });
     }
 
+    const action = str(b.action);
+    if (!["like", "save", "repost", "comment"].includes(action)) return NextResponse.json({ error: "unknown_action" }, { status: 400 });
+    const lessonId = str(b.id);
+    const body = str(b.body).trim().slice(0, 1000);
+    if (action === "comment" && !body) return NextResponse.json({ error: "empty_comment" }, { status: 400 });
     const ok = await circle(me);
-    const l = b.id ? await getLesson(b.id) : null;
-    if (!l || !ok.has(l.author)) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    l.comments ??= []; l.likes ??= []; l.reposts ??= [];
-    const flip = (arr: string[]) => (arr.includes(me) ? arr.filter((e) => e !== me) : [...arr, me]);
 
-    if (b.action === "like") l.likes = flip(l.likes);
-    else if (b.action === "save") l.saves = flip(l.saves ?? []); // private bookmark; works on any lesson I can see
-    else if (b.action === "repost") {
-      if (l.settings?.reposts === false && !l.reposts.includes(me)) return NextResponse.json({ error: "reposts_off" }, { status: 403 });
-      l.reposts = flip(l.reposts);
-    }
-    else if (b.action === "comment" && b.body?.trim()) {
-      if (l.settings?.comments === false) return NextResponse.json({ error: "comments_off" }, { status: 403 });
-      l.comments.push({ id: uid(), by: me, body: b.body.trim().slice(0, 1000), at: Date.now() });
-    }
-    else return NextResponse.json({ error: "unknown_action" }, { status: 400 });
+    const outcome = await updateLessons((all) => {
+      const l = all.find((x) => x.id === lessonId && ok.has(x.author));
+      if (!l) return { result: "not_found" as const };
+      const flip = (arr: string[]) => (arr.includes(me) ? arr.filter((e) => e !== me) : [...arr, me]);
+      if (action === "like") l.likes = flip(l.likes);
+      else if (action === "save") l.saves = flip(l.saves ?? []); // private bookmark
+      else if (action === "repost") {
+        if (l.settings?.reposts === false && !l.reposts.includes(me)) return { result: "reposts_off" as const };
+        l.reposts = flip(l.reposts);
+      } else {
+        if (l.settings?.comments === false) return { result: "comments_off" as const };
+        if (l.comments.length >= MAX_COMMENTS_PER_LESSON) return { result: "too_many" as const };
+        l.comments.push({ id: uid(), by: me, body, at: Date.now() });
+      }
+      return { next: all, result: "ok" as const };
+    });
 
-    await saveLesson(l);
+    if (outcome === "not_found") return NextResponse.json({ error: "not_found" }, { status: 404 });
+    if (outcome === "reposts_off" || outcome === "comments_off") return NextResponse.json({ error: outcome }, { status: 403 });
+    if (outcome === "too_many") return NextResponse.json({ error: "too_many_comments" }, { status: 429 });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[lessons] POST failed:", err);
-    return NextResponse.json({ error: "storage_error", detail: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return unavailable(err);
   }
 }

@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
-import { getGoogleConfig } from "@/lib/server/google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
+import { rateLimited, sessionEmail } from "@/lib/server/auth";
 import { getAccount, findByHandle } from "@/lib/server/accounts";
 import { friendEmails, findRecord, listFor, respond, sendRequest, terminate } from "@/lib/server/friends";
 import { publicMetricsFor } from "@/lib/server/metrics";
 
 export const dynamic = "force-dynamic";
-
-function sessionEmail(request: Request): string | null {
-  const config = getGoogleConfig();
-  const cookie = readCookie(request, APP_SESSION_COOKIE);
-  return config && cookie ? openAppSession(cookie, config.tokenSecret)?.email ?? null : null;
-}
 
 /** GET — friends list (with competition-safe metrics) + pending requests. */
 export async function GET(request: Request) {
@@ -23,6 +16,8 @@ export async function GET(request: Request) {
 
   // Search by @handle — returns only handle + name, never email.
   if (searchHandle) {
+    // Stops a script from walking the whole handle directory.
+    if (rateLimited(`friend-search:${me}`, 30, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     const target = await findByHandle(searchHandle);
     if (!target || target.email === me) return NextResponse.json({ results: [] });
     return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name?.split(" ")[0] ?? target.handle }] });
@@ -57,13 +52,15 @@ export async function POST(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as {
-    action?: string;
-    handle?: string;
-    recordId?: string;
-    status?: "accepted" | "declined";
-    block?: boolean;
+  const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const body = {
+    action: typeof raw.action === "string" ? raw.action : "",
+    handle: typeof raw.handle === "string" ? raw.handle.slice(0, 40) : "",
+    recordId: typeof raw.recordId === "string" ? raw.recordId.slice(0, 80) : "",
+    // Only these two answers are valid; blocking has its own action.
+    status: (raw.status === "accepted" ? "accepted" : raw.status === "declined" ? "declined" : null) as "accepted" | "declined" | null,
   };
+  if (rateLimited(`friends:${me}`, 60, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   if (body.action === "request") {
     if (!body.handle) return NextResponse.json({ error: "handle_required" }, { status: 400 });

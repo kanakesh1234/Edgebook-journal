@@ -23,7 +23,7 @@
 /*  admin credential can't live inside the store it's used to read.     */
 /* ------------------------------------------------------------------ */
 
-import { createFolder, findFolder, getFile, putFile, refreshAccessTokenDetailed } from "./drive";
+import { createFolder, deleteFile, findFolder, getFile, putFile, refreshAccessTokenDetailed } from "./drive";
 import { getGoogleConfig } from "./google-config";
 
 const META_FOLDER = "EdgeBook-Meta";
@@ -133,6 +133,50 @@ export async function writeMetaJson(name: string, data: unknown): Promise<void> 
   const token = await getAdminAccessToken();
   const folderId = await getMetaFolderId();
   await putFile(token, folderId, name, Buffer.from(JSON.stringify(data, null, 2)), "application/json");
+}
+
+/* ------------------------------------------------------------------ */
+/*  Safe read-modify-write                                              */
+/*  Two requests changing the same JSON file at once would otherwise    */
+/*  both read the old copy and the second write would erase the first   */
+/*  (a lost like / comment / friend request). Updates to one file run   */
+/*  one at a time inside this server instance.                          */
+/* ------------------------------------------------------------------ */
+const locks = new Map<string, Promise<unknown>>();
+
+function withLock<R>(name: string, fn: () => Promise<R>): Promise<R> {
+  const run = (locks.get(name) ?? Promise.resolve()).catch(() => undefined).then(fn);
+  locks.set(name, run);
+  void run.finally(() => { if (locks.get(name) === run) locks.delete(name); }).catch(() => undefined);
+  return run;
+}
+
+/**
+ * Read `name`, let `fn` change it, write it back — serialised per file.
+ * `fn` returns `{ next, result }`; leave `next` undefined to skip the write.
+ */
+export function updateMetaJson<T, R>(
+  name: string,
+  fallback: T,
+  fn: (current: T) => { next?: T; result: R } | Promise<{ next?: T; result: R }>,
+): Promise<R> {
+  return withLock(name, async () => {
+    const current = await readMetaJson<T>(name, fallback);
+    const { next, result } = await fn(current);
+    if (next !== undefined) await writeMetaJson(name, next);
+    return result;
+  });
+}
+
+/* Binary files (lesson images / video / audio) live in the same admin folder. */
+export async function putMetaFile(name: string, data: Buffer, mimeType: string): Promise<void> {
+  await putFile(await getAdminAccessToken(), await getMetaFolderId(), name, data, mimeType);
+}
+export async function getMetaFile(name: string): Promise<Blob | null> {
+  return getFile(await getAdminAccessToken(), await getMetaFolderId(), name);
+}
+export async function deleteMetaFile(name: string): Promise<void> {
+  await deleteFile(await getAdminAccessToken(), await getMetaFolderId(), name);
 }
 
 /** TEST-ONLY: clears per-process caches so tests can simulate a cold restart. */

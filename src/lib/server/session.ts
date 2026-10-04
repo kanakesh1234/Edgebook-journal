@@ -19,14 +19,19 @@ export interface AppSession {
   email: string;
   name: string;
   sub: string;
+  /** Expiry (epoch ms), enforced server-side. A copied/stolen cookie stops working after this, whatever the browser does. */
+  exp?: number;
 }
+
+/** App sessions last 30 days. */
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 function hmac(input: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(input).digest("base64url");
 }
 
 export function sealAppSession(session: AppSession, secret: string): string {
-  const body = JSON.stringify(session);
+  const body = JSON.stringify({ ...session, exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 });
   const mac = hmac(body, secret);
   return Buffer.from(JSON.stringify({ body, mac })).toString("base64url");
 }
@@ -45,6 +50,8 @@ export function openAppSession(cookie: string | undefined, secret: string): AppS
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     const session = JSON.parse(body) as AppSession;
     if (!session.email) return null;
+    // Cookies sealed before expiry existed (no `exp`) are rejected: one re-login, and no cookie lives forever.
+    if (typeof session.exp !== "number" || session.exp < Date.now()) return null;
     return session;
   } catch {
     return null;
@@ -68,7 +75,7 @@ export function sessionCookieOptions(request?: Request) {
     secure,
     sameSite: "lax" as const,
     path: "/",
-    maxAge: 60 * 60 * 24 * 30, // app session: 30 days (Drive auth itself is server-side)
+    maxAge: SESSION_MAX_AGE_SECONDS, // app session: 30 days (Drive auth itself is server-side)
   };
 }
 
@@ -81,4 +88,15 @@ export function readCookie(request: Request, name: string): string | undefined {
     if (k === name) return decodeURIComponent(v.join("="));
   }
   return undefined;
+}
+
+/**
+ * Only same-site relative paths are allowed as a post-login destination.
+ * `//evil.com` and `/\\evil.com` start with "/" but are treated by browsers as another host (open redirect).
+ */
+export function safeNextPath(value: string | null | undefined, fallback = "/dashboard"): string {
+  if (!value || value.length > 300) return fallback;
+  if (!/^\/(?![\/\\])/.test(value)) return fallback;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return fallback;
+  return value;
 }

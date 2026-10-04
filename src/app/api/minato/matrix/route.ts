@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
+import { rateLimited, sessionEmail } from "@/lib/server/auth";
+import { getGoogleConfig } from "@/lib/server/google-config";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,9 @@ function normalize(items: unknown[]) {
 }
 
 export async function POST(request: Request) {
+  const me = sessionEmail(request);
+  if (getGoogleConfig() && !me) return NextResponse.json({ items: [] }, { status: 401 });
+  if (rateLimited(`matrix:${me ?? "local"}`, 30, 5 * 60_000)) return NextResponse.json({ items: [] }, { status: 429 });
   const body = await request.json().catch(() => ({})) as { action?: unknown; questions?: unknown[]; submittedAnswers?: unknown };
   const action = body.action === "explain" ? "explain" : body.action === "frame" ? "frame" : null;
   const questions = normalize(Array.isArray(body.questions) ? body.questions : []);

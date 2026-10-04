@@ -18,8 +18,7 @@ import "@fontsource/spectral/400-italic.css";
 import "@fontsource/spectral/600.css";
 import "@fontsource/spectral/700.css";
 import "@/components/lessons/lessons.css";
-import { upload } from "@vercel/blob/client";
-import { ImageError, imageTypeOf, prepareLessonImage } from "@/lib/images";
+import { ImageError, imageTypeOf, MAX_LESSON_MEDIA_BYTES, prepareLessonImage } from "@/lib/images";
 import "@/components/lessons/writer.css";
 
 /* ------------------------------------------------------------------ */
@@ -39,9 +38,10 @@ const anyMedia = (f: File) => !!imageTypeOf(f) || VID.test(f.type) || AUD.test(f
 const ERR_TEXT: Record<string, string> = {
   not_logged_in: "You're signed out. Sign in again, then retry.",
   unsupported_type: "That file type isn't supported.",
-  too_large: "That file is over 50 MB.",
+  too_large: "That file is over 4 MB. Use a smaller (or compressed) file.",
+  rate_limited: "Too many uploads in a row. Wait a minute and retry.",
   bad_content: "That file doesn't look like a valid image, video or audio file.",
-  storage_failed: "The server couldn't save the file. Check that the Blob store is connected to this project.",
+  storage_failed: "The server couldn't save the file. Try again in a moment.",
 };
 
 const TEXT_COLORS = ["#e03131", "#f76707", "#f59f00", "#2f9e44", "#1c7ed6", "#7048e8", "#d6336c", "#868e96"];
@@ -225,6 +225,7 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
     const ed = edRef.current;
     if (!ed) return;
     if (!anyMedia(picked)) return say("Use an image (png, jpg, gif, webp), video (mp4, webm, mov) or audio (mp3, wav, m4a, ogg) file.");
+    if (!imageTypeOf(picked) && picked.size > MAX_LESSON_MEDIA_BYTES) return say("Video and audio files must be under 4 MB.");
     setUploading(true);
     try {
       let file = picked;
@@ -232,17 +233,15 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
         try { file = await prepareLessonImage(picked); }
         catch (err) { return say(err instanceof ImageError ? err.message : "That image could not be read."); }
       }
-      if (file.size > 50 * 1024 * 1024) return say(ERR_TEXT.too_large);
-      const kind: "image" | "video" | "audio" = file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image";
-      const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-60) || "media";
-      try {
-        // Straight from the browser to Vercel Blob; /api/lessons/media only issues the upload token.
-        const blob = await upload(`lessons/${safe}`, file, { access: "public", handleUploadUrl: "/api/lessons/media", contentType: file.type });
-        ed.chain().focus().insertContent([{ type: kind, attrs: { src: blob.url } }, { type: "paragraph" }]).run();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "";
-        return say(msg.includes("not_logged_in") ? ERR_TEXT.not_logged_in : `Upload failed${msg ? `: ${msg}` : ""}. Try again.`);
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/lessons/media", { method: "POST", body: fd }).catch(() => null);
+      if (!r) return say("Upload failed — check your connection and try again.");
+      if (!r.ok) {
+        const code = ((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? "";
+        return say(r.status === 413 ? "That file is too large to upload." : ERR_TEXT[code] ?? `Upload failed (${r.status}). Try again.`);
       }
+      const d = (await r.json()) as { url: string; kind: "image" | "video" | "audio" };
+      ed.chain().focus().insertContent([{ type: d.kind, attrs: { src: d.url } }, { type: "paragraph" }]).run();
     } finally {
       setUploading(false);
     }
@@ -384,9 +383,14 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "create", title, subtitle, html: finalHtml, bylines, settings }),
     }).catch(() => null);
-    const d = (await r?.json().catch(() => ({}))) as { id?: string } | undefined;
+    const d = (await r?.json().catch(() => ({}))) as { id?: string; error?: string } | undefined;
     setBusy(false);
-    if (!r?.ok || !d?.id) return setErr(r?.status === 413 ? "This lesson is too long to publish." : "Couldn’t publish. Check your connection and try again.");
+    if (!r?.ok || !d?.id) return setErr(
+      r?.status === 413 ? "This lesson is too long to publish."
+      : r?.status === 401 ? "You're signed out. Sign in again, then publish."
+      : d?.error === "rate_limited" ? "You're publishing too fast. Wait a bit and retry."
+      : d?.error === "storage_unavailable" ? "Lessons storage isn't reachable right now. Try again in a moment."
+      : "Couldn’t publish. Check your connection and try again.");
     localStorage.removeItem(DRAFT);
     router.push(`/lessons/${d.id}`);
   };

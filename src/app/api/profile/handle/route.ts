@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
-import { getGoogleConfig } from "@/lib/server/google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
-import { findByHandle, getAccount, upsertAccount } from "@/lib/server/accounts";
+import { rateLimited, sessionEmail } from "@/lib/server/auth";
+import { claimHandle, getAccount } from "@/lib/server/accounts";
 
 export const dynamic = "force-dynamic";
 
 const HANDLE_RE = /^[a-z0-9_]{3,24}$/;
-
-function sessionEmail(request: Request): string | null {
-  const config = getGoogleConfig();
-  const cookie = readCookie(request, APP_SESSION_COOKIE);
-  return config && cookie ? openAppSession(cookie, config.tokenSecret)?.email ?? null : null;
-}
 
 /** GET — current account handle (server-owned for Google users). */
 export async function GET(request: Request) {
@@ -29,6 +22,7 @@ export async function POST(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
 
+  if (rateLimited(`handle:${me}`, 10, 10 * 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   const body = (await request.json().catch(() => ({}))) as { handle?: string };
   const handle = (typeof body.handle === "string" ? body.handle : "").trim().replace(/^@/, "").toLowerCase();
 
@@ -39,14 +33,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await findByHandle(handle);
-  if (existing && existing.email !== me) {
-    return NextResponse.json(
-      { error: "taken", detail: "That handle is already taken." },
-      { status: 409 },
-    );
+  const result = await claimHandle(me, handle);
+  if (result === "taken") {
+    return NextResponse.json({ error: "taken", detail: "That handle is already taken." }, { status: 409 });
   }
-
-  const updated = await upsertAccount({ email: me, handle });
-  return NextResponse.json({ handle: updated.handle });
+  if (result === "missing") return NextResponse.json({ error: "no_account" }, { status: 404 });
+  return NextResponse.json({ handle });
 }

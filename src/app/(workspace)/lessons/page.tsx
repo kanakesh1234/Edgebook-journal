@@ -5,9 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { btn, btnDanger, btnPrimary, pill } from "@/components/lessons/buttons";
 import { BookmarkIcon } from "@/components/lessons/bookmark-icon";
-import { ConfirmDialog } from "@/components/ui/confirm";
-import { toast } from "@/components/ui/toast";
 import "@/components/lessons/lessons.css";
+import { lessonsPost } from "@/components/lessons/api";
 
 export interface LessonView {
   id: string; title: string; subtitle: string; createdAt: number;
@@ -17,8 +16,7 @@ export interface LessonView {
   comments: { id: string; by: string; body: string; at: number }[];
 }
 
-const send = (body: object) =>
-  fetch("/api/lessons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const send = lessonsPost;
 
 export default function LessonsPage() {
   const router = useRouter();
@@ -28,8 +26,6 @@ export default function LessonsPage() {
   const [openId, setOpenId] = useState<string | null>(null); // inline comments
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<"all" | "saved">("all");
-  const [askDelete, setAskDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     fetch("/api/lessons", { cache: "no-store" })
@@ -53,35 +49,20 @@ export default function LessonsPage() {
       if (action === "repost") return { ...l, repostedByMe: !l.repostedByMe, reposts: l.reposts + (l.repostedByMe ? -1 : 1) };
       return { ...l, savedByMe: !l.savedByMe };
     }));
-    await send({ action, id }).catch(() => {});
+    await send({ action, id });
     load();
   };
   const comment = async (id: string) => {
     if (!draft.trim()) return;
-    await send({ action: "comment", id, body: draft });
-    setDraft("");
+    if (await send({ action: "comment", id, body: draft })) setDraft("");
     load();
   };
   const toggle = (id: string) =>
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const remove = async () => {
-    if (!picked.size) return;
-    setDeleting(true);
-    try {
-      const res = await send({ action: "delete", ids: [...picked] });
-      if (!res.ok) {
-        const detail = await res.json().then((j: { detail?: string; error?: string }) => j?.detail ?? j?.error).catch(() => undefined);
-        throw new Error(res.status === 401 ? "Please log in again." : detail ? `${res.status}: ${detail}` : `Server said ${res.status}.`);
-      }
-      const gone = new Set(picked);
-      setItems((cur) => cur && cur.filter((l) => !gone.has(l.id)));
-      toast.success(`Deleted ${gone.size} lesson${gone.size > 1 ? "s" : ""}`);
-      setPicked(new Set()); setSelecting(false);
-    } catch (e) {
-      toast.error("Couldn't delete", e instanceof Error ? e.message : "Try again.");
-    } finally {
-      setDeleting(false); setAskDelete(false); load();
-    }
+    if (!picked.size || !confirm(`Delete ${picked.size} lesson${picked.size > 1 ? "s" : ""}? This can’t be undone.`)) return;
+    if (await send({ action: "delete", ids: [...picked] })) { setPicked(new Set()); setSelecting(false); }
+    load();
   };
 
   return (
@@ -112,7 +93,7 @@ export default function LessonsPage() {
               onChange={() => setPicked(allPicked ? new Set() : new Set(mine.map((l) => l.id)))} />
             Select all my lessons ({mine.length})
           </label>
-          <button className={btnDanger} disabled={!picked.size} onClick={() => setAskDelete(true)}>Delete ({picked.size})</button>
+          <button className={btnDanger} disabled={!picked.size} onClick={remove}>Delete ({picked.size})</button>
         </div>
       )}
 
@@ -175,14 +156,6 @@ export default function LessonsPage() {
           );
         })}
       </div>
-      <ConfirmDialog
-        open={askDelete}
-        onClose={() => !deleting && setAskDelete(false)}
-        onConfirm={remove}
-        busy={deleting}
-        title={`Delete ${picked.size} lesson${picked.size > 1 ? "s" : ""}?`}
-        body="This can't be undone."
-      />
     </div>
   );
 }

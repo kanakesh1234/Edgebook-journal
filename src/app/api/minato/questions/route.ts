@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { cardFromFact, type FactAtom, type QuestionFormat } from "@/lib/practice/time-machine";
 import { getOpenRouterConfig } from "@/lib/services/ai";
+import { rateLimited, sessionEmail } from "@/lib/server/auth";
+import { getGoogleConfig } from "@/lib/server/google-config";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +48,9 @@ function locallyValidate(proposals: Proposal[], atoms: FactAtom[], seen: Seen[],
 }
 
 export async function POST(request: Request) {
+  const me = sessionEmail(request);
+  if (getGoogleConfig() && !me) return NextResponse.json({ cards: [], source: "local", reason: "Sign in to use AI questions." }, { status: 401 });
+  if (rateLimited(`questions:${me ?? "local"}`, 20, 5 * 60_000)) return NextResponse.json({ cards: [], source: "local", reason: "Too many requests — try again in a few minutes." }, { status: 429 });
   const body = await request.json().catch(() => ({})) as { atoms?: unknown[]; doNotRepeat?: Seen[]; count?: number; seed?: string };
   const atoms = (Array.isArray(body.atoms) ? body.atoms : []).filter(validAtom).slice(0, 300);
   const seen = Array.isArray(body.doNotRepeat) ? body.doNotRepeat.slice(-500) : [];
@@ -60,7 +65,7 @@ export async function POST(request: Request) {
   if (config) {
     try {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST", headers: { "Authorization": `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+        method: "POST", signal: AbortSignal.timeout(20_000), headers: { "Authorization": `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: config.model, temperature: 0.8, response_format: { type: "json_object" }, messages: [
           { role: "system", content: "Return strict JSON only: {\"questions\":[{\"factId\":string,\"format\":string,\"variant\":0-3}]}. Pick varied formats. Use only supplied fact IDs; do not write questions, answers, numbers, times, prices, or rules." },
           { role: "user", content: JSON.stringify({ facts: atoms, doNotRepeat: seen, count, seed: body.seed ?? "" }) },
@@ -73,6 +78,7 @@ export async function POST(request: Request) {
   }
   const cards = locallyValidate(proposals, atoms, seen, count);
   const value = { cards, createdAt: Date.now() };
+  if (bank.size >= 100) bank.delete(bank.keys().next().value as string); // bounded cache
   bank.set(cacheKey, value);
   return NextResponse.json({ ...value, source: proposals.length ? "ai-validated" : "local" });
 }

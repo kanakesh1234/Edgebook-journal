@@ -12,6 +12,7 @@ const root = process.env.VERCEL ? undefined : path.dirname(__dirname);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false, // don't advertise the framework in every response
   ...(root ? { turbopack: { root }, outputFileTracingRoot: root } : {}),
 };
 

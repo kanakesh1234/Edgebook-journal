@@ -1,28 +1,27 @@
-# Edgebook update — friends fix, image uploads, glass article cards, flat lesson buttons
+# Edgebook fix 2 — lessons save/delete error + security hardening
 
-Copy every file in this folder into the SAME path in your project (src/... is already laid out).
+Copy every file here into the SAME path in your project, then DELETE:
+- src/app/api/drive/diagnose/        (whole folder — unsafe, see below)
+- git rm -r --cached .data           (stop committing lesson data; .data/ is now in .gitignore). Do this AFTER you have
+                                      created/liked/commented once so lessons.json exists in Drive (the old data seeds it).
 
-DELETE (no longer used):
-- src/app/api/friends/competition/   (whole folder — head-to-head is removed)
+No new packages, no new env vars. Redeploy. Everyone signs in again once (sessions now expire).
 
-No new packages, no env changes.
+## The bug
+"500: EROFS: read-only file system, open '/var/task/.data/lessons.json'" — Vercel's disk is read-only; lessons were saved to
+a local file. They now live in the same admin Google Drive folder as accounts.json / friends.json (ADMIN_GOOGLE_REFRESH_TOKEN).
+Existing lessons + images that shipped in .data/ are copied into Drive the first time they are used.
+Uploads are capped at 4 MB (Vercel rejects request bodies ~4.5 MB).
 
-Friends
-- src/app/api/friends/route.ts            fix: incoming requests showed YOUR data (wrong "other person" email)
-- src/app/(workspace)/friends/page.tsx    head-to-head removed; small trash icon (with confirm) replaces "Remove"
-
-Mobile / tablet
-- src/components/shell/nav.tsx            gear removed from the top bar; it now only appears at the bottom of the open menu
-
-Lessons
-- src/components/lessons/buttons.ts       flat buttons (3D shadows + press-down removed)
-- src/components/lessons/lessons.css      editorial Liquid-Glass article cards (theme tokens only)
-- src/app/(workspace)/lessons/page.tsx    feed uses the new cards
-- src/app/(workspace)/lessons/[id]/page.tsx  renamed button imports
-
-Image uploads
-- src/lib/images.ts                       extension fallback, HEIC message, white flatten, lesson image prep/resize
-- src/components/lessons/writer.tsx       normalises images before upload, shows the real reason on failure
-- src/app/api/lessons/media/route.ts      JSON errors, content check, handles write failures
-- src/lib/services/storage.ts             Drive screenshot upload retries transient failures
-- src/components/journal/entry-form-modal.tsx  "Screenshot upload failed" toast
+## Security fixes
+- NEW src/middleware.ts: cross-site writes to /api blocked; CSP, X-Frame-Options, nosniff, HSTS, Referrer/Permissions policy.
+- Open redirect after login (`next=//evil.com`) fixed; Google ID token audience/issuer/expiry checked.
+- Sessions now carry a server-enforced expiry (a stolen cookie no longer works forever).
+- OAuth code/state no longer written to logs.
+- /api/drive/diagnose removed (was live in production; `?write=1` rewrote your journal).
+- /api/market-data, /catalog, /minato/chat, /minato/matrix, /minato/questions required NO login — anyone could spend your
+  paid LSE / OpenRouter keys. Now: signed-in only + rate limits + input limits; provider errors no longer echoed.
+- Friends: a blocked person could un-block themselves (accept/remove); invalid `status` values were stored. Fixed.
+- Friends/accounts/lessons updates are serialised (no more lost likes/requests when two happen at once); handle claim is atomic.
+- Lesson uploads: real file type checked from the bytes, served with nosniff + sandbox CSP; screenshot upload must be a JPEG.
+- Rate limits: friend search, friend actions, handle changes, lesson actions/uploads, Minato.

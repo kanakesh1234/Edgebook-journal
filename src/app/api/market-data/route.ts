@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { INSTRUMENTS } from '@/lib/backtesting/instruments';
+import { rateLimited, sessionEmail } from '@/lib/server/auth';
 
 /* ------------------------------------------------------------------ */
 /*  Market data proxy — server-side only                                */
@@ -91,7 +92,16 @@ function resolveProviderSymbol(symbol: string): string {
   return symbol;
 }
 
+const SYMBOL_RE = /^[A-Za-z0-9._-]{1,20}$/;
+const TIMEFRAME_RE = /^\d{1,3}(s|m|h|d|w)$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]{0,20}(Z|[+-]\d{2}:?\d{2})?)?$/;
+
 export async function GET(req: NextRequest) {
+  // The upstream data plan is paid for — only signed-in users may spend it.
+  const me = sessionEmail(req);
+  if (!me) return NextResponse.json({ error: 'not_logged_in' }, { status: 401 });
+  if (rateLimited(`market:${me}`, 120, 60_000)) return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+
   const apiKey = getApiKey();
   if (!apiKey) {
     return NextResponse.json(
@@ -108,6 +118,10 @@ export async function GET(req: NextRequest) {
 
   if (!rawSymbol) {
     return NextResponse.json({ error: 'Missing required parameter: symbol' }, { status: 400 });
+  }
+
+  if (!SYMBOL_RE.test(rawSymbol) || !TIMEFRAME_RE.test(timeframe) || (start && !DATE_RE.test(start)) || (end && !DATE_RE.test(end))) {
+    return NextResponse.json({ error: 'Invalid symbol, timeframe or date.' }, { status: 400 });
   }
 
   // Resolve to LSE provider symbol (NQ → NQ.F, ES → ES.F, etc.)
@@ -151,10 +165,11 @@ export async function GET(req: NextRequest) {
     });
 
     if (!lseRes.ok) {
-      const text = await lseRes.text().catch(() => '');
+      // Never forward the provider's raw error body to the browser (can contain account / quota details).
+      console.error(`[market-data] LSE responded ${lseRes.status}`);
       return NextResponse.json(
-        { error: `LSE API error (${lseRes.status}): ${text || lseRes.statusText}` },
-        { status: lseRes.status >= 500 ? 502 : lseRes.status },
+        { error: `Market data provider error (${lseRes.status}).` },
+        { status: lseRes.status >= 500 ? 502 : lseRes.status === 429 ? 429 : 502 },
       );
     }
 
@@ -212,7 +227,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ candles: sliced, count: sliced.length });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: `Failed to fetch market data: ${msg}` }, { status: 502 });
+    console.error('[market-data] fetch failed:', err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: 'Failed to fetch market data.' }, { status: 502 });
   }
 }
