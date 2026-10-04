@@ -173,7 +173,7 @@ export async function POST(request: Request) {
     entries?: Record<string, unknown>[];
     /** True when the client intentionally supplied the complete in-memory journal, including an empty challenge. */
     journalProvided?: boolean;
-    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode"> | null;
+    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode" | "trailingBasis" | "drawdownFloor"> | null;
     responseTokenLimit?: number;
   };
   const messages = body.messages ?? [];
@@ -235,6 +235,13 @@ export async function POST(request: Request) {
     targetEquity: selectedChallenge?.targetBalance ?? 20000,
     maxDrawdown: selectedChallenge?.maxDrawdown ?? 1000,
     currency: "USD",
+    ...(selectedChallenge
+      ? {
+          drawdownMode: selectedChallenge.drawdownMode ?? "static",
+          trailingBasis: selectedChallenge.trailingBasis ?? null,
+          drawdownFloor: selectedChallenge.drawdownFloor ?? null,
+        }
+      : {}),
   });
   const holds = holdTimeStats(entries as never);
   const patterns = detectPatterns(entries as never);
@@ -316,6 +323,7 @@ export async function POST(request: Request) {
       targetBalance: selectedChallenge.targetBalance ?? null,
       maxDrawdown: selectedChallenge.maxDrawdown ?? null,
       drawdownMode: selectedChallenge.drawdownMode ?? "static",
+      trailingBasis: selectedChallenge.drawdownMode === "dynamic" ? (selectedChallenge.trailingBasis ?? "live") : null,
     } : null,
     trades: stats.tradingDays,
     totalPnl: Math.round(stats.totalPnl),

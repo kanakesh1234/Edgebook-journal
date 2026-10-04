@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp, persistFailedSince } from "@/lib/store";
 import { challengeProgress, type ChallengeProgress } from "@/lib/challenges";
-import type { Challenge, DrawdownMode } from "@/lib/types";
+import type { Challenge, DrawdownMode, TrailingBasis } from "@/lib/types";
 import { formatSignedMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/input";
@@ -273,17 +273,17 @@ function ChallengeDetail({
           <Metric label="Current balance" value={formatSignedMoney(progress.currentEquity)} />
           <Metric label="Highest balance" value={formatSignedMoney(progress.highestBalance)} />
           <Metric
-            label={`Drawdown (${progress.drawdownMode})`}
+            label={`Drawdown (${ddLabel(progress.drawdownMode, progress.trailingBasis)})`}
             value={formatSignedMoney(progress.currentDrawdown)}
             tone={progress.currentDrawdown > 0 ? "loss" : "muted"}
           />
           <Metric
-            label="Drawdown remaining"
-            value={progress.maxDrawdown > 0 ? formatSignedMoney(progress.remainingDrawdown) : "—"}
-            tone={progress.maxDrawdown > 0 && progress.remainingDrawdown <= progress.maxDrawdown * 0.25 ? "loss" : "profit"}
+            label="Cushion above floor"
+            value={progress.maxDrawdown > 0 ? formatSignedMoney(progress.drawdownCushion) : "—"}
+            tone={progress.maxDrawdown > 0 && (progress.breached || progress.remainingDrawdown <= progress.maxDrawdown * 0.25) ? "loss" : "profit"}
           />
           <Metric
-            label="Drawdown threshold"
+            label="Drawdown floor"
             value={progress.maxDrawdown > 0 ? formatSignedMoney(progress.drawdownThreshold) : "—"}
           />
           <Metric label="Target progress" value={`${progress.progressPct}%`} tone="gold" />
@@ -342,6 +342,17 @@ function ChallengeDetail({
   );
 }
 
+function ddLabel(mode: DrawdownMode, basis: TrailingBasis | null): string {
+  if (mode !== "dynamic") return "static";
+  return basis === "eod" ? "dynamic · EOD" : "dynamic · live";
+}
+
+const DD_HELP: Record<string, string> = {
+  static: "Fixed loss floor (starting balance − max drawdown) that never moves.",
+  eod: "Floor trails the highest end-of-day balance − max drawdown. It only moves up, and only after a day closes.",
+  live: "Floor trails the highest balance reached − max drawdown. It moves up immediately with every new high.",
+};
+
 /* ------------------------------ form modal ------------------------------ */
 
 function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; challenge: Challenge | null; onClose: () => void }) {
@@ -351,6 +362,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
   const [targetBalance, setTargetBalance] = useState("");
   const [maxDrawdown, setMaxDrawdown] = useState("");
   const [drawdownMode, setDrawdownMode] = useState<DrawdownMode>("static");
+  const [trailingBasis, setTrailingBasis] = useState<TrailingBasis>("eod");
   const [drawdownFloor, setDrawdownFloor] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -369,6 +381,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       setTargetBalance(editing.targetBalance?.toString() ?? "");
       setMaxDrawdown(editing.maxDrawdown?.toString() ?? "");
       setDrawdownMode(editing.drawdownMode ?? "static");
+      setTrailingBasis(editing.trailingBasis ?? "live"); // legacy dynamic = live
       setDrawdownFloor(editing.drawdownFloor?.toString() ?? "");
       setStartDate(editing.startDate ?? "");
       setEndDate(editing.endDate ?? "");
@@ -379,7 +392,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       setNotes(editing.notes ?? "");
     } else {
       setName(""); setStartingBalance(""); setTargetBalance(""); setMaxDrawdown("");
-      setDrawdownMode("static"); setDrawdownFloor(""); setStartDate(""); setEndDate("");
+      setDrawdownMode("static"); setTrailingBasis("eod"); setDrawdownFloor(""); setStartDate(""); setEndDate("");
       setDailyProfitTarget(""); setDailyLossLimit(""); setTradeLimit(""); setInstruments(""); setNotes("");
     }
     setError(null);
@@ -398,6 +411,7 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
       startingBalance: start,
       targetBalance: target,
       drawdownMode,
+      trailingBasis: drawdownMode === "dynamic" ? trailingBasis : null,
       maxDrawdown: Number(maxDrawdown) || null,
       drawdownFloor: drawdownMode === "dynamic" && drawdownFloor ? Number(drawdownFloor) : null,
       startDate: startDate || undefined,
@@ -444,24 +458,38 @@ function ChallengeFormModal({ open, challenge, onClose }: { open: boolean; chall
             <Field label="Max drawdown" htmlFor="ch-dd">
               <TextInput id="ch-dd" inputMode="decimal" className="tabular" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value.replace(/[^\d.]/g, ""))} />
             </Field>
-            {drawdownMode === "dynamic" ? (
-              <Field label="Drawdown floor / lock" hint="optional — trailing threshold never goes below this" htmlFor="ch-ddfloor">
-                <TextInput id="ch-ddfloor" inputMode="decimal" className="tabular" placeholder={`e.g. ${(Number(startingBalance) || 50000) - (Number(maxDrawdown) || 2500)}`} value={drawdownFloor} onChange={(e) => setDrawdownFloor(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-            ) : (
-              <div aria-hidden className="hidden sm:block" />
-            )}
-            <Field label="Drawdown model" htmlFor="ch-ddmode">
+            <Field label="Drawdown type" htmlFor="ch-ddmode">
               <select
                 id="ch-ddmode"
                 value={drawdownMode}
                 onChange={(e) => setDrawdownMode(e.target.value as DrawdownMode)}
                 className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink focus:border-gold/60 focus:outline-none"
               >
-                <option value="static">Static — from starting balance</option>
-                <option value="dynamic">Dynamic — trailing high-water mark</option>
+                <option value="static">Static — fixed floor</option>
+                <option value="dynamic">Dynamic — floor trails upward</option>
               </select>
             </Field>
+            {drawdownMode === "dynamic" && (
+              <>
+                <Field label="Trailing basis" htmlFor="ch-ddbasis">
+                  <select
+                    id="ch-ddbasis"
+                    value={trailingBasis}
+                    onChange={(e) => setTrailingBasis(e.target.value as TrailingBasis)}
+                    className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink focus:border-gold/60 focus:outline-none"
+                  >
+                    <option value="eod">End-of-day (EOD) trailing</option>
+                    <option value="live">Live (intraday) trailing</option>
+                  </select>
+                </Field>
+                <Field label="Drawdown floor / lock" hint="optional — trailing floor never goes below this" htmlFor="ch-ddfloor">
+                  <TextInput id="ch-ddfloor" inputMode="decimal" className="tabular" placeholder={`e.g. ${(Number(startingBalance) || 50000) - (Number(maxDrawdown) || 2500)}`} value={drawdownFloor} onChange={(e) => setDrawdownFloor(e.target.value.replace(/[^\d.]/g, ""))} />
+                </Field>
+              </>
+            )}
+            <p className="col-span-2 -mt-1 text-[12px] leading-relaxed text-muted">
+              {DD_HELP[drawdownMode === "dynamic" ? trailingBasis : "static"]} Cushion = current equity − current floor.
+            </p>
             <Field label="Start date" hint="optional" htmlFor="ch-startdate">
               <TextInput id="ch-startdate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </Field>

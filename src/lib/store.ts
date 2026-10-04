@@ -395,7 +395,11 @@ export const useApp = create<AppState>((set, get) => ({
   async saveChallenge(challenge) {
     const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
-    const challenges = [...(settings.challenges ?? []).filter((c) => c.id !== challenge.id), challenge];
+    const existing = settings.challenges ?? [];
+    // Edit in place so the card keeps its position; append only when new.
+    const challenges = existing.some((c) => c.id === challenge.id)
+      ? existing.map((c) => (c.id === challenge.id ? challenge : c))
+      : [...existing, challenge];
     const next = { ...settings, challenges };
     set({ settings: next });
     await persist(user.id, entries, next, dayLogs, get().plans);

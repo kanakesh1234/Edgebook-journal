@@ -1,13 +1,14 @@
-import type { Challenge, JournalEntry, JournalSettings } from "./types";
+import type { Challenge, JournalEntry, JournalSettings, TrailingBasis } from "./types";
+import { computeDrawdown } from "./drawdown";
 
 /* ------------------------------------------------------------------ */
 /*  Challenge progress — pure calculations                             */
 /*                                                                      */
-/*  STATIC drawdown:  peak = startingBalance (fixed anchor).            */
-/*                    drawdown = startingBalance − equity (min 0).      */
-/*  DYNAMIC drawdown: trailing high-water-mark of equity;               */
-/*                    drawdown = max peak-to-current decline.           */
-/*  Both are explicit and tested — never approximated.                  */
+/*  STATIC drawdown:  floor = startingBalance − maxDrawdown. Never moves.*/
+/*  DYNAMIC drawdown: floor = trailing peak − maxDrawdown, moves UP only.*/
+/*    EOD trailing:   peak = highest end-of-day balance (closed days).   */
+/*    Live trailing:  peak = highest balance, updated on every trade.    */
+/*  Remaining cushion is ALWAYS currentEquity − currentFloor.            */
 /* ------------------------------------------------------------------ */
 
 export interface ChallengeMilestone {
@@ -33,12 +34,20 @@ export interface ChallengeProgress {
   /** Remaining drawdown budget. */
   remainingDrawdown: number;
   drawdownMode: "static" | "dynamic";
+  /** Dynamic only: what drives the trailing floor. Null for static. */
+  trailingBasis: TrailingBasis | null;
+  /** The peak the floor trails from (static: starting balance). */
+  drawdownPeak: number;
   /**
-   * Lowest equity allowed before breach.
+   * Current drawdown floor — the lowest equity allowed before breach.
    * STATIC: startingBalance − maxDrawdown (fixed).
-   * DYNAMIC: high-water mark − maxDrawdown, never below drawdownFloor when set.
+   * DYNAMIC: drawdownPeak − maxDrawdown, never below drawdownFloor when set.
    */
   drawdownThreshold: number;
+  /** currentEquity − drawdownThreshold. Negative = floor breached. */
+  drawdownCushion: number;
+  /** True once equity has reached/crossed the floor (needs maxDrawdown set). */
+  breached: boolean;
   drawdownFloor: number | null;
   /** Worst peak-to-current decline seen (always trailing model). */
   maxObservedDrawdown: number;
@@ -72,30 +81,18 @@ export function challengeProgress(
   const range = targetBalance - startingBalance;
   const progress = range > 0 ? Math.min(1, Math.max(0, (currentEquity - startingBalance) / range)) : 0;
 
-  // Trailing high-water-mark walk (used for dynamic DD + max observed DD).
-  let peak = startingBalance;
-  let maxObserved = 0;
-  let equity = startingBalance;
-  for (const e of tradesList) {
-    equity += e.pnl;
-    peak = Math.max(peak, equity);
-    maxObserved = Math.max(maxObserved, peak - equity);
-  }
-
   const drawdownMode = challenge.drawdownMode ?? "static";
   const maxDrawdown = challenge.maxDrawdown ?? 0;
-  const staticDD = Math.max(0, startingBalance - currentEquity);
-  const dynamicDD = Math.max(0, peak - currentEquity);
-  const currentDrawdown = drawdownMode === "dynamic" ? dynamicDD : staticDD;
-
-  // Drawdown threshold — the equity level that must not be breached.
-  // STATIC: fixed anchor at starting balance. DYNAMIC: trails the high-water
-  // mark upward with new equity highs, locked at drawdownFloor when set.
+  const dd = computeDrawdown({
+    startingBalance,
+    maxDrawdown,
+    mode: drawdownMode,
+    basis: challenge.trailingBasis,
+    floor: challenge.drawdownFloor ?? null,
+    trades: tradesList,
+    asOf: today,
+  });
   const floor = challenge.drawdownFloor ?? null;
-  const drawdownThreshold =
-    drawdownMode === "dynamic"
-      ? Math.max(floor ?? -Infinity, peak - maxDrawdown)
-      : startingBalance - maxDrawdown;
 
   const wins = tradesList.filter((e) => e.pnl > 0).length;
   const losses = tradesList.filter((e) => e.pnl < 0).length;
@@ -129,24 +126,26 @@ export function challengeProgress(
     passed: progress >= f - 1e-9,
   }));
 
-  void today;
-
   return {
     challengeId: challenge.id,
     startingBalance,
     targetBalance,
     currentEquity,
-    highestBalance: peak,
+    highestBalance: dd.livePeak,
     currentPnl,
     progress,
     progressPct: Math.round(progress * 100),
     maxDrawdown,
-    currentDrawdown,
-    remainingDrawdown: Math.max(0, maxDrawdown - currentDrawdown),
+    currentDrawdown: dd.currentDrawdown,
+    remainingDrawdown: dd.remaining,
     drawdownMode,
-    drawdownThreshold,
+    trailingBasis: dd.trailingBasis,
+    drawdownPeak: dd.drawdownPeak,
+    drawdownThreshold: dd.threshold,
+    drawdownCushion: dd.cushion,
+    breached: dd.breached,
     drawdownFloor: floor,
-    maxObservedDrawdown: maxObserved,
+    maxObservedDrawdown: dd.maxObserved,
     distanceToTarget: Math.max(0, targetBalance - currentEquity),
     reachedTarget: range > 0 && currentEquity >= targetBalance,
     trades: tradesList.length,
@@ -193,6 +192,11 @@ export function scopeToPrimary(
     targetEquity: challenge.targetBalance ?? settings.targetEquity,
     maxDrawdown:
       challenge.maxDrawdown && challenge.maxDrawdown > 0 ? challenge.maxDrawdown : settings.maxDrawdown,
+    // Effective-only: lets computeStats (Home, Practise, MINATO) use the
+    // challenge's drawdown model. Derived per render, never persisted.
+    drawdownMode: challenge.drawdownMode ?? "static",
+    trailingBasis: challenge.trailingBasis ?? null,
+    drawdownFloor: challenge.drawdownFloor ?? null,
   };
   return { entries: scoped, settings: effective, challenge };
 }

@@ -6,6 +6,7 @@ import {
   type JournalStats,
 } from "./types";
 import { dateKey } from "./format";
+import { computeDrawdown } from "./drawdown";
 
 /* ------------------------------------------------------------------ */
 /*  Pure analytics engine — no React, fully testable                   */
@@ -63,8 +64,34 @@ export function computeStats(entries: JournalEntry[], settings: JournalSettings)
   for (const p of equityCurve) peakEquity = Math.max(peakEquity, p.equity);
 
   const currentEquity = settings.startingEquity + totalPnl;
-  const drawdown = Math.max(0, peakEquity - currentEquity);
-  const drawdownPct = peakEquity > 0 ? drawdown / peakEquity : 0;
+  let drawdown = Math.max(0, peakEquity - currentEquity);
+  let drawdownPct = peakEquity > 0 ? drawdown / peakEquity : 0;
+  let drawdownBudgetUsed =
+    settings.maxDrawdown > 0
+      ? Math.min(1, Math.max(0, (peakEquity - currentEquity) / settings.maxDrawdown))
+      : 0;
+  let drawdownFloor: number | null = null;
+  let drawdownCushion: number | null = null;
+
+  // A challenge's drawdown model (static / EOD / live) overrides the default
+  // live peak-to-current number so every screen agrees with the challenge card.
+  if (settings.drawdownMode) {
+    const dd = computeDrawdown({
+      startingBalance: settings.startingEquity,
+      maxDrawdown: settings.maxDrawdown,
+      mode: settings.drawdownMode,
+      basis: settings.trailingBasis,
+      floor: settings.drawdownFloor ?? null,
+      trades: entries,
+    });
+    drawdown = dd.currentDrawdown;
+    drawdownPct = dd.drawdownPeak > 0 ? drawdown / dd.drawdownPeak : 0;
+    drawdownBudgetUsed = dd.budgetUsed;
+    if (settings.maxDrawdown > 0) {
+      drawdownFloor = dd.threshold;
+      drawdownCushion = dd.cushion;
+    }
+  }
 
   const tradingDays = daily.length;
   const decidedDays = winningDays + losingDays;
@@ -93,10 +120,9 @@ export function computeStats(entries: JournalEntry[], settings: JournalSettings)
     peakEquity,
     drawdown,
     drawdownPct,
-    drawdownBudgetUsed:
-      settings.maxDrawdown > 0
-        ? Math.min(1, Math.max(0, (peakEquity - currentEquity) / settings.maxDrawdown))
-        : 0,
+    drawdownBudgetUsed,
+    drawdownFloor,
+    drawdownCushion,
 
     remainingToTarget: settings.targetEquity - currentEquity,
     targetProgress: targetRange !== 0 ? clamp01((currentEquity - settings.startingEquity) / targetRange) : 0,

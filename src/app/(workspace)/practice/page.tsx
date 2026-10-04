@@ -60,8 +60,8 @@ export default function PracticePage() {
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
 
-  const { entries, challenge } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
-  const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
+  const { entries, challenge, settings: scopedSettings } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
+  const stats = useMemo(() => computeStats(entries, scopedSettings), [entries, scopedSettings]);
   const progress: PracticeProgress = settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 };
   const today = todayKey();
 
@@ -87,9 +87,11 @@ export default function PracticePage() {
   const usable = useMemo(() => entries.filter(isUsable).sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt), [entries]);
   const week = useMemo(() => weekTrades(entries), [entries]);
   const drawdownLeft = useMemo(() => {
+    // Cushion above the challenge's current floor (equity − floor).
+    if (stats.drawdownCushion != null) return Math.max(0, stats.drawdownCushion);
     const limit = challenge?.maxDrawdown ?? settings.maxDrawdown;
     return limit > 0 ? Math.max(0, limit - stats.drawdown) : null;
-  }, [challenge?.maxDrawdown, settings.maxDrawdown, stats.drawdown]);
+  }, [challenge?.maxDrawdown, settings.maxDrawdown, stats.drawdown, stats.drawdownCushion]);
 
   const weakTags = useMemo(() => [...new Set((progress.seenQuestions ?? []).filter((s) => s.variant === 1).map((s) => s.format))].slice(-5), [progress.seenQuestions]);
   const perf = progress.modePerformance ?? {};

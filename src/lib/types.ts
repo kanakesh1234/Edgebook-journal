@@ -122,6 +122,14 @@ export interface JournalSettings {
   matrixProgress?: MatrixProgress;
   /** Trading challenges — distinct trading periods/objectives. */
   challenges?: Challenge[];
+  /**
+   * EFFECTIVE-ONLY — filled in by scopeToPrimary() from the primary challenge
+   * so computeStats uses its drawdown model. Never persisted or edited here;
+   * unset means the default overall (live peak-to-current) behaviour.
+   */
+  drawdownMode?: DrawdownMode;
+  trailingBasis?: TrailingBasis | null;
+  drawdownFloor?: number | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -130,14 +138,24 @@ export interface JournalSettings {
 
 export type DrawdownMode = "static" | "dynamic";
 
+/**
+ * DYNAMIC only — when the trailing floor moves up:
+ *  - "eod":  floor updates from the qualifying end-of-day balance (after the day closes).
+ *  - "live": floor moves immediately with every new equity high.
+ * Absent on a dynamic challenge = "live" (the original behaviour).
+ */
+export type TrailingBasis = "eod" | "live";
+
 export interface Challenge {
   id: string;
   name: string;
   notes?: string;
   startingBalance?: number | null;
   targetBalance?: number | null;
-  /** STATIC: measured from starting balance. DYNAMIC: trailing high-water mark. */
+  /** STATIC: fixed floor (start − max DD). DYNAMIC: floor trails equity upward. */
   drawdownMode?: DrawdownMode;
+  /** DYNAMIC only: EOD-trailing or live-trailing. Null/absent = live. */
+  trailingBasis?: TrailingBasis | null;
   maxDrawdown?: number | null;
   /**
    * DYNAMIC only: absolute equity floor the trailing threshold can never
@@ -674,6 +692,9 @@ export interface JournalStats {
   drawdown: number; // absolute currency from peak
   drawdownPct: number;
   drawdownBudgetUsed: number; // fraction of maxDrawdown consumed
+  /** Current drawdown floor / cushion (equity − floor). Null without a challenge model or max drawdown. */
+  drawdownFloor: number | null;
+  drawdownCushion: number | null;
 
   remainingToTarget: number;
   targetProgress: number; // 0..1

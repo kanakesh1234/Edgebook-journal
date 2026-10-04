@@ -98,6 +98,77 @@ try {
     ok("DYNAMIC/TRAILING drawdown calculation with optional lock");
   }
 
+  /* ── 15b. EOD vs LIVE trailing + cushion = equity − floor ── */
+  {
+    const base = { name: "T", startingBalance: 50000, targetBalance: 55000, drawdownMode: "dynamic" as const, maxDrawdown: 2500, createdAt: 1 };
+    const trades = (id: string) => [
+      mkEntry("a", "2026-08-20", +2000, { challengeId: id }), // EOD 52,000
+      mkEntry("b", "2026-08-21", +1000, { challengeId: id }), // intraday 53,000
+      mkEntry("c", "2026-08-21", -1500, { challengeId: id }), // EOD 51,500
+    ];
+    const today = "2026-08-22"; // both days above are closed
+    const live = challengeProgress({ ...base, id: "L", trailingBasis: "live" as const }, trades("L"), today);
+    const eod = challengeProgress({ ...base, id: "E", trailingBasis: "eod" as const }, trades("E"), today);
+    const legacy = challengeProgress({ ...base, id: "G" }, trades("G"), today); // no basis → live
+    expect("live floor follows the intraday high", live.drawdownThreshold, 50500);   // 53,000 − 2,500
+    expect("live cushion = equity − floor", live.drawdownCushion, 1000);              // 51,500 − 50,500
+    expect("eod floor uses best end-of-day balance", eod.drawdownThreshold, 49500);   // 52,000 − 2,500
+    expect("eod cushion = equity − floor", eod.drawdownCushion, 2000);                // 51,500 − 49,500
+    expect("legacy dynamic behaves as live", legacy.drawdownThreshold, 50500);
+    expect("remainingDrawdown equals cushion", eod.remainingDrawdown, 2000);
+
+    // Today's session is still open → its gains do not move the EOD floor yet
+    const open = challengeProgress({ ...base, id: "E", trailingBasis: "eod" as const }, trades("E"), "2026-08-21");
+    expect("eod: open day excluded from floor", open.drawdownThreshold, 49500);
+    expect("eod: open day still counts toward equity", open.drawdownCushion, 2000);
+
+    // Static: cushion measured from the FIXED floor even when in profit
+    const st = challengeProgress({ ...base, id: "S", drawdownMode: "static" as const }, [mkEntry("a", "2026-08-20", +2000, { challengeId: "S" })], today);
+    expect("static cushion above start = equity − fixed floor", st.drawdownCushion, 4500); // 52,000 − 47,500
+    expect("static remaining uses cushion", st.remainingDrawdown, 4500);
+    expect("static has no trailing basis", st.trailingBasis, null);
+
+    // Breach
+    const br = challengeProgress({ ...base, id: "B", drawdownMode: "static" as const }, [mkEntry("a", "2026-08-20", -2600, { challengeId: "B" })], today);
+    expect("breach flagged below floor", [br.breached, br.remainingDrawdown, br.drawdownCushion], [true, 0, -100]);
+    ok("EOD / LIVE trailing + cushion");
+  }
+
+  /* ── 15c. Editing the drawdown model changes EVERY screen's stats ── */
+  {
+    const { scopeToPrimary } = await import("../src/lib/challenges.ts");
+    const { computeStats } = await import("../src/lib/stats.ts");
+    const mk = (id: string) => [
+      mkEntry("a", "2026-08-20", +2000, { challengeId: id }),
+      mkEntry("b", "2026-08-21", +1000, { challengeId: id }),
+      mkEntry("c", "2026-08-21", -1500, { challengeId: id }),
+    ];
+    const settingsFor = (c: Record<string, unknown>) => ({
+      traderName: "t", startingEquity: 10000, targetEquity: 20000, maxDrawdown: 999, currency: "USD",
+      challenges: [c], primaryChallengeId: c.id,
+    }) as never;
+    const base = { id: "P", name: "P", startingBalance: 50000, targetBalance: 55000, maxDrawdown: 2500, createdAt: 1 };
+    const siteCushion = (c: Record<string, unknown>) => {
+      const sc = scopeToPrimary(settingsFor(c), mk("P") as never);
+      const stats = computeStats(sc.entries, sc.settings);
+      const prog = challengeProgress(c as never, mk("P") as never, "2026-08-22");
+      return { site: stats.drawdownCushion, card: prog.drawdownCushion, floor: stats.drawdownFloor, used: stats.drawdownBudgetUsed };
+    };
+    // equity ends 51,500 in all three
+    const st = siteCushion({ ...base, drawdownMode: "static" });
+    const eod = siteCushion({ ...base, drawdownMode: "dynamic", trailingBasis: "eod" });
+    const live = siteCushion({ ...base, drawdownMode: "dynamic", trailingBasis: "live" });
+    expect("site stats: static cushion matches challenge card", [st.site, st.floor], [st.card, 47500]);
+    expect("site stats: EOD cushion matches challenge card", [eod.site, eod.floor], [eod.card, 49500]);
+    expect("site stats: live cushion matches challenge card", [live.site, live.floor], [live.card, 50500]);
+    expect("switching static → live changes the site-wide numbers", st.site !== live.site, true);
+    expect("budget used follows the cushion", live.used, 0.6);   // 1 − 1000/2500
+    // no primary challenge → untouched default behaviour
+    const plain = computeStats(mk("x") as never, { traderName: "t", startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1000, currency: "USD" } as never);
+    expect("no challenge model → no floor/cushion injected", [plain.drawdownFloor, plain.drawdownCushion], [null, null]);
+    ok("site-wide stats follow the challenge drawdown model");
+  }
+
   /* ── 16. Milestones ── */
   {
     const c = { id: "c3", name: "Milestones", startingBalance: 50000, targetBalance: 60000, createdAt: 1 };

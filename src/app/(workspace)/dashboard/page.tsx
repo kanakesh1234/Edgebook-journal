@@ -285,6 +285,14 @@ export default function DashboardPage() {
               amount={stats.drawdown}
               budget={settings.maxDrawdown}
             />
+            {stats.drawdownFloor != null && stats.drawdownCushion != null && (
+              <p className="mt-1.5 flex justify-between text-[10px] tabular text-faint">
+                <span>floor {formatMoney(stats.drawdownFloor, settings.currency)}</span>
+                <span className={stats.drawdownCushion <= 0 ? "text-loss" : undefined}>
+                  cushion {formatMoney(stats.drawdownCushion, settings.currency)}
+                </span>
+              </p>
+            )}
           </div>
         </motion.div>
       </div>
