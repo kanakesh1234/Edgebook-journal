@@ -13,9 +13,13 @@ import {
   LEVELS, LEVEL_MASTERY_KEY, buildPool, displayStreak, fmtMoney, isUsable, levelFromProgress, nextStreak, rankOf, tradeLabel, weekTrades,
   type GameMode, type Level, type PracticeQuestion,
 } from "@/lib/practice/engine";
-import { orderByFreshness, recentPrompts, recordAnswers, rememberPrompts } from "@/lib/practice/history";
+import { recentPrompts, recordAnswers, rememberPrompts } from "@/lib/practice/history";
+import { readLedger, resetDone, updateLedger } from "@/lib/practice/ledger";
+import { assembleSession, type Group } from "@/lib/practice/session";
+import { duelQuestions } from "@/lib/practice/duel-questions";
 import { addDailyStats } from "@/lib/practice/daily";
 import { fetchAiQuestions } from "@/lib/practice/ai-client";
+import { fpKey as hash } from "@/lib/practice/ledger";
 import type { JournalEntry, PracticeProgress } from "@/lib/types";
 
 type Mode = "matrix" | "time-machine" | "math-duel" | "boss";
@@ -23,7 +27,7 @@ type LevelPick = 0 | Level;
 type MatrixFilter = "all" | "untested" | "needs-work" | "strong";
 
 const MODES: { id: Mode; title: string; blurb: string; icon: string; tone: string }[] = [
-  { id: "matrix", title: "Matrix", blurb: "Revisit and test your real trades.", icon: "✦", tone: "border-indigo-400/40 bg-indigo-500/10" },
+  { id: "matrix", title: "Matrix", blurb: "Charts + trade maths + Math Duel on your real trades.", icon: "✦", tone: "border-indigo-400/40 bg-indigo-500/10" },
   { id: "time-machine", title: "Time Machine", blurb: "Practice recorded process decisions.", icon: "◎", tone: "border-emerald-400/40 bg-emerald-500/10" },
   { id: "math-duel", title: "Math Duel", blurb: "Calculation fluency from your risk data.", icon: "♜", tone: "border-amber-400/50 bg-amber-500/10" },
   { id: "boss", title: "Weekend Boss", blurb: "Combine this week's real trades.", icon: "◈", tone: "border-rose-400/40 bg-rose-500/10" },
@@ -90,6 +94,15 @@ export default function PracticePage() {
   const weakTags = useMemo(() => [...new Set((progress.seenQuestions ?? []).filter((s) => s.variant === 1).map((s) => s.format))].slice(-5), [progress.seenQuestions]);
   const perf = progress.modePerformance ?? {};
 
+  /** How many questions in each mode are still unanswered-or-missed (powers the counters). */
+  const hasChart = useMemo(() => new Set(entries.filter((e) => (e.images?.length ?? 0) > 0).map((e) => e.id)), [entries]);
+  const freshLeft = useMemo(() => {
+    const base = { trades: usable, all: entries, seed: 1, drawdownLeft };
+    const ledger = readLedger(progress);
+    const count = (mode: GameMode) => buildPool({ ...base, mode, trades: mode === "boss" ? week.trades : usable }).filter((q) => !ledger.done.has(hash(q.fp))).length;
+    return { tm: count("time-machine"), matrix: count("matrix"), boss: week.trades.length >= 2 ? count("boss") : 0 };
+  }, [usable, entries, drawdownLeft, progress, week.trades]);
+
   const launch = async (kind: GameMode, trades: JournalEntry[], title: string, n: number, tradeId?: string) => {
     setBusy(title);
     setNotice(null);
@@ -102,12 +115,29 @@ export default function PracticePage() {
       ai = result.questions;
       if (result.note) setNotice(result.note);
     }
-    const blended: PracticeQuestion[] = [];
-    for (let i = 0; i < Math.max(ai.length, local.length); i++) { if (ai[i]) blended.push(ai[i]!); if (local[i]) blended.push(local[i]!); }
-    const pool = orderByFreshness(blended, progress, today);
+
+    // Matrix = Time Machine charts + trade maths + Math Duel. Boss = this week's trades.
+    const ledger = readLedger(progress);
+    const duel = kind === "matrix" ? duelQuestions(Math.max(4, Math.ceil(n * 0.4)), progress.mathDuel?.ratings ?? {}, ledger, seed) : [];
+    const weights: Partial<Record<Group, number>> = kind === "time-machine" ? { tm: 1 } : kind === "boss" ? { boss: 5, tm: 2, math: 3 } : { tm: 5, math: 2, duel: 3 };
+    const assembled = assembleSession({ questions: [...ai, ...local, ...duel], progress, count: n, startLevel: level, weights, hasChart });
     setBusy(null);
-    if (pool.length < 3) { setNotice("Not enough recorded data for that selection yet. Add a few more trades and try again."); return; }
-    setSession({ title, kind, pool, count: n, startLevel: level, tradeId, retry: () => { setSession(null); void launch(kind, trades, title, n, tradeId); } });
+
+    if (assembled.pool.length < 3) {
+      setNotice(assembled.retired > 0
+        ? `You have answered every available question for this selection correctly (${assembled.retired} retired). Add trades or review notes for new ones, or use “Replay mastered questions” below.`
+        : "Not enough recorded data for that selection yet. Add a few more trades and try again.");
+      return;
+    }
+    if (assembled.pool.length < n + 3 && assembled.retired > 0) {
+      setNotice(`Only ${Math.min(n, assembled.pool.length)} question${assembled.pool.length === 1 ? "" : "s"} left that you have not already answered correctly for this selection.`);
+    }
+    setSession({ title, kind, pool: assembled.pool, count: Math.min(n, assembled.pool.length), startLevel: level, tradeId, retry: () => { setSession(null); void launch(kind, trades, title, n, tradeId); } });
+  };
+
+  const replayMastered = () => {
+    void updateSettings({ practiceProgress: { ...progress, ledger: resetDone(progress) } });
+    setNotice("Mastered questions can appear again. Questions you missed are still kept first.");
   };
 
   const finish = (result: DrillResult) => {
@@ -130,6 +160,7 @@ export default function PracticePage() {
         masteryByTag: mastery,
         modePerformance,
         seenQuestions: recordAnswers(progress, result.answers.map((a) => ({ fp: a.fp, tag: a.tag, correct: a.correct })), today),
+        ledger: updateLedger(progress, result.answers.map((a) => ({ fp: a.fp, correct: a.correct }))),
         perfectSets: (progress.perfectSets ?? 0) + (result.total >= 3 && result.correct === result.total ? 1 : 0),
         dailyStats: addDailyStats(progress, today, { xp: result.xp, correct: result.correct, total: result.total }),
       },
@@ -190,7 +221,12 @@ export default function PracticePage() {
         </div>
       </section>
 
-      {notice && <p className="rounded-lg bg-gold/10 px-4 py-3 text-sm text-ink">{notice}</p>}
+      {notice && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gold/10 px-4 py-3 text-sm text-ink">
+          <p>{notice}</p>
+          {(progress.ledger?.done.length ?? 0) > 0 && <Button size="sm" variant="outline" onClick={replayMastered}>Replay mastered questions</Button>}
+        </div>
+      )}
       {busy && <p className="rounded-lg border border-line bg-raised px-4 py-3 text-sm text-muted">Writing fresh questions for {busy}… this can take up to 40 seconds with the free AI model.</p>}
 
       {needData && mode !== "math-duel" && <p className="panel p-5 text-sm text-muted">No trades with a P&amp;L yet. Add or import a trade and questions appear here straight away. Math Duel works without any data.</p>}
@@ -232,8 +268,9 @@ export default function PracticePage() {
         <section className="space-y-4">
           <div className="panel p-5">
             <h2 className="text-base font-semibold text-ink">Process drill across all {usable.length} trades</h2>
-            <p className="mt-1 text-sm text-muted">Recall what you decided and why — sides, setups, time windows, lessons, plan-following. New and previously-missed questions come first; nothing repeats until you have seen everything.</p>
+            <p className="mt-1 text-sm text-muted">Every question shows your saved chart — press Compare to open all of the trade's charts, then answer. Questions you answer correctly never repeat; ones you miss come back until you get them right.</p>
             <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("time-machine", usable, "Time Machine", count)}>Train · {count} questions</Button>
+            <p className="mt-2 text-xs text-muted">{freshLeft.tm} question{freshLeft.tm === 1 ? "" : "s"} still fresh across your trades · {usable.filter((t) => (t.images?.length ?? 0) > 0).length} of {usable.length} trades have saved charts.</p>
           </div>
           {mastery.length > 0 && (
             <div className="panel p-5">
@@ -258,14 +295,14 @@ export default function PracticePage() {
           {week.trades.length >= 2 ? (
             <>
               <p className="mt-1 text-sm text-muted">{week.label} · {week.trades.length} trades · net <b className={cn("font-mono", week.trades.reduce((s, t) => s + t.pnl, 0) >= 0 ? "text-profit" : "text-loss")}>{fmtMoney(week.trades.reduce((s, t) => s + t.pnl, 0))}</b></p>
-              <p className="mt-2 text-sm text-muted">Cross-trade questions: totals, spread, best and worst days, profit factor, break-even win rate, and net R.</p>
+              <p className="mt-2 text-sm text-muted">Cross-trade questions on this week's saved charts: totals, spread, best and worst days, repeated mistakes, profit factor, break-even win rate and net R.</p>
               <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("boss", week.trades, "Weekend Boss", Math.max(count, 10))}>Play Boss</Button>
             </>
           ) : <p className="mt-1 text-sm text-muted">The boss needs at least 2 trades in the same week. Record another trade and come back.</p>}
         </section>
       )}
 
-      {session && <DrillRunner key={session.pool.map((q) => q.id).join("|")} title={session.title} pool={session.pool} count={session.count} startLevel={session.startLevel} lockLevel={levelPick !== 0} onFinish={finish} onClose={() => setSession(null)} onRetry={session.retry} />}
+      {session && <DrillRunner key={session.pool.map((q) => q.id).join("|")} title={session.title} pool={session.pool} count={session.count} startLevel={session.startLevel} lockLevel={levelPick !== 0} entries={allEntries} onFinish={finish} onClose={() => setSession(null)} onRetry={session.retry} />}
     </div>
   );
 }

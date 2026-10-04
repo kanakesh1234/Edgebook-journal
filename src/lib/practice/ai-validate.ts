@@ -138,6 +138,8 @@ function similar(a: string, b: string): boolean {
 
 const norm = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
 const FORBIDDEN = /\b(will price|price will|go up|go down|buy now|sell now|guaranteed|next candle|prediction for)\b/i;
+/** Lookup trivia the trader finds pointless (calendar questions, "what day was it"). */
+const TRIVIA = /\b(which|what) (day|weekday|day of the week)\b|\bday of the week\b|\bwhat (month|year|date)\b/i;
 
 /* ------------------------- main validator ------------------------- */
 
@@ -169,7 +171,7 @@ export function validateAiBatch(parsed: unknown, trades: EvidenceTrade[], avoid:
     if (!item || typeof item !== "object" || kept.length >= limit) continue;
     const prompt = str(item.prompt, 420);
     const explanation = str(item.explanation, 520);
-    if (!prompt || prompt.length < 15 || !explanation || FORBIDDEN.test(prompt)) continue;
+    if (!prompt || prompt.length < 15 || !explanation || FORBIDDEN.test(prompt) || TRIVIA.test(prompt)) continue;
     if (asked.some((previous) => similar(previous, prompt))) continue;
     const trade = typeof item.tradeId === "string" ? byId.get(item.tradeId) : undefined;
     const level = clampLevel(item.level);
@@ -203,6 +205,8 @@ export function validateAiBatch(parsed: unknown, trades: EvidenceTrade[], avoid:
       const inPrompt = numbersIn(prompt);
       const inExpression = (expression.match(/\d+\.?\d*/g) ?? []).map(Number);
       if (inExpression.some((n) => !inPrompt.some((p) => near(p, n)))) continue;
+      // The answer must not simply be a number already written in the question (e.g. "1R is $80 — what is 1R?").
+      if (Math.abs(answer) > 4 && inPrompt.some((p) => near(p, Math.abs(answer)))) continue;
       if (item.uses === "trade" && inPrompt.some((p) => p > 4 && !allowed.some((a) => near(a, p)))) continue;
       const choices = mathChoices(answer, unit, parseInt(id.slice(3), 36) || 11);
       if (!choices) continue;
@@ -231,6 +235,8 @@ export function buildAiPrompt(args: { mode: string; level: number; count: number
     "- No market predictions, no reading prices off charts, no buy/sell advice.",
     "- For math give an arithmetic EXPRESSION only (digits, + - * / and brackets); never give the answer. Every number in the expression must also appear in the prompt. If uses is \"trade\", the numbers must come from the evidence.",
     "- Vary the style: why-questions, rule checks, what-if changes, mistake spotting, scenario application. Do not ask the same thing twice.",
+    "- NEVER ask calendar trivia (what weekday a date was) and NEVER ask for a number that is already written in the question.",
+    "- Prefer questions about the trader's own reasoning and repeated mistakes: compare trades in EVIDENCE, ask which mistake keeps repeating, what likely causes it, and what the trader's own rule says to do instead.",
     "- Do NOT repeat or paraphrase anything in AVOID.",
     "- If a trade has no notes/lesson text, write math questions for it instead of concept questions.",
   ].join("\n");

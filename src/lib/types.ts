@@ -449,6 +449,9 @@ export interface PracticeProgress {
   /** Per-day practice totals (YYYY-MM-DD). Powers the Home arcade card so it
    * always matches what the Practise page recorded. Trimmed to ~45 days. */
   dailyStats?: Record<string, { xp: number; correct: number; total: number }>;
+  /** No-repeat ledger. `done` = hashes of questions answered correctly (never asked again);
+   * `missed` = hashes of questions last answered wrong (allowed to come back until answered right). */
+  ledger?: { done: string[]; missed: string[] };
 }
 
 export type MatrixScreenshotRole = "pre-entry" | "management" | "exit";

@@ -4,6 +4,9 @@ import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Level, PracticeQuestion } from "@/lib/practice/engine";
+import type { JournalEntry } from "@/lib/types";
+import { groupOf, type Group } from "@/lib/practice/session";
+import { ChartPanel } from "@/components/practice/ChartPanel";
 
 export interface AnswerLog {
   fp: string;
@@ -35,6 +38,8 @@ interface Props {
   startLevel: Level;
   /** When true the level never moves during the session. */
   lockLevel?: boolean;
+  /** All journal trades, so each question can show its saved screenshots. */
+  entries?: JournalEntry[];
   onFinish: (result: DrillResult) => void;
   onClose: () => void;
   onRetry?: () => void;
@@ -49,18 +54,20 @@ function check(question: PracticeQuestion, response: string): boolean {
 }
 
 /** Pick the unused question nearest the live level; earlier pool position (fresher) wins ties. */
-function pick(pool: PracticeQuestion[], used: Set<string>, level: Level, lastTag: string | null): PracticeQuestion | null {
+const GROUP_LABEL: Record<Group, string> = { tm: "Time Machine", math: "Trade math", duel: "Math Duel", boss: "Weekend Boss" };
+
+function pick(pool: PracticeQuestion[], used: Set<string>, level: Level, lastTag: string | null, lastGroup: Group | null = null): PracticeQuestion | null {
   let best: PracticeQuestion | null = null;
   let bestScore = Infinity;
   pool.forEach((q, index) => {
     if (used.has(q.id)) return;
-    const score = Math.abs(q.level - level) * 100 + index + (q.tag === lastTag ? 40 : 0);
+    const score = Math.abs(q.level - level) * 100 + index + (q.tag === lastTag ? 40 : 0) + (lastGroup && groupOf(q) === lastGroup ? 25 : 0);
     if (score < bestScore) { best = q; bestScore = score; }
   });
   return best;
 }
 
-export function DrillRunner({ title, pool, count, startLevel, lockLevel, onFinish, onClose, onRetry }: Props) {
+export function DrillRunner({ title, pool, count, startLevel, lockLevel, entries = [], onFinish, onClose, onRetry }: Props) {
   const total = Math.min(count, pool.length);
   const used = useRef(new Set<string>());
   const log = useRef<AnswerLog[]>([]);
@@ -117,7 +124,7 @@ export function DrillRunner({ title, pool, count, startLevel, lockLevel, onFinis
 
   const next = () => {
     if (index + 1 >= total) { finish(); return; }
-    const upcoming = pick(pool, used.current, level, question?.tag ?? null);
+    const upcoming = pick(pool, used.current, level, question?.tag ?? null, question ? groupOf(question) : null);
     if (!upcoming) { finish(); return; }
     used.current.add(upcoming.id);
     setQuestion(upcoming);
@@ -175,6 +182,8 @@ export function DrillRunner({ title, pool, count, startLevel, lockLevel, onFinis
   }
 
   const q = question!;
+  const chartIds = q.chartTradeIds ?? (q.tradeId ? [q.tradeId] : []);
+  const chartEntries = chartIds.map((id) => entries.find((e) => e.id === id)).filter((e): e is JournalEntry => !!e);
   return (
     <div className={shell}>
       <div className="mx-auto min-h-screen max-w-2xl px-5 py-6">
@@ -188,9 +197,15 @@ export function DrillRunner({ title, pool, count, startLevel, lockLevel, onFinis
           <span>L{level} · Combo ×{combo}{q.source === "ai" ? " · AI" : ""}</span>
         </div>
 
-        <main className="mt-12">
-          <p className="font-mono text-xs uppercase tracking-wider text-muted">{q.pin}</p>
-          <h2 className="mt-4 text-2xl font-semibold leading-snug">{q.prompt}</h2>
+        <main className="mt-8">
+          <p className="font-mono text-xs uppercase tracking-wider text-muted">
+            {GROUP_LABEL[groupOf(q)]} · {q.pin}
+            {q.retry && <span className="ml-2 rounded-full bg-loss/15 px-2 py-0.5 font-sans text-[10px] font-bold normal-case tracking-normal text-loss">Missed before — try again</span>}
+          </p>
+          {chartEntries.length > 0 && (
+            <div className="mt-4"><ChartPanel key={q.id} entries={chartEntries} hint={!!q.compareHint && !answered} /></div>
+          )}
+          <h2 className="mt-5 text-2xl font-semibold leading-snug">{q.prompt}</h2>
 
           {!answered && q.kind === "choice" && (
             <div className="mt-8 grid gap-3">

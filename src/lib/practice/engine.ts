@@ -13,6 +13,8 @@ import type { JournalEntry, PracticeProgress } from "@/lib/types";
 import { addDays, formatDateMedium, weekdayLong } from "@/lib/format";
 import { seededRng, type Rng } from "./math/rng";
 import { breakevenWinRate, lossStreakProbability } from "./math/formulas";
+import { buildTradeQuestions, MATH_TAGS } from "./chart-questions";
+import { hashText } from "./history";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -53,6 +55,14 @@ export interface PracticeQuestion {
   /** Verbatim excerpt of the trader's own words that an AI question is based on. */
   evidence?: string;
   tradeId?: string;
+  /** Which part of the game this question belongs to (drives the Matrix / Boss mix). */
+  group?: "tm" | "math" | "duel" | "boss";
+  /** Trades whose saved screenshots are shown above the question. Defaults to [tradeId]. */
+  chartTradeIds?: string[];
+  /** The question is easier with the second chart — nudges the trader to open Compare. */
+  compareHint?: boolean;
+  /** Missed before — it is back because the trader answered it wrong last time. */
+  retry?: boolean;
 }
 
 export type Bucket = "best" | "breakeven" | "worst";
@@ -165,11 +175,11 @@ export function classify(entries: JournalEntry[]): Record<Bucket, JournalEntry |
 function choiceQ(id: string, tag: string, level: Level, pin: string, prompt: string, answer: string, wrong: string[], explanation: string, rng: Rng): PracticeQuestion | null {
   const distractors = [...new Set(wrong.filter((item) => item && item !== answer))].slice(0, 3);
   if (!distractors.length) return null;
-  return { id, fp: id, source: "local", tradeId: id.split(":")[0], kind: "choice", tag, level, pin, prompt, choices: shuffle([answer, ...distractors], rng), answer, explanation, xp: 10 * level };
+  return { id, fp: id, source: "local", kind: "choice", tag, level, pin, prompt, choices: shuffle([answer, ...distractors], rng), answer, explanation, xp: 10 * level };
 }
 
 function numberQ(id: string, tag: string, level: Level, pin: string, prompt: string, answer: number, tolerance: number, unit: string, explanation: string): PracticeQuestion {
-  return { id, fp: id, source: "local", tradeId: id.split(":")[0], kind: "number", tag, level, pin, prompt, answer: String(round(answer, 4)), tolerance, unit, explanation, xp: 12 * level };
+  return { id, fp: id, source: "local", kind: "number", tag, level, pin, prompt, answer: String(round(answer, 4)), tolerance, unit, explanation, xp: 12 * level };
 }
 
 /** Wrong dollar amounts. `spread` shrinks as the level rises. */
@@ -182,107 +192,9 @@ function nearMoney(value: number, level: Level, rng: Rng): string[] {
 /*  Per-trade questions                                                */
 /* ------------------------------------------------------------------ */
 
-const GENERIC_SETUPS = ["Opening range breakout", "Liquidity sweep reversal", "Trend pullback", "News fade", "Range fade"];
-const FILLER_WORDS = ["target", "setup", "patience", "entry", "stop", "confirmation"];
-
 function tradeQuestions(entry: JournalEntry, all: JournalEntry[], rng: Rng): PracticeQuestion[] {
-  const out: Array<PracticeQuestion | null> = [];
-  const pin = tradeLabel(entry);
-  const id = (suffix: string) => `${entry.id}:${suffix}`;
-
-  /* Level 1 — recognition */
-  const side = sideOf(entry);
-  if (side) {
-    const answer = cap(side);
-    out.push(choiceQ(id("side"), "direction", 1, pin, `Which side did you take on ${tradeLabelNoSide(entry)}?`, answer, [answer === "Long" ? "Short" : "Long"], `Your journal records this trade as ${answer}.`, rng));
-  }
-  const outcome = entry.pnl > 0 ? "Win" : entry.pnl < 0 ? "Loss" : "Break-even";
-  out.push(choiceQ(id("outcome"), "outcome", 1, pin, "How did this trade finish?", outcome, ["Win", "Loss", "Break-even"], `Recorded P&L is ${fmtMoney(entry.pnl)}.`, rng));
-  if (entry.pnl !== 0) out.push(choiceQ(id("pnl-wide"), "pnl", 1, pin, "What was the P&L on this trade?", fmtMoney(entry.pnl), nearMoney(entry.pnl, 1, rng), `Recorded P&L is ${fmtMoney(entry.pnl)}.`, rng));
-
-  /* Level 2 — recall */
-  if (entry.pnl !== 0) out.push(choiceQ(id("pnl-close"), "pnl", 2, pin, "Exact P&L — which figure did you record?", fmtMoney(entry.pnl), nearMoney(entry.pnl, 2, rng), `Recorded P&L is ${fmtMoney(entry.pnl)}.`, rng));
-
-  const weekday = weekdayLong(entry.date);
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  out.push(choiceQ(id("weekday"), "weekday", 2, pin, `Which day of the week was ${tradeLabelNoSide(entry)}?`, weekday, shuffle(days, rng), `${formatDateMedium(entry.date)} was a ${weekday}.`, rng));
-
-  const hour = hourOf(entry);
-  if (hour != null) {
-    const others = [9, 10, 11, 13, 14, 15].filter((h) => h !== hour);
-    out.push(choiceQ(id("window"), "time-window", 2, pin, "In which time window did you enter?", windowLabel(hour), shuffle(others, rng).map(windowLabel), `Entry time recorded: ${entry.entryTime} NY.`, rng));
-  }
-
-  const setup = entry.setup?.trim();
-  if (setup) {
-    const others = [...new Set(all.map((e) => e.setup?.trim()).filter((s): s is string => !!s && s !== setup))];
-    const pool = others.length >= 2 ? others : [...others, ...GENERIC_SETUPS.filter((g) => g !== setup)];
-    out.push(choiceQ(id("setup"), "setup", 2, pin, "Which setup did you tag this trade with?", setup, shuffle(pool, rng), `Setup recorded: ${setup}.`, rng));
-  }
-
-  const lesson = lessonOf(entry);
-  if (lesson) {
-    const words = lesson.split(/\s+/).filter(Boolean);
-    const hiddenIndex = words.findIndex((w, i) => i > 0 && w.replace(/[^\w]/g, "").length >= 5);
-    if (hiddenIndex > 0) {
-      const hidden = words[hiddenIndex]!.replace(/[^\w'-]/g, "");
-      const borrowed = all.flatMap((e) => (lessonOf(e) ?? "").split(/\s+/)).map((w) => w.replace(/[^\w'-]/g, "")).filter((w) => w.length >= 4 && w.toLowerCase() !== hidden.toLowerCase());
-      const blanked = words.map((w, i) => (i === hiddenIndex ? "____" : w)).join(" ");
-      out.push(choiceQ(id("lesson"), "lesson", 2, pin, `Complete your own lesson: “${blanked}”`, hidden, shuffle([...borrowed, ...FILLER_WORDS], rng), `Your recorded lesson: “${lesson}”`, rng));
-    }
-  }
-
-  const followed = followedPlanOf(entry);
-  if (followed != null) {
-    const answer = followed ? "Yes, I followed it" : "No, I deviated";
-    out.push(choiceQ(id("followed"), "process", 2, pin, "Did your review say you followed the plan on this trade?", answer, ["Yes, I followed it", "No, I deviated"], `Your review records followedPlan = ${followed}. Process is judged separately from P&L.`, rng));
-  }
-
-  const sameDay = all.filter((e) => e.date === entry.date && isUsable(e));
-  if (entry.instrument) {
-    const known = [...new Set(all.map((e) => e.instrument).filter((i): i is string => !!i && i !== entry.instrument))];
-    const pool = [...known, ...["MNQ", "MES", "NQ", "ES", "GC", "CL"].filter((i) => i !== entry.instrument && !known.includes(i))];
-    out.push(choiceQ(id("instrument"), "instrument", 1, pin, `Which instrument did you trade on ${formatDateMedium(entry.date)}?`, entry.instrument, shuffle(pool, rng), `Recorded instrument: ${entry.instrument}.`, rng));
-  }
-  const ranked = all.filter(isUsable);
-  if (ranked.length >= 3) {
-    const order = [...ranked].sort((a, b) => b.pnl - a.pnl);
-    const position = order.findIndex((e) => e.id === entry.id);
-    if (position >= 0) {
-      const label = position === 0 ? "My best trade" : position === order.length - 1 ? "My worst trade" : "Somewhere in the middle";
-      out.push(choiceQ(id("rank"), "rank", 2, pin, `Among your ${ranked.length} recorded trades, where does this one rank by P&L?`, label, ["My best trade", "My worst trade", "Somewhere in the middle"], `Ranked ${position + 1} of ${order.length} by P&L.`, rng));
-    }
-  }
-  out.push(numberQ(id("day-trades"), "day-count", 2, pin, `How many trades did you record on ${formatDateMedium(entry.date)}?`, sameDay.length, 0, "", `${sameDay.length} recorded trade${sameDay.length === 1 ? "" : "s"} share this date.`));
-  if (sameDay.length > 1) {
-    const net = sameDay.reduce((sum, t) => sum + t.pnl, 0);
-    out.push(numberQ(id("day-net"), "day-net", 3, pin, `What was your combined P&L across all ${sameDay.length} trades on ${formatDateMedium(entry.date)}?`, net, Math.max(1, Math.abs(net) * 0.01), "$", `Adding the day's trades gives ${fmtMoney(round(net))}.`));
-  }
-  const entryMinutes = clockMinutes(entry.entryTime);
-  const exitMinutes = clockMinutes(entry.exitTime);
-  if (entryMinutes != null && exitMinutes != null && exitMinutes >= entryMinutes) {
-    out.push(numberQ(id("hold"), "hold-time", 2, pin, `You entered at ${entry.entryTime} and exited at ${entry.exitTime}. How many minutes did you hold?`, exitMinutes - entryMinutes, 0, "min", `${entry.exitTime} − ${entry.entryTime} = ${exitMinutes - entryMinutes} minutes.`));
-  }
-
-  /* Level 3 — application (numbers) */
-  if (isNum(entry.entryPrice) && isNum(entry.stopLoss) && isNum(entry.takeProfit) && entry.entryPrice !== entry.stopLoss) {
-    const risk = Math.abs(entry.entryPrice - entry.stopLoss);
-    const reward = Math.abs(entry.takeProfit - entry.entryPrice);
-    out.push(numberQ(id("planned-rr"), "planned-rr", 3, pin, `Entry ${entry.entryPrice}, stop ${entry.stopLoss}, target ${entry.takeProfit}. What was the planned reward-to-risk (in R)?`, reward / risk, 0.05, "R", `Reward ${round(reward)} ÷ risk ${round(risk)} = ${round(reward / risk)}R.`));
-  }
-  if (isNum(entry.rr) && entry.rr !== 0 && entry.pnl !== 0) {
-    const oneR = Math.abs(entry.pnl / entry.rr);
-    out.push(numberQ(id("r-dollars"), "r-dollars", 3, pin, `This trade made ${fmtMoney(entry.pnl)} at ${entry.rr}R. How many dollars was 1R?`, oneR, Math.max(1, oneR * 0.02), "$", `|${fmtMoney(entry.pnl)}| ÷ |${entry.rr}R| = $${round(oneR)} per R.`));
-  }
-  if (isNum(entry.entryPrice) && isNum(entry.exitPrice) && side) {
-    const points = side.toLowerCase() === "short" ? entry.entryPrice - entry.exitPrice : entry.exitPrice - entry.entryPrice;
-    out.push(numberQ(id("points"), "points", 3, pin, `Entry ${entry.entryPrice}, exit ${entry.exitPrice} on a ${side} trade. How many points did you gain (negative if you lost)?`, points, 0.25, "pts", `${side.toLowerCase() === "short" ? "Short = entry − exit" : "Long = exit − entry"} = ${round(points)} points.`));
-  }
-
-  return out.filter((q): q is PracticeQuestion => q != null);
+  return buildTradeQuestions(entry, all, rng, tradeLabel(entry));
 }
-
-const MATH_TAGS = new Set(["planned-rr", "r-dollars", "points"]);
 
 /* ------------------------------------------------------------------ */
 /*  Portfolio math (uses ALL recorded trades)                          */
@@ -298,6 +210,7 @@ export function portfolioQuestions(all: JournalEntry[], rng: Rng, drawdownLeft: 
   const pin = `All ${n} recorded trades${n < 20 ? " · small sample" : ""}`;
   const out: PracticeQuestion[] = [];
 
+  const PF = (q: PracticeQuestion): PracticeQuestion => ({ ...q, group: "math" });
   out.push(numberQ("pf:wins", "win-count", 1, pin, `Out of your ${n} recorded trades, how many were winners (P&L above zero)?`, wins.length, 0, "", `${wins.length} of ${n} trades have a positive P&L.`));
   out.push(numberQ("pf:winrate", "win-rate", 2, pin, `What is your win rate across these ${n} trades?`, winRate * 100, 0.6, "%", `${wins.length} ÷ ${n} = ${round(winRate * 100, 1)}%.`));
   const expectancy = trades.reduce((sum, t) => sum + t.pnl, 0) / n;
@@ -318,7 +231,7 @@ export function portfolioQuestions(all: JournalEntry[], rng: Rng, drawdownLeft: 
   const streak = lossStreakProbability(winRate, 3) * 100;
   out.push(numberQ("pf:streak", "loss-streak", 4, pin, `At your ${round(winRate * 100, 1)}% win rate, what is the chance of 3 losses in a row?`, streak, 0.6, "%", `(1 − ${round(winRate, 3)})³ = ${round(streak, 1)}%.`));
 
-  return shuffle(out, rng);
+  return shuffle(out.map((q) => ({ ...PF(q), fp: `${q.fp}@n${n}` })), rng);
 }
 
 /* ------------------------------------------------------------------ */
@@ -440,8 +353,6 @@ export function displayStreak(progress: PracticeProgress, today: string): number
 
 export type GameMode = "matrix" | "time-machine" | "boss";
 
-const PROCESS_TAGS = new Set(["direction", "outcome", "pnl", "time-window", "setup", "lesson", "process", "weekday", "instrument", "rank", "day-count", "hold-time"]);
-
 /** Trades of the "active week": the 7 calendar days ending at the latest trade. Falls back to the latest 10 trades. */
 export function weekTrades(all: JournalEntry[]): { trades: JournalEntry[]; label: string } {
   const usable = all.filter(isUsable).sort((a, b) => a.date.localeCompare(b.date));
@@ -498,7 +409,15 @@ export function bossQuestions(trades: JournalEntry[], rng: Rng): PracticeQuestio
     const total = rs.reduce((a, b) => a + b, 0);
     out.push(numberQ("boss:r", "r-total", 3, pin, `Your recorded R multiples were ${rs.map((r) => `${r}R`).join(", ")}. What is the net R for the week?`, total, 0.05, "R", `Sum of R multiples = ${round(total)}R.`));
   }
-  return out.filter((q): q is PracticeQuestion => q != null);
+  const bestWorst = [best.id, worst.id].filter((v, i, a) => a.indexOf(v) === i);
+  const weekIds = [...week].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8).map((t) => t.id);
+  const weekKey = hashText(week.map((t) => t.id).sort().join(","));
+  return out.filter((q): q is PracticeQuestion => q != null).map((q) => ({
+    ...q,
+    fp: `${q.fp}@${weekKey}`,
+    group: "boss" as const,
+    chartTradeIds: q.id === "boss:worst-day" ? [worst.id] : q.id === "boss:best-day" ? [best.id] : q.id === "boss:spread" ? bestWorst : weekIds,
+  }));
 }
 
 export interface PoolOptions {
@@ -509,7 +428,7 @@ export interface PoolOptions {
   drawdownLeft: number | null;
 }
 
-/** Every candidate question for a mode, across ALL levels. The runner picks by live difficulty. */
+/** Every candidate question for a mode, across ALL levels. `assembleSession` then applies the no-repeat ledger and the mix. */
 export function buildPool(options: PoolOptions): PracticeQuestion[] {
   const rng = seededRng(options.seed);
   const trades = options.trades.filter(isUsable);
@@ -517,11 +436,13 @@ export function buildPool(options: PoolOptions): PracticeQuestion[] {
 
   if (options.mode === "boss") {
     questions.push(...bossQuestions(trades, rng));
-    for (const t of trades) questions.push(...tradeQuestions(t, options.all, rng).filter((q) => MATH_TAGS.has(q.tag)).slice(0, 1));
+    for (const t of trades) questions.push(...tradeQuestions(t, options.all, rng));
     questions.push(...portfolioQuestions(options.all, rng, options.drawdownLeft).filter((q) => q.level >= 3));
   } else if (options.mode === "time-machine") {
-    for (const t of trades) questions.push(...tradeQuestions(t, options.all, rng).filter((q) => PROCESS_TAGS.has(q.tag)));
+    // Chart-based revision: process, notes, behaviour, timing, management — no calculators.
+    for (const t of trades) questions.push(...tradeQuestions(t, options.all, rng).filter((q) => q.group === "tm"));
   } else {
+    // Matrix = Time Machine (charts) + trade math + Math Duel (added by the page).
     for (const t of trades) questions.push(...tradeQuestions(t, options.all, rng));
   }
 

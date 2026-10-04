@@ -3,6 +3,21 @@ import type { Level, PracticeQuestion } from "./engine";
 import { tradeLabel } from "./engine";
 import type { EvidenceTrade } from "./ai-validate";
 
+/** Trade notes plus the trader's own review answers, capped (the server keeps 700 chars). */
+function richNotes(entry: JournalEntry): string | undefined {
+  const r = entry.review;
+  const parts = [
+    entry.notes,
+    r?.execution?.whyEntered && `Why entered: ${r.execution.whyEntered}`,
+    r?.followUp?.strongestEvidence && `Strongest evidence: ${r.followUp.strongestEvidence}`,
+    r?.followUp?.conceptMisunderstood && `Misunderstood: ${r.followUp.conceptMisunderstood}`,
+    r?.plannedVsActual?.deviations && `Deviations: ${r.plannedVsActual.deviations}`,
+    entry.reflection?.cause && `Cause: ${entry.reflection.cause}`,
+    r?.psychology?.emotionBefore && `Emotion before: ${r.psychology.emotionBefore}`,
+  ].filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+  return parts.length ? parts.join(" . ").slice(0, 700) : undefined;
+}
+
 export function toEvidence(entry: JournalEntry): EvidenceTrade {
   const mistake = entry.review?.followUp?.biggestMistake;
   const followed = typeof entry.review?.outcome?.followedPlan === "boolean" ? entry.review.outcome.followedPlan : entry.reflection?.followedSetup;
@@ -11,7 +26,7 @@ export function toEvidence(entry: JournalEntry): EvidenceTrade {
     instrument: entry.instrument, direction: entry.direction ?? null, setup: entry.setup, rr: entry.rr,
     entryTime: entry.entryTime, exitTime: entry.exitTime, entryPrice: entry.entryPrice, exitPrice: entry.exitPrice,
     stopLoss: entry.stopLoss, takeProfit: entry.takeProfit, quantity: entry.quantity,
-    notes: entry.notes, lesson: entry.reflection?.lesson, mistake,
+    notes: richNotes(entry), lesson: entry.reflection?.lesson, mistake,
     followedPlan: typeof followed === "boolean" ? followed : null,
   };
 }
