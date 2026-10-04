@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { btn3d, btn3dDanger, btn3dPrimary, pill } from "@/components/lessons/buttons";
+import { btn, btnDanger, btnPrimary, pill } from "@/components/lessons/buttons";
 import { BookmarkIcon } from "@/components/lessons/bookmark-icon";
+import "@/components/lessons/lessons.css";
 
 export interface LessonView {
   id: string; title: string; subtitle: string; createdAt: number;
@@ -71,11 +72,11 @@ export default function LessonsPage() {
         <h1 className="font-display text-2xl font-semibold text-ink">Lessons</h1>
         <div className="flex gap-2">
           {mine.length > 0 && (
-            <button className={btn3d} onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}>
+            <button className={btn} onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}>
               {selecting ? "Done" : "Select"}
             </button>
           )}
-          <Link href="/lessons/new" className={btn3dPrimary}>Write a lesson</Link>
+          <Link href="/lessons/new" className={btnPrimary}>Write a lesson</Link>
         </div>
       </div>
 
@@ -93,7 +94,7 @@ export default function LessonsPage() {
               onChange={() => setPicked(allPicked ? new Set() : new Set(mine.map((l) => l.id)))} />
             Select all my lessons ({mine.length})
           </label>
-          <button className={btn3dDanger} disabled={!picked.size} onClick={remove}>Delete ({picked.size})</button>
+          <button className={btnDanger} disabled={!picked.size} onClick={remove}>Delete ({picked.size})</button>
         </div>
       )}
 
@@ -109,39 +110,46 @@ export default function LessonsPage() {
         </p>
       )}
 
-      <div className="space-y-4">
+      <div className="lesson-feed space-y-6">
         {shown?.map((l) => {
           const cover = l.cover;
           const isPicked = picked.has(l.id);
+          const dek = l.hook || l.subtitle || l.excerpt;
+          const open = () => (selecting ? l.mine && toggle(l.id) : router.push(`/lessons/${l.id}`));
           return (
             <article key={l.id}
-              onClick={() => (selecting ? l.mine && toggle(l.id) : router.push(`/lessons/${l.id}`))}
-              className={`cursor-pointer rounded-2xl border bg-surface p-4 transition-colors hover:bg-raised ${isPicked ? "border-gold" : "border-line"} ${selecting && !l.mine ? "opacity-50" : ""}`}>
-              {l.repostedBy.length > 0 && <p className="mb-1 text-[11px] text-faint">{l.repostedBy.join(", ")} reposted</p>}
-              <div className="flex items-center gap-2 text-xs text-faint">
+              role="link"
+              tabIndex={0}
+              onClick={open}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } }}
+              className={`lesson-card${isPicked ? " is-picked" : ""}${selecting && !l.mine ? " opacity-50" : ""}`}>
+              {l.repostedBy.length > 0 && <p className="lc-eyebrow mb-2">{l.repostedBy.join(", ")} reposted</p>}
+              <div className="lc-eyebrow flex items-center gap-2">
                 {selecting && l.mine && <input type="checkbox" checked={isPicked} readOnly />}
-                <span>{l.bylines.length ? l.bylines.join(", ") : l.mine ? "You" : l.author.name} · @{l.author.handle} · {new Date(l.createdAt).toLocaleDateString()} · {l.readMins} min read</span>
+                <span>
+                  <b>{l.bylines.length ? l.bylines.join(", ") : l.mine ? "You" : l.author.name}</b> · @{l.author.handle} · {new Date(l.createdAt).toLocaleDateString()} · {l.readMins} min read
+                </span>
               </div>
-              {cover && /* eslint-disable-next-line @next/next/no-img-element */ <img src={cover} alt="" className="mt-3 max-h-72 w-full rounded-xl object-cover" />}
-              <h2 className="mt-3 text-lg font-semibold text-ink">{l.title}</h2>
-              {(l.hook || l.subtitle || l.excerpt) && <p className="mt-1 line-clamp-2 text-[15px] leading-snug text-muted">{l.hook || l.subtitle || l.excerpt}</p>}
+              {cover && /* eslint-disable-next-line @next/next/no-img-element */ <img src={cover} alt="" className="lc-cover" loading="lazy" />}
+              <h2 className="lc-title">{l.title}</h2>
+              {dek && <p className="lc-dek">{dek}</p>}
 
               {!selecting && (
-                <div className="mt-3 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => act(e, l.id, "like")} className={pill + (l.likedByMe ? " text-gold" : " text-faint")}>{l.likedByMe ? "♥" : "♡"} {l.likes}</button>
-                  {l.settings.comments && <button onClick={() => { setOpenId(openId === l.id ? null : l.id); setDraft(""); }} className={pill + (openId === l.id ? " text-gold" : " text-faint")}>Comments {l.comments.length}</button>}
-                  {(l.settings.reposts || l.repostedByMe) && <button onClick={(e) => act(e, l.id, "repost")} className={pill + (l.repostedByMe ? " text-gold" : " text-faint")}>{l.repostedByMe ? "Reposted" : "Repost"} {l.reposts}</button>}
-                  <button onClick={(e) => act(e, l.id, "save")} aria-pressed={l.savedByMe} className={pill + " ml-auto" + (l.savedByMe ? " text-gold" : " text-faint")}><BookmarkIcon filled={l.savedByMe} />{l.savedByMe ? "Saved" : "Save"}</button>
+                <div className="lc-actions" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={(e) => act(e, l.id, "like")} className={pill + " lc-pill" + (l.likedByMe ? " text-gold" : " text-faint")}>{l.likedByMe ? "♥" : "♡"} {l.likes}</button>
+                  {l.settings.comments && <button onClick={() => { setOpenId(openId === l.id ? null : l.id); setDraft(""); }} className={pill + " lc-pill" + (openId === l.id ? " text-gold" : " text-faint")}>Comments {l.comments.length}</button>}
+                  {(l.settings.reposts || l.repostedByMe) && <button onClick={(e) => act(e, l.id, "repost")} className={pill + " lc-pill" + (l.repostedByMe ? " text-gold" : " text-faint")}>{l.repostedByMe ? "Reposted" : "Repost"} {l.reposts}</button>}
+                  <button onClick={(e) => act(e, l.id, "save")} aria-pressed={l.savedByMe} className={pill + " lc-pill ml-auto" + (l.savedByMe ? " text-gold" : " text-faint")}><BookmarkIcon filled={l.savedByMe} />{l.savedByMe ? "Saved" : "Save"}</button>
                 </div>
               )}
 
               {openId === l.id && !selecting && l.settings.comments && (
-                <div className="mt-3 space-y-2 border-t border-line pt-3" onClick={(e) => e.stopPropagation()}>
+                <div className="mt-4 space-y-2 border-t border-line pt-4" onClick={(e) => e.stopPropagation()}>
                   {l.comments.map((c) => <p key={c.id} className="text-sm text-muted"><span className="font-medium text-ink">{c.by}</span> {c.body}</p>)}
                   <div className="flex gap-2">
                     <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && comment(l.id)}
-                      placeholder="Add a comment" className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3 py-1.5 text-sm text-ink outline-none focus:border-line-strong" />
-                    <button className={btn3dPrimary} onClick={() => comment(l.id)}>Send</button>
+                      placeholder="Add a comment" className="min-w-0 flex-1 rounded-xl border border-line bg-canvas/70 px-3.5 py-2 text-sm text-ink outline-none focus:border-line-strong" />
+                    <button className={btnPrimary} onClick={() => comment(l.id)}>Send</button>
                   </div>
                 </div>
               )}

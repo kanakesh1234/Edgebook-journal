@@ -18,6 +18,7 @@ import "@fontsource/spectral/400-italic.css";
 import "@fontsource/spectral/600.css";
 import "@fontsource/spectral/700.css";
 import "@/components/lessons/lessons.css";
+import { ImageError, imageTypeOf, prepareLessonImage } from "@/lib/images";
 import "@/components/lessons/writer.css";
 
 /* ------------------------------------------------------------------ */
@@ -30,10 +31,17 @@ interface Snapshot { at: number; title: string; subtitle: string; html: string; 
 
 const DRAFT = "edgebook-lesson-draft";
 const HISTORY = "edgebook-lesson-history";
-const IMG = /^image\/(png|jpeg|gif|webp)$/;
 const VID = /^video\/(mp4|webm|quicktime)$/;
 const AUD = /^audio\/(mpeg|wav|x-wav|mp4|x-m4a|ogg)$/;
-const anyMedia = (f: File) => IMG.test(f.type) || VID.test(f.type) || AUD.test(f.type);
+// Images are normalised in the browser (see prepareLessonImage), so anything the browser can decode is welcome.
+const anyMedia = (f: File) => !!imageTypeOf(f) || VID.test(f.type) || AUD.test(f.type);
+const ERR_TEXT: Record<string, string> = {
+  not_logged_in: "You're signed out. Sign in again, then retry.",
+  unsupported_type: "That file type isn't supported.",
+  too_large: "That file is over 50 MB.",
+  bad_content: "That file doesn't look like a valid image, video or audio file.",
+  storage_failed: "The server couldn't save the file. Check that the app can write to its .data folder.",
+};
 
 const TEXT_COLORS = ["#e03131", "#f76707", "#f59f00", "#2f9e44", "#1c7ed6", "#7048e8", "#d6336c", "#868e96"];
 const HILITES = ["#ffe066", "#b2f2bb", "#a5d8ff", "#ffc9c9", "#eebefa", "#ffd8a8", "#dee2e6"];
@@ -212,23 +220,35 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
   }, []);
 
   /* ----- upload ----- */
-  const addFile = useCallback(async (file: File) => {
+  const addFile = useCallback(async (picked: File) => {
     const ed = edRef.current;
     if (!ed) return;
-    if (!anyMedia(file)) return say("Use png, jpg, gif, webp, mp4, webm, mov, mp3, wav, m4a or ogg.");
+    if (!anyMedia(picked)) return say("Use an image (png, jpg, gif, webp), video (mp4, webm, mov) or audio (mp3, wav, m4a, ogg) file.");
     setUploading(true);
-    const fd = new FormData(); fd.append("file", file);
-    const r = await fetch("/api/lessons/media", { method: "POST", body: fd }).catch(() => null);
-    setUploading(false);
-    if (!r?.ok) return say(r?.status === 413 ? "That file is over 50 MB." : "Upload failed. Try again.");
-    const d = (await r.json()) as { url: string; kind: "image" | "video" | "audio" };
-    ed.chain().focus().insertContent([{ type: d.kind, attrs: { src: d.url } }, { type: "paragraph" }]).run();
+    try {
+      let file = picked;
+      if (imageTypeOf(picked)) {
+        try { file = await prepareLessonImage(picked); }
+        catch (err) { return say(err instanceof ImageError ? err.message : "That image could not be read."); }
+      }
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/lessons/media", { method: "POST", body: fd }).catch(() => null);
+      if (!r) return say("Upload failed — check your connection and try again.");
+      if (!r.ok) {
+        const code = ((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? "";
+        return say(r.status === 413 ? "That file is too large to upload." : ERR_TEXT[code] ?? `Upload failed (${r.status}). Try again.`);
+      }
+      const d = (await r.json()) as { url: string; kind: "image" | "video" | "audio" };
+      ed.chain().focus().insertContent([{ type: d.kind, attrs: { src: d.url } }, { type: "paragraph" }]).run();
+    } finally {
+      setUploading(false);
+    }
   }, [say]);
   const filesOf = (list?: FileList | null) => [...(list ?? [])].filter(anyMedia);
   const pick = (kind: "image" | "video" | "audio") => {
     kindRef.current = kind;
     if (fileRef.current) {
-      fileRef.current.accept = kind === "image" ? "image/png,image/jpeg,image/gif,image/webp" : kind === "video" ? "video/mp4,video/webm,video/quicktime" : "audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/ogg";
+      fileRef.current.accept = kind === "image" ? "image/*" : kind === "video" ? "video/mp4,video/webm,video/quicktime" : "audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/ogg";
       fileRef.current.click();
     }
     setMenu(null);

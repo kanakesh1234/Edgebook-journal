@@ -34,7 +34,8 @@ export async function GET(request: Request) {
   const friends = [];
 
   for (const r of records) {
-    const otherEmail = r.from === me ? r.to : me;
+    // The OTHER person: if I sent it, they are `to`; if they sent it, they are `from`.
+    const otherEmail = r.from === me ? r.to : r.from;
     const direction = r.from === me ? "outgoing" : "incoming";
     const acct = await getAccount(otherEmail);
     if (r.status === "pending" && direction === "incoming") {

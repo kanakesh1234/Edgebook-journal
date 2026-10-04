@@ -239,7 +239,6 @@ export function MobileTopBar({ title }: { title?: string }) {
           >
             <MenuIcon className="h-5 w-5" />
           </button>
-          <SettingsGear className="h-11 w-11 border-transparent bg-transparent" />
         </div>
         <p className="absolute left-1/2 -translate-x-1/2 font-display text-sm font-semibold text-muted">
           {heading}

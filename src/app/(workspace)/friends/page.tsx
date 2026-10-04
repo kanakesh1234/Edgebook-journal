@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import { Button } from "@/components/ui/button";
 import { TextInput } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/misc";
 import { toast } from "@/components/ui/toast";
-import { TrophyIcon } from "@/components/ui/icons";
+import { TrashIcon, TrophyIcon } from "@/components/ui/icons";
+import { ConfirmDialog } from "@/components/ui/confirm";
 
 interface Metrics {
   handle: string;
@@ -26,7 +26,7 @@ interface FriendRow extends Metrics {
 }
 
 /**
- * Friends — add by @handle, requests, head-to-head competition.
+ * Friends — add by @handle, requests, and a shared leaderboard view.
  * Only competition-safe aggregate metrics are shared. Virtual Edge
  * Points only — no money, no wagering.
  */
@@ -39,7 +39,7 @@ export default function FriendsPage() {
   const [searchResult, setSearchResult] = useState<{ handle: string; displayName: string } | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [headToHead, setHeadToHead] = useState<{ handle: string; me: Metrics; them: Metrics } | null>(null);
+  const [toRemove, setToRemove] = useState<FriendRow | null>(null);
 
   const refresh = useCallback(() => {
     void Promise.all([
@@ -92,20 +92,6 @@ export default function FriendsPage() {
         toast.success("Friend added");
       }
       refresh();
-      setHeadToHead(null);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openCompetition = async (handle: string) => {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/friends/competition?handle=${encodeURIComponent(handle)}`, { cache: "no-store" });
-      if (res.ok) {
-        const d = (await res.json()) as { me: Metrics; them: Metrics };
-        setHeadToHead({ handle, me: d.me, them: d.them });
-      }
     } finally {
       setBusy(false);
     }
@@ -240,70 +226,47 @@ export default function FriendsPage() {
               transition={{ duration: 0.35, delay: i * 0.04, ease: EASE }}
               className="panel p-5"
             >
-              {headToHead?.handle === f.handle ? (
-                <HeadToHead me={headToHead.me} them={headToHead.them} onBack={() => setHeadToHead(null)} />
-              ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 place-items-center rounded-full border border-gold/30 bg-gold/[0.08] text-sm font-bold text-gold">
-                      {f.displayName.slice(0, 1).toUpperCase()}
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-ink">{f.displayName} <span className="text-xs font-normal text-faint">{f.handle}</span></p>
-                      <p className="num text-xs text-muted">
-                        {f.trades} trades · {f.winRate != null ? `${f.winRate}% win` : "—"} · {f.edgePoints} EP
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={busy} onClick={() => void openCompetition(f.handle)}>
-                      Head-to-head
-                    </Button>
-                    <Button variant="subtle" size="sm" disabled={busy} onClick={() => void act({ action: "remove", recordId: f.id })}>
-                      Remove
-                    </Button>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-gold/30 bg-gold/[0.08] text-sm font-bold text-gold">
+                    {f.displayName.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink">{f.displayName} <span className="text-xs font-normal text-faint">{f.handle}</span></p>
+                    <p className="num text-xs text-muted">
+                      {f.trades} trades · {f.winRate != null ? `${f.winRate}% win` : "—"} · {f.edgePoints} EP
+                    </p>
                   </div>
                 </div>
-              )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setToRemove(f)}
+                  aria-label={`Remove ${f.displayName}`}
+                  title="Remove friend"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-faint transition-colors hover:bg-loss/10 hover:text-loss focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loss/40 disabled:opacity-40"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              </div>
             </motion.div>
           ))}
         </div>
       )}
-    </div>
-  );
-}
 
-function HeadToHead({ me, them, onBack }: { me: Metrics; them: Metrics; onBack: () => void }) {
-  const rows: [string, number | string, number | string, boolean][] = [
-    ["P&L", `$${me.totalPnl.toLocaleString()}`, `$${them.totalPnl.toLocaleString()}`, me.totalPnl >= them.totalPnl],
-    ["Return %", `${me.returnPct}%`, `${them.returnPct}%`, me.returnPct >= them.returnPct],
-    ["Win rate", me.winRate != null ? `${me.winRate}%` : "—", them.winRate != null ? `${them.winRate}%` : "—", (me.winRate ?? 0) >= (them.winRate ?? 0)],
-    ["Process score", `${me.processScore}`, `${them.processScore}`, me.processScore >= them.processScore],
-    ["Edge Points", `${me.edgePoints}`, `${them.edgePoints}`, me.edgePoints >= them.edgePoints],
-  ];
-  const iWin = me.processScore + me.edgePoints * 0.1 >= them.processScore + them.edgePoints * 0.1;
-  return (
-    <div>
-      <div className="grid grid-cols-3 items-center gap-2 border-b border-line pb-3 text-center">
-        <p className="font-display text-lg font-bold text-gold">YOU</p>
-        <p className="text-xs font-medium uppercase tracking-widest text-faint">vs</p>
-        <p className="font-display text-lg font-bold text-info">{them.displayName}</p>
-      </div>
-      <dl className="mt-3 space-y-2">
-        {rows.map(([label, mine, theirs, lead]) => (
-          <div key={label} className="grid grid-cols-3 items-center gap-2 text-[13px]">
-            <span className={cn("num text-right font-semibold", lead ? "text-profit" : "text-muted")}>{mine}</span>
-            <span className="text-center text-[10px] font-medium uppercase tracking-wider text-faint">{label}</span>
-            <span className={cn("num font-semibold", !lead ? "text-profit" : "text-muted")}>{theirs}</span>
-          </div>
-        ))}
-      </dl>
-      <p className="mt-3 text-center text-xs text-faint">
-        {iWin ? "You're ahead on process + points. Keep the checklist honest." : "Behind on process — the fastest fix is completing every trade review."}
-      </p>
-      <div className="mt-3 flex justify-center">
-        <Button variant="subtle" size="sm" onClick={onBack}>Back</Button>
-      </div>
+      <ConfirmDialog
+        open={!!toRemove}
+        onClose={() => setToRemove(null)}
+        title="Remove friend?"
+        body={toRemove ? `${toRemove.displayName} (${toRemove.handle}) will be removed from your friends. You can send a new request later.` : ""}
+        confirmLabel="Remove"
+        busy={busy}
+        onConfirm={() => {
+          const target = toRemove;
+          if (!target) return;
+          void act({ action: "remove", recordId: target.id }).then(() => setToRemove(null));
+        }}
+      />
     </div>
   );
 }

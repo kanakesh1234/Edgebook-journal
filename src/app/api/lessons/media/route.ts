@@ -19,18 +19,60 @@ function loggedIn(request: Request) {
   return !!(config && cookie && openAppSession(cookie, config.tokenSecret)?.email);
 }
 
-/** POST multipart "file" → { url, kind } */
+const EXT_TO_TYPE: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", jfif: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+  mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", ogg: "audio/ogg",
+};
+
+/** Real image type from the first bytes, so a mislabelled or truncated upload is rejected instead of saved as a broken file. */
+function sniffImage(b: Buffer): string | null {
+  if (b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length > 6 && b.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (b.length > 12 && b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
+}
+
+/** POST multipart "file" → { url, kind } — always answers with JSON { error } on failure so the editor can say why. */
 export async function POST(request: Request) {
   if (!loggedIn(request)) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
-  const file = (await request.formData()).get("file");
+
+  let file: FormDataEntryValue | null;
+  try {
+    file = (await request.formData()).get("file");
+  } catch {
+    // Body missing, truncated or over a platform limit.
+    return NextResponse.json({ error: "too_large" }, { status: 413 });
+  }
   if (!(file instanceof File)) return NextResponse.json({ error: "no_file" }, { status: 400 });
-  const ext = TYPES[file.type];
-  if (!ext) return NextResponse.json({ error: "unsupported_type" }, { status: 415 });
+  if (file.size === 0) return NextResponse.json({ error: "bad_content" }, { status: 400 });
   if (file.size > 50 * 1024 * 1024) return NextResponse.json({ error: "too_large" }, { status: 413 });
+
+  // Some browsers send an empty / generic type — fall back to the file extension.
+  const declared = file.type && file.type !== "application/octet-stream"
+    ? file.type
+    : EXT_TO_TYPE[file.name.split(".").pop()?.toLowerCase() ?? ""] ?? "";
+  let type = declared;
+  let ext = TYPES[type];
+  if (!ext) return NextResponse.json({ error: "unsupported_type" }, { status: 415 });
+
+  const buf = Buffer.from(await file.arrayBuffer());
+  if (type.startsWith("image/")) {
+    const real = sniffImage(buf);
+    if (!real) return NextResponse.json({ error: "bad_content" }, { status: 415 });
+    if (real !== type) { type = real; ext = TYPES[real]; } // trust the bytes over the label
+  }
+
   const id = uid();
-  await fs.mkdir(DIR, { recursive: true });
-  await fs.writeFile(path.join(DIR, `${id}.${ext}`), Buffer.from(await file.arrayBuffer()));
-  return NextResponse.json({ url: `/api/lessons/media?id=${id}.${ext}`, kind: file.type.startsWith("video") ? "video" : file.type.startsWith("audio") ? "audio" : "image" });
+  try {
+    await fs.mkdir(DIR, { recursive: true });
+    await fs.writeFile(path.join(DIR, `${id}.${ext}`), buf);
+  } catch (err) {
+    console.error("[lessons/media] could not write upload:", err);
+    return NextResponse.json({ error: "storage_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ url: `/api/lessons/media?id=${id}.${ext}`, kind: type.startsWith("video") ? "video" : type.startsWith("audio") ? "audio" : "image" });
 }
 
 /** GET ?id=<file> */

@@ -26,3 +26,110 @@
 .lesson-prose a.lesson-btn:hover { background: #ea5a10; }
 .lesson-prose a.lesson-btn-outline { background: transparent; color: #ff6719; box-shadow: inset 0 0 0 2px #ff6719; }
 .lesson-prose a.lesson-btn-outline:hover { background: rgb(255 103 25 / .1); }
+
+/* ------------------------------------------------------------------ */
+/*  Editorial article cards (feed only)                                 */
+/*  Soft Liquid-Glass material built purely from the app's theme        */
+/*  tokens (surface / line / gold / ink), so light + dark both inherit. */
+/* ------------------------------------------------------------------ */
+.lesson-feed {
+  --lc-hi: rgb(255 255 255 / 0.65);          /* top-edge specular highlight */
+  --lc-sheen: rgb(255 255 255 / 0.5);        /* diagonal sheen              */
+  --lc-shadow: 0 1px 2px rgb(48 40 24 / 0.04), 0 8px 24px -16px rgb(48 40 24 / 0.16);
+  --lc-shadow-hover: 0 2px 4px rgb(48 40 24 / 0.05), 0 16px 36px -18px rgb(48 40 24 / 0.22);
+  position: relative;
+  isolation: isolate;
+}
+[data-theme="dark"] .lesson-feed {
+  --lc-hi: rgb(255 240 210 / 0.09);
+  --lc-sheen: rgb(255 240 210 / 0.06);
+  --lc-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 10px 28px -18px rgb(0 0 0 / 0.45);
+  --lc-shadow-hover: 0 2px 4px rgb(0 0 0 / 0.4), 0 18px 40px -20px rgb(0 0 0 / 0.55);
+}
+.lesson-card {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  padding: clamp(20px, 3.2vw, 30px);
+  border-radius: 26px;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--lc-hi), var(--lc-shadow);
+  transition: transform .5s cubic-bezier(.16, 1, .3, 1), box-shadow .5s cubic-bezier(.16, 1, .3, 1), border-color .3s ease, background-color .3s ease;
+}
+.lesson-card::before {                      /* diagonal glass sheen */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, var(--lc-sheen) 0%, transparent 38%);
+  opacity: .7;
+}
+.lesson-card > * { position: relative; }   /* keep content above the sheen */
+.lesson-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--line-strong) 80%, transparent);
+  box-shadow: inset 0 1px 0 var(--lc-hi), var(--lc-shadow-hover);
+}
+.lesson-card:active { transform: translateY(-1px) scale(.995); }
+.lesson-card:focus-visible { outline: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); outline-offset: 3px; }
+.lesson-card.is-picked {
+  border-color: color-mix(in srgb, var(--gold) 70%, transparent);
+  box-shadow: inset 0 1px 0 var(--lc-hi), 0 0 0 3px color-mix(in srgb, var(--gold) 18%, transparent), var(--lc-shadow);
+}
+
+.lesson-card .lc-eyebrow { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; color: var(--faint); }
+.lesson-card .lc-eyebrow b { font-weight: 600; color: var(--muted); }
+.lesson-card .lc-cover {
+  display: block;
+  width: 100%;
+  margin-top: 18px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 18px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent), 0 10px 28px -16px rgb(0 0 0 / .35);
+}
+.lesson-card .lc-title {
+  margin-top: 18px;
+  font-size: clamp(21px, 3.4vw, 26px);
+  font-weight: 650;
+  line-height: 1.18;
+  letter-spacing: -.022em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.lesson-card .lc-dek {
+  margin-top: 10px;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lesson-card .lc-actions {
+  margin-top: 22px;
+  padding-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+.lesson-card .lc-actions .lc-pill {              /* glass chips for like / comment / repost / save */
+  background: color-mix(in srgb, var(--raised) 55%, transparent);
+  border-color: color-mix(in srgb, var(--line) 80%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+.lesson-card .lc-actions .lc-pill:hover { background: color-mix(in srgb, var(--raised) 85%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lesson-card, .lesson-card:hover, .lesson-card:active { transition: none; transform: none; }
+}
+/* Browsers without backdrop-filter get a solid surface so text stays readable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lesson-card { background: var(--surface); }
+}

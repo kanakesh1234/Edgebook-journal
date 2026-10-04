@@ -109,12 +109,24 @@ export class GoogleDriveDataStore implements DataStore {
   }
 
   async putImage(imageId: string, blob: Blob): Promise<void> {
-    const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "image/jpeg" },
-      body: blob,
-    });
-    if (!res.ok) throw new Error(`drive_image_write_failed:${res.status}`);
+    // Drive occasionally answers 429/5xx (or the network blips) — retry a couple of times before giving up.
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 600 * attempt));
+      try {
+        const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          body: blob,
+        });
+        if (res.ok) return;
+        lastStatus = res.status;
+        if (!RETRYABLE_STATUSES.has(res.status)) break; // 400 / 401 won't improve by retrying
+      } catch {
+        lastStatus = 0; // network error — retry
+      }
+    }
+    throw new Error(`drive_image_write_failed:${lastStatus}`);
   }
 
   async getImage(imageId: string): Promise<Blob | undefined> {

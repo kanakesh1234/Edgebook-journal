@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { btn3dDanger, btn3dPrimary, pill } from "@/components/lessons/buttons";
+import { btnDanger, btnPrimary, pill } from "@/components/lessons/buttons";
 import "@/components/lessons/lessons.css";
 import { BookmarkIcon } from "@/components/lessons/bookmark-icon";
 import type { LessonView } from "../page";
@@ -39,7 +39,7 @@ export default function LessonPage() {
     <div className="mx-auto w-full max-w-2xl px-4 py-8">
       <div className="flex items-center justify-between">
         <Link href="/lessons" className="text-sm text-faint hover:text-ink">← Lessons</Link>
-        {l.mine && <button className={btn3dDanger} onClick={remove}>Delete</button>}
+        {l.mine && <button className={btnDanger} onClick={remove}>Delete</button>}
       </div>
       <h1 className="mt-4 font-display text-3xl font-semibold text-ink">{l.title}</h1>
       {l.subtitle && <p className="mt-2 text-lg text-muted">{l.subtitle}</p>}
@@ -61,7 +61,7 @@ export default function LessonPage() {
         </div>
         <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment"
           className="mt-4 min-h-[72px] w-full rounded-xl border border-line bg-surface p-3 text-sm text-ink outline-none focus:border-line-strong" />
-        <button onClick={() => { if (text.trim()) { void post("comment", text); setText(""); } }} className={btn3dPrimary + " mt-3"}>Comment</button>
+        <button onClick={() => { if (text.trim()) { void post("comment", text); setText(""); } }} className={btnPrimary + " mt-3"}>Comment</button>
       </section>}
     </div>
   );

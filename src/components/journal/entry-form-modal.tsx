@@ -248,8 +248,12 @@ export function EntryFormModal({
           setReflecting(created);
         }
       }
-    } catch {
-      toast.error("Could not save the entry", "Please try again.");
+    } catch (err) {
+      const imageFailed = err instanceof Error && err.message.startsWith("drive_image_write_failed");
+      toast.error(
+        imageFailed ? "Screenshot upload failed" : "Could not save the entry",
+        imageFailed ? "Your entry wasn't saved. Check your connection and try again." : "Please try again.",
+      );
     } finally {
       setSaving(false);
     }
