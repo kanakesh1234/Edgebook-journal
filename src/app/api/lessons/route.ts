@@ -100,8 +100,13 @@ export async function POST(request: Request) {
     const ids = new Set(Array.isArray(b.ids) ? b.ids : []);
     const gone = all.filter((l) => ids.has(l.id) && l.author.toLowerCase() === me.toLowerCase()); // you can only delete your own
     if (!gone.length) return NextResponse.json({ error: "nothing_deleted" }, { status: 404 });
-    await writeLessons(all.filter((l) => !gone.includes(l)));
-    await removeMedia(gone);
+    try {
+      await writeLessons(all.filter((l) => !gone.includes(l)));
+    } catch (e) {
+      console.error("[lessons] delete failed:", e);
+      return NextResponse.json({ error: "delete_failed", detail: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+    await removeMedia(gone).catch(() => {});
     return NextResponse.json({ ok: true, deleted: gone.length });
   }
 

@@ -34,7 +34,10 @@ export default function LessonPage() {
     setDeleting(true);
     try {
       const res = await fetch("/api/lessons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete", ids: [id] }) });
-      if (!res.ok) throw new Error(res.status === 401 ? "Please log in again." : `Server said ${res.status}.`);
+      if (!res.ok) {
+        const detail = await res.json().then((j: { detail?: string; error?: string }) => j?.detail ?? j?.error).catch(() => undefined);
+        throw new Error(res.status === 401 ? "Please log in again." : detail ? `${res.status}: ${detail}` : `Server said ${res.status}.`);
+      }
       toast.success("Lesson deleted");
       router.push("/lessons");
     } catch (e) {

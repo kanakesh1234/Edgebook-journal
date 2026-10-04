@@ -46,9 +46,13 @@ export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().to
 
 export async function removeMedia(lessons: Lesson[]) {
   for (const l of lessons) {
-    const text = (l.html ?? "") + " " + l.blocks.map((b) => b.v).join(" ");
-    for (const m of text.matchAll(/\/api\/lessons\/media\?id=([a-z0-9]+\.(?:png|jpg|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg))/g)) {
-      await fs.unlink(path.join(DATA_DIR, "lesson-media", m[1])).catch(() => {});
+    try {
+      const text = (l.html ?? "") + " " + (l.blocks ?? []).map((b) => b.v).join(" ");
+      for (const m of text.matchAll(/\/api\/lessons\/media\?id=([a-z0-9]+\.(?:png|jpg|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg))/g)) {
+        await fs.unlink(path.join(DATA_DIR, "lesson-media", m[1])).catch(() => {});
+      }
+    } catch {
+      /* media cleanup is best effort and must never fail a delete */
     }
   }
 }

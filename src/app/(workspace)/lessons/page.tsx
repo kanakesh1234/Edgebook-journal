@@ -69,7 +69,10 @@ export default function LessonsPage() {
     setDeleting(true);
     try {
       const res = await send({ action: "delete", ids: [...picked] });
-      if (!res.ok) throw new Error(res.status === 401 ? "Please log in again." : `Server said ${res.status}.`);
+      if (!res.ok) {
+        const detail = await res.json().then((j: { detail?: string; error?: string }) => j?.detail ?? j?.error).catch(() => undefined);
+        throw new Error(res.status === 401 ? "Please log in again." : detail ? `${res.status}: ${detail}` : `Server said ${res.status}.`);
+      }
       const gone = new Set(picked);
       setItems((cur) => cur && cur.filter((l) => !gone.has(l.id)));
       toast.success(`Deleted ${gone.size} lesson${gone.size > 1 ? "s" : ""}`);
