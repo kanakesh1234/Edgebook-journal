@@ -1,233 +1,211 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
-import { PLAN_EMOTIONS, setupRules, type PlaybookRule, type TradeDirection, type TradePlan, type PlanRuleState, type JournalEntry } from "@/lib/types";
-import { todayKey } from "@/lib/format";
-import { detectPatterns, matchPlanToPatterns } from "@/lib/minato/patterns";
-import { Button } from "@/components/ui/button";
-import { Field, TextArea, TextInput } from "@/components/ui/input";
+import { useUi } from "@/lib/ui-store";
+import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
+import { currencySymbol, todayKey } from "@/lib/format";
 import { Modal } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
-import { MinatoAvatar, MinatoBubble } from "@/components/ai/minato-visual";
-import { ImageUploader, type UploadItem } from "./image-uploader";
-import { TradeReviewFlow } from "./trade-review-flow";
 import { cn, uid } from "@/lib/utils";
-import { EASE } from "@/components/landing/reveal";
-import { PencilIcon, UploadIcon } from "@/components/ui/icons";
+import { ImageUploader, type UploadItem } from "./image-uploader";
+import { AutopsyBody, useAutopsy } from "./autopsy";
+import {
+  CheckRow, ChoiceCard, Chip, Disclosure, FLOW_EASE, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
+  SheetFrame, StepTitle, StepTransition, TextBlock, TextBox,
+} from "./flow-ui";
 
 /**
- * PLAN TRADE — the complete guided trade lifecycle, in fixed order:
+ * PLAN & RECORD — one calm, continuous ritual.
  *
- *   PRE-SESSION → SETUP SELECTION → RULE CHECKLIST →
- *   MANUAL ENTRY / IMPORT → SCREENSHOTS → AUTOPSY
+ *   plan → setup (+ its rules) → trade → chart → autopsy → done
+ *
+ * "setup" is skipped when the trader has no playbook. There is no stepper:
+ * each step simply follows the last. Validation is shown as quiet inline
+ * state, and Continue stays disabled until the step's rules are satisfied.
  */
-const STAGES = [
-  "Pre-session",
-  "Setup",
-  "Rules",
-  "Record trade",
-  "Screenshots",
-  "Autopsy",
-] as const;
+type StepId = "plan" | "setup" | "trade" | "chart" | "autopsy" | "done";
+type ImportRow = { date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null };
 
-/** Stage indices — rules must precede manual entry/import. */
-export const PLAN_STAGE = {
-  PRE_SESSION: 0,
-  SETUP: 1,
-  RULES: 2,
-  RECORD: 3,
-  SCREENSHOTS: 4,
-  AUTOPSY: 5,
-} as const;
+const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
+const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
+const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
+const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 
-export function PlanTradeFlow({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const playbook = settings.playbook ?? [];
   const challenges = settings.challenges ?? [];
+  const sym = currencySymbol(settings.currency);
 
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState<StepId>("plan");
+  const [dir, setDir] = useState<1 | -1>(1);
 
-  // ── Stage 0: pre-session ──
-  const [date, setDate] = useState(todayKey());
-  const [challengeId, setChallengeId] = useState("");
-  const [instrument, setInstrument] = useState("");
-  const [bias, setBias] = useState<"long" | "short" | "either">("either");
-  const [preSessionProcess, setPreSessionProcess] = useState("");
+  // plan
   const [thesis, setThesis] = useState("");
-  const [drawOnLiquidity, setDrawOnLiquidity] = useState("");
-  const [drawLevel, setDrawLevel] = useState("");
-  const [liquidityObservations, setLiquidityObservations] = useState("");
-  const [importantLevels, setImportantLevels] = useState("");
-  const [mustHappenBeforeEntry, setMustHappenBeforeEntry] = useState("");
+  const [emotion, setEmotion] = useState<(typeof PLAN_EMOTIONS)[number] | "">("");
+  const [moreEmotions, setMoreEmotions] = useState(false);
+  const [instrument, setInstrument] = useState("");
+  const [draw, setDraw] = useState("");
   const [invalidation, setInvalidation] = useState("");
-  const [expectedTarget, setExpectedTarget] = useState("");
-  const [emotionalState, setEmotionalState] = useState<(typeof PLAN_EMOTIONS)[number] | "">("");
-  const [emotionalNote, setEmotionalNote] = useState("");
-  const [whatCouldBreakPlan, setWhatCouldBreakPlan] = useState("");
-  const [entryTimePlanned, setEntryTimePlanned] = useState("");
+  const [breakPlan, setBreakPlan] = useState("");
 
-  // ── Stage 1: setup selection ──
+  // setup + rules
   const [playbookId, setPlaybookId] = useState("");
-
-  // ── Stage 2: rule checklist ──
   const [ruleStates, setRuleStates] = useState<Record<string, PlanRuleState>>({});
 
-  // ── Stage 3: manual entry / import ──
-  const [entryMode, setEntryMode] = useState<"choose" | "manual" | "import">("choose");
-  const [tradeDate, setTradeDate] = useState(todayKey());
+  // trade
+  const [mode, setMode] = useState<"manual" | "import">("manual");
   const [pnl, setPnl] = useState("");
-  const [rr, setRr] = useState("");
-  const [dirInstrument, setDirInstrument] = useState("");
   const [direction, setDirection] = useState<TradeDirection | null>(null);
+  const [tradeDate, setTradeDate] = useState(todayKey());
+  const [rr, setRr] = useState("");
   const [entryTime, setEntryTime] = useState("");
   const [exitTime, setExitTime] = useState("");
-  const [createdEntry, setCreatedEntry] = useState<JournalEntry | null>(null);
-  const importRef = useRef<HTMLInputElement>(null);
-  const [importRows, setImportRows] = useState<{ date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null }[] | null>(null);
+  const [tradeInstrument, setTradeInstrument] = useState("");
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
-  // ── Stage 4: screenshots ──
+  // after the trade exists
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const [images, setImages] = useState<UploadItem[]>([]);
-
-  // ── Stage 5: autopsy ──
-  const [autopsyEntry, setAutopsyEntry] = useState<JournalEntry | null>(null);
-
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const autopsy = useAutopsy(createdId, step === "autopsy");
 
   const selectedPlaybook = playbook.find((p) => p.id === playbookId);
-  const selectedRules: PlaybookRule[] = useMemo(() => setupRules(selectedPlaybook), [selectedPlaybook]);
-  const allRulesConfirmed =
-    selectedRules.length === 0 || selectedRules.every((_, i) => (ruleStates[String(i)] ?? "waiting") === "ready");
+  const rules = useMemo(() => setupRules(selectedPlaybook), [selectedPlaybook]);
+  const confirmedRules = rules.filter((_, i) => ruleStates[String(i)] === "ready").length;
+  const allRules = rules.length === 0 || confirmedRules === rules.length;
 
+  const order: StepId[] = useMemo(() => (playbook.length ? ["plan", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "trade", "chart", "autopsy", "done"]), [playbook.length]);
+  const go = (to: StepId) => {
+    setDir(order.indexOf(to) >= order.indexOf(step) ? 1 : -1);
+    setSaveError(null);
+    setStep(to);
+  };
+  const prev = (s: StepId): StepId | null => { const i = order.indexOf(s); return i > 0 ? order[i - 1]! : null; };
+  const next = (s: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(s) + 1)]!;
+
+  const recentInstruments = useMemo(() => {
+    const seen: string[] = [];
+    for (const e of [...entries].sort((a, b) => b.createdAt - a.createdAt)) {
+      const i = e.instrument?.trim();
+      if (i && i !== "—" && !seen.includes(i)) seen.push(i);
+      if (seen.length === 4) break;
+    }
+    return seen;
+  }, [entries]);
+
+  // Fresh start every time the flow opens.
   useEffect(() => {
     if (!open) return;
-    setDate(todayKey()); setTradeDate(todayKey());
-    setChallengeId(useApp.getState().settings.primaryChallengeId ?? challenges[0]?.id ?? "");
-    setPlaybookId(playbook[0]?.id ?? "");
-    setInstrument(""); setBias("either"); setPreSessionProcess(""); setThesis("");
-    setDrawOnLiquidity(""); setDrawLevel(""); setLiquidityObservations(""); setImportantLevels("");
-    setMustHappenBeforeEntry(""); setInvalidation(""); setExpectedTarget("");
-    setEmotionalState(""); setEmotionalNote(""); setWhatCouldBreakPlan(""); setEntryTimePlanned("");
-    setRuleStates({}); setStep(0);
-    setEntryMode("choose"); setPnl(""); setRr(""); setDirInstrument(""); setDirection(null);
-    setEntryTime(""); setExitTime(""); setCreatedEntry(null);
-    setImportRows(null); setImportError(null); setImages([]); setAutopsyEntry(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setStep("plan"); setDir(1);
+    setThesis(""); setEmotion(""); setMoreEmotions(false); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
+    const only = useApp.getState().settings.playbook ?? [];
+    setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
+    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setTradeInstrument("");
+    setImportRows(null); setImportError(null);
+    setCreatedId(null); setImages([]); setSaving(false); setSaveError(null);
   }, [open]);
 
-  // Pattern detection is only visible in the first stage. Avoid scanning a
-  // large imported journal while the trader is entering or importing trades.
-  const patterns = useMemo(
-    () => step === PLAN_STAGE.PRE_SESSION ? detectPatterns(entries) : [],
-    [entries, step],
-  );
-  const planText = `${thesis} ${drawOnLiquidity} ${mustHappenBeforeEntry} ${whatCouldBreakPlan}`;
-  const planMatch = useMemo(() => matchPlanToPatterns(planText, patterns), [planText, patterns]);
+  /* ---------------- gating + quiet hints per step ---------------- */
+  const pnlText = pnl.trim();
+  const pnlValue = pnlText === "" ? NaN : Number(pnlText);
+  const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlValue);
+  const manualReady = Number.isFinite(pnlValue);
+  const finalInstrument = (instrument.trim() || tradeInstrument.trim()).toUpperCase();
 
-  // Per-stage gating
-  const canNext =
-    step === 0 ? thesis.trim().length > 0 && emotionalState !== ""
-    : step === 1 ? playbook.length === 0 || !!playbookId   // setup required when any exist
-    : step === 2 ? allRulesConfirmed                        // setup rules gate
-    : step === 3 ? createdEntry != null
-    : true;
+  const gate: { ok: boolean; hint: string | null } = (() => {
+    switch (step) {
+      case "plan":
+        if (!thesis.trim()) return { ok: false, hint: "Write your plan to continue" };
+        if (!emotion) return { ok: false, hint: "Pick how you feel" };
+        return { ok: true, hint: null };
+      case "setup":
+        if (!playbookId) return { ok: false, hint: "Choose a setup" };
+        if (!allRules) return { ok: false, hint: `${confirmedRules} of ${rules.length} rules confirmed` };
+        return { ok: true, hint: null };
+      case "trade":
+        if (mode === "import") return importRows?.length ? { ok: true, hint: null } : { ok: false, hint: "Choose a file to import" };
+        if (!pnlText) return { ok: false, hint: "Enter the net P&L" };
+        if (pnlInvalid) return { ok: false, hint: "Numbers only — negative for a loss" };
+        return { ok: true, hint: null };
+      case "chart":
+        return images.length ? { ok: true, hint: null } : { ok: false, hint: "Add a chart, or skip for now" };
+      case "autopsy":
+        return autopsy.ready ? { ok: true, hint: null } : { ok: false, hint: "Answer the first three to finish" };
+      default:
+        return { ok: true, hint: null };
+    }
+  })();
 
+  /* ---------------- persistence ---------------- */
   const buildPlan = (): TradePlan => ({
     id: uid(`pl-${Date.now().toString(36)}`),
-    date,
-    challengeId: challengeId || undefined,
+    date: todayKey(),
+    challengeId: useApp.getState().settings.primaryChallengeId ?? challenges[0]?.id ?? undefined,
     playbookId: playbookId || undefined,
     playbookName: selectedPlaybook?.name,
     playbookVersion: selectedPlaybook?.version,
-    instrument: instrument.trim() || undefined,
-    bias,
-    preSessionProcess: preSessionProcess.trim() || undefined,
+    instrument: finalInstrument || undefined,
+    bias: "either",
     thesis: thesis.trim(),
-    drawOnLiquidity: drawOnLiquidity.trim() || undefined,
-    drawLevel: drawLevel.trim() || undefined,
-    liquidityObservations: liquidityObservations.trim() || undefined,
-    importantLevels: importantLevels.trim() || undefined,
-    mustHappenBeforeEntry: mustHappenBeforeEntry.trim() || undefined,
+    drawOnLiquidity: draw.trim() || undefined,
     invalidation: invalidation.trim() || undefined,
     expectedSetup: selectedPlaybook?.name,
-    expectedTarget: expectedTarget.trim() || undefined,
-    emotionalState: emotionalState || undefined,
-    emotionalNote: emotionalNote.trim() || undefined,
-    whatCouldBreakPlan: whatCouldBreakPlan.trim() || undefined,
-    rules: selectedRules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] ?? "waiting", note: r.description })),
+    emotionalState: emotion || undefined,
+    whatCouldBreakPlan: breakPlan.trim() || undefined,
+    rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] ?? "waiting", note: r.description })),
     status: "executed",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
 
-  /** Create the actual trade from manual details. */
-  const saveManualTrade = async () => {
-    const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl.replace(/[^\d.\-−]/g, "").replace("−", "-"));
-    if (!Number.isFinite(pnlNumber)) {
-      toast.error("Net P&L is required", "Enter a number — negative for a loss.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const plan = buildPlan();
-      await useApp.getState().savePlan(plan);
-      const created = await useApp.getState().createEntry({
-        date: tradeDate <= todayKey() ? tradeDate : todayKey(),
-        pnl: Math.round(pnlNumber * 100) / 100,
-        rr: rr.trim() === "" ? null : Number(rr),
-        instrument: (dirInstrument.trim() || instrument.trim() || "—").toUpperCase(),
-        direction,
-        setup: selectedPlaybook?.name ?? "",
-        setupId: playbookId || undefined,
-        notes: "",
-        images: [],
-        challengeId: challengeId || undefined,
-        planId: plan.id,
-        entryTime: entryTime.trim() || undefined,
-        exitTime: exitTime.trim() || undefined,
-      });
-      setCreatedEntry(created);
-      setStep(PLAN_STAGE.SCREENSHOTS);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const challengeId = () => useApp.getState().settings.primaryChallengeId ?? challenges[0]?.id ?? undefined;
 
-  /** Import CSV rows (stage 3 → 4) in one persisted transaction. */
-  const runImport = async () => {
-    if (!importRows?.length) return;
+  const saveTrade = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       const plan = buildPlan();
       await useApp.getState().savePlan(plan);
-      const drafts = importRows.map((row, i) => ({
-        date: row.date,
-        pnl: row.pnl,
-        rr: row.rr,
-        instrument: row.instrument,
-        direction: row.direction,
-        setup: row.setup || selectedPlaybook?.name || "",
-        setupId: row.setup ? undefined : playbookId || undefined,
-        notes: row.notes,
-        entryTime: row.entryTime ?? undefined,
-        images: [] as JournalEntry["images"],
-        challengeId: challengeId || undefined,
-        planId: i === 0 ? plan.id : undefined,
-        reviewStatus: "not_reviewed" as const,
-      }));
-      const created = await useApp.getState().createEntries(drafts);
-      setCreatedEntry(created[0] ?? null);
-      toast.success(`Imported ${created.length} ${created.length === 1 ? "trade" : "trades"}`, "Screenshots next — then Autopsy.");
-      setStep(PLAN_STAGE.SCREENSHOTS);
+      if (mode === "manual") {
+        const created = await useApp.getState().createEntry({
+          date: tradeDate <= todayKey() ? tradeDate : todayKey(),
+          pnl: Math.round(pnlValue * 100) / 100,
+          rr: rr.trim() === "" || !Number.isFinite(Number(rr)) ? null : Number(rr),
+          instrument: finalInstrument || "—",
+          direction,
+          setup: selectedPlaybook?.name ?? "",
+          setupId: playbookId || undefined,
+          notes: "",
+          images: [],
+          challengeId: challengeId(),
+          planId: plan.id,
+          entryTime: entryTime.trim() || undefined,
+          exitTime: exitTime.trim() || undefined,
+        });
+        setCreatedId(created.id);
+      } else if (importRows?.length) {
+        const created = await useApp.getState().createEntries(importRows.map((row, i) => ({
+          date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument, direction: row.direction,
+          setup: row.setup || selectedPlaybook?.name || "",
+          setupId: row.setup ? undefined : playbookId || undefined,
+          notes: row.notes, entryTime: row.entryTime ?? undefined,
+          images: [] as JournalEntry["images"],
+          challengeId: challengeId(),
+          planId: i === 0 ? plan.id : undefined,
+          reviewStatus: "not_reviewed" as const,
+        })));
+        setCreatedId(created[0]?.id ?? null);
+      }
+      go("chart");
+    } catch {
+      setSaveError("Couldn't save — try again.");
     } finally {
       setSaving(false);
     }
@@ -237,7 +215,6 @@ export function PlanTradeFlow({
     setImportError(null);
     try {
       const text = await file.text();
-      // Let the upload state paint before parsing a large broker export.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { parseTradesCsv } = await import("@/lib/csv-import");
       const result = parseTradesCsv(text);
@@ -245,464 +222,234 @@ export function PlanTradeFlow({
       if (result.rows.length === 0) { setImportError("No valid rows found in that file."); return; }
       setImportRows(result.rows.map((r) => ({ date: r.date, pnl: r.pnl, rr: r.rr, instrument: r.instrument, direction: r.direction, setup: r.setup, notes: r.notes, entryTime: r.entryTime })));
     } catch {
-      setImportError("Could not read that file — try re-exporting it.");
+      setImportError("Couldn't read that file — try re-exporting it.");
     }
   };
 
-  /** Persist screenshots onto the trade (stage 4 → 5). */
-  const saveScreenshots = async () => {
-    if (!createdEntry) return;
+  /** Persist charts onto the trade, then read it back from the store so every later screen sees them. */
+  const saveCharts = async () => {
+    const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
+    if (!live) { go("autopsy"); return; }
     setSaving(true);
+    setSaveError(null);
     try {
       const blobs = new Map<string, Blob>();
       for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-      await useApp.getState().updateEntry(
-        createdEntry.id,
-        {
-          date: createdEntry.date, pnl: createdEntry.pnl, rr: createdEntry.rr,
-          instrument: createdEntry.instrument, direction: createdEntry.direction,
-          setup: createdEntry.setup, setupId: createdEntry.setupId, notes: createdEntry.notes,
-          images: images.map((i) => i.meta), challengeId: createdEntry.challengeId,
-          tradeNumber: createdEntry.tradeNumber ?? null,
-          entryTime: createdEntry.entryTime, exitTime: createdEntry.exitTime,
-          entryPrice: createdEntry.entryPrice, exitPrice: createdEntry.exitPrice,
-          stopLoss: createdEntry.stopLoss, takeProfit: createdEntry.takeProfit,
-        },
-        blobs,
-      );
-      setStep(PLAN_STAGE.AUTOPSY);
+      await useApp.getState().updateEntry(live.id, {
+        date: live.date, pnl: live.pnl, rr: live.rr, instrument: live.instrument, direction: live.direction,
+        setup: live.setup, setupId: live.setupId, notes: live.notes, images: images.map((i) => i.meta),
+        compareImage: live.compareImage, challengeId: live.challengeId, tradeNumber: live.tradeNumber ?? null,
+        entryTime: live.entryTime, exitTime: live.exitTime, entryPrice: live.entryPrice, exitPrice: live.exitPrice,
+        stopLoss: live.stopLoss, takeProfit: live.takeProfit, quantity: live.quantity,
+      }, blobs);
+      go("autopsy");
+    } catch {
+      setSaveError("Couldn't save the chart — try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  const finish = () => {
-    toast.success("Trade complete", "Journal, challenge progress and MINATO analytics updated.");
-    onClose();
+  const completeAutopsy = async () => { if (await autopsy.submit()) go("done"); };
+
+  const onContinue = () => {
+    if (!gate.ok || saving) return;
+    if (step === "plan" || step === "setup") go(next(step));
+    else if (step === "trade") void saveTrade();
+    else if (step === "chart") void saveCharts();
+    else if (step === "autopsy") void completeAutopsy();
+    else onClose();
   };
 
+  const continueLabel = step === "trade" ? (mode === "import" && importRows ? `Import ${importRows.length}` : "Save trade") : step === "autopsy" ? "Finish" : step === "done" ? "Done" : "Continue";
+  // Going back is only possible before the trade is saved (never re-creates it) and from autopsy to the chart.
+  const back = step === "plan" || step === "chart" || step === "done" ? null : step === "autopsy" ? "chart" : prev(step);
+
+  const hintText = saveError ?? autopsy.error ?? gate.hint;
+  const hintTone = saveError || autopsy.error ? "warn" : "muted";
+
   return (
-    <>
-    <Modal open={open && !autopsyEntry} onClose={onClose} size="lg" label="Plan a trade" title="Plan & record a trade">
-      <div className="px-6 py-6 sm:px-8">
-        {/* Progress */}
-        <ol className="flex items-center gap-1" aria-label={`Stage ${Math.min(step + 1, STAGES.length)} of ${STAGES.length}: ${STAGES[Math.min(step, STAGES.length - 1)]}`}>
-          {STAGES.map((label, i) => (
-            <li key={label} className="flex flex-1 items-center gap-1 last:flex-none">
-              <span className={cn(
-                "grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold transition-colors",
-                i < step ? "border-profit/50 bg-profit/[0.12] text-profit"
-                  : i === step ? "border-gold bg-gold/[0.14] text-gold"
-                  : "border-line bg-raised text-faint",
-              )}>
-                {i < step ? "✓" : i + 1}
-              </span>
-              {i < STAGES.length - 1 && <span className={cn("h-px flex-1", i < step ? "bg-profit/40" : "bg-line-strong")} />}
-            </li>
-          ))}
-        </ol>
-        <p className="mt-2 text-[11px] font-medium uppercase tracking-wider text-faint">{STAGES[Math.min(step, STAGES.length - 1)]}</p>
-
-        {/* MINATO appears contextually at the checklist stage only */}
-        <AnimatePresence>
-          {step === 2 && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mt-4 flex items-start justify-end gap-2">
-              <MinatoBubble state="curious" text="Thesis noted. Work through every rule before you commit capital." />
-              <MinatoAvatar state="curious" size={44} />
-            </motion.div>
+    <Modal open={open} onClose={onClose} size="md" label="Plan and record a trade">
+      <SheetFrame
+        onClose={onClose}
+        onBack={back ? () => go(back) : undefined}
+        hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
+        actions={
+          <>
+            {step === "chart" && <QuietButton disabled={saving} onClick={() => go("autopsy")}>Skip for now</QuietButton>}
+            <PrimaryButton disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>{continueLabel}</PrimaryButton>
+          </>
+        }
+      >
+        <StepTransition stepKey={step} dir={dir}>
+          {step === "plan" && (
+            <div className="space-y-8">
+              <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
+              <div className="space-y-2.5">
+                <Label done={thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
+                <TextBlock id="flow-plan" autoFocus value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="Where do you expect price to go, and why?" />
+              </div>
+              <div className="space-y-3">
+                <Label done={emotion !== ""}>How are you feeling?</Label>
+                <div className="flex flex-wrap gap-2">
+                  {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                  {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                  {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
+                </div>
+              </div>
+              <div className="space-y-2.5">
+                <Label hint="optional" htmlFor="flow-instrument">Instrument</Label>
+                <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="NQ" className="max-w-[12rem] font-mono" />
+                {recentInstruments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {recentInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
+                  </div>
+                )}
+              </div>
+              <Disclosure label="Add detail">
+                <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
+                <div className="space-y-2.5"><Label htmlFor="flow-inval">What would invalidate it?</Label><TextBox id="flow-inval" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} /></div>
+                <div className="space-y-2.5"><Label htmlFor="flow-break">What could make you break the plan?</Label><TextBox id="flow-break" value={breakPlan} onChange={(e) => setBreakPlan(e.target.value)} /></div>
+              </Disclosure>
+            </div>
           )}
-        </AnimatePresence>
 
-        <div className="mt-5 min-h-[240px]">
-          <AnimatePresence mode="sync" initial={false}>
-            {/* ─────────────── STAGE 0 · PRE-SESSION ─────────────── */}
-            {step === 0 && (
-              <StageShell key="presession" title="Pre-session planning" subtitle="Plan before you know your entry or exit — that's the point.">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Planned day" htmlFor="plan-date">
-                      <TextInput id="plan-date" type="date" max={todayKey()} value={date} onChange={(e) => setDate(e.target.value)} />
-                    </Field>
-                    <Field label="Instrument" hint="optional" htmlFor="plan-instrument">
-                      <TextInput id="plan-instrument" placeholder="NQ, ES…" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} />
-                    </Field>
-                  </div>
-                  <Field label="Pre-session process" hint="routine, review, levels" htmlFor="plan-presession">
-                    <TextArea id="plan-presession" className="min-h-14" placeholder="e.g. Mark overnight high/low, check news calendar, no trades before 9:33." value={preSessionProcess} onChange={(e) => setPreSessionProcess(e.target.value)} />
-                  </Field>
-                  <Field label="1 · What is price likely to do today?" hint="your thesis — stored exactly as written" htmlFor="plan-thesis">
-                    <TextArea id="plan-thesis" className="min-h-20" placeholder="Write your market thesis freely…" value={thesis} onChange={(e) => setThesis(e.target.value)} />
-                  </Field>
-                  <Field label="2 · Where is the draw on liquidity?" htmlFor="plan-draw">
-                    <TextInput id="plan-draw" placeholder="e.g. overnight high above equal highs" value={drawOnLiquidity} onChange={(e) => setDrawOnLiquidity(e.target.value)} />
-                  </Field>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Level" hint="optional" htmlFor="plan-level">
-                      <TextInput id="plan-level" className="tabular" placeholder="e.g. 22,540" value={drawLevel} onChange={(e) => setDrawLevel(e.target.value)} />
-                    </Field>
-                    <Field label="Expected target" hint="optional" htmlFor="plan-target">
-                      <TextInput id="plan-target" placeholder="e.g. opposing PD array" value={expectedTarget} onChange={(e) => setExpectedTarget(e.target.value)} />
-                    </Field>
-                  </div>
-                  <Field label="3 · Expected market narrative" hint="the story you expect price to tell" htmlFor="plan-narrative">
-                    <TextInput id="plan-narrative" placeholder="e.g. sweep Asia highs → reversal into NY draw" value={liquidityObservations} onChange={(e) => setLiquidityObservations(e.target.value)} />
-                  </Field>
-                  <Field label="4 · Key liquidity levels" htmlFor="plan-levels">
-                    <TextArea id="plan-levels" className="min-h-12" value={importantLevels} onChange={(e) => setImportantLevels(e.target.value)} />
-                  </Field>
-                  <Field label="5 · What are you expecting to happen?" hint="your execution intention" htmlFor="plan-must">
-                    <TextInput id="plan-must" placeholder="e.g. sweep + SMT confirmation before any entry" value={mustHappenBeforeEntry} onChange={(e) => setMustHappenBeforeEntry(e.target.value)} />
-                  </Field>
-                  <Field label="What would invalidate the idea?" hint="optional" htmlFor="plan-invalid">
-                    <TextInput id="plan-invalid" placeholder="e.g. reclaims the swept level" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} />
-                  </Field>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="6 · Emotional state check">
-                      <EmotionPicker value={emotionalState} onChange={setEmotionalState} />
-                    </Field>
-                    <Field label="What's influencing that state?" hint="sleep, yesterday, news…" htmlFor="plan-emotion-note">
-                      <TextArea id="plan-emotion-note" className="min-h-16" value={emotionalNote} onChange={(e) => setEmotionalNote(e.target.value)} />
-                    </Field>
-                  </div>
-                  <Field label="What could cause you to break your plan today?" hint="MINATO compares prediction vs reality" htmlFor="plan-break">
-                    <TextArea id="plan-break" className="min-h-14" placeholder="e.g. I may enter early because I don't want to miss the move." value={whatCouldBreakPlan} onChange={(e) => setWhatCouldBreakPlan(e.target.value)} />
-                  </Field>
-
-                  {/* Proactive pattern warning — evidence-based, dismissible */}
-                  {planMatch && planMatch.pattern.count >= 2 && (
-                    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-gold/40 bg-gold/[0.07] p-4">
-                      <div className="flex items-start gap-2.5">
-                        <MinatoAvatar state="warning" size={36} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] leading-relaxed text-ink">
-                            This sounds similar to the <strong className="text-gold">{planMatch.pattern.label}</strong> pattern
-                            you&apos;ve recorded before ({planMatch.pattern.count}×, {planMatch.pattern.confidence}). Confirm
-                            your setup conditions before treating this as an entry.
-                          </p>
-                          <PatternEvidenceDisclosure pattern={planMatch.pattern} />
-                        </div>
+          {step === "setup" && (
+            <div className="space-y-8">
+              <StepTitle title="Pick your setup" />
+              <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Setup">
+                {playbook.map((p) => {
+                  const n = setupRules(p).length;
+                  return <ChoiceCard key={p.id} selected={playbookId === p.id} title={p.name} meta={`${n} ${n === 1 ? "rule" : "rules"}`} onClick={() => { setPlaybookId(p.id); setRuleStates({}); }} />;
+                })}
+              </div>
+              <AnimatePresence initial={false}>
+                {selectedPlaybook && rules.length > 0 && (
+                  <motion.div key={selectedPlaybook.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.26, ease: FLOW_EASE }} className="overflow-hidden">
+                    <div className="space-y-3 pb-1">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[13px] font-medium text-muted">Confirm each rule</p>
+                        <p className="text-[12px] tabular-nums text-faint">{confirmedRules}/{rules.length}</p>
                       </div>
-                    </motion.div>
+                      <div className="h-[3px] overflow-hidden rounded-full bg-line-soft"><div className="h-full rounded-full bg-profit transition-[width] duration-300" style={{ width: `${(confirmedRules / rules.length) * 100}%` }} /></div>
+                      <div className="space-y-2">
+                        {rules.map((r, i) => {
+                          const checked = ruleStates[String(i)] === "ready";
+                          return <CheckRow key={i} checked={checked} title={r.text || `Rule ${i + 1}`} note={r.description} onClick={() => setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" })} />;
+                        })}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {step === "trade" && (
+            <div className="space-y-8">
+              <StepTitle title="Log the trade" />
+              <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />
+
+              {mode === "manual" && (
+                <div className="space-y-7">
+                  <div className="rounded-[26px] border border-line bg-raised px-6 py-7 text-center">
+                    <Label htmlFor="flow-pnl">Net P&amp;L</Label>
+                    <div className="mt-3 flex items-baseline justify-center gap-1.5">
+                      <span className="text-[28px] text-faint">{sym}</span>
+                      <input
+                        id="flow-pnl"
+                        autoFocus
+                        inputMode="decimal"
+                        value={pnl}
+                        onChange={(e) => setPnl(cleanNumber(e.target.value))}
+                        placeholder="0.00"
+                        aria-invalid={pnlInvalid || undefined}
+                        className={cn("w-44 bg-transparent text-center font-mono text-[44px] tracking-tight outline-none placeholder:text-faint/60", pnlValue > 0 && "text-profit", pnlValue < 0 && "text-loss", pnlInvalid && "text-loss")}
+                      />
+                    </div>
+                    <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
+                  </div>
+                  <div className="space-y-3">
+                    <Label hint="optional">Direction</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(["long", "short"] as const).map((d) => (
+                        <button key={d} type="button" aria-pressed={direction === d} onClick={() => setDirection(direction === d ? null : d)}
+                          className={cn("rounded-2xl border py-3.5 text-[16px] font-semibold capitalize transition-all duration-150 active:scale-[0.97]",
+                            direction === d ? (d === "long" ? "border-profit/50 bg-profit/10 text-profit" : "border-loss/50 bg-loss/10 text-loss") : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}>
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {!instrument.trim() && (
+                    <div className="space-y-2.5"><Label hint="optional" htmlFor="flow-tinst">Instrument</Label><TextBox id="flow-tinst" value={tradeInstrument} onChange={(e) => setTradeInstrument(e.target.value.toUpperCase())} placeholder="NQ" className="max-w-[12rem] font-mono" /></div>
+                  )}
+                  <Disclosure label="More detail">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
+                      <div className="space-y-2.5"><Label htmlFor="flow-rr">R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
+                      <div className="space-y-2.5"><Label htmlFor="flow-in">Entry time</Label><TextBox id="flow-in" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} /></div>
+                      <div className="space-y-2.5"><Label htmlFor="flow-out">Exit time</Label><TextBox id="flow-out" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} /></div>
+                    </div>
+                  </Disclosure>
+                </div>
+              )}
+
+              {mode === "import" && (
+                <div className="space-y-4">
+                  <input ref={importRef} type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadImportFile(f); e.target.value = ""; }} />
+                  {!importRows ? (
+                    <>
+                      <button type="button" onClick={() => importRef.current?.click()} className="flex w-full flex-col items-center gap-1.5 rounded-[26px] border border-dashed border-line-strong bg-raised px-6 py-12 transition-colors hover:border-gold/60">
+                        <span className="text-[16px] font-semibold text-ink">Choose a CSV</span>
+                        <span className="text-[13px] text-muted">Broker or spreadsheet export</span>
+                      </button>
+                      {importError && <p className="px-1 text-[13px] text-loss">{importError}</p>}
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="flex items-center gap-2 text-[14px] text-ink">
+                        <span className="grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-profit"><IconCheck className="h-3 w-3" /></span>
+                        {importRows.length} {importRows.length === 1 ? "trade" : "trades"} ready
+                        <button type="button" onClick={() => { setImportRows(null); setImportError(null); }} className="ml-auto text-[13px] font-medium text-gold hover:underline">Change file</button>
+                      </p>
+                      <ul className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                        {importRows.slice(0, 4).map((r, i) => (
+                          <li key={i} className="flex items-center justify-between px-4 py-2.5 text-[14px]">
+                            <span className="text-muted">{r.date} · <span className="text-ink">{r.instrument}</span></span>
+                            <span className={cn("font-mono tabular-nums", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>{r.pnl}</span>
+                          </li>
+                        ))}
+                        {importRows.length > 4 && <li className="px-4 py-2.5 text-[13px] text-faint">+{importRows.length - 4} more</li>}
+                      </ul>
+                    </div>
                   )}
                 </div>
-              </StageShell>
-            )}
-
-            {/* ─────────────── STAGE 1 · SETUP SELECTION ─────────────── */}
-            {step === 1 && (
-              <StageShell key="setup" title="Select your setup" subtitle="Which Playbook strategy does this planned trade belong to? Its rules load in the next step.">
-                {playbook.length === 0 ? (
-                  <p className="rounded-control border border-dashed border-line-strong px-4 py-8 text-center text-sm text-muted">
-                    No playbook setups yet — create one in Trading Lab, or continue without a setup.
-                  </p>
-                ) : (
-                  <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Playbook setup">
-                    {playbook.map((p) => {
-                      const ruleCount = setupRules(p).length;
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          role="radio"
-                          aria-checked={playbookId === p.id}
-                          onClick={() => { setPlaybookId(p.id); setRuleStates({}); }}
-                          className={cn(
-                            "rounded-xl border px-4 py-3 text-left transition-all duration-150 active:scale-[0.98]",
-                            playbookId === p.id ? "border-gold/60 bg-gold/[0.07]" : "border-line bg-raised/60 hover:border-line-strong",
-                          )}
-                        >
-                          <p className="truncate text-sm font-semibold text-ink">📁 {p.name}</p>
-                          <p className="num mt-0.5 text-[11px] text-faint">{ruleCount} {ruleCount === 1 ? "rule" : "rules"}{p.sessions?.length ? ` · ${p.sessions.join(", ")}` : ""}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </StageShell>
-            )}
-
-            {/* ─────────────── STAGE 2 · RULE CHECKLIST ─────────────── */}
-            {step === 2 && (
-              <StageShell key="checklist" title="Setup rule checklist" subtitle={selectedPlaybook ? `${selectedPlaybook.name} — confirm every rule to proceed` : "No setup selected."}>
-                {selectedRules.length === 0 ? (
-                  <p className="rounded-control border border-dashed border-line-strong px-4 py-8 text-center text-sm text-muted">
-                    No rules on this setup — continue to record the trade.
-                  </p>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      {selectedRules.map((r, i) => {
-                        const checked = (ruleStates[String(i)] ?? "waiting") === "ready";
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            role="checkbox"
-                            aria-checked={checked}
-                            onClick={() => setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" })}
-                            className={cn(
-                              "flex w-full items-start gap-3 rounded-xl border px-4 py-2.5 text-left transition-colors",
-                              checked ? "border-profit/40 bg-profit/[0.06]" : "border-line bg-raised/60 hover:border-line-strong",
-                            )}
-                          >
-                            <span className={cn(
-                              "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition-colors",
-                              checked ? "border-profit bg-profit/[0.15] text-profit" : "border-line-strong bg-surface text-transparent",
-                            )}>✓</span>
-                            <span className="min-w-0">
-                              <span className="block text-[13px] text-ink">Rule {i + 1}: {r.text}</span>
-                              {r.description && <span className="mt-0.5 block text-xs leading-relaxed text-muted">{r.description}</span>}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {!allRulesConfirmed && (
-                      <p className="mt-3 rounded-lg border border-gold/30 bg-gold/[0.06] px-3 py-2 text-xs text-gold" role="status">
-                        Execution gate: confirm every rule before recording the trade.
-                      </p>
-                    )}
-                  </>
-                )}
-              </StageShell>
-            )}
-
-
-            {/* ─────────── STAGE 3 · MANUAL ENTRY OR IMPORT ─────────── */}
-            {step === 3 && !createdEntry && (
-              <StageShell key="record" title="Record the trade" subtitle="Manual entry or import — screenshots come right after either path.">
-                {entryMode === "choose" && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <button type="button" onClick={() => setEntryMode("manual")} className="flex flex-col items-center gap-2 rounded-xl border border-line bg-raised/60 px-6 py-8 transition-colors hover:border-gold/50">
-                      <PencilIcon className="h-5 w-5 text-gold" />
-                      <span className="text-sm font-semibold text-ink">MANUAL ENTRY</span>
-                      <span className="text-center text-xs text-muted">Enter this trade&apos;s details by hand.</span>
-                    </button>
-                    <button type="button" onClick={() => setEntryMode("import")} className="flex flex-col items-center gap-2 rounded-xl border border-line bg-raised/60 px-6 py-8 transition-colors hover:border-gold/50">
-                      <UploadIcon className="h-5 w-5 text-gold" />
-                      <span className="text-sm font-semibold text-ink">IMPORT TRADES</span>
-                      <span className="text-center text-xs text-muted">Upload a broker/spreadsheet CSV export.</span>
-                    </button>
-                  </div>
-                )}
-
-                {entryMode === "manual" && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Trading day" htmlFor="pt-date">
-                        <TextInput id="pt-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} />
-                      </Field>
-                      <Field label="Net P&L" hint="negative for loss" htmlFor="pt-pnl">
-                        <TextInput id="pt-pnl" inputMode="decimal" className="tabular" placeholder="-120.50" value={pnl} onChange={(e) => setPnl(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))} />
-                      </Field>
-                      <Field label="Risk-to-reward" hint="optional" htmlFor="pt-rr">
-                        <TextInput id="pt-rr" inputMode="decimal" className="tabular" placeholder="+2.5R" value={rr} onChange={(e) => setRr(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))} />
-                      </Field>
-                      <Field label="Instrument" hint="optional" htmlFor="pt-instrument">
-                        <TextInput id="pt-instrument" placeholder="NQ…" value={dirInstrument} onChange={(e) => setDirInstrument(e.target.value.toUpperCase())} />
-                      </Field>
-                      <Field label="Entry time" hint="NY, optional" htmlFor="pt-entrytime">
-                        <TextInput id="pt-entrytime" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
-                      </Field>
-                      <Field label="Exit time" hint="NY, optional" htmlFor="pt-exittime">
-                        <TextInput id="pt-exittime" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} />
-                      </Field>
-                    </div>
-                    <Field label="Direction" hint="optional">
-                      <div className="grid grid-cols-2 gap-2">
-                        {(["long", "short"] as const).map((d) => (
-                          <button key={d} type="button" aria-pressed={direction === d}
-                            onClick={() => setDirection((cur) => (cur === d ? null : d))}
-                            className={cn("rounded-xl border py-2.5 text-sm font-semibold capitalize transition-all active:scale-[0.97]",
-                              direction === d ? (d === "long" ? "border-profit/50 bg-profit/[0.12] text-profit" : "border-loss/50 bg-loss/[0.10] text-loss") : "border-line bg-raised/60 text-muted")}>
-                            {d}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
-                    <div className="flex justify-end">
-                      <Button variant="gold" size="sm" loading={saving} disabled={saving} onClick={() => void saveManualTrade()}>
-                        Save trade → Screenshots
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {entryMode === "import" && (
-                  <div className="space-y-4">
-                    <input ref={importRef} type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadImportFile(f); e.target.value = ""; }} />
-                    {!importRows ? (
-                      <>
-                        <button type="button" onClick={() => importRef.current?.click()} className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-line-strong bg-raised/40 px-6 py-10 transition-colors hover:border-gold/50">
-                          <UploadIcon className="h-5 w-5 text-gold" />
-                          <span className="text-sm font-semibold text-ink">Upload trades CSV</span>
-                        </button>
-                        {importError && <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2 text-[13px] text-loss">{importError}</p>}
-                      </>
-                    ) : (
-                      <>
-                        <p className="rounded-lg border border-line bg-raised/60 px-3 py-2 text-[13px] text-muted">
-                          <span className="num font-semibold text-ink">{importRows.length}</span> {importRows.length === 1 ? "trade" : "trades"} parsed — tagged with{" "}
-                          <strong className="text-ink">{selectedPlaybook?.name || "no setup"}</strong> and{" "}
-                          <strong className="text-ink">{challenges.find((c) => c.id === challengeId)?.name || "no challenge"}</strong>.
-                          You&apos;ll add screenshots before Autopsy.
-                        </p>
-                        <div className="max-h-40 overflow-y-auto rounded-xl border border-line">
-                          <table className="w-full text-left text-[12px]">
-                            <thead className="sticky top-0 bg-raised text-[10px] uppercase tracking-wide text-faint"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">P&L</th><th className="px-3 py-2">Instrument</th></tr></thead>
-                            <tbody className="divide-y divide-line-soft">
-                              {importRows.slice(0, 20).map((r, i) => (
-                                <tr key={i}><td className="px-3 py-1.5 tabular text-muted">{r.date}</td><td className={cn("px-3 py-1.5 num", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>{r.pnl}</td><td className="px-3 py-1.5 text-ink">{r.instrument}</td></tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="flex justify-between">
-                          <Button variant="subtle" size="sm" onClick={() => { setImportRows(null); setImportError(null); }}>Different file</Button>
-                          <Button variant="gold" size="sm" loading={saving} disabled={saving} onClick={() => void runImport()}>
-                            Import {importRows.length} → Screenshots
-                          </Button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </StageShell>
-            )}
-
-            {/* ─────────────── STAGE 4 · SCREENSHOTS ─────────────── */}
-            {step === 4 && createdEntry && (
-              <StageShell key="screenshots" title={`Screenshots — ${createdEntry.setup || createdEntry.instrument || "trade"} (${createdEntry.date})`} subtitle="Add up to two chart screenshots. They stay attached to THIS trade.">
-                <ImageUploader items={images} onChange={setImages} max={2} />
-                <div className="mt-4 flex justify-between">
-                  <Button variant="ghost" size="sm" disabled={saving} onClick={() => {
-                    if (!window.confirm("Skip screenshots? The trade will be marked REVIEW INCOMPLETE until evidence is added.")) return;
-                    setStep(PLAN_STAGE.AUTOPSY);
-                  }}>
-                    Continue without screenshots…
-                  </Button>
-                  <Button variant="gold" size="sm" loading={saving} disabled={saving} onClick={() => void saveScreenshots()}>
-                    Save screenshots → Autopsy
-                  </Button>
-                </div>
-              </StageShell>
-            )}
-
-            {/* ─────────────── STAGE 5 · AUTOPSY HANDOFF ─────────────── */}
-            {step === 5 && createdEntry && (
-              <StageShell key="autopsy" title="Autopsy" subtitle="The full structured post-trade review — connected to your plan, checklist and setup.">
-                <div className="rounded-xl border border-gold/30 bg-gold/[0.05] p-4 text-[13px] leading-relaxed text-ink">
-                  The trade is saved with its plan, checklist and screenshots. Autopsy walks through
-                  execution, psychology, outcome and concepts — MINATO analyzes the answers afterwards.
-                </div>
-                <div className="mt-4 flex justify-between">
-                  <Button variant="ghost" size="sm" onClick={finish}>Save as incomplete draft</Button>
-                  <Button variant="gold" size="sm" onClick={() => setAutopsyEntry(createdEntry)}>
-                    Open Autopsy
-                  </Button>
-                </div>
-              </StageShell>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Footer nav */}
-        <div className="mt-6 flex items-center justify-between border-t border-line pt-4">
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Close</Button>
-          <div className="flex items-center gap-2.5">
-            {step > 0 && step < PLAN_STAGE.SCREENSHOTS && (
-              <Button variant="subtle" size="sm" onClick={() => setStep((s) => s - 1)} disabled={saving}>Back</Button>
-            )}
-            {(step === 0 || step === 1 || step === 2) && (
-              <Button
-                variant="gold"
-                size="sm"
-                disabled={!canNext || saving}
-                onClick={() => setStep((s) => s + 1)}
-              >
-                Next
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
-    </Modal>
-
-    {/* Autopsy — outside the wizard modal so it renders full-screen above it */}
-    <TradeReviewFlow
-      open={!!autopsyEntry}
-      entry={autopsyEntry}
-      onClose={() => { setAutopsyEntry(null); finish(); }}
-    />
-    </>
-  );
-}
-
-/** Interactive emotional-state picker — chips, not a static text field. */
-function EmotionPicker({ value, onChange }: { value: string; onChange: (v: (typeof PLAN_EMOTIONS)[number] | "") => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Emotional state">
-      {PLAN_EMOTIONS.map((e) => (
-        <button
-          key={e}
-          type="button"
-          aria-pressed={value === e}
-          onClick={() => onChange(value === e ? "" : e)}
-          className={cn(
-            "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-            value === e ? "border-gold/50 bg-gold/[0.1] text-gold" : "border-line bg-raised/60 text-faint hover:text-muted",
+              )}
+            </div>
           )}
-        >
-          {e.charAt(0) + e.slice(1).toLowerCase()}
-        </button>
-      ))}
-    </div>
-  );
-}
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-faint">{label}</dt>
-      <dd className="mt-0.5 truncate text-[13px] font-medium text-ink">{value}</dd>
-    </div>
-  );
-}
+          {step === "chart" && (
+            <div className="space-y-8">
+              <StepTitle title="Add your chart" subtitle={importRows && importRows.length > 1 ? "Up to two screenshots, attached to the first trade." : "Up to two screenshots."} />
+              <ImageUploader items={images} onChange={setImages} max={2} />
+            </div>
+          )}
 
-function reduceSafe(): boolean {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
+          {step === "autopsy" && <AutopsyBody a={autopsy} onAddChart={() => go("chart")} />}
 
-function StageShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return (
-    <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.16, ease: EASE }}>
-      <h3 className="font-display text-lg font-semibold tracking-[-0.02em] text-ink">{title}</h3>
-      <p className="mt-0.5 text-[13px] text-muted">{subtitle}</p>
-      <div className="mt-4">{children}</div>
-    </motion.div>
-  );
-}
-
-/** "Why are you saying this?" — evidence disclosure for pattern warnings. */
-export function PatternEvidenceDisclosure({ pattern }: { pattern: { label: string; count: number; confidence: string; improving: boolean; evidence: { entryId: string; date: string; excerpt: string }[] } }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="mt-2">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="text-xs font-medium text-gold underline-offset-2 hover:underline">
-        {open ? "Hide evidence" : "Why are you saying this?"}
-      </button>
-      {open && (
-        <ul className="mt-2 space-y-1.5">
-          {pattern.evidence.slice(0, 5).map((ev) => (
-            <li key={ev.entryId} className="rounded-lg border border-line bg-surface px-3 py-2 text-[12px]">
-              <span className="num text-faint">{ev.date}</span> — <span className="text-muted">“{ev.excerpt}”</span>
-            </li>
-          ))}
-          <li className="text-[11px] text-faint">
-            {pattern.count} occurrences · {pattern.confidence} pattern{pattern.improving ? " · improving" : ""}
-          </li>
-        </ul>
-      )}
-    </div>
+          {step === "done" && (
+            <div className="flex min-h-[20rem] flex-col items-center justify-center text-center">
+              <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 380, damping: 22 }} className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_12px_28px_-10px_var(--gold-strong)]">
+                <IconCheck className="h-7 w-7" />
+              </motion.div>
+              <h2 className="mt-7 text-[32px] font-semibold tracking-[-0.025em] text-ink">Logged.</h2>
+              <p className="mt-2 max-w-[22rem] text-[15px] leading-snug text-muted">Process noted — the outcome is just data.</p>
+              {createdId && <button type="button" onClick={() => { useUi.getState().openMinatoWithTrade(createdId); onClose(); }} className="mt-6 text-[14px] font-medium text-gold hover:underline">Talk it through with MINATO</button>}
+            </div>
+          )}
+        </StepTransition>
+      </SheetFrame>
+    </Modal>
   );
 }
