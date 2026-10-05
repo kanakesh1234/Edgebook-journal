@@ -37,8 +37,8 @@ function CompactTile({ mode, level, status, disabled, busy, onStart, href }: Omi
         <span className="block truncate text-[15px] font-semibold tracking-[-0.015em] text-ink">{meta.title}</span>
         <span className="mt-0.5 block whitespace-nowrap text-[12px] tabular-nums text-muted">{disabled ? "Locked" : `Level ${level}`}</span>
       </span>
-      <span className={cn("relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-transform duration-200", disabled ? "bg-ink/10 text-faint" : "bg-ink text-canvas group-hover:scale-105")}>
-        {busy ? <span className="h-3 w-3 animate-pulse rounded-full bg-canvas" /> : <PlayIcon />}
+      <span className={cn("relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-transform duration-200", disabled ? "bg-ink/10 text-faint" : "bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_6px_14px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)] group-hover:scale-105 group-hover:shadow-[0_8px_18px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)]")}>
+        {busy ? <span className="h-3 w-3 animate-pulse rounded-full bg-on-gold" /> : <PlayIcon />}
       </span>
     </>
   );
@@ -66,7 +66,7 @@ export function ModeCard({ mode, level, status, disabled, busy, onStart, href, c
         <p className="mt-2 max-w-[30ch] text-[15px] leading-snug text-muted">{meta.blurb}</p>
         <div className="mt-auto flex items-end justify-between gap-4 pt-6">
           <p className="max-w-[24ch] text-[12px] leading-snug text-faint">{status}</p>
-          <span className={cn("inline-flex shrink-0 items-center rounded-full px-4 py-2 text-[13px] font-semibold transition-colors", disabled ? "bg-ink/10 text-faint" : "bg-ink text-canvas group-hover:opacity-85")}>
+          <span className={cn("inline-flex shrink-0 items-center rounded-full px-4 py-2 text-[13px] font-semibold transition-colors", disabled ? "bg-ink/10 text-faint" : "bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_6px_14px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)] group-hover:brightness-110")}>
             {busy ? "Preparing…" : disabled ? "Locked" : "Start"}
           </span>
         </div>
