@@ -1,161 +1,483 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { btn, btnDanger, btnPrimary, pill } from "@/components/lessons/buttons";
-import { BookmarkIcon } from "@/components/lessons/bookmark-icon";
-import "@/components/lessons/lessons.css";
+import { motion } from "motion/react";
+import { cn } from "@/lib/utils";
+import { btn, btnPrimary } from "@/components/lessons/buttons";
 import { lessonsPost } from "@/components/lessons/api";
+import { LessonCard, LessonCardSkeleton } from "@/components/lessons/lesson-card";
+import {
+  DEFAULT_FILTERS,
+  FilterPanelPresence,
+  matchesLength,
+  Segmented,
+  TABS,
+  LENGTH_OPTIONS,
+  STATUS_OPTIONS,
+  type Filters,
+} from "@/components/lessons/filters";
+import { ChevronRightIcon, PlusIcon, SearchIcon, SlidersIcon, XIcon } from "@/components/lessons/lesson-icons";
+import { LessonsIcon } from "@/components/lessons/lessons-icon";
+import { Portal } from "@/components/lessons/portal";
+import { minsLeft, plural } from "@/components/lessons/format";
+import { statusOf, useReadProgress } from "@/components/lessons/progress";
+import type { LessonAction, LessonView } from "@/components/lessons/types";
+import { ConfirmDialog } from "@/components/ui/confirm";
+import { EmptyState } from "@/components/ui/misc";
+import "@/components/lessons/lessons.css";
 
-export interface LessonView {
-  id: string; title: string; subtitle: string; createdAt: number;
-  html: string; cover: string | null; excerpt: string; hook: string; readMins: number;
-  author: { handle: string; name: string }; bylines: string[]; settings: { comments: boolean; reposts: boolean }; mine: boolean;
-  likes: number; likedByMe: boolean; reposts: number; repostedByMe: boolean; savedByMe: boolean; repostedBy: string[];
-  comments: { id: string; by: string; body: string; at: number }[];
-}
+// Kept so existing imports (`import type { LessonView } from "../page"`) keep working.
+export type { LessonView } from "@/components/lessons/types";
 
-const send = lessonsPost;
+/** Survives navigating into a lesson and back, so the library is where you left it. Resets on full reload. */
+let remembered: Filters = DEFAULT_FILTERS;
 
 export default function LessonsPage() {
-  const router = useRouter();
   const [items, setItems] = useState<LessonView[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [f, setF] = useState<Filters>(remembered);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [stuck, setStuck] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [openId, setOpenId] = useState<string | null>(null); // inline comments
-  const [draft, setDraft] = useState("");
-  const [view, setView] = useState<"all" | "saved">("all");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const entries = useReadProgress();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const patch = useCallback((p: Partial<Filters>) => setF((s) => ({ ...s, ...p })), []);
+  useEffect(() => {
+    remembered = f;
+  }, [f]);
+
+  /* ------------------------------- Data ------------------------------- */
 
   const load = useCallback(() => {
     fetch("/api/lessons", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { lessons: [] }))
-      .then((d) => setItems(d.lessons ?? []))
-      .catch(() => setItems([]));
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return (await r.json()) as { lessons?: LessonView[] };
+      })
+      .then((d) => {
+        setItems(d.lessons ?? []);
+        setFailed(false);
+      })
+      .catch(() => {
+        setFailed(true);
+        setItems((cur) => cur ?? []);
+      });
   }, []);
   useEffect(load, [load]);
 
-  const mine = (items ?? []).filter((l) => l.mine);
-  const savedCount = (items ?? []).filter((l) => l.savedByMe).length;
-  const shown = view === "saved" ? (items ?? []).filter((l) => l.savedByMe) : items;
-  const allPicked = mine.length > 0 && mine.every((l) => picked.has(l.id));
+  /** Optimistic: the control flips instantly, then the server state is re-synced. */
+  const act = useCallback(
+    async (id: string, action: LessonAction) => {
+      setItems((cur) =>
+        cur &&
+        cur.map((l) => {
+          if (l.id !== id) return l;
+          if (action === "like") return { ...l, likedByMe: !l.likedByMe, likes: l.likes + (l.likedByMe ? -1 : 1) };
+          if (action === "repost") return { ...l, repostedByMe: !l.repostedByMe, reposts: l.reposts + (l.repostedByMe ? -1 : 1) };
+          return { ...l, savedByMe: !l.savedByMe };
+        }),
+      );
+      await lessonsPost({ action, id });
+      load();
+    },
+    [load],
+  );
 
-  // Optimistic: the button flips instantly while scrolling, then the server state is re-synced.
-  const act = async (e: React.MouseEvent, id: string, action: "like" | "repost" | "save") => {
-    e.stopPropagation();
-    setItems((cur) => cur && cur.map((l) => {
-      if (l.id !== id) return l;
-      if (action === "like") return { ...l, likedByMe: !l.likedByMe, likes: l.likes + (l.likedByMe ? -1 : 1) };
-      if (action === "repost") return { ...l, repostedByMe: !l.repostedByMe, reposts: l.reposts + (l.repostedByMe ? -1 : 1) };
-      return { ...l, savedByMe: !l.savedByMe };
-    }));
-    await send({ action, id });
+  const togglePick = useCallback(
+    (id: string) =>
+      setPicked((p) => {
+        const n = new Set(p);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      }),
+    [],
+  );
+
+  const exitSelect = useCallback(() => {
+    setSelecting(false);
+    setPicked(new Set());
+  }, []);
+
+  const removePicked = async () => {
+    if (!picked.size) return;
+    setBusy(true);
+    const ok = await lessonsPost({ action: "delete", ids: [...picked] });
+    setBusy(false);
+    setConfirmOpen(false);
+    if (ok) exitSelect();
     load();
   };
-  const comment = async (id: string) => {
-    if (!draft.trim()) return;
-    if (await send({ action: "comment", id, body: draft })) setDraft("");
-    load();
-  };
-  const toggle = (id: string) =>
-    setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const remove = async () => {
-    if (!picked.size || !confirm(`Delete ${picked.size} lesson${picked.size > 1 ? "s" : ""}? This can’t be undone.`)) return;
-    if (await send({ action: "delete", ids: [...picked] })) { setPicked(new Set()); setSelecting(false); }
-    load();
-  };
+
+  /* ---------------------------- Derived lists ---------------------------- */
+
+  const all = useMemo(() => items ?? [], [items]);
+  const mine = useMemo(() => all.filter((l) => l.mine), [all]);
+  const readCount = all.filter((l) => statusOf(entries[l.id]) === "read").length;
+  const inProgress = all.some((l) => statusOf(entries[l.id]) === "reading");
+
+  const q = f.query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    const terms = q.split(/\s+/).filter(Boolean);
+    const list = all.filter((l) => {
+      if (f.tab === "saved" && !l.savedByMe) return false;
+      if (f.tab === "yours" && !l.mine) return false;
+      if (f.tab === "friends" && l.mine) return false;
+      if (!matchesLength(l.readMins, f.length)) return false;
+      if (f.status !== "any" && statusOf(entries[l.id]) !== f.status) return false;
+      if (terms.length) {
+        const hay = [l.title, l.subtitle, l.excerpt, l.hook, l.author.name, l.author.handle, ...l.bylines].join(" ").toLowerCase();
+        if (!terms.every((t) => hay.includes(t))) return false;
+      }
+      return true;
+    });
+    if (f.sort === "liked") list.sort((a, b) => b.likes - a.likes || b.createdAt - a.createdAt);
+    return list;
+  }, [all, entries, f.tab, f.length, f.status, f.sort, q]);
+
+  const activeFilters = (f.length !== "any" ? 1 : 0) + (f.status !== "any" ? 1 : 0);
+  const dirty = activeFilters > 0 || f.sort !== "newest";
+  const pristine = f.tab === "all" && !q && activeFilters === 0;
+
+  // The lesson you were last reading. Shown only on the clean "All" view.
+  const resume = useMemo(() => {
+    const reading = all.filter((l) => statusOf(entries[l.id]) === "reading");
+    reading.sort((a, b) => entries[b.id].at - entries[a.id].at);
+    return reading[0] ?? null;
+  }, [all, entries]);
+
+  // One featured lesson, only when the library is unfiltered and the newest lesson has a cover.
+  const featured = pristine && f.sort === "newest" && filtered.length >= 3 && filtered[0].cover && filtered[0].id !== resume?.id ? filtered[0] : null;
+  const rest = featured ? filtered.slice(1) : filtered;
+
+  const allPicked = mine.length > 0 && mine.every((l) => picked.has(l.id));
+  const canSelect = f.tab === "yours" && filtered.some((l) => l.mine);
+
+  // Leaving "Yours" ends select mode; it only makes sense there.
+  useEffect(() => {
+    if (f.tab !== "yours" && selecting) exitSelect();
+  }, [f.tab, selecting, exitSelect]);
+
+  /* ----------------------------- Interactions ----------------------------- */
+
+  // Sticky-toolbar material only appears once it is actually stuck.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const top = window.matchMedia("(min-width: 1024px)").matches ? 0 : 56;
+    const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting), { rootMargin: `-${top + 1}px 0px 0px 0px` });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // "/" focuses search, like most reading apps.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /* -------------------------------- Render -------------------------------- */
+
+  const loading = items === null;
+  const showError = failed && all.length === 0;
+  const resultsLabel = q ? `${plural(filtered.length, "result")} for “${f.query.trim()}”` : plural(filtered.length, "lesson");
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="font-display text-2xl font-semibold text-ink">Lessons</h1>
-        <div className="flex gap-2">
-          {mine.length > 0 && (
-            <button className={btn} onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}>
+    <div className="w-full pb-28 sm:pb-16">
+      {/* Header */}
+      <header className="flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl">Lessons</h1>
+          <p className="mt-1.5 max-w-md text-[15px] leading-relaxed text-muted">Playbooks and notes from you and your circle.</p>
+        </div>
+        <Link href="/lessons/new" className={cn(btnPrimary, "shrink-0")}>
+          <PlusIcon className="h-4 w-4" />
+          <span className="hidden sm:inline">Write a lesson</span>
+          <span className="sm:hidden">Write</span>
+        </Link>
+      </header>
+
+      {/* Progress: a single quiet line, only once you've started reading */}
+      {!loading && all.length > 0 && (readCount > 0 || inProgress) && (
+        <div className="mt-5 flex items-center gap-3" aria-label="Library progress">
+          <div className="lc-track w-28" role="progressbar" aria-valuemin={0} aria-valuemax={all.length} aria-valuenow={readCount} aria-label="Lessons read">
+            <i style={{ width: `${(readCount / all.length) * 100}%` }} />
+          </div>
+          <p className="text-[13px] tabular text-muted">
+            {readCount} of {all.length} read
+          </p>
+        </div>
+      )}
+
+      {/* Continue reading */}
+      {pristine && resume && (
+        <Link href={`/lessons/${resume.id}`} className="lc-continue mt-6">
+          {resume.cover && (
+            <span className="lc-continue-thumb">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={resume.cover} alt="" loading="lazy" decoding="async" />
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block text-[11px] font-medium uppercase tracking-[0.1em] text-gold-deep dark:text-gold">Continue reading</span>
+            <span className="mt-1 line-clamp-2 text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink">{resume.title}</span>
+            <span className="mt-2.5 flex items-center gap-3">
+              <span className="lc-track flex-1">
+                <i style={{ width: `${Math.round(entries[resume.id].p * 100)}%` }} />
+              </span>
+              <span className="shrink-0 text-[12px] tabular text-muted">{minsLeft(resume.readMins, entries[resume.id].p)} min left</span>
+            </span>
+          </span>
+          <ChevronRightIcon className="h-5 w-5 shrink-0 text-faint" />
+        </Link>
+      )}
+
+      {/* Search, collections and filters */}
+      <div ref={sentinelRef} className="h-px" aria-hidden="true" />
+      <div className={cn("lessons-toolbar sticky top-14 z-30 -mx-4 mt-3 px-4 py-2.5 sm:-mx-6 sm:px-6 lg:top-0 lg:mx-0 lg:px-0", stuck && "is-stuck")}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+          <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-2">
+            <label className="relative min-w-0 flex-1">
+              <span className="sr-only">Search lessons</span>
+              <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-faint" />
+              <input
+                ref={inputRef}
+                value={f.query}
+                onChange={(e) => patch({ query: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    if (f.query) patch({ query: "" });
+                    else inputRef.current?.blur();
+                  }
+                }}
+                type="text"
+                inputMode="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="Search lessons"
+                className="h-10 w-full rounded-control border border-line bg-raised pl-10 pr-10 text-base text-ink transition-[border-color,box-shadow] duration-200 placeholder:text-faint hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10 sm:text-[15px]"
+              />
+              {f.query ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    patch({ query: "" });
+                    inputRef.current?.focus();
+                  }}
+                  className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-faint transition-colors hover:text-ink"
+                >
+                  <XIcon className="h-4 w-4" />
+                </button>
+              ) : (
+                <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-line bg-canvas/60 px-1.5 py-0.5 font-mono text-[11px] text-faint lg:block">/</kbd>
+              )}
+            </label>
+
+            <button
+              ref={filterBtnRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={filtersOpen}
+              aria-label={activeFilters ? `Filters, ${activeFilters} active` : "Filters"}
+              onClick={() => setFiltersOpen((o) => !o)}
+              className={cn(
+                "relative inline-flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-control border bg-raised text-[14px] font-medium text-muted transition-colors duration-200 hover:text-ink sm:w-auto sm:px-3.5",
+                dirty ? "border-gold/50 text-gold-deep dark:text-gold" : "border-line hover:border-line-strong",
+              )}
+            >
+              <SlidersIcon className="h-[18px] w-[18px]" />
+              <span className="hidden sm:inline">Filter</span>
+              {activeFilters > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-gold-strong px-1 text-[11px] font-semibold text-on-gold">{activeFilters}</span>
+              )}
+            </button>
+          </div>
+
+          <Segmented className="order-2 w-full md:order-1 md:w-auto" label="Collection" layoutId="lessons-tab" value={f.tab} options={TABS} onChange={(tab) => patch({ tab })} />
+        </div>
+      </div>
+
+      <FilterPanelPresence
+        open={filtersOpen}
+        anchor={filterBtnRef}
+        filters={f}
+        resultCount={filtered.length}
+        dirty={dirty}
+        onChange={patch}
+        onReset={() => patch({ length: "any", status: "any", sort: "newest" })}
+        onClose={() => setFiltersOpen(false)}
+      />
+
+      {/* Results line: count, active filters, and (on "Yours") Select */}
+      {!loading && !showError && all.length > 0 && (
+        <div className="mt-4 flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <p className="text-[13px] text-muted" aria-live="polite">
+              {resultsLabel}
+            </p>
+            {f.length !== "any" && <FilterChip label={LENGTH_OPTIONS.find((o) => o.id === f.length)!.label} onClear={() => patch({ length: "any" })} />}
+            {f.status !== "any" && <FilterChip label={STATUS_OPTIONS.find((o) => o.id === f.status)!.label} onClear={() => patch({ status: "any" })} />}
+          </div>
+          {canSelect && (
+            <button type="button" onClick={() => (selecting ? exitSelect() : setSelecting(true))} className="h-9 rounded-lg px-2 text-[13px] font-medium text-gold-deep transition-opacity hover:opacity-80 dark:text-gold">
               {selecting ? "Done" : "Select"}
             </button>
           )}
-          <Link href="/lessons/new" className={btnPrimary}>Write a lesson</Link>
         </div>
+      )}
+
+      {/* Content */}
+      <div className="mt-4">
+        {loading && (
+          <div className="lc-grid" aria-busy="true" aria-label="Loading lessons">
+            <LessonCardSkeleton />
+            <LessonCardSkeleton withCover={false} />
+            <LessonCardSkeleton />
+            <LessonCardSkeleton withCover={false} />
+          </div>
+        )}
+
+        {showError && (
+          <EmptyState
+            className="py-14"
+            icon={<LessonsIcon className="h-7 w-7" />}
+            title="Couldn’t load your lessons"
+            body="Check your connection and try again."
+            action={
+              <button
+                type="button"
+                className={btn}
+                onClick={() => {
+                  setFailed(false);
+                  setItems(null);
+                  load();
+                }}
+              >
+                Try again
+              </button>
+            }
+          />
+        )}
+
+        {!loading && !showError && all.length === 0 && (
+          <EmptyState
+            className="py-14"
+            icon={<LessonsIcon className="h-7 w-7" />}
+            title="No lessons yet"
+            body="Write the first one, or add friends to see theirs here."
+            action={
+              <>
+                <Link href="/lessons/new" className={btnPrimary}>
+                  Write a lesson
+                </Link>
+                <Link href="/friends" className={btn}>
+                  Find friends
+                </Link>
+              </>
+            }
+          />
+        )}
+
+        {!loading && !showError && all.length > 0 && filtered.length === 0 && (
+          <EmptyState
+            className="py-14"
+            icon={f.query ? <SearchIcon className="h-7 w-7" /> : <LessonsIcon className="h-7 w-7" />}
+            title={q || activeFilters ? "No lessons match" : f.tab === "saved" ? "Nothing saved yet" : f.tab === "yours" ? "You haven’t written a lesson yet" : "No lessons from friends yet"}
+            body={
+              q || activeFilters
+                ? "Try a different search, or clear the filters."
+                : f.tab === "saved"
+                  ? "Tap the bookmark on any lesson to keep it here."
+                  : f.tab === "yours"
+                    ? "Your lessons will appear here."
+                    : "Lessons from your friends will appear here."
+            }
+            action={
+              q || activeFilters ? (
+                <button type="button" className={btn} onClick={() => setF({ ...DEFAULT_FILTERS, tab: f.tab })}>
+                  Clear search and filters
+                </button>
+              ) : f.tab === "yours" ? (
+                <Link href="/lessons/new" className={btnPrimary}>
+                  Write a lesson
+                </Link>
+              ) : f.tab === "friends" ? (
+                <Link href="/friends" className={btn}>
+                  Find friends
+                </Link>
+              ) : undefined
+            }
+          />
+        )}
+
+        {!loading && filtered.length > 0 && (
+          <div className="lc-grid">
+            {featured && <LessonCard l={featured} entry={entries[featured.id]} variant="featured" selecting={selecting} picked={picked.has(featured.id)} onPick={togglePick} onAct={act} />}
+            {rest.map((l) => (
+              <LessonCard key={l.id} l={l} entry={entries[l.id]} selecting={selecting} picked={picked.has(l.id)} onPick={togglePick} onAct={act} />
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="mb-4 flex gap-2">
-        <button onClick={() => setView("all")} className={pill + (view === "all" ? " text-gold" : " text-faint")}>All</button>
-        <button onClick={() => setView("saved")} className={pill + (view === "saved" ? " text-gold" : " text-faint")}>
-          <BookmarkIcon filled={view === "saved"} />Saved{savedCount > 0 ? ` ${savedCount}` : ""}
-        </button>
-      </div>
-
+      {/* Selection bar — floats only while selecting */}
       {selecting && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-line bg-raised px-4 py-3">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-            <input type="checkbox" checked={allPicked}
-              onChange={() => setPicked(allPicked ? new Set() : new Set(mine.map((l) => l.id)))} />
-            Select all my lessons ({mine.length})
-          </label>
-          <button className={btnDanger} disabled={!picked.size} onClick={remove}>Delete ({picked.size})</button>
-        </div>
+        <Portal>
+          <div className="lesson-float" data-show="true">
+            <motion.div
+              className="lesson-selectbar"
+              role="toolbar"
+              aria-label="Selected lessons"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <span className="min-w-[88px] px-2 text-[13px] font-medium tabular text-ink">{picked.size ? `${picked.size} selected` : "Select lessons"}</span>
+              <button type="button" className="lesson-bar-btn" onClick={() => setPicked(allPicked ? new Set() : new Set(mine.map((l) => l.id)))}>
+                {allPicked ? "Clear" : "Select all"}
+              </button>
+              <button type="button" className="lesson-bar-btn" data-danger="true" disabled={!picked.size} onClick={() => setConfirmOpen(true)}>
+                Delete
+              </button>
+            </motion.div>
+          </div>
+        </Portal>
       )}
 
-      {items === null && <p className="text-sm text-faint">Loading…</p>}
-      {view === "saved" && items && items.length > 0 && shown?.length === 0 && (
-        <p className="rounded-xl border border-dashed border-line-strong p-6 text-sm text-muted">
-          Nothing saved yet. Tap Save on any lesson to keep it here.
-        </p>
-      )}
-      {items?.length === 0 && (
-        <p className="rounded-xl border border-dashed border-line-strong p-6 text-sm text-muted">
-          No lessons yet. Write the first one, or add friends in Friends to see theirs here.
-        </p>
-      )}
-
-      <div className="lesson-feed space-y-6">
-        {shown?.map((l) => {
-          const cover = l.cover;
-          const isPicked = picked.has(l.id);
-          const dek = l.hook || l.subtitle || l.excerpt;
-          const open = () => (selecting ? l.mine && toggle(l.id) : router.push(`/lessons/${l.id}`));
-          return (
-            <article key={l.id}
-              role="link"
-              tabIndex={0}
-              onClick={open}
-              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } }}
-              className={`lesson-card${isPicked ? " is-picked" : ""}${selecting && !l.mine ? " opacity-50" : ""}`}>
-              {l.repostedBy.length > 0 && <p className="lc-eyebrow mb-2">{l.repostedBy.join(", ")} reposted</p>}
-              <div className="lc-eyebrow flex items-center gap-2">
-                {selecting && l.mine && <input type="checkbox" checked={isPicked} readOnly />}
-                <span>
-                  <b>{l.bylines.length ? l.bylines.join(", ") : l.mine ? "You" : l.author.name}</b> · @{l.author.handle} · {new Date(l.createdAt).toLocaleDateString()} · {l.readMins} min read
-                </span>
-              </div>
-              {cover && /* eslint-disable-next-line @next/next/no-img-element */ <img src={cover} alt="" className="lc-cover" loading="lazy" />}
-              <h2 className="lc-title">{l.title}</h2>
-              {dek && <p className="lc-dek">{dek}</p>}
-
-              {!selecting && (
-                <div className="lc-actions" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={(e) => act(e, l.id, "like")} className={pill + " lc-pill" + (l.likedByMe ? " text-gold" : " text-faint")}>{l.likedByMe ? "♥" : "♡"} {l.likes}</button>
-                  {l.settings.comments && <button onClick={() => { setOpenId(openId === l.id ? null : l.id); setDraft(""); }} className={pill + " lc-pill" + (openId === l.id ? " text-gold" : " text-faint")}>Comments {l.comments.length}</button>}
-                  {(l.settings.reposts || l.repostedByMe) && <button onClick={(e) => act(e, l.id, "repost")} className={pill + " lc-pill" + (l.repostedByMe ? " text-gold" : " text-faint")}>{l.repostedByMe ? "Reposted" : "Repost"} {l.reposts}</button>}
-                  <button onClick={(e) => act(e, l.id, "save")} aria-pressed={l.savedByMe} className={pill + " lc-pill ml-auto" + (l.savedByMe ? " text-gold" : " text-faint")}><BookmarkIcon filled={l.savedByMe} />{l.savedByMe ? "Saved" : "Save"}</button>
-                </div>
-              )}
-
-              {openId === l.id && !selecting && l.settings.comments && (
-                <div className="mt-4 space-y-2 border-t border-line pt-4" onClick={(e) => e.stopPropagation()}>
-                  {l.comments.map((c) => <p key={c.id} className="text-sm text-muted"><span className="font-medium text-ink">{c.by}</span> {c.body}</p>)}
-                  <div className="flex gap-2">
-                    <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && comment(l.id)}
-                      placeholder="Add a comment" className="min-w-0 flex-1 rounded-xl border border-line bg-canvas/70 px-3.5 py-2 text-sm text-ink outline-none focus:border-line-strong" />
-                    <button className={btnPrimary} onClick={() => comment(l.id)}>Send</button>
-                  </div>
-                </div>
-              )}
-            </article>
-          );
-        })}
-      </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => !busy && setConfirmOpen(false)}
+        onConfirm={removePicked}
+        busy={busy}
+        title={`Delete ${plural(picked.size, "lesson")}?`}
+        body="This can’t be undone. Their images and videos are removed too."
+        confirmLabel="Delete"
+      />
     </div>
+  );
+}
+
+function FilterChip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <button type="button" onClick={onClear} aria-label={`Remove filter: ${label}`} className="inline-flex h-7 items-center gap-1 rounded-full border border-gold/35 bg-gold/[0.08] pl-2.5 pr-1.5 text-[12px] font-medium text-gold-deep transition-colors hover:bg-gold/[0.14] dark:text-gold">
+      {label}
+      <XIcon className="h-3.5 w-3.5" />
+    </button>
   );
 }

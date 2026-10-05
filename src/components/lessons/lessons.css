@@ -1,135 +1,267 @@
-/* Reading + writing styles for lessons. Colours inherit from the app theme. */
-.lesson-prose { font-size: 1.05rem; line-height: 1.8; }
+/* ==================================================================
+   Lessons — reading, library and floating UI.
+   Every colour, line and shadow comes from the Edgebook tokens
+   (canvas · surface · raised · line · ink · muted · faint · gold),
+   so light and dark inherit automatically. Inter throughout.
+
+   Material (blur) is used only where content scrolls beneath it:
+   the sticky search toolbar, the filter sheet, the action dock.
+   Everything you read sits on flat, quiet surfaces.
+   ================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  Lesson body (shared by the reader and the writer's preview)        */
+/* ------------------------------------------------------------------ */
+.lesson-prose { font-size: 1.05rem; line-height: 1.8; overflow-wrap: break-word; }
 .lesson-prose p { margin: 0 0 1.1em; }
-.lesson-prose h2 { font-size: 1.55rem; font-weight: 650; line-height: 1.25; margin: 1.7em 0 .5em; }
-.lesson-prose h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.3; margin: 1.4em 0 .4em; }
+.lesson-prose h2 { font-size: 1.6rem; font-weight: 650; line-height: 1.22; letter-spacing: -.022em; margin: 1.9em 0 .55em; }
+.lesson-prose h3 { font-size: 1.22rem; font-weight: 650; line-height: 1.3; letter-spacing: -.015em; margin: 1.5em 0 .4em; }
 .lesson-prose strong { font-weight: 650; }
-.lesson-prose a { text-decoration: underline; text-underline-offset: 3px; }
+.lesson-prose a { color: var(--gold); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--gold) 40%, transparent); text-underline-offset: 3px; transition: text-decoration-color .2s ease; }
+.lesson-prose a:hover { text-decoration-color: var(--gold); }
 .lesson-prose ul { list-style: disc; padding-left: 1.5em; margin: 0 0 1.1em; }
 .lesson-prose ol { list-style: decimal; padding-left: 1.5em; margin: 0 0 1.1em; }
-.lesson-prose li { margin: .25em 0; }
+.lesson-prose li { margin: .3em 0; padding-left: .2em; }
+.lesson-prose li::marker { color: var(--faint); }
 .lesson-prose li > p { margin: 0; }
-.lesson-prose blockquote { border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent); padding-left: 1em; margin: 1.3em 0; font-style: italic; opacity: .85; }
-.lesson-prose code { background: color-mix(in srgb, currentColor 10%, transparent); padding: .1em .35em; border-radius: 6px; font-size: .9em; }
-.lesson-prose pre { background: color-mix(in srgb, currentColor 8%, transparent); padding: 1em; border-radius: 12px; overflow-x: auto; margin: 1.3em 0; }
-.lesson-prose pre code { background: none; padding: 0; }
-.lesson-prose hr { border: 0; border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent); margin: 2em 0; }
-.lesson-prose img, .lesson-prose video { display: block; max-width: 100%; border-radius: 12px; margin: 1.3em auto; }
-.lesson-prose iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 12px; margin: 1.3em 0; }
+.lesson-prose blockquote { border-left: 2px solid color-mix(in srgb, var(--gold) 55%, transparent); padding: .1em 0 .1em 1.1em; margin: 1.6em 0; color: var(--muted); }
+.lesson-prose blockquote p:last-child { margin-bottom: 0; }
+.lesson-prose code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace); background: var(--raised); border: 1px solid var(--line); padding: .08em .38em; border-radius: 6px; font-size: .86em; }
+.lesson-prose pre { background: var(--raised); border: 1px solid var(--line); padding: 1em 1.1em; border-radius: 14px; overflow-x: auto; margin: 1.5em 0; font-size: .88em; line-height: 1.65; }
+.lesson-prose pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.lesson-prose hr { border: 0; height: 1px; background: var(--line); margin: 2.4em 0; }
+.lesson-prose img, .lesson-prose video { display: block; max-width: 100%; height: auto; border-radius: 14px; margin: 1.6em auto; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent); }
+.lesson-prose iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 14px; margin: 1.6em 0; }
+.lesson-prose audio { display: block; width: 100%; margin: 1.5em 0; }
+.lesson-prose mark { color: inherit; border-radius: 3px; padding: 0 1px; }
+
+/* Author-inserted call-to-action buttons use the app's gold, not a foreign accent. */
+.lesson-prose .lesson-btn-wrap { text-align: center; margin: 1.8em 0; }
+.lesson-prose a.lesson-btn { display: inline-block; padding: .72em 1.5em; border-radius: 10px; background: var(--gold-strong); color: var(--on-gold); font: 600 .92rem/1 inherit; font-family: inherit; text-decoration: none; transition: background-color .2s ease; }
+.lesson-prose a.lesson-btn:hover { background: var(--gold-strong-hover); }
+.lesson-prose a.lesson-btn-outline { background: transparent; color: var(--gold); box-shadow: inset 0 0 0 1.5px var(--gold-strong); }
+.lesson-prose a.lesson-btn-outline:hover { background: color-mix(in srgb, var(--gold) 10%, transparent); }
+
+/* Writer editor (unchanged behaviour) */
 .lesson-editor { min-height: 380px; outline: none; }
 .lesson-editor p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; opacity: .45; }
 .lesson-editor .ProseMirror-selectednode { outline: 2px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: 12px; }
-.lesson-prose audio { display: block; width: 100%; margin: 1.3em 0; }
-.lesson-prose mark { color: inherit; border-radius: 3px; padding: 0 1px; }
-.lesson-prose .lesson-btn-wrap { text-align: center; margin: 1.6em 0; }
-.lesson-prose a.lesson-btn { display: inline-block; padding: .65em 1.4em; border-radius: 10px; background: #ff6719; color: #fff; font: 600 .92rem/1 var(--font-sans, system-ui, sans-serif); text-decoration: none; }
-.lesson-prose a.lesson-btn:hover { background: #ea5a10; }
-.lesson-prose a.lesson-btn-outline { background: transparent; color: #ff6719; box-shadow: inset 0 0 0 2px #ff6719; }
-.lesson-prose a.lesson-btn-outline:hover { background: rgb(255 103 25 / .1); }
 
 /* ------------------------------------------------------------------ */
-/*  Editorial article cards (feed only)                                 */
-/*  Soft Liquid-Glass material built purely from the app's theme        */
-/*  tokens (surface / line / gold / ink), so light + dark both inherit. */
+/*  Reader                                                              */
 /* ------------------------------------------------------------------ */
-.lesson-feed {
-  --lc-hi: rgb(255 255 255 / 0.65);          /* top-edge specular highlight */
-  --lc-sheen: rgb(255 255 255 / 0.5);        /* diagonal sheen              */
-  --lc-shadow: 0 1px 2px rgb(48 40 24 / 0.04), 0 8px 24px -16px rgb(48 40 24 / 0.16);
-  --lc-shadow-hover: 0 2px 4px rgb(48 40 24 / 0.05), 0 16px 36px -18px rgb(48 40 24 / 0.22);
-  position: relative;
-  isolation: isolate;
-}
-[data-theme="dark"] .lesson-feed {
-  --lc-hi: rgb(255 240 210 / 0.09);
-  --lc-sheen: rgb(255 240 210 / 0.06);
-  --lc-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 10px 28px -18px rgb(0 0 0 / 0.45);
-  --lc-shadow-hover: 0 2px 4px rgb(0 0 0 / 0.4), 0 18px 40px -20px rgb(0 0 0 / 0.55);
-}
-.lesson-card {
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-  padding: clamp(20px, 3.2vw, 30px);
-  border-radius: 26px;
-  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  backdrop-filter: blur(22px) saturate(150%);
-  box-shadow: inset 0 1px 0 var(--lc-hi), var(--lc-shadow);
-  transition: transform .5s cubic-bezier(.16, 1, .3, 1), box-shadow .5s cubic-bezier(.16, 1, .3, 1), border-color .3s ease, background-color .3s ease;
-}
-.lesson-card::before {                      /* diagonal glass sheen */
-  content: "";
-  position: absolute;
-  inset: 0;
+.lesson-reader .lesson-prose { font-size: 1.0938rem; line-height: 1.75; color: var(--ink); }
+@media (min-width: 640px) { .lesson-reader .lesson-prose { font-size: 1.1875rem; } }
+.lesson-reader .lesson-prose > :first-child { margin-top: 0; }
+.lesson-reader .lesson-prose > :last-child { margin-bottom: 0; }
+
+/* Reading progress, a hairline along the top of the content area */
+.lesson-topbar { position: fixed; top: 3.5rem; left: 0; right: 0; height: 2px; z-index: 30; pointer-events: none; background: color-mix(in srgb, var(--ink) 5%, transparent); }
+@media (min-width: 1024px) { .lesson-topbar { top: 0; left: 15rem; } }
+.lesson-topbar-fill { height: 100%; background: var(--gold-strong); transform-origin: left center; will-change: transform; border-radius: 0 2px 2px 0; }
+
+.lesson-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 999px; border: 1px solid var(--line); background: var(--raised); color: var(--gold); font-size: 14px; font-weight: 600; }
+.lesson-avatar-sm { width: 28px; height: 28px; font-size: 12px; margin-top: 1px; }
+
+.lesson-resume { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line)); background: color-mix(in srgb, var(--gold) 7%, var(--raised)); color: var(--gold); font-size: 13px; font-weight: 550; transition: background-color .2s ease; }
+@media (hover: hover) { .lesson-resume:hover { background: color-mix(in srgb, var(--gold) 13%, var(--raised)); } }
+
+.lesson-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 208px; padding: 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--overlay); box-shadow: 0 24px 64px -24px rgb(48 40 24 / .28), 0 2px 6px rgb(48 40 24 / .06); transform-origin: top right; }
+[data-theme="dark"] .lesson-menu { box-shadow: 0 28px 72px -24px rgb(0 0 0 / .65); }
+.lesson-menu button { display: flex; width: 100%; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--ink); text-align: left; transition: background-color .15s ease; }
+.lesson-menu button:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.lesson-menu button[data-danger="true"] { color: var(--loss); }
+.lesson-menu button[data-danger="true"]:hover { background: color-mix(in srgb, var(--loss) 10%, transparent); }
+
+/* ------------------------------------------------------------------ */
+/*  Floating UI: action dock + selection bar                            */
+/*  Pinned above the Minato launcher on phones, centred in the content */
+/*  area (clear of the sidebar) on desktop.                             */
+/* ------------------------------------------------------------------ */
+.lesson-float {
+  position: fixed; left: 0; right: 0; z-index: 60;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+  display: flex; justify-content: center; padding: 0 12px;
   pointer-events: none;
-  background: linear-gradient(135deg, var(--lc-sheen) 0%, transparent 38%);
-  opacity: .7;
+  transition: opacity .3s ease, transform .45s cubic-bezier(.16, 1, .3, 1), visibility 0s linear 0s;
 }
-.lesson-card > * { position: relative; }   /* keep content above the sheen */
-.lesson-card:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--line-strong) 80%, transparent);
-  box-shadow: inset 0 1px 0 var(--lc-hi), var(--lc-shadow-hover);
+@media (min-width: 640px) { .lesson-float { bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); } }
+@media (min-width: 1024px) { .lesson-float { left: 15rem; } }
+.lesson-float[data-show="false"] { opacity: 0; transform: translateY(14px); visibility: hidden; transition-delay: 0s, 0s, .45s; }
+.lesson-float > * { pointer-events: auto; }
+
+.lesson-dock, .lesson-selectbar {
+  display: flex; align-items: center; gap: 2px; padding: 5px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%);
+  box-shadow: 0 14px 40px -14px rgb(48 40 24 / .26), 0 1px 3px rgb(48 40 24 / .06);
 }
-.lesson-card:active { transform: translateY(-1px) scale(.995); }
-.lesson-card:focus-visible { outline: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); outline-offset: 3px; }
-.lesson-card.is-picked {
-  border-color: color-mix(in srgb, var(--gold) 70%, transparent);
-  box-shadow: inset 0 1px 0 var(--lc-hi), 0 0 0 3px color-mix(in srgb, var(--gold) 18%, transparent), var(--lc-shadow);
+[data-theme="dark"] .lesson-dock, [data-theme="dark"] .lesson-selectbar { box-shadow: 0 18px 44px -16px rgb(0 0 0 / .6), 0 1px 3px rgb(0 0 0 / .35); }
+.lesson-dock { border-radius: 999px; }
+.lesson-selectbar { border-radius: 18px; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lesson-dock, .lesson-selectbar, .fp { background: var(--surface); }
 }
 
-.lesson-card .lc-eyebrow { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; color: var(--faint); }
-.lesson-card .lc-eyebrow b { font-weight: 600; color: var(--muted); }
-.lesson-card .lc-cover {
-  display: block;
-  width: 100%;
-  margin-top: 18px;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 18px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent), 0 10px 28px -16px rgb(0 0 0 / .35);
+.lesson-dock-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 44px; min-width: 44px; padding: 0 12px; border-radius: 999px; color: var(--muted); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; transition: color .2s ease, background-color .2s ease, transform .15s ease; }
+.lesson-dock-btn:focus-visible { border-radius: 999px; }
+.lesson-dock-btn:active { transform: scale(.93); }
+.lesson-dock-btn[data-on="true"] { color: var(--gold); }
+@media (hover: hover) { .lesson-dock-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); } .lesson-dock-btn[data-on="true"]:hover { color: var(--gold); } }
+.lesson-dock-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line); }
+
+.lesson-bar-btn { height: 38px; padding: 0 14px; border-radius: 13px; font-size: 13px; font-weight: 550; color: var(--ink); transition: background-color .2s ease, opacity .2s ease; }
+.lesson-bar-btn:focus-visible { border-radius: 13px; }
+@media (hover: hover) { .lesson-bar-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); } }
+.lesson-bar-btn[data-danger="true"] { color: var(--loss); }
+.lesson-bar-btn:disabled { opacity: .4; pointer-events: none; }
+
+/* ------------------------------------------------------------------ */
+/*  Library: sticky toolbar                                             */
+/*  The blur lives on a pseudo-element: a backdrop-filter on the        */
+/*  toolbar itself would trap `position: fixed` descendants.            */
+/* ------------------------------------------------------------------ */
+.lessons-toolbar { isolation: isolate; }
+.lessons-toolbar::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0;
+  background: color-mix(in srgb, var(--canvas) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid var(--line);
+  transition: opacity .25s ease;
+  pointer-events: none;
 }
-.lesson-card .lc-title {
-  margin-top: 18px;
-  font-size: clamp(21px, 3.4vw, 26px);
-  font-weight: 650;
-  line-height: 1.18;
-  letter-spacing: -.022em;
-  color: var(--ink);
-  text-wrap: balance;
+.lessons-toolbar.is-stuck::before { opacity: 1; }
+
+/* ------------------------------------------------------------------ */
+/*  Library: filter sheet (phones) / popover (≥ 640px)                  */
+/* ------------------------------------------------------------------ */
+.fp-scrim { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / .32); }
+@media (min-width: 640px) { .fp-scrim { background: transparent; } }
+.fp {
+  position: fixed; z-index: 101; left: 0; right: 0; bottom: 0;
+  max-height: 86dvh; overflow-y: auto; overscroll-behavior: contain;
+  padding: 10px 20px max(20px, env(safe-area-inset-bottom));
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 24px 24px 0 0;
+  background: color-mix(in srgb, var(--overlay) 90%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%);
+  box-shadow: 0 -24px 64px -28px rgb(48 40 24 / .35);
+  outline: none;
 }
-.lesson-card .lc-dek {
-  margin-top: 10px;
-  font-size: 15.5px;
-  line-height: 1.6;
-  color: var(--muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+[data-theme="dark"] .fp { box-shadow: 0 -24px 64px -24px rgb(0 0 0 / .7); }
+.fp-grab { width: 36px; height: 5px; margin: 0 auto 14px; border-radius: 3px; background: var(--line-strong); }
+@media (min-width: 640px) {
+  .fp { left: auto; right: var(--fp-right, 24px); top: var(--fp-top, 120px); bottom: auto; width: 368px; max-height: calc(100dvh - var(--fp-top, 120px) - 16px); padding: 18px; border-bottom: 1px solid var(--line); border-radius: 20px; box-shadow: 0 24px 64px -24px rgb(48 40 24 / .3), 0 2px 6px rgb(48 40 24 / .06); }
+  [data-theme="dark"] .fp { box-shadow: 0 28px 72px -24px rgb(0 0 0 / .65); }
+  .fp-grab { display: none; }
 }
-.lesson-card .lc-actions {
-  margin-top: 22px;
-  padding-top: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+.fp-chip { height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--raised); color: var(--muted); font-size: 13px; font-weight: 500; transition: background-color .2s ease, border-color .2s ease, color .2s ease; }
+.fp-chip:focus-visible { border-radius: 999px; }
+@media (hover: hover) { .fp-chip:hover { border-color: var(--line-strong); color: var(--ink); } }
+.fp-chip[aria-checked="true"] { border-color: color-mix(in srgb, var(--gold) 55%, transparent); background: color-mix(in srgb, var(--gold) 12%, var(--raised)); color: var(--gold-deep); }
+[data-theme="dark"] .fp-chip[aria-checked="true"] { color: var(--gold); }
+
+/* ------------------------------------------------------------------ */
+/*  Library: cards                                                      */
+/*  Flat surfaces. Phones get compact rows (text left, thumbnail       */
+/*  right); tablet and desktop get a two-column grid of vertical        */
+/*  cards, with one large featured card when the library is unfiltered. */
+/* ------------------------------------------------------------------ */
+.lc-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 640px) { .lc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; } }
+.lc-grid > .lc[data-variant="featured"] { grid-column: 1 / -1; }
+
+.lc {
+  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--surface);
+  box-shadow: 0 1px 2px rgb(48 40 24 / .05), 0 1px 3px rgb(48 40 24 / .04);
+  transition: border-color .25s ease, box-shadow .4s cubic-bezier(.16, 1, .3, 1), transform .4s cubic-bezier(.16, 1, .3, 1), opacity .25s ease;
 }
-.lesson-card .lc-actions .lc-pill {              /* glass chips for like / comment / repost / save */
-  background: color-mix(in srgb, var(--raised) 55%, transparent);
-  border-color: color-mix(in srgb, var(--line) 80%, transparent);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+[data-theme="dark"] .lc { box-shadow: 0 1px 2px rgb(0 0 0 / .35); }
+@media (hover: hover) {
+  .lc:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: 0 14px 34px -16px rgb(48 40 24 / .2); }
+  [data-theme="dark"] .lc:hover { box-shadow: 0 16px 40px -18px rgb(0 0 0 / .55); }
+  .lc:hover .lc-media img { transform: scale(1.025); }
 }
-.lesson-card .lc-actions .lc-pill:hover { background: color-mix(in srgb, var(--raised) 85%, transparent); }
+.lc:has(.lc-hit:focus-visible) { outline: 2px solid color-mix(in srgb, var(--gold) 65%, transparent); outline-offset: 3px; }
+.lc[data-picked="true"] { border-color: var(--gold-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 18%, transparent); }
+.lc[data-dim="true"] { opacity: .45; }
+
+.lc-media { position: relative; overflow: hidden; aspect-ratio: 16 / 10; background: var(--raised); }
+.lc-media::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 6%, transparent); }
+.lc-media img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .9s cubic-bezier(.16, 1, .3, 1); }
+
+.lc-body { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 18px 20px 12px; }
+.lc-kicker { margin-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--gold); }
+.lc-meta { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; color: var(--faint); }
+.lc-meta > * { flex: none; }
+.lc-author { flex: 0 1 auto !important; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 550; color: var(--muted); }
+.lc-state { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding-left: 6px; font-weight: 550; font-variant-numeric: tabular-nums; color: var(--muted); }
+.lc-state[data-reading="true"] { color: var(--gold); }
+.lc-check { display: grid; place-items: center; width: 18px; height: 18px; margin-right: 4px; border-radius: 999px; border: 1.5px solid var(--line-strong); color: var(--on-gold); transition: background-color .2s ease, border-color .2s ease; }
+.lc-check[data-on="true"] { background: var(--gold-strong); border-color: var(--gold-strong); }
+
+.lc-title { margin-top: 9px; font-size: 19px; font-weight: 620; line-height: 1.25; letter-spacing: -.02em; color: var(--ink); text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+@media (min-width: 640px) { .lc-title { font-size: 20px; } }
+.lc-hit { text-align: left; font: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.lc-hit::after { content: ""; position: absolute; inset: 0; z-index: 1; }
+.lc-hit:focus-visible { outline: none; }
+.lc-dek { margin-top: 8px; font-size: 14.5px; line-height: 1.55; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+
+.lc-foot { display: flex; align-items: center; gap: 2px; margin: auto -9px 0; padding-top: 10px; }
+.lc-act { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 9px; border-radius: 999px; color: var(--faint); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; transition: color .2s ease, background-color .2s ease, transform .15s ease; }
+.lc-act:focus-visible { border-radius: 999px; }
+.lc-act:active { transform: scale(.92); }
+.lc-act[data-on="true"] { color: var(--gold); }
+@media (hover: hover) { .lc-act:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); } .lc-act[data-on="true"]:hover { color: var(--gold); } }
+@media (pointer: coarse) { .lc-act { height: 44px; min-width: 44px; justify-content: center; } }
+.lc-stat { display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; color: var(--faint); }
+
+/* Progress: a hairline at the foot of an in-progress card */
+.lc-bar, .lc-track { background: color-mix(in srgb, var(--ink) 8%, transparent); overflow: hidden; }
+.lc-bar { height: 3px; }
+.lc-track { height: 4px; border-radius: 999px; }
+.lc-bar i, .lc-track i { display: block; height: 100%; background: var(--gold-strong); border-radius: 0 2px 2px 0; transition: width .4s ease; }
+.lc-track i { border-radius: inherit; }
+
+/* Featured card (unfiltered library only) */
+.lc[data-variant="featured"] .lc-title { margin-top: 10px; font-size: 23px; line-height: 1.2; letter-spacing: -.025em; -webkit-line-clamp: 4; line-clamp: 4; }
+.lc[data-variant="featured"] .lc-dek { margin-top: 10px; font-size: 15.5px; -webkit-line-clamp: 3; line-clamp: 3; }
+.lc[data-variant="featured"] .lc-media { aspect-ratio: 16 / 9; }
+@media (min-width: 768px) {
+  .lc[data-variant="featured"] { flex-direction: row; }
+  .lc[data-variant="featured"] .lc-media { flex: 0 0 54%; aspect-ratio: auto; min-height: 290px; }
+  .lc[data-variant="featured"] .lc-body { padding: 28px 28px 16px; }
+  .lc[data-variant="featured"] .lc-title { font-size: 28px; }
+  .lc[data-variant="featured"] .lc-bar { position: absolute; left: 0; right: 0; bottom: 0; }
+}
+
+/* Phones: compact rows with a trailing thumbnail */
+@media (max-width: 639.98px) {
+  .lc:not([data-variant="featured"]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-radius: 18px; }
+  .lc:not([data-variant="featured"]) .lc-body { grid-column: 1; grid-row: 1; padding: 16px 14px 6px 18px; }
+  .lc:not([data-variant="featured"]) .lc-media { grid-column: 2; grid-row: 1; align-self: start; width: 92px; height: 92px; aspect-ratio: auto; margin: 16px 16px 0 0; border-radius: 12px; }
+  .lc:not([data-variant="featured"]) .lc-bar { grid-column: 1 / -1; grid-row: 2; }
+  .lc:not([data-variant="featured"]) .lc-title { margin-top: 7px; font-size: 17px; }
+  .lc:not([data-variant="featured"]) .lc-dek { font-size: 14px; }
+  .lc[data-variant="featured"] .lc-body { padding: 16px 18px 8px; }
+}
+
+/* Loading skeleton shares the silhouette */
+.lc-skel { pointer-events: none; }
+.lc-skel .lc-media { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.lc-skel .lc-media::after { display: none; }
+
+/* "Continue reading" shelf */
+.lc-continue { display: flex; align-items: center; gap: 16px; padding: 14px 18px 14px 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 1px 2px rgb(48 40 24 / .05), 0 1px 3px rgb(48 40 24 / .04); transition: border-color .25s ease, box-shadow .4s cubic-bezier(.16, 1, .3, 1), transform .4s cubic-bezier(.16, 1, .3, 1); }
+[data-theme="dark"] .lc-continue { box-shadow: 0 1px 2px rgb(0 0 0 / .35); }
+@media (hover: hover) { .lc-continue:hover { border-color: var(--line-strong); transform: translateY(-1px); box-shadow: 0 12px 30px -16px rgb(48 40 24 / .2); } }
+.lc-continue:not(:has(.lc-continue-thumb)) { padding-left: 18px; }
+.lc-continue-thumb { flex: none; width: 64px; height: 64px; overflow: hidden; border-radius: 12px; background: var(--raised); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 6%, transparent); }
+.lc-continue-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@media (min-width: 640px) { .lc-continue-thumb { width: 72px; height: 72px; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .lesson-card, .lesson-card:hover, .lesson-card:active { transition: none; transform: none; }
-}
-/* Browsers without backdrop-filter get a solid surface so text stays readable. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .lesson-card { background: var(--surface); }
+  .lc, .lc:hover, .lc-continue:hover { transform: none; }
+  .lc:hover .lc-media img { transform: none; }
 }

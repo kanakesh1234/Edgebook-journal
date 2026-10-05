@@ -1,7 +1,6 @@
-export function BookmarkIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" width="14" height="14" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true" className="-mt-0.5 mr-1 inline">
-      <path d="M6 3h12v18l-6-4-6 4z" />
-    </svg>
-  );
+/** Kept for backwards compatibility — the canonical icon set lives in lesson-icons.tsx. */
+import { BookmarkIcon as Icon } from "./lesson-icons";
+
+export function BookmarkIcon({ filled, className }: { filled: boolean; className?: string }) {
+  return <Icon filled={filled} className={className} />;
 }
