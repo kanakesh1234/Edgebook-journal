@@ -37,8 +37,17 @@ function CompactTile({ mode, level, status, disabled, busy, onStart, href }: Omi
         <span className="block truncate text-[15px] font-semibold tracking-[-0.015em] text-ink">{meta.title}</span>
         <span className="mt-0.5 block whitespace-nowrap text-[12px] tabular-nums text-muted">{disabled ? "Locked" : `Level ${level}`}</span>
       </span>
-      <span className={cn("relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-transform duration-200", disabled ? "bg-ink/10 text-faint" : "bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_6px_14px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)] group-hover:scale-105 group-hover:shadow-[0_8px_18px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)]")}>
-        {busy ? <span className="h-3 w-3 animate-pulse rounded-full bg-on-gold" /> : <PlayIcon />}
+      <span
+        className={cn("relative grid h-9 w-9 shrink-0 place-items-center rounded-full transition-transform duration-200", disabled ? "bg-ink/10 text-faint" : "group-hover:scale-105")}
+        style={disabled ? undefined : {
+          // Same tint as the tile's own corner glow, so the button belongs to the card.
+          background: `linear-gradient(145deg, color-mix(in srgb, ${meta.accent} 34%, var(--raised)), color-mix(in srgb, ${meta.accent} 16%, var(--raised)))`,
+          border: `1px solid color-mix(in srgb, ${meta.accent} 38%, transparent)`,
+          color: `color-mix(in srgb, ${meta.accent} 62%, var(--ink))`,
+          boxShadow: `0 4px 10px -5px color-mix(in srgb, ${meta.accent} 55%, transparent), inset 0 1px 0 rgb(255 255 255 / 0.5)`,
+        }}
+      >
+        {busy ? <span className="h-3 w-3 animate-pulse rounded-full bg-current" /> : <PlayIcon />}
       </span>
     </>
   );
