@@ -218,7 +218,7 @@ export function validateAiBatch(parsed: unknown, trades: EvidenceTrade[], avoid:
   return kept;
 }
 
-export function buildAiPrompt(args: { mode: string; level: number; count: number; trades: EvidenceTrade[]; avoid: string[]; weakTags: string[] }): { system: string; user: string } {
+export function buildAiPrompt(args: { mode: string; level: number; arena?: number; count: number; trades: EvidenceTrade[]; avoid: string[]; weakTags: string[] }): { system: string; user: string } {
   const levelGuide: Record<number, string> = {
     1: "L1 recognition: simple recall of what the trader recorded.",
     2: "L2 recall: remember their own reasoning, setup rules and lessons.",
@@ -239,13 +239,17 @@ export function buildAiPrompt(args: { mode: string; level: number; count: number
     "- Prefer questions about the trader's own reasoning and repeated mistakes: compare trades in EVIDENCE, ask which mistake keeps repeating, what likely causes it, and what the trader's own rule says to do instead.",
     "- Do NOT repeat or paraphrase anything in AVOID.",
     "- If a trade has no notes/lesson text, write math questions for it instead of concept questions.",
+    '- If mode is "math-duel", write ONLY math questions, preferring "uses":"trade" with numbers from EVIDENCE.',
+    "- These are 60-second rounds: every prompt is at most 30 words and answerable in about 10 seconds; every choice is at most 8 words. No long scenarios, no trivia, nothing the trader could answer without thinking.",
+    "- playerLevel is open-ended (1 = beginner). Scale difficulty with it: 1-4 one-step recall or arithmetic on their numbers; 5-9 two-step reasoning, applying their own rule to a variation, spotting which recorded mistake caused a loss; 10+ comparing several trades, diagnosing a repeated mistake across days, three-step maths, expectancy what-ifs.",
   ].join("\n");
   const user = JSON.stringify({
     mode: args.mode,
+    playerLevel: args.arena ?? args.level,
     target: `Produce ${args.count} questions around difficulty level ${args.level}; include some at level ${Math.max(1, args.level - 1)} and ${Math.min(4, args.level + 1)}.`,
     difficulty: levelGuide,
     weakTopics: args.weakTags.slice(0, 5),
-    AVOID: args.avoid.slice(-40),
+    AVOID: args.avoid.slice(-60),
     EVIDENCE: args.trades.map((t) => ({ ...t, notes: t.notes?.slice(0, 600), lesson: t.lesson?.slice(0, 300), mistake: t.mistake?.slice(0, 300) })),
   });
   return { system, user };

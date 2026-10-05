@@ -24,7 +24,7 @@ const CompareIcon = ({ className }: { className?: string }) => (
  * trade has more than one chart) opens a full-screen vertical-scroll view with
  * every chart; Back returns to the question.
  */
-export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: boolean }) {
+export function ChartPanel({ entries, onOverlay }: { entries: JournalEntry[]; /** Called with true while a full-screen chart is open (the round clock pauses). */ onOverlay?: (open: boolean) => void }) {
   const withCharts = useMemo(() => entries.filter((e) => chartsOf(e).length > 0), [entries]);
   const [tradeIdx, setTradeIdx] = useState(0);
   const [comparing, setComparing] = useState(false);
@@ -32,6 +32,12 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
   const entry = withCharts[Math.min(tradeIdx, withCharts.length - 1)];
   const charts = useMemo(() => (entry ? chartsOf(entry) : []), [entry]);
   const urls = useImageUrls(charts.map((c) => c.id));
+
+  useEffect(() => {
+    onOverlay?.(comparing || zoom);
+    return () => onOverlay?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comparing, zoom]);
 
   useEffect(() => {
     if (!comparing && !zoom) return;
@@ -56,11 +62,11 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
 
   return (
     <>
-      <figure className="overflow-hidden rounded-xl border border-line bg-raised">
+      <figure className="overflow-hidden rounded-[20px] border border-line bg-surface">
         <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-ink">{label}</p>
-            <p className="text-[10px] uppercase tracking-wider text-muted">{first.label} · saved screenshot</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted">{first.label}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {withCharts.length > 1 && (
@@ -80,10 +86,7 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
             {canCompare && (
               <button
                 onClick={() => setComparing(true)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg border border-gold-strong bg-gold-strong px-3 py-1.5 text-xs font-bold text-on-gold transition hover:bg-gold-strong-hover",
-                  hint && "animate-pulse",
-                )}
+                className="flex items-center gap-1.5 rounded-full border border-line-strong bg-raised px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-gold-strong"
               >
                 <CompareIcon className="h-4 w-4" /> Compare{charts.length > 2 ? ` (${charts.length})` : ""}
               </button>
@@ -93,12 +96,11 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
         <button onClick={() => setZoom(true)} className="block w-full cursor-zoom-in bg-canvas" aria-label="Enlarge chart">
           {urls[first.id] ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={urls[first.id]!} alt={`${label} chart`} className="max-h-[42vh] w-full object-contain" draggable={false} />
+            <img src={urls[first.id]!} alt={`${label} chart`} className="max-h-[34vh] w-full object-contain" draggable={false} />
           ) : (
             <div className="grid h-40 place-items-center text-xs text-muted">Loading chart…</div>
           )}
         </button>
-        {hint && canCompare && <figcaption className="border-t border-line px-3 py-2 text-[11px] text-muted">Tip: press Compare to see every chart of this trade, then come back and answer.</figcaption>}
       </figure>
 
       {zoom && (
@@ -117,14 +119,14 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
               <p className="truncate text-sm font-semibold">{label} — compare</p>
               <p className="text-[11px] text-muted">{charts.length} saved charts · scroll down</p>
             </div>
-            <button onClick={() => setComparing(false)} className="rounded-lg border border-gold-strong bg-gold-strong px-4 py-2 text-xs font-bold text-on-gold hover:bg-gold-strong-hover">
+            <button onClick={() => setComparing(false)} className="rounded-full bg-gold-strong px-4 py-2 text-xs font-semibold text-on-gold hover:bg-gold-strong-hover">
               ← Back to question
             </button>
           </header>
           <div className="flex-1 overflow-y-auto px-4 py-5">
             <div className="mx-auto flex max-w-5xl flex-col gap-6">
               {charts.map((chart, i) => (
-                <section key={chart.id} className="overflow-hidden rounded-xl border border-line bg-raised">
+                <section key={chart.id} className="overflow-hidden rounded-[20px] border border-line bg-surface">
                   <p className="border-b border-line px-4 py-2 text-xs font-semibold">
                     Chart {i + 1} of {charts.length} <span className="font-normal text-muted">· {chart.label}</span>
                   </p>
@@ -136,7 +138,7 @@ export function ChartPanel({ entries, hint }: { entries: JournalEntry[]; hint?: 
                   )}
                 </section>
               ))}
-              <button onClick={() => setComparing(false)} className="mx-auto mb-6 rounded-lg border border-gold-strong bg-gold-strong px-6 py-3 text-sm font-bold text-on-gold hover:bg-gold-strong-hover">
+              <button onClick={() => setComparing(false)} className="mx-auto mb-6 rounded-full bg-gold-strong px-6 py-3 text-sm font-semibold text-on-gold hover:bg-gold-strong-hover">
                 ← Back to question
               </button>
             </div>

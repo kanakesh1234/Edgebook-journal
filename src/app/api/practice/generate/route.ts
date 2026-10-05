@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const WINDOW_MS = 5 * 60_000;
-const MAX_CALLS = 10;
+const MAX_CALLS = 24;
 const calls = new Map<string, number[]>();
 
 function limited(key: string): boolean {
@@ -42,7 +42,7 @@ async function callModel(apiKey: string, model: string, system: string, user: st
     method: "POST",
     signal,
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, max_tokens: 2800, temperature: 0.8, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
+    body: JSON.stringify({ model, max_tokens: 4200, temperature: 0.8, messages: [{ role: "system", content: system }, { role: "user", content: user }] }),
   });
   if (!res.ok) return null;
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -59,19 +59,20 @@ export async function POST(request: Request) {
   const config = getOpenRouterConfig();
   if (!config) return NextResponse.json({ questions: [], source: "local", reason: "AI key is not configured." });
 
-  const body = (await request.json().catch(() => ({}))) as { mode?: unknown; level?: unknown; count?: unknown; trades?: unknown; avoid?: unknown; weakTags?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { mode?: unknown; level?: unknown; arena?: unknown; count?: unknown; trades?: unknown; avoid?: unknown; weakTags?: unknown };
   const trades = (Array.isArray(body.trades) ? body.trades : []).map(cleanTrade).filter((t): t is EvidenceTrade => t != null).slice(0, 12);
   if (!trades.length) return NextResponse.json({ questions: [], source: "local", reason: "No trades supplied." });
   const level = Math.min(4, Math.max(1, Math.round(Number(body.level) || 1)));
-  const count = Math.min(16, Math.max(4, Math.round(Number(body.count) || 8)));
-  const avoid = (Array.isArray(body.avoid) ? body.avoid : []).filter((a): a is string => typeof a === "string").map((a) => a.slice(0, 200)).slice(-60);
+  const count = Math.min(24, Math.max(4, Math.round(Number(body.count) || 8)));
+  const arena = Math.min(999, Math.max(1, Math.round(Number(body.arena) || level)));
+  const avoid = (Array.isArray(body.avoid) ? body.avoid : []).filter((a): a is string => typeof a === "string").map((a) => a.slice(0, 200)).slice(-100);
   const weakTags = (Array.isArray(body.weakTags) ? body.weakTags : []).filter((a): a is string => typeof a === "string").slice(0, 6);
   const mode = typeof body.mode === "string" ? body.mode.slice(0, 20) : "matrix";
 
-  const { system, user } = buildAiPrompt({ mode, level, count: count + 4, trades, avoid, weakTags });
+  const { system, user } = buildAiPrompt({ mode, level, arena, count: count + 4, trades, avoid, weakTags });
   const models = [config.model, ...(config.fallbackModel ? [config.fallbackModel] : [])];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 40_000);
+  const timer = setTimeout(() => controller.abort(), 52_000);
   try {
     for (const model of models) {
       try {

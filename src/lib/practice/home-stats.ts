@@ -1,5 +1,6 @@
 import type { JournalEntry, JournalSettings } from "@/lib/types";
-import { displayStreak, isUsable, levelFromProgress, rankOf, weekTrades } from "./engine";
+import { displayStreak, isUsable, rankOf, weekTrades } from "./engine";
+import { arenaLevels } from "./arena";
 import { matrixAccuracy, matrixTodayXp } from "@/lib/matrix/overview";
 import { matrixStreak } from "@/lib/matrix/attempt";
 import { MATRIX_DAILY_XP_GOAL } from "@/lib/matrix/progression";
@@ -49,7 +50,7 @@ export function practiceHomeStats(entries: JournalEntry[], settings: JournalSett
   return {
     xp: practice.xp + matrix.xp,
     rank: rankOf(practice.xp),
-    level: levelFromProgress(practice),
+    levels: arenaLevels(practice),
     dailyGoal: MATRIX_DAILY_XP_GOAL,
     todayXp,
     streak: Math.max(displayStreak(practice, today), matrixStreak(matrix, today)),

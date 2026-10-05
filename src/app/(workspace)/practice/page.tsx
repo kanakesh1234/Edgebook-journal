@@ -1,310 +1,193 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/lib/store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { todayKey } from "@/lib/format";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { MathDuel } from "@/components/practice/MathDuel";
-import { DrillRunner, type DrillResult } from "@/components/practice/DrillRunner";
-import {
-  LEVELS, LEVEL_MASTERY_KEY, buildPool, displayStreak, fmtMoney, isUsable, levelFromProgress, nextStreak, rankOf, tradeLabel, weekTrades,
-  type GameMode, type Level, type PracticeQuestion,
-} from "@/lib/practice/engine";
-import { recentPrompts, recordAnswers, rememberPrompts } from "@/lib/practice/history";
-import { readLedger, resetDone, updateLedger } from "@/lib/practice/ledger";
-import { assembleSession, type Group } from "@/lib/practice/session";
-import { duelQuestions } from "@/lib/practice/duel-questions";
+import { Spinner } from "@/components/ui/button";
+import { ModeCard, MODE_META } from "@/components/practice/mode-card";
+import { RoundRunner, type RoundResult } from "@/components/practice/round-runner";
+import { displayStreak, isUsable, nextStreak, rankOf, weekTrades } from "@/lib/practice/engine";
+import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
+import { updateLedger } from "@/lib/practice/ledger";
 import { addDailyStats } from "@/lib/practice/daily";
-import { fetchAiQuestions } from "@/lib/practice/ai-client";
-import { fpKey as hash } from "@/lib/practice/ledger";
-import type { JournalEntry, PracticeProgress } from "@/lib/types";
+import { nextQuestionBank } from "@/lib/practice/bank";
+import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
+import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import type { PracticeProgress } from "@/lib/types";
 
-type Mode = "matrix" | "time-machine" | "math-duel" | "boss";
-type LevelPick = 0 | Level;
-type MatrixFilter = "all" | "untested" | "needs-work" | "strong";
+type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
 
-const MODES: { id: Mode; title: string; blurb: string; icon: string; tone: string }[] = [
-  { id: "matrix", title: "Matrix", blurb: "Charts + trade maths + Math Duel on your real trades.", icon: "✦", tone: "border-indigo-400/40 bg-indigo-500/10" },
-  { id: "time-machine", title: "Time Machine", blurb: "Practice recorded process decisions.", icon: "◎", tone: "border-emerald-400/40 bg-emerald-500/10" },
-  { id: "math-duel", title: "Math Duel", blurb: "Calculation fluency from your risk data.", icon: "♜", tone: "border-amber-400/50 bg-amber-500/10" },
-  { id: "boss", title: "Weekend Boss", blurb: "Combine this week's real trades.", icon: "◈", tone: "border-rose-400/40 bg-rose-500/10" },
-];
-const COUNTS = [5, 8, 10, 15] as const;
-const FILTERS: { id: MatrixFilter; label: string }[] = [
-  { id: "all", label: "All trades" }, { id: "untested", label: "Untested" }, { id: "needs-work", label: "Needs work" }, { id: "strong", label: "Strong" },
-];
+const EMPTY: PracticeProgress = { xp: 0, streak: 0, freezeDays: 1 };
 
-function modeFromUrl(): Mode {
+function modeFromUrl(): ArenaMode | null {
   const raw = new URLSearchParams(window.location.search).get("mode");
+  if (raw === "matrix") return "matrix";
   if (raw === "time-machine" || raw === "timemachine") return "time-machine";
   if (raw === "math-duel" || raw === "math" || raw === "duel") return "math-duel";
   if (raw === "boss" || raw === "weekend-boss") return "boss";
-  return "matrix";
+  return null;
 }
 
-interface Session {
-  title: string;
-  kind: GameMode;
-  pool: PracticeQuestion[];
-  count: number;
-  startLevel: Level;
-  tradeId?: string;
-  retry: () => void;
+/** Everything a round needs, read fresh from the store (so "Next round" never uses stale data). */
+function snapshot() {
+  const state = useApp.getState();
+  const { entries, challenge, settings: scoped } = scopeToPrimary(state.settings, state.entries);
+  const stats = computeStats(entries, scoped);
+  let drawdownLeft: number | null;
+  if (stats.drawdownCushion != null) drawdownLeft = Math.max(0, stats.drawdownCushion);
+  else {
+    const limit = challenge?.maxDrawdown ?? state.settings.maxDrawdown;
+    drawdownLeft = limit > 0 ? Math.max(0, limit - stats.drawdown) : null;
+  }
+  return { entries, drawdownLeft, progress: state.settings.practiceProgress ?? EMPTY, updateSettings: state.updateSettings };
 }
 
 export default function PracticePage() {
   const allEntries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
-  const updateSettings = useApp((s) => s.updateSettings);
-
-  const { entries, challenge, settings: scopedSettings } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
-  const stats = useMemo(() => computeStats(entries, scopedSettings), [entries, scopedSettings]);
-  const progress: PracticeProgress = settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 };
+  const { entries } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
+  const progress = settings.practiceProgress ?? EMPTY;
   const today = todayKey();
 
-  const [mode, setModeState] = useState<Mode>("matrix");
-  const [levelPick, setLevelPick] = useState<LevelPick>(0);
-  const [count, setCount] = useState<number>(8);
-  const [aiOn, setAiOn] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [notice, setNotice] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [filter, setFilter] = useState<MatrixFilter>("all");
-  const [shown, setShown] = useState(25);
+  const token = useRef(0);
+  const deepLink = useRef<ArenaMode | null>(null);
 
-  useEffect(() => { setModeState(modeFromUrl()); }, []);
-  const setMode = (next: Mode) => {
-    setModeState(next);
-    setNotice(null);
-    try { window.history.replaceState(null, "", `/practice?mode=${next}`); } catch { /* optional */ }
-  };
-
-  const autoLevel = levelFromProgress(progress);
-  const level: Level = levelPick || autoLevel;
-  const usable = useMemo(() => entries.filter(isUsable).sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt), [entries]);
+  const levels = arenaLevels(progress);
+  const usable = useMemo(() => entries.filter(isUsable), [entries]);
   const week = useMemo(() => weekTrades(entries), [entries]);
-  const drawdownLeft = useMemo(() => {
-    // Cushion above the challenge's current floor (equity − floor).
-    if (stats.drawdownCushion != null) return Math.max(0, stats.drawdownCushion);
-    const limit = challenge?.maxDrawdown ?? settings.maxDrawdown;
-    return limit > 0 ? Math.max(0, limit - stats.drawdown) : null;
-  }, [challenge?.maxDrawdown, settings.maxDrawdown, stats.drawdown, stats.drawdownCushion]);
 
-  const weakTags = useMemo(() => [...new Set((progress.seenQuestions ?? []).filter((s) => s.variant === 1).map((s) => s.format))].slice(-5), [progress.seenQuestions]);
-  const perf = progress.modePerformance ?? {};
+  const lock = (mode: ArenaMode): string | null => {
+    if (mode === "math-duel") return null;
+    if (usable.length === 0) return "Add a trade to unlock this mode.";
+    if (mode === "boss" && week.trades.length < 2) return "Needs two trades in the same week.";
+    return null;
+  };
 
-  /** How many questions in each mode are still unanswered-or-missed (powers the counters). */
-  const hasChart = useMemo(() => new Set(entries.filter((e) => (e.images?.length ?? 0) > 0).map((e) => e.id)), [entries]);
-  const freshLeft = useMemo(() => {
-    const base = { trades: usable, all: entries, seed: 1, drawdownLeft };
-    const ledger = readLedger(progress);
-    const count = (mode: GameMode) => buildPool({ ...base, mode, trades: mode === "boss" ? week.trades : usable }).filter((q) => !ledger.done.has(hash(q.fp))).length;
-    return { tm: count("time-machine"), matrix: count("matrix"), boss: week.trades.length >= 2 ? count("boss") : 0 };
-  }, [usable, entries, drawdownLeft, progress, week.trades]);
-
-  const launch = async (kind: GameMode, trades: JournalEntry[], title: string, n: number, tradeId?: string) => {
-    setBusy(title);
+  const start = async (mode: ArenaMode) => {
+    const id = ++token.current;
     setNotice(null);
-    const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
-    const local = buildPool({ mode: kind, trades, all: entries, seed, drawdownLeft });
-    let ai: PracticeQuestion[] = [];
-    if (aiOn) {
-      const evidenceTrades = kind === "matrix" ? trades.slice(0, 1) : [...trades].sort((a, b) => Number(!!b.notes || !!b.reflection?.lesson) - Number(!!a.notes || !!a.reflection?.lesson) || b.date.localeCompare(a.date)).slice(0, 8);
-      const result = await fetchAiQuestions({ mode: kind, level, count: Math.max(8, n), trades: evidenceTrades, avoid: recentPrompts(), weakTags });
-      ai = result.questions;
-      if (result.note) setNotice(result.note);
-    }
-
-    // Matrix = Time Machine charts + trade maths + Math Duel. Boss = this week's trades.
-    const ledger = readLedger(progress);
-    const duel = kind === "matrix" ? duelQuestions(Math.max(4, Math.ceil(n * 0.4)), progress.mathDuel?.ratings ?? {}, ledger, seed) : [];
-    const weights: Partial<Record<Group, number>> = kind === "time-machine" ? { tm: 1 } : kind === "boss" ? { boss: 5, tm: 2, math: 3 } : { tm: 5, math: 2, duel: 3 };
-    const assembled = assembleSession({ questions: [...ai, ...local, ...duel], progress, count: n, startLevel: level, weights, hasChart });
-    setBusy(null);
-
-    if (assembled.pool.length < 3) {
-      setNotice(assembled.retired > 0
-        ? `You have answered every available question for this selection correctly (${assembled.retired} retired). Add trades or review notes for new ones, or use “Replay mastered questions” below.`
-        : "Not enough recorded data for that selection yet. Add a few more trades and try again.");
-      return;
-    }
-    if (assembled.pool.length < n + 3 && assembled.retired > 0) {
-      setNotice(`Only ${Math.min(n, assembled.pool.length)} question${assembled.pool.length === 1 ? "" : "s"} left that you have not already answered correctly for this selection.`);
-    }
-    setSession({ title, kind, pool: assembled.pool, count: Math.min(n, assembled.pool.length), startLevel: level, tradeId, retry: () => { setSession(null); void launch(kind, trades, title, n, tradeId); } });
+    setPhase({ kind: "preparing", mode });
+    const snap = snapshot();
+    const level = levelOf(snap.progress, mode);
+    const prepared = await prepareRound({ mode, level, entries: snap.entries, progress: snap.progress, drawdownLeft: snap.drawdownLeft });
+    if (id !== token.current) { if ("round" in prepared) prepared.round.close(); return; }
+    if ("empty" in prepared) { setPhase({ kind: "idle" }); setNotice(prepared.empty); return; }
+    setPhase({ kind: "playing", mode, level, round: prepared.round });
   };
 
-  const replayMastered = () => {
-    void updateSettings({ practiceProgress: { ...progress, ledger: resetDone(progress) } });
-    setNotice("Mastered questions can appear again. Questions you missed are still kept first.");
-  };
+  const cancel = () => { token.current++; setPhase({ kind: "idle" }); };
 
-  const finish = (result: DrillResult) => {
-    if (!session) return;
-    const mastery = { ...(progress.masteryByTag ?? {}) };
+  // Deep links from Home (/practice?mode=matrix) start that mode straight away.
+  useEffect(() => {
+    const mode = modeFromUrl();
+    if (!mode) return;
+    deepLink.current = mode;
+    try { window.history.replaceState(null, "", "/practice"); } catch { /* optional */ }
+  }, []);
+  useEffect(() => {
+    const mode = deepLink.current;
+    if (!mode || phase.kind !== "idle") return;
+    if (mode !== "math-duel" && entries.length === 0) return; // wait for the journal to load
+    deepLink.current = null;
+    void start(mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries.length]);
+
+  /** Saves a finished round and returns the level change for the summary. */
+  const finish = (mode: ArenaMode, level: number, result: RoundResult): RoundOutcome => {
+    const snap = snapshot();
+    const live = snap.progress;
+    const outcome = evaluateRound({ mode, level, fails: failsOf(live, mode), correct: result.correct, answered: result.total, completed: result.completed });
+    if (result.total === 0) return outcome;
+
+    const mastery = { ...(live.masteryByTag ?? {}) };
     result.correctTags.forEach((tag) => { mastery[tag] = (mastery[tag] ?? 0) + 1; });
-    if (levelPick === 0) mastery[LEVEL_MASTERY_KEY] = result.finalLevel;
-    const modePerformance = { ...(progress.modePerformance ?? {}) };
-    const bump = (key: string) => { const c = modePerformance[key] ?? { correct: 0, attempts: 0 }; modePerformance[key] = { correct: c.correct + result.correct, attempts: c.attempts + result.total }; };
-    bump(session.kind);
-    if (session.tradeId) bump(`matrix:${session.tradeId}`);
-    const { streak, freezeDays } = nextStreak(progress, today);
-    rememberPrompts(result.answers.filter((a) => a.prompt).map((a) => a.prompt));
-    void updateSettings({
-      practiceProgress: {
-        ...progress,
-        xp: progress.xp + result.xp,
-        streak, freezeDays, lastMissionDate: today,
-        completedMissionDates: [...new Set([...(progress.completedMissionDates ?? []), today])].slice(-90),
-        masteryByTag: mastery,
-        modePerformance,
-        seenQuestions: recordAnswers(progress, result.answers.map((a) => ({ fp: a.fp, tag: a.tag, correct: a.correct })), today),
-        ledger: updateLedger(progress, result.answers.map((a) => ({ fp: a.fp, correct: a.correct }))),
-        perfectSets: (progress.perfectSets ?? 0) + (result.total >= 3 && result.correct === result.total ? 1 : 0),
-        dailyStats: addDailyStats(progress, today, { xp: result.xp, correct: result.correct, total: result.total }),
-      },
-    });
+    const perf = { ...(live.modePerformance ?? {}) };
+    const bump = (key: string, correct: number, attempts: number) => {
+      const c = perf[key] ?? { correct: 0, attempts: 0 };
+      perf[key] = { correct: c.correct + correct, attempts: c.attempts + attempts };
+    };
+    bump(mode, result.correct, result.total);
+    for (const a of result.answers) if (a.question.tradeId) bump(`matrix:${a.question.tradeId}`, a.correct ? 1 : 0, 1);
+
+    const { streak, freezeDays } = nextStreak(live, today);
+    const duelSigns = result.answers.filter((a) => a.question.id.startsWith("duel:")).map((a) => a.question.id.slice(5));
+    rememberPrompts(result.answers.map((a) => a.prompt));
+
+    const next: PracticeProgress = {
+      ...live,
+      xp: live.xp + result.xp,
+      streak, freezeDays, lastMissionDate: today,
+      completedMissionDates: [...new Set([...(live.completedMissionDates ?? []), today])].slice(-90),
+      masteryByTag: mastery,
+      modePerformance: perf,
+      seenQuestions: recordAnswers(live, result.answers.map((a) => ({ fp: a.fp, tag: a.tag, correct: a.correct })), today),
+      ledger: updateLedger(live, result.answers.map((a) => ({ fp: a.fp, correct: a.correct }))),
+      questionBank: nextQuestionBank(live, result.answers.map((a) => ({ question: a.question, correct: a.correct }))),
+      perfectSets: (live.perfectSets ?? 0) + (result.total >= 3 && result.correct === result.total ? 1 : 0),
+      dailyStats: addDailyStats(live, today, { xp: result.xp, correct: result.correct, total: result.total }),
+      arena: applyOutcome(live, mode, outcome, result.correct),
+      mathDuel: duelSigns.length ? { ...(live.mathDuel ?? {}), recentSignatures: [...(live.mathDuel?.recentSignatures ?? []), ...duelSigns].slice(-3000) } : live.mathDuel,
+    };
+    void snap.updateSettings({ practiceProgress: next });
+    // Write the next round's AI questions in the background so it starts instantly.
+    void warmBank({ mode, level: outcome.nextLevel, entries: snap.entries, progress: next, drawdownLeft: snap.drawdownLeft }).catch(() => undefined);
+    return outcome;
   };
 
-  const matrixRows = useMemo(() => usable.filter((t) => {
-    const p = perf[`matrix:${t.id}`];
-    const accuracy = p && p.attempts ? p.correct / p.attempts : null;
-    if (filter === "untested") return accuracy == null;
-    if (filter === "needs-work") return accuracy != null && accuracy < 0.7;
-    if (filter === "strong") return accuracy != null && accuracy >= 0.85;
-    return true;
-  }), [usable, perf, filter]);
-  const nextUp = usable.find((t) => !perf[`matrix:${t.id}`]) ?? usable[0];
-
-  const mastery = Object.entries(progress.masteryByTag ?? {}).filter(([tag]) => tag !== LEVEL_MASTERY_KEY).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const topScore = Math.max(10, ...mastery.map(([, v]) => v));
-  const name = settings.fullName || settings.traderName || "Trader";
-  const needData = usable.length === 0;
+  const status = (mode: ArenaMode): string => {
+    const locked = lock(mode);
+    if (locked) return locked;
+    const gate = gateFor(mode, levels[mode]);
+    return `Clear ${gate.correct} correct at ${Math.round(gate.accuracy * 100)}% to reach Level ${levels[mode] + 1}.`;
+  };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-7 pb-20">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[.16em] text-gold">Practice arcade</p>
-          <h1 className="mt-1 font-display text-3xl font-semibold text-ink">Train with your recorded trades</h1>
-          <p className="mt-1 text-sm text-muted">{name} · every question is drawn from your journal.</p>
-        </div>
-        <p className="text-xs text-muted">{displayStreak(progress, today)} day streak · {progress.xp.toLocaleString()} XP · {rankOf(progress.xp)}</p>
+    <div className="mx-auto max-w-5xl pb-24">
+      <header className="pt-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">Practice</p>
+        <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.03em] text-ink sm:text-[52px]">Train on your own trades.</h1>
+        <p className="mt-4 max-w-xl text-[17px] leading-snug text-muted">Sixty-second rounds, written fresh from your journal. Each level asks a little more.</p>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {MODES.map((m) => (
-          <button key={m.id} onClick={() => setMode(m.id)} className={cn("rounded-xl border p-4 text-left transition", m.tone, mode === m.id ? "ring-2 ring-gold-strong" : "opacity-80 hover:opacity-100")}>
-            <span className="text-lg">{m.icon}</span>
-            <p className="mt-2 text-sm font-semibold text-ink">{m.title}</p>
-            <p className="mt-1 text-xs text-muted">{m.blurb}</p>
-          </button>
+      {notice && <p className="mt-8 rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
+
+      <div className="mt-10 grid gap-5 sm:grid-cols-2">
+        {ARENA_MODES.map((mode) => (
+          <ModeCard key={mode} mode={mode} level={levels[mode]} status={status(mode)} disabled={!!lock(mode)} busy={phase.kind === "preparing" && phase.mode === mode} onStart={() => void start(mode)} />
         ))}
       </div>
 
-      <section className="panel flex flex-wrap items-center justify-between gap-4 p-4">
-        <div className="min-w-[14rem]">
-          <p className="text-sm font-semibold text-ink">Difficulty</p>
-          <p className="mt-0.5 text-xs text-muted">{levelPick === 0 ? `Auto · starts at ${LEVELS[autoLevel - 1]!.name} and adjusts live as you answer.` : `Locked to ${LEVELS[levelPick - 1]!.name}.`}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => setLevelPick(0)} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", levelPick === 0 ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>Auto L{autoLevel}</button>
-          {LEVELS.map((l) => <button key={l.level} onClick={() => setLevelPick(l.level)} title={l.blurb} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", levelPick === l.level ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>L{l.level}</button>)}
-          {mode !== "math-duel" && (
-            <>
-              <span className="mx-2 h-5 w-px bg-line" />
-              {COUNTS.map((n) => <button key={n} onClick={() => setCount(n)} className={cn("rounded-md border px-2 py-1.5 text-xs font-bold", count === n ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>{n}</button>)}
-              <label className="ml-2 flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={aiOn} onChange={(e) => setAiOn(e.target.checked)} /> AI questions</label>
-            </>
-          )}
-        </div>
-      </section>
+      <p className="mt-8 text-[12px] tabular-nums text-faint">{displayStreak(progress, today)} day streak · {progress.xp.toLocaleString()} XP · {rankOf(progress.xp)}</p>
 
-      {notice && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gold/10 px-4 py-3 text-sm text-ink">
-          <p>{notice}</p>
-          {(progress.ledger?.done.length ?? 0) > 0 && <Button size="sm" variant="outline" onClick={replayMastered}>Replay mastered questions</Button>}
+      {phase.kind === "preparing" && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-canvas/95 backdrop-blur-sm">
+          <div className="text-center">
+            <Spinner className="mx-auto h-6 w-6 text-gold" />
+            <p className="mt-5 text-[20px] font-semibold tracking-[-0.02em] text-ink">Writing your {MODE_META[phase.mode].title} round</p>
+            <p className="mt-1 text-[14px] text-muted">From your trades and saved charts.</p>
+            <button onClick={cancel} className="mt-6 text-[13px] text-muted transition-colors hover:text-ink">Cancel</button>
+          </div>
         </div>
       )}
-      {busy && <p className="rounded-lg border border-line bg-raised px-4 py-3 text-sm text-muted">Writing fresh questions for {busy}… this can take up to 40 seconds with the free AI model.</p>}
 
-      {needData && mode !== "math-duel" && <p className="panel p-5 text-sm text-muted">No trades with a P&amp;L yet. Add or import a trade and questions appear here straight away. Math Duel works without any data.</p>}
-
-      {mode === "math-duel" && <MathDuel progress={progress} updateSettings={updateSettings} levelOverride={levelPick} />}
-
-      {mode === "matrix" && !needData && (
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            {FILTERS.map((f) => <button key={f.id} onClick={() => { setFilter(f.id); setShown(25); }} className={cn("rounded-lg border px-3 py-1.5 text-xs font-bold", filter === f.id ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-raised text-muted")}>{f.label}</button>)}
-          </div>
-          {nextUp && (
-            <div className="panel flex items-center justify-between gap-4 p-4">
-              <div><p className="text-xs font-bold text-gold">Next up</p><p className="mt-1 text-sm text-ink">{tradeLabel(nextUp)}</p></div>
-              <Button variant="gold" disabled={!!busy} onClick={() => void launch("matrix", [nextUp], `Test · ${tradeLabel(nextUp)}`, 8, nextUp.id)}>Take 8-question test</Button>
-            </div>
-          )}
-          <div className="panel divide-y divide-line overflow-hidden">
-            {matrixRows.slice(0, shown).map((t) => {
-              const p = perf[`matrix:${t.id}`];
-              return (
-                <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{tradeLabel(t)}</p><p className="mt-0.5 text-xs text-muted">{t.setup?.trim() || "No recorded setup"}</p></div>
-                  <div className="flex items-center gap-3">
-                    <span className={cn("font-mono text-sm", t.pnl > 0 ? "text-profit" : t.pnl < 0 ? "text-loss" : "text-muted")}>{fmtMoney(t.pnl)}</span>
-                    <span className="w-16 text-right text-xs text-muted">{p && p.attempts ? `${Math.round((p.correct / p.attempts) * 100)}% · ${p.attempts}q` : "untested"}</span>
-                    <Button size="sm" variant="outline" disabled={!!busy} onClick={() => void launch("matrix", [t], `Test · ${tradeLabel(t)}`, 8, t.id)}>Test</Button>
-                  </div>
-                </div>
-              );
-            })}
-            {!matrixRows.length && <p className="px-4 py-6 text-sm text-muted">No trades match this filter yet.</p>}
-          </div>
-          {matrixRows.length > shown && <Button variant="outline" onClick={() => setShown((n) => n + 25)}>Show more</Button>}
-        </section>
+      {phase.kind === "playing" && (
+        <RoundRunner
+          key={phase.round.initial.map((q) => q.id).join("|")}
+          title={MODE_META[phase.mode].title}
+          mode={phase.mode}
+          level={phase.level}
+          round={phase.round}
+          entries={allEntries}
+          onFinish={(result) => finish(phase.mode, phase.level, result)}
+          onNext={() => void start(phase.mode)}
+          onClose={() => setPhase({ kind: "idle" })}
+        />
       )}
-
-      {mode === "time-machine" && !needData && (
-        <section className="space-y-4">
-          <div className="panel p-5">
-            <h2 className="text-base font-semibold text-ink">Process drill across all {usable.length} trades</h2>
-            <p className="mt-1 text-sm text-muted">Every question shows your saved chart — press Compare to open all of the trade's charts, then answer. Questions you answer correctly never repeat; ones you miss come back until you get them right.</p>
-            <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("time-machine", usable, "Time Machine", count)}>Train · {count} questions</Button>
-            <p className="mt-2 text-xs text-muted">{freshLeft.tm} question{freshLeft.tm === 1 ? "" : "s"} still fresh across your trades · {usable.filter((t) => (t.images?.length ?? 0) > 0).length} of {usable.length} trades have saved charts.</p>
-          </div>
-          {mastery.length > 0 && (
-            <div className="panel p-5">
-              <p className="text-sm font-semibold text-ink">Topics mastery</p>
-              <div className="mt-3 space-y-2">
-                {mastery.map(([tag, value]) => (
-                  <div key={tag} className="grid grid-cols-[8rem_1fr_2rem] items-center gap-3 text-xs text-muted">
-                    <span className="truncate capitalize">{tag.replace(/-/g, " ")}</span>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-ink/10"><div className="h-full bg-gold-strong" style={{ width: `${Math.min(100, (value / topScore) * 100)}%` }} /></div>
-                    <span className="font-mono">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {mode === "boss" && !needData && (
-        <section className="panel p-5">
-          <h2 className="text-base font-semibold text-ink">Weekend Boss</h2>
-          {week.trades.length >= 2 ? (
-            <>
-              <p className="mt-1 text-sm text-muted">{week.label} · {week.trades.length} trades · net <b className={cn("font-mono", week.trades.reduce((s, t) => s + t.pnl, 0) >= 0 ? "text-profit" : "text-loss")}>{fmtMoney(week.trades.reduce((s, t) => s + t.pnl, 0))}</b></p>
-              <p className="mt-2 text-sm text-muted">Cross-trade questions on this week's saved charts: totals, spread, best and worst days, repeated mistakes, profit factor, break-even win rate and net R.</p>
-              <Button className="mt-4" variant="gold" disabled={!!busy} onClick={() => void launch("boss", week.trades, "Weekend Boss", Math.max(count, 10))}>Play Boss</Button>
-            </>
-          ) : <p className="mt-1 text-sm text-muted">The boss needs at least 2 trades in the same week. Record another trade and come back.</p>}
-        </section>
-      )}
-
-      {session && <DrillRunner key={session.pool.map((q) => q.id).join("|")} title={session.title} pool={session.pool} count={session.count} startLevel={session.startLevel} lockLevel={levelPick !== 0} entries={allEntries} onFinish={finish} onClose={() => setSession(null)} onRetry={session.retry} />}
     </div>
   );
 }

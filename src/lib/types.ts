@@ -470,6 +470,9 @@ export interface PracticeProgress {
   /** No-repeat ledger. `done` = hashes of questions answered correctly (never asked again);
    * `missed` = hashes of questions last answered wrong (allowed to come back until answered right). */
   ledger?: { done: string[]; missed: string[] };
+  /** Auto-scaling arena ladder (Solo-Leveling style): one open-ended level per mode.
+   * `fails` counts consecutive failed rounds (two in a row drops a level). */
+  arena?: { levels?: Record<string, number>; fails?: Record<string, number>; best?: Record<string, number> };
 }
 
 export type MatrixScreenshotRole = "pre-entry" | "management" | "exit";

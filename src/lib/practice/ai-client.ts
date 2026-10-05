@@ -34,7 +34,7 @@ export function toEvidence(entry: JournalEntry): EvidenceTrade {
 export interface AiResult { questions: PracticeQuestion[]; note: string | null }
 
 /** Asks the server for AI-written, evidence-checked questions. Never throws: on any problem returns no questions. */
-export async function fetchAiQuestions(args: { mode: string; level: Level; count: number; trades: JournalEntry[]; avoid: string[]; weakTags: string[] }, timeoutMs = 45_000): Promise<AiResult> {
+export async function fetchAiQuestions(args: { mode: string; level: Level; arena?: number; count: number; trades: JournalEntry[]; avoid: string[]; weakTags: string[] }, timeoutMs = 50_000): Promise<AiResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -42,7 +42,7 @@ export async function fetchAiQuestions(args: { mode: string; level: Level; count
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
-      body: JSON.stringify({ mode: args.mode, level: args.level, count: args.count, avoid: args.avoid, weakTags: args.weakTags, trades: args.trades.slice(0, 12).map(toEvidence) }),
+      body: JSON.stringify({ mode: args.mode, level: args.level, arena: args.arena, count: args.count, avoid: args.avoid, weakTags: args.weakTags, trades: args.trades.slice(0, 12).map(toEvidence) }),
     });
     const data = (await res.json().catch(() => null)) as { questions?: PracticeQuestion[]; reason?: string } | null;
     const questions = Array.isArray(data?.questions) ? data.questions : [];

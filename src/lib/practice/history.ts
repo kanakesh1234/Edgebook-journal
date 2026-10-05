@@ -73,7 +73,7 @@ export function recentPrompts(): string[] {
   try {
     const raw = window.localStorage.getItem(PROMPT_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(-60) : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string").slice(-120) : [];
   } catch {
     return [];
   }
@@ -82,6 +82,6 @@ export function recentPrompts(): string[] {
 export function rememberPrompts(prompts: string[]): void {
   try {
     const merged = [...recentPrompts(), ...prompts.map((p) => p.slice(0, 200))];
-    window.localStorage.setItem(PROMPT_KEY, JSON.stringify(merged.slice(-60)));
+    window.localStorage.setItem(PROMPT_KEY, JSON.stringify(merged.slice(-120)));
   } catch { /* storage is optional */ }
 }

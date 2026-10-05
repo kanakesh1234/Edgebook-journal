@@ -5,6 +5,7 @@ import "./questions.test.ts";
 import "./attempt.test.ts";
 import "./overview.test.ts";
 import "./rewards.test.ts";
+import "../practice/arena.test.ts";
 
 const [longWin, shortLoss, incomplete] = fixtureJournal.entries;
 const win = realizedR(longWin);

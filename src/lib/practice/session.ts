@@ -44,7 +44,8 @@ function spreadByTrade(list: PracticeQuestion[], startLevel: Level, hasChart: Re
     const key = tradeKey(q);
     queues.set(key, [...(queues.get(key) ?? []), q]);
   }
-  for (const [key, queue] of queues) queues.set(key, [...queue].sort((a, b) => Math.abs(a.level - startLevel) - Math.abs(b.level - startLevel)));
+// AI-written questions lead (they are the point of every round); local ones fill in behind them.
+  for (const [key, queue] of queues) queues.set(key, [...queue].sort((a, b) => Number(b.source === "ai") * 1000 - Number(a.source === "ai") * 1000 + Math.abs(a.level - startLevel) - Math.abs(b.level - startLevel)));
   const keys = [...queues.keys()].sort((a, b) => Number(hasChart.has(b)) - Number(hasChart.has(a)));
   const out: PracticeQuestion[] = [];
   for (let round = 0; keys.some((k) => (queues.get(k)?.length ?? 0) > round); round++) {
