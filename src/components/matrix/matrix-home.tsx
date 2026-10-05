@@ -8,7 +8,6 @@ import { scopeToPrimary } from "@/lib/challenges";
 import { practiceHomeStats } from "@/lib/practice/home-stats";
 import { ProgressBar } from "@/components/matrix/ui";
 import { ModeCard } from "@/components/practice/mode-card";
-import { gateFor } from "@/lib/practice/arena";
 
 /** Home "Practice arcade" card — mirrors the Practise page; every tile deep-links to its mode. */
 export function MatrixHome() {
@@ -18,11 +17,6 @@ export function MatrixHome() {
   const { entries } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
   const s = useMemo(() => practiceHomeStats(entries, settings, today), [entries, settings, today]);
 
-  const gateLine = (mode: "matrix" | "time-machine" | "math-duel" | "boss") => {
-    const gate = gateFor(mode, s.levels[mode]);
-    return `Clear ${gate.correct} correct to reach Level ${s.levels[mode] + 1}.`;
-  };
-
   return (
     <section className="panel p-5 sm:p-6" aria-label="Practice arcade">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -30,21 +24,20 @@ export function MatrixHome() {
           <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-gold">Practice arcade</p>
           <h2 className="mt-1 text-lg font-semibold text-ink">Train with your recorded trades</h2>
           <p className="mt-1 text-xs text-muted">
-            {s.rank} · {s.xp.toLocaleString()} XP
+            {s.rank} · Lv {s.xpLevel.level}
           </p>
         </div>
         <Link href="/practice" className="text-xs font-semibold text-gold hover:underline">Open Practise →</Link>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-5">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric
-          label="Today’s XP"
-          value={`${s.todayXp} / ${s.dailyGoal}`}
-          detail={<ProgressBar value={Math.min(100, (s.todayXp / s.dailyGoal) * 100)} />}
+          label={`Level ${s.xpLevel.level}`}
+          value={`${s.xpLevel.into} / ${s.xpLevel.need} XP`}
+          detail={<ProgressBar value={s.xpLevel.pct} />}
         />
         <Metric label="Practice streak" value={`${s.streak} day${s.streak === 1 ? "" : "s"}`} detail={s.streak > 0 ? "keep it alive today" : "train once to start"} />
         <Metric label="Trades logged" value={String(s.tradesTotal)} detail={`${s.tradesToday} today`} />
-        <Metric label="Challenges" value={String(settings.challenges?.length ?? 0)} detail="recorded" />
         <Metric
           label="Accuracy"
           value={s.accuracy == null ? "—" : `${Math.round(s.accuracy * 100)}%`}
@@ -52,11 +45,11 @@ export function MatrixHome() {
         />
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <ModeCard compact mode="matrix" level={s.levels.matrix} href="/practice?mode=matrix" disabled={s.usableTrades === 0} status={s.usableTrades === 0 ? "Log a trade to unlock." : gateLine("matrix")} />
-        <ModeCard compact mode="time-machine" level={s.levels["time-machine"]} href="/practice?mode=time-machine" disabled={s.usableTrades === 0} status={s.usableTrades === 0 ? "Log a trade to unlock." : gateLine("time-machine")} />
-        <ModeCard compact mode="math-duel" level={s.levels["math-duel"]} href="/practice?mode=math-duel" status={gateLine("math-duel")} />
-        <ModeCard compact mode="boss" level={s.levels.boss} href="/practice?mode=boss" disabled={!s.bossReady} status={s.bossReady ? gateLine("boss") : "Needs 2 trades in the same week."} />
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <ModeCard compact mode="matrix" level={s.levels.matrix} href="/practice?mode=matrix" disabled={s.usableTrades === 0} status="Log a trade to unlock." />
+        <ModeCard compact mode="time-machine" level={s.levels["time-machine"]} href="/practice?mode=time-machine" disabled={s.usableTrades === 0} status="Log a trade to unlock." />
+        <ModeCard compact mode="math-duel" level={s.levels["math-duel"]} href="/practice?mode=math-duel" status="" />
+        <ModeCard compact mode="boss" level={s.levels.boss} href="/practice?mode=boss" disabled={!s.bossReady} status="Needs 2 trades in the same week." />
       </div>
     </section>
   );

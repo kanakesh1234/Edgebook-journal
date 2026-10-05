@@ -13,6 +13,7 @@ import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
 import { updateLedger } from "@/lib/practice/ledger";
 import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
+import { xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
 import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
 import type { PracticeProgress } from "@/lib/types";
@@ -162,7 +163,7 @@ export default function PracticePage() {
         ))}
       </div>
 
-      <p className="mt-8 text-[12px] tabular-nums text-faint">{displayStreak(progress, today)} day streak · {progress.xp.toLocaleString()} XP · {rankOf(progress.xp)}</p>
+      <p className="mt-8 text-[12px] tabular-nums text-faint">{displayStreak(progress, today)} day streak · {rankOf(progress.xp)} · Lv {xpLevel(progress.xp).level}</p>
 
       {phase.kind === "preparing" && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-canvas/95 backdrop-blur-sm">
