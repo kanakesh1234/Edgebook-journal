@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false, // don't advertise the framework in every response
   ...(root ? { turbopack: { root }, outputFileTracingRoot: root } : {}),
+  // Matrix is one mode of Practice now: trade pickers, mode pickers and per-trade tests are gone.
+  // Any old link or bookmark lands on the Practice home, where the coach picks what is next.
+  async redirects() {
+    return [{ source: "/practice/matrix/:path*", destination: "/practice", permanent: false }];
+  },
 };
 
 export default nextConfig;

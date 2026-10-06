@@ -5,8 +5,10 @@ import { useApp } from "@/lib/store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { todayKey } from "@/lib/format";
-import { Spinner } from "@/components/ui/button";
+import Link from "next/link";
 import { ModeCard, MODE_META } from "@/components/practice/mode-card";
+import { AcademyStrip, PreparingScreen, SessionHero } from "@/components/practice/home";
+import { Eyebrow } from "@/components/practice/ui";
 import { RoundRunner, type RoundResult } from "@/components/practice/round-runner";
 import { displayStreak, isUsable, nextStreak, rankOf, weekTrades } from "@/lib/practice/engine";
 import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
@@ -15,7 +17,8 @@ import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
 import { xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
-import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { overallAccuracy, recommendMode } from "@/lib/practice/coach";
 import type { PracticeProgress } from "@/lib/types";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
@@ -140,41 +143,60 @@ export default function PracticePage() {
     return outcome;
   };
 
-  const status = (mode: ArenaMode): string => {
-    const locked = lock(mode);
-    if (locked) return locked;
+  const meterFor = (mode: ArenaMode) => {
     const gate = gateFor(mode, levels[mode]);
-    return `Clear ${gate.correct} correct at ${Math.round(gate.accuracy * 100)}% to reach Level ${levels[mode] + 1}.`;
+    return { value: Math.min(levelBestOf(progress, mode), gate.correct), goal: gate.correct, accuracy: gate.accuracy, nextLevel: levels[mode] + 1 };
   };
+
+  const locks = useMemo(
+    () => Object.fromEntries(ARENA_MODES.map((mode) => [mode, lock(mode)])) as Record<ArenaMode, string | null>,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [usable.length, week.trades.length],
+  );
+  const recommended = useMemo(() => recommendMode({ progress, locked: locks }), [progress, locks]);
+  const busyMode = phase.kind === "preparing" ? phase.mode : null;
 
   return (
     <div className="mx-auto max-w-5xl pb-24">
-      <header className="pt-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">Practice</p>
-        <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.03em] text-ink sm:text-[52px]">Train on your own trades.</h1>
-        <p className="mt-4 max-w-xl text-[17px] leading-snug text-muted">Sixty-second rounds, written fresh from your journal. Each level asks a little more.</p>
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 pt-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">Practice</p>
+          <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.03em] text-ink sm:text-[52px]">Train on your own trades.</h1>
+          <p className="mt-4 max-w-xl text-[17px] leading-snug text-muted">Sixty-second rounds, written fresh from your journal. Difficulty finds you.</p>
+        </div>
+        <Link href="/practice/progress" className="inline-flex h-10 items-center gap-1.5 rounded-full border border-line-strong bg-raised px-4 text-[13.5px] font-medium text-ink transition-colors hover:border-gold-strong">
+          Your progress <span aria-hidden className="text-muted">→</span>
+        </Link>
       </header>
 
-      {notice && <p className="mt-8 rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
+      <div className="mt-9 space-y-4">
+        <AcademyStrip rank={rankOf(progress.xp)} level={xpLevel(progress.xp)} streak={displayStreak(progress, today)} accuracy={overallAccuracy(progress)} />
 
-      <div className="mt-10 grid gap-5 sm:grid-cols-2">
+        {notice && <p role="status" className="rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
+
+        {recommended && (
+          <SessionHero mode={recommended.mode} level={levels[recommended.mode]} reason={recommended.reason} meter={meterFor(recommended.mode)} busy={busyMode === recommended.mode} onStart={() => void start(recommended.mode)} />
+        )}
+      </div>
+
+      <div className="mt-12 flex items-baseline justify-between"><Eyebrow>All modes</Eyebrow></div>
+      <div className="mt-4 grid gap-5 sm:grid-cols-2">
         {ARENA_MODES.map((mode) => (
-          <ModeCard key={mode} mode={mode} level={levels[mode]} status={status(mode)} disabled={!!lock(mode)} busy={phase.kind === "preparing" && phase.mode === mode} onStart={() => void start(mode)} />
+          <ModeCard
+            key={mode}
+            mode={mode}
+            level={levels[mode]}
+            status={locks[mode] ?? ""}
+            disabled={!!locks[mode]}
+            busy={busyMode === mode}
+            meter={locks[mode] ? undefined : meterFor(mode)}
+            meta={mode === "boss" && !locks[mode] ? week.label : undefined}
+            onStart={() => void start(mode)}
+          />
         ))}
       </div>
 
-      <p className="mt-8 text-[12px] tabular-nums text-faint">{displayStreak(progress, today)} day streak · {rankOf(progress.xp)} · Lv {xpLevel(progress.xp).level}</p>
-
-      {phase.kind === "preparing" && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-canvas/95 backdrop-blur-sm">
-          <div className="text-center">
-            <Spinner className="mx-auto h-6 w-6 text-gold" />
-            <p className="mt-5 text-[20px] font-semibold tracking-[-0.02em] text-ink">Writing your {MODE_META[phase.mode].title} round</p>
-            <p className="mt-1 text-[14px] text-muted">From your trades and saved charts.</p>
-            <button onClick={cancel} className="mt-6 text-[13px] text-muted transition-colors hover:text-ink">Cancel</button>
-          </div>
-        </div>
-      )}
+      {phase.kind === "preparing" && <PreparingScreen mode={phase.mode} onCancel={cancel} />}
 
       {phase.kind === "playing" && (
         <RoundRunner

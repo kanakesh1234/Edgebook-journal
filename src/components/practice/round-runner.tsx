@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "motion/react";
-import { Button } from "@/components/ui/button";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ChartPanel } from "@/components/practice/ChartPanel";
+import { RoundSummary } from "@/components/practice/round-summary";
+import { MODE_META, ModeBadge, tint } from "@/components/practice/modes";
+import { AnswerTile, GateMeter, TimerRing, surface, type TileState } from "@/components/practice/ui";
+import { GlassIconButton, IconCheck, IconClose } from "@/components/journal/flow-ui";
 import { cn } from "@/lib/utils";
 import type { JournalEntry } from "@/lib/types";
 import type { PracticeQuestion } from "@/lib/practice/engine";
 import { groupOf } from "@/lib/practice/session";
-import { nudge, ROUND_SECONDS, targetDifficulty, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { gateFor, nudge, ROUND_SECONDS, targetDifficulty, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { brief, feedbackDwellMs } from "@/lib/practice/pacing";
 import type { Round } from "@/lib/practice/round";
 import { stashUnused } from "@/lib/practice/bank";
 import { DuelSound } from "@/lib/practice/math/sound";
@@ -80,8 +84,6 @@ function pick(pool: PracticeQuestion[], used: Set<string>, target: number, last:
 let sharedSound: DuelSound | null = null;
 const sound = () => (sharedSound ??= new DuelSound());
 
-const clock = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
-
 export function RoundRunner({ title, mode, level, round, entries, onFinish, onNext, onClose }: Props) {
   const pool = useRef<PracticeQuestion[]>([...round.initial]);
   const used = useRef(new Set<string>());
@@ -111,6 +113,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const [tally, setTally] = useState({ correct: 0, total: 0 });
   const [summary, setSummary] = useState<{ result: RoundResult; outcome: RoundOutcome } | null>(null);
 
+  const reduce = useReducedMotion();
   const answered = response !== null;
   const right = answered && question ? isRight(question, response) : false;
 
@@ -197,7 +200,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     if (more.length) pool.current.push(...more.filter((p) => !pool.current.some((x) => x.id === p.id || x.fp === p.fp)));
     if (pool.current.filter((p) => !used.current.has(p.id)).length < LOW_WATER) round.topUp();
 
-    advanceTimer.current = window.setTimeout(advance, ok ? 520 : 1400);
+    advanceTimer.current = window.setTimeout(advance, feedbackDwellMs({ correct: ok, combo: combo.current.now, explanation: q.explanation }));
   };
 
   const handlers = useRef({ submit, advance });
@@ -228,154 +231,129 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   }, [question, entries]);
 
   /* ---------- summary ---------- */
-  if (summary) return <Summary title={title} summary={summary} entries={entries} onNext={onNext} onClose={onClose} />;
+  if (summary) return <RoundSummary title={title} mode={mode} summary={summary} entries={entries} onNext={onNext} onClose={onClose} />;
   if (!question) return null;
 
+  const meta = MODE_META[mode];
+  const gate = gateFor(mode, level);
   const secs = Math.ceil(left / 1000);
   const low = secs <= 10;
   const valid = typed.trim() !== "" && !Number.isNaN(numeric(typed));
+  const accuracy = tally.total >= 3 ? tally.correct / tally.total : null;
+  const comboNow = combo.current.now;
+  const stageWidth = mode === "time-machine" ? "max-w-3xl" : mode === "math-duel" ? "max-w-xl" : "max-w-2xl";
+  const twoUp = mode === "math-duel" && question.kind === "choice" && (question.choices ?? []).every((c) => c.length <= 16);
+  const enter = reduce ? { opacity: 0 } : mode === "time-machine" ? { opacity: 0, x: -14 } : { opacity: 0, y: 10 };
+  const settled = reduce ? { opacity: 1 } : { opacity: 1, x: 0, y: 0 };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-canvas text-ink">
-      <header className="flex h-14 shrink-0 items-center justify-between px-5 sm:px-8">
-        <button onClick={() => end(false)} className="text-[13px] text-muted transition-colors hover:text-ink">Exit</button>
-        <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-faint">{title} · Level {level}</p>
-        <span className={cn("w-14 text-right font-mono text-[13px] tabular-nums", low && !isPaused ? "text-loss" : "text-muted")}>{isPaused ? "Paused" : clock(left)}</span>
-      </header>
-      <div className="h-[2px] w-full bg-line-soft">
-        <div className={cn("h-full transition-[width] duration-100 ease-linear", low ? "bg-loss" : "bg-gold-strong")} style={{ width: `${(left / TOTAL_MS) * 100}%` }} />
-      </div>
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-canvas text-ink">
+      {/* the mode's own atmosphere: one soft wash, nothing busy */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[46vh]" style={{ background: `radial-gradient(70% 100% at 50% 0%, ${tint(meta.accent, mode === "boss" ? 13 : 9)}, transparent)` }} />
+      {mode === "matrix" && <div aria-hidden className="dot-backdrop pointer-events-none absolute inset-x-0 top-0 h-[40vh] opacity-50 [mask-image:linear-gradient(#000,transparent)]" />}
 
-      <main className="flex-1 overflow-y-auto">
-        <motion.div key={question.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} className="mx-auto w-full max-w-2xl px-6 py-8 sm:py-12">
+      <header className="relative flex h-[68px] shrink-0 items-center justify-between px-4 sm:px-7">
+        <GlassIconButton label="End round" onClick={() => end(false)}><IconClose /></GlassIconButton>
+        <div className="flex items-center gap-2.5">
+          <ModeBadge mode={mode} size="sm" />
+          <div className="leading-tight">
+            <p className="text-[13.5px] font-semibold tracking-[-0.01em]">{title}</p>
+            <p className="text-[11.5px] text-muted">{meta.stage} · Level {level}</p>
+          </div>
+        </div>
+        <TimerRing fraction={left / TOTAL_MS} seconds={secs} low={low} paused={isPaused} />
+      </header>
+
+      <main className="relative flex-1 overflow-y-auto">
+        <motion.div key={question.id} initial={enter} animate={settled} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} className={cn("mx-auto w-full px-6 pb-6 pt-3 sm:pt-8", stageWidth)}>
           <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-muted">
-            <span>{question.pin}</span>
-            {question.retry && <span className="rounded-full bg-loss/10 px-2 py-0.5 text-[11px] text-loss">Missed before</span>}
-            {question.source === "ai" && <span className="rounded-full bg-gold/10 px-2 py-0.5 text-[11px] text-gold">AI</span>}
+            <span className="rounded-full border border-line bg-raised px-3 py-1 text-ink/80">{question.pin}</span>
+            {question.retry && <span className="rounded-full bg-loss/10 px-2.5 py-1 text-[11.5px] text-loss">Missed before</span>}
+            {question.source === "ai" && <span className="rounded-full px-2.5 py-1 text-[11.5px]" style={{ background: tint(meta.accent, 12), color: tint(meta.accent, 75, "var(--ink)") }}>From your notes</span>}
           </div>
 
-          {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} /></div>}
+          {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} large={mode === "time-machine"} /></div>}
 
-          <h2 className="mt-6 text-[26px] font-semibold leading-[1.2] tracking-[-0.02em] sm:text-[32px]">{question.prompt}</h2>
+          <h2 className={cn("mt-6 font-semibold tracking-[-0.022em]", mode === "math-duel" ? "text-[28px] leading-[1.18] sm:text-[34px]" : "text-[26px] leading-[1.2] sm:text-[32px]")}>{question.prompt}</h2>
 
           {question.kind === "choice" && (
-            <div className="mt-8 grid gap-3">
+            <div className={cn("mt-7 grid gap-3", twoUp && "sm:grid-cols-2")} role="group" aria-label="Answers">
               {question.choices?.map((choice, i) => {
-                const state = !answered ? "idle" : choice === question.answer ? "right" : choice === response ? "wrong" : "dim";
-                return (
-                  <button
-                    key={choice}
-                    disabled={answered}
-                    onClick={() => submit(choice)}
-                    className={cn(
-                      "flex items-center gap-4 rounded-[18px] border px-5 py-4 text-left text-[17px] transition-colors",
-                      state === "idle" && "border-line bg-surface hover:border-line-strong hover:bg-raised",
-                      state === "right" && "border-profit/60 bg-profit/10",
-                      state === "wrong" && "border-loss/60 bg-loss/10",
-                      state === "dim" && "border-line bg-surface opacity-40",
-                    )}
-                  >
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-current text-[11px] font-semibold text-muted">{i + 1}</span>
-                    <span>{choice}</span>
-                  </button>
-                );
+                const state: TileState = !answered ? "idle" : choice === question.answer ? "right" : choice === response ? "wrong" : "dim";
+                return <AnswerTile key={choice} index={i} label={choice} state={state} accent={meta.accent} compact={twoUp} onClick={() => submit(choice)} />;
               })}
             </div>
           )}
 
           {question.kind === "number" && (
-            <div className="mt-8">
-              <div className={cn("flex items-baseline gap-3 border-b-2 pb-2 transition-colors", !answered && "border-line-strong focus-within:border-gold-strong", answered && (right ? "border-profit" : "border-loss"))}>
-                <input
-                  key={question.id}
-                  autoFocus
-                  inputMode="decimal"
-                  disabled={answered}
-                  value={answered ? response ?? "" : typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && valid) submit(typed); }}
-                  placeholder="Answer"
-                  className={cn("min-w-0 flex-1 bg-transparent font-mono text-[32px] outline-none placeholder:text-faint", answered && (right ? "text-profit" : "text-loss"))}
-                />
-                {question.unit && <span className="text-lg text-muted">{question.unit}</span>}
-                {!answered && <button onClick={() => submit(typed)} disabled={!valid} className="text-[13px] font-semibold text-gold transition-opacity disabled:opacity-30">Check ↵</button>}
-              </div>
-              {answered && !right && <p className="mt-3 text-[15px] text-muted">Answer <b className="font-semibold text-ink">{answerText(question)}</b></p>}
+            <div
+              className={cn(
+                "mt-7 flex items-center gap-3 rounded-[22px] px-5 py-3.5 transition-[border-color,background-color,box-shadow] duration-200",
+                !answered && cn(surface.material, "focus-within:border-gold/60 focus-within:ring-4 focus-within:ring-gold/10"),
+                answered && (right ? "border border-profit/55 bg-profit/[0.09]" : "border border-loss/55 bg-loss/[0.09]"),
+              )}
+            >
+              <input
+                key={question.id}
+                autoFocus
+                inputMode="decimal"
+                aria-label="Your answer"
+                disabled={answered}
+                value={answered ? response ?? "" : typed}
+                onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && valid) submit(typed); }}
+                placeholder="Answer"
+                className={cn("num min-w-0 flex-1 bg-transparent text-[38px] leading-tight outline-none placeholder:text-faint/70 sm:text-[44px]", answered && (right ? "text-profit" : "text-loss"))}
+              />
+              {question.unit && <span className="text-[18px] text-muted">{question.unit}</span>}
+              {!answered && (
+                <button type="button" onClick={() => submit(typed)} disabled={!valid} className="inline-flex h-11 shrink-0 items-center rounded-full bg-gradient-to-b from-gold-strong to-gold-deep px-5 text-[14px] font-semibold text-on-gold shadow-[0_6px_14px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)] transition-all hover:brightness-110 active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-none disabled:bg-ink/[0.07] disabled:text-faint disabled:shadow-none">
+                  Check ↵
+                </button>
+              )}
             </div>
           )}
         </motion.div>
       </main>
 
-      <footer className="flex shrink-0 items-center justify-between px-5 py-3 text-[12px] tabular-nums text-faint sm:px-8">
-        <span>{tally.correct} correct</span>
-        <span>{tally.total} answered</span>
-      </footer>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Summary                                                            */
-/* ------------------------------------------------------------------ */
-
-function Summary({ title, summary, entries, onNext, onClose }: { title: string; summary: { result: RoundResult; outcome: RoundOutcome }; entries: JournalEntry[]; onNext: () => void; onClose: () => void }) {
-  const { result, outcome } = summary;
-  const [open, setOpen] = useState<string | null>(null);
-  const missed = result.answers.filter((a) => !a.correct);
-  const pct = (n: number) => `${Math.round(n * 100)}%`;
-  const head = {
-    up: { eyebrow: "Level up", title: `Level ${outcome.nextLevel}`, sub: `You cleared ${outcome.gate.correct} correct at ${pct(outcome.gate.accuracy)}.` },
-    hold: { eyebrow: "Round complete", title: `Level ${outcome.level} holds`, sub: `Needed ${outcome.gate.correct} correct at ${pct(outcome.gate.accuracy)} — you got ${result.correct} (${pct(result.accuracy)}).${outcome.nextFails >= 1 && outcome.level > 1 ? " Miss again and you drop a level." : ""}` },
-    down: { eyebrow: "Round complete", title: `Back to level ${outcome.nextLevel}`, sub: `Needed ${outcome.gate.correct} correct at ${pct(outcome.gate.accuracy)} — you got ${result.correct} (${pct(result.accuracy)}).` },
-    early: { eyebrow: "Round ended", title: "Level unchanged", sub: "Leaving early never costs a level." },
-  }[outcome.outcome];
-
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-canvas text-ink">
-      <div className="mx-auto max-w-2xl px-6 py-14 sm:py-20">
-        <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">{title} · {head.eyebrow}</p>
-        <motion.h1 initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mt-3 text-[44px] font-semibold leading-none tracking-[-0.03em] sm:text-[56px]">{head.title}</motion.h1>
-        <p className="mt-4 text-[16px] text-muted">{head.sub}</p>
-
-        <div className="mt-10 grid grid-cols-3 gap-3">
-          {[["Correct", `${result.correct}/${result.total}`], ["Accuracy", pct(result.accuracy)], ["XP", `+${result.xp}`]].map(([label, value]) => (
-            <div key={label} className="rounded-[20px] border border-line bg-surface p-5">
-              <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-faint">{label}</p>
-              <p className="mt-2 font-mono text-[26px] tabular-nums">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        <section className="mt-12">
-          <h2 className="text-[13px] font-semibold text-ink">{missed.length ? `Review · ${missed.length} missed` : "Clean round"}</h2>
-          {missed.length === 0 && result.total > 0 && <p className="mt-2 text-[14px] text-muted">Nothing to review.</p>}
-          <div className="mt-3 space-y-3">
-            {missed.map((a) => {
-              const ids = a.question.chartTradeIds ?? (a.question.tradeId ? [a.question.tradeId] : []);
-              const shots = ids.map((id) => entries.find((e) => e.id === id)).filter((e): e is JournalEntry => !!e && (e.images?.length ?? 0) > 0);
-              return (
-                <article key={a.fp} className="rounded-[20px] border border-line bg-surface p-5">
-                  <p className="text-[16px] font-medium leading-snug">{a.prompt}</p>
-                  <p className="mt-3 text-[13px] text-muted">You: {a.yourAnswer} · Answer: <b className="font-semibold text-ink">{a.correctAnswer}</b></p>
-                  <p className="mt-2 text-[14px] leading-relaxed text-muted">{a.question.explanation}</p>
-                  {a.question.evidence && <p className="mt-3 border-l-2 border-gold-strong pl-3 text-[13px] italic text-muted">From your notes: “{a.question.evidence}”</p>}
-                  {shots.length > 0 && (
-                    <>
-                      <button onClick={() => setOpen(open === a.fp ? null : a.fp)} className="mt-3 text-[13px] font-semibold text-gold">{open === a.fp ? "Hide chart" : "Show chart"}</button>
-                      {open === a.fp && <div className="mt-3"><ChartPanel entries={shots} /></div>}
-                    </>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        <div className="mt-12 flex flex-wrap gap-3">
-          <Button variant="gold" size="lg" onClick={onNext}>Next round · Level {outcome.nextLevel}</Button>
-          <Button variant="ghost" size="lg" onClick={onClose}>Done</Button>
-        </div>
+      {/* Feedback is docked above the footer so the question never shifts. Tap or press Enter to move on. */}
+      <div className="relative shrink-0 px-4 sm:px-8" aria-live="polite">
+        <AnimatePresence initial={false}>
+          {answered && (
+            <motion.button
+              key={question.id}
+              type="button"
+              onClick={advance}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              className={cn("mx-auto mb-3 flex w-full items-start gap-3.5 rounded-[20px] border px-4 py-3.5 text-left", stageWidth, right ? "border-profit/40 bg-profit/[0.08]" : "border-loss/40 bg-loss/[0.08]")}
+            >
+              <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-canvas [&_svg]:h-3.5 [&_svg]:w-3.5", right ? "bg-profit" : "bg-loss")}>{right ? <IconCheck className="h-3.5 w-3.5" /> : <IconClose />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-baseline gap-x-2.5">
+                  <span className={cn("text-[15px] font-semibold", right ? "text-profit" : "text-loss")}>{right ? "Correct" : "Not quite"}</span>
+                  {right && <span className="num text-[13px] text-muted">+{question.xp} XP{comboNow >= 3 ? ` · ×${comboNow} flow` : ""}</span>}
+                  {!right && <span className="text-[14px] text-ink">Answer: <b className="font-semibold">{answerText(question)}</b></span>}
+                </span>
+                {!right && question.explanation && <span className="mt-1 block text-[13.5px] leading-snug text-muted">{brief(question.explanation)}</span>}
+              </span>
+              <span className="hidden shrink-0 self-center text-[12px] font-medium text-faint sm:block">Continue ↵</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
+
+      <footer className="relative shrink-0 border-t border-line/60 bg-canvas px-5 py-3.5 sm:px-8">
+        <div className={cn("mx-auto flex items-center gap-5", stageWidth)}>
+          <GateMeter value={tally.correct} goal={gate.correct} accent={meta.accent} variant={mode === "boss" ? "boss" : "fill"} accuracy={accuracy} needAccuracy={gate.accuracy} nextLevel={level + 1} />
+          <div className="flex shrink-0 items-center gap-2.5 text-[12px]">
+            {comboNow >= 2 && <span className="num rounded-full px-2.5 py-1 font-semibold" style={{ background: tint(meta.accent, 14), color: tint(meta.accent, 75, "var(--ink)") }}>×{comboNow}</span>}
+            <span className="num text-muted">{xp.current} XP</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

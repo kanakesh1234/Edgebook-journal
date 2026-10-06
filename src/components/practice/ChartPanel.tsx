@@ -24,7 +24,7 @@ const CompareIcon = ({ className }: { className?: string }) => (
  * trade has more than one chart) opens a full-screen vertical-scroll view with
  * every chart; Back returns to the question.
  */
-export function ChartPanel({ entries, onOverlay }: { entries: JournalEntry[]; /** Called with true while a full-screen chart is open (the round clock pauses). */ onOverlay?: (open: boolean) => void }) {
+export function ChartPanel({ entries, onOverlay, large }: { entries: JournalEntry[]; /** Called with true while a full-screen chart is open (the round clock pauses). */ onOverlay?: (open: boolean) => void; /** Give the chart more room (Time Machine). */ large?: boolean }) {
   const withCharts = useMemo(() => entries.filter((e) => chartsOf(e).length > 0), [entries]);
   const [tradeIdx, setTradeIdx] = useState(0);
   const [comparing, setComparing] = useState(false);
@@ -62,20 +62,20 @@ export function ChartPanel({ entries, onOverlay }: { entries: JournalEntry[]; /*
 
   return (
     <>
-      <figure className="overflow-hidden rounded-[20px] border border-line bg-surface">
-        <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+      <figure className="overflow-hidden rounded-[22px] border border-line bg-surface shadow-[0_1px_2px_rgb(48_40_24/0.05)] dark:shadow-none">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
           <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-ink">{label}</p>
-            <p className="text-[10px] uppercase tracking-wider text-muted">{first.label}</p>
+            <p className="truncate text-[13px] font-semibold text-ink">{label}</p>
+            <p className="text-[10.5px] font-medium uppercase tracking-[.12em] text-faint">{first.label}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {withCharts.length > 1 && (
-              <div className="flex items-center gap-1 text-[10px] font-bold text-muted">
+              <div className="flex items-center gap-1 text-[11px] font-semibold text-muted">
                 {withCharts.map((e, i) => (
                   <button
                     key={e.id}
                     onClick={() => { setTradeIdx(i); setComparing(false); }}
-                    className={cn("h-6 w-6 rounded-md border", i === tradeIdx ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-canvas")}
+                    className={cn("h-7 w-7 rounded-full border transition-colors", i === tradeIdx ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line bg-canvas hover:border-line-strong")}
                     aria-label={`Show trade ${i + 1} chart`}
                   >
                     {i + 1}
@@ -86,7 +86,7 @@ export function ChartPanel({ entries, onOverlay }: { entries: JournalEntry[]; /*
             {canCompare && (
               <button
                 onClick={() => setComparing(true)}
-                className="flex items-center gap-1.5 rounded-full border border-line-strong bg-raised px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:border-gold-strong"
+                className="flex h-8 items-center gap-1.5 rounded-full border border-line-strong bg-raised px-3.5 text-[12.5px] font-semibold text-ink transition-colors hover:border-gold-strong"
               >
                 <CompareIcon className="h-4 w-4" /> Compare{charts.length > 2 ? ` (${charts.length})` : ""}
               </button>
@@ -96,9 +96,9 @@ export function ChartPanel({ entries, onOverlay }: { entries: JournalEntry[]; /*
         <button onClick={() => setZoom(true)} className="block w-full cursor-zoom-in bg-canvas" aria-label="Enlarge chart">
           {urls[first.id] ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={urls[first.id]!} alt={`${label} chart`} className="max-h-[34vh] w-full object-contain" draggable={false} />
+            <img src={urls[first.id]!} alt={`${label} chart`} className={cn("w-full object-contain", large ? "max-h-[44vh]" : "max-h-[34vh]")} draggable={false} />
           ) : (
-            <div className="grid h-40 place-items-center text-xs text-muted">Loading chart…</div>
+            <div className="grid h-40 animate-pulse place-items-center bg-ink/[0.03] text-xs text-muted">Loading chart…</div>
           )}
         </button>
       </figure>

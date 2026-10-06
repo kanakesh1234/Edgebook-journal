@@ -31,6 +31,12 @@ export function levelOf(progress: PracticeProgress | undefined, mode: ArenaMode)
   return typeof stored === "number" && Number.isFinite(stored) && stored >= 1 ? Math.floor(stored) : 1;
 }
 
+/** Best correct count in a single round at the current level — progress toward the gate. */
+export function levelBestOf(progress: PracticeProgress | undefined, mode: ArenaMode): number {
+  const stored = progress?.arena?.levelBest?.[mode];
+  return typeof stored === "number" && stored > 0 ? Math.floor(stored) : 0;
+}
+
 export function failsOf(progress: PracticeProgress | undefined, mode: ArenaMode): number {
   const stored = progress?.arena?.fails?.[mode];
   return typeof stored === "number" && stored > 0 ? Math.floor(stored) : 0;
@@ -94,10 +100,13 @@ export function evaluateRound(args: { mode: ArenaMode; level: number; fails: num
 export function applyOutcome(progress: PracticeProgress | undefined, mode: ArenaMode, result: RoundOutcome, correct: number): NonNullable<PracticeProgress["arena"]> {
   const arena = progress?.arena ?? {};
   const best = Math.max(arena.best?.[mode] ?? 0, correct);
+  // The meter measures the CURRENT level only: a new level starts from zero, the same level keeps its best.
+  const levelBest = result.nextLevel === result.level ? Math.max(arena.levelBest?.[mode] ?? 0, correct) : 0;
   return {
     levels: { ...(arena.levels ?? {}), [mode]: result.nextLevel },
     fails: { ...(arena.fails ?? {}), [mode]: result.nextFails },
     best: { ...(arena.best ?? {}), [mode]: best },
+    levelBest: { ...(arena.levelBest ?? {}), [mode]: levelBest },
   };
 }
 

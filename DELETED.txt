@@ -1,0 +1,18 @@
+Delete these files after copying the rest over your project (they are replaced by the unified Practice system; /practice/matrix/* now redirects to /practice):
+
+src/app/(workspace)/practice/matrix/[tradeId]/charts/page.tsx
+src/app/(workspace)/practice/matrix/[tradeId]/page.tsx
+src/app/(workspace)/practice/matrix/[tradeId]/summary/page.tsx
+src/app/(workspace)/practice/matrix/[tradeId]/test/page.tsx
+src/app/(workspace)/practice/matrix/modes/page.tsx
+src/app/(workspace)/practice/matrix/page.tsx
+src/app/(workspace)/practice/matrix/rewards/page.tsx
+src/app/(workspace)/practice/matrix/weekend-boss/page.tsx
+src/components/matrix/chart-study.tsx
+src/components/matrix/game-modes.tsx
+src/components/matrix/matrix-hub.tsx
+src/components/matrix/reward-vault.tsx
+src/components/matrix/test-flow.tsx
+src/components/matrix/test-summary.tsx
+src/components/matrix/trade-detail.tsx
+src/components/matrix/weekend-boss.tsx
