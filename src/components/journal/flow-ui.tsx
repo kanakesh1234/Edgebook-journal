@@ -7,12 +7,23 @@
  * action bar, round icon buttons and segmented switches. Everything you read or
  * type into (cards, inputs, checklists) is a solid, quiet Edgebook surface.
  */
-import { useRef, useState } from "react";
+import { Children, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/button";
 
 export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
+/**
+ * Motion language (after Apple's SwiftUI spring model: a spring is defined by duration + bounce).
+ *  - SPRING  ≈ SwiftUI .snappy: quick, tiny bounce — used for everything that moves or resizes.
+ *  - FADE    quick ease-out for opacity, so content never lags behind its own movement.
+ *  - POP     a livelier spring for small confirmations (check marks).
+ */
+export const FLOW_SPRING = { type: "spring", duration: 0.4, bounce: 0.1 } as const;
+export const FLOW_FADE = { duration: 0.26, ease: [0.22, 1, 0.36, 1] } as const;
+export const FLOW_POP = { type: "spring", duration: 0.32, bounce: 0.35 } as const;
+/** Height/opacity expand + collapse: spring for size, fast fade for opacity. */
+export const FLOW_EXPAND = { ...FLOW_SPRING, opacity: FLOW_FADE } as const;
 
 /** Glass recipes — translucency + blur + a hairline highlight. */
 export const glass = {
@@ -100,6 +111,64 @@ export function StepTransition({ stepKey, dir, children }: { stepKey: string; di
   );
 }
 
+/**
+ * A newly revealed question UNFOLDS: its height opens with the snappy spring while it fades in,
+ * exactly like the "Yes → add event" list. The gap above it (the parent's space-y) is folded into the
+ * animation, so nothing jumps. Place Reveals in a container WITHOUT space-y-* (each Reveal brings its own 28px lead-in). Clipping applies only while animating, so focus rings are never cut off.
+ * `focus` puts the cursor in its first field once it starts opening (without scrolling the sheet).
+ * Reduce Motion: plain crossfade.
+ */
+export function Reveal({ children, delay = 0, focus = false, gap = true }: { children: React.ReactNode; delay?: number; focus?: boolean; gap?: boolean }) {
+  const reduce = useReducedMotion();
+  const ref = useRef<HTMLElement>(null);
+  const [shown, setShown] = useState(false);
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  useEffect(() => {
+    if (!shown || !focus) return;
+    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true }), 90 + delay * 1000);
+    return () => window.clearTimeout(t);
+  }, [shown, focus, delay]);
+  const hidden = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
+  const visible = reduce ? { opacity: 1 } : { opacity: 1, height: "auto" };
+  return (
+    <motion.section
+      ref={ref}
+      initial={hidden}
+      animate={shown ? visible : hidden}
+      transition={reduce ? { duration: 0.18 } : { ...FLOW_SPRING, delay, opacity: { ...FLOW_FADE, delay } }}
+      onAnimationComplete={() => { if (shown) setSettled(true); }}
+      className={cn(!settled && "overflow-hidden")}
+    >
+      <div className={gap ? "pt-7" : undefined}>{children}</div>
+    </motion.section>
+  );
+}
+
+/** Children cascade in one after another (chips, options). Late additions animate in on their own. */
+export function Stagger({ children, className, step = 0.04, delay = 0 }: { children: React.ReactNode; className?: string; step?: number; delay?: number }) {
+  const reduce = useReducedMotion();
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  const item = {
+    hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 8 },
+    show: { opacity: 1, y: 0, transition: reduce ? { duration: 0.15 } : { ...FLOW_SPRING, opacity: FLOW_FADE } },
+  };
+  return (
+    <motion.div className={className} initial="hidden" animate={shown ? "show" : "hidden"} variants={{ hidden: {}, show: { transition: { staggerChildren: reduce ? 0 : step, delayChildren: delay } } }}>
+      {Children.toArray(children).map((c, i) => (
+        <motion.div key={(c as { key?: string | number }).key ?? i} variants={item}>{c}</motion.div>
+      ))}
+    </motion.div>
+  );
+}
+
 /** One quiet line of micro-feedback; cross-fades when the text changes. */
 export function Hint({ text, tone = "muted" }: { text: string | null; tone?: "muted" | "warn" | "ok" }) {
   return (
@@ -167,7 +236,7 @@ export function Label({ children, done, hint, htmlFor }: { children: React.React
       {hint && <span className="text-[12px] font-normal text-faint">{hint}</span>}
       <AnimatePresence initial={false}>
         {done && (
-          <motion.span initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} className="grid h-4 w-4 place-items-center rounded-full bg-profit/15 text-profit">
+          <motion.span initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} transition={FLOW_POP} className="grid h-4 w-4 place-items-center rounded-full bg-profit/15 text-profit">
             <IconCheck className="h-2.5 w-2.5" />
           </motion.span>
         )}
@@ -178,7 +247,7 @@ export function Label({ children, done, hint, htmlFor }: { children: React.React
 
 const box =
   "w-full rounded-2xl border border-line bg-raised px-4 py-3 text-[16px] leading-snug text-ink placeholder:text-faint " +
-  "transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
+  "transition-[border-color,box-shadow] duration-100 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
 
 export function TextBox({ className, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "ref">) {
   return <input className={cn(box, className)} {...props} />;
@@ -281,9 +350,19 @@ export function BinaryChoice({ value, onChange, options }: { value: boolean | nu
 }
 
 /** Progressive disclosure: optional detail stays tucked away until asked for. */
-export function Disclosure({ label, children, defaultOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean }) {
+export function Disclosure({ label, children, defaultOpen = false, autoFocusOnOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean; autoFocusOnOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useRef(`d-${Math.random().toString(36).slice(2, 8)}`).current;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Clip only while the height animates; once settled, let focus rings render in full.
+  const [settled, setSettled] = useState(defaultOpen);
+
+  // Opt-in: when the user opens the section, put the cursor in its first field.
+  useEffect(() => {
+    if (!open || !autoFocusOnOpen) return;
+    const t = window.setTimeout(() => bodyRef.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true }), 60);
+    return () => window.clearTimeout(t);
+  }, [open, autoFocusOnOpen]);
   return (
     <div>
       <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[14px] font-medium text-muted transition-colors hover:text-ink">
@@ -292,8 +371,8 @@ export function Disclosure({ label, children, defaultOpen = false }: { label: st
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div id={id} initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.24, ease: FLOW_EASE }} className="overflow-hidden">
-            <div className="-mx-1 space-y-5 px-1 pb-1 pt-4">{children}</div>
+          <motion.div id={id} initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={FLOW_EXPAND} onAnimationStart={() => setSettled(false)} onAnimationComplete={() => setSettled(true)} className={cn(!settled && "overflow-hidden")}>
+            <div ref={bodyRef} className="-mx-2 space-y-5 px-2 pb-2 pt-4">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>

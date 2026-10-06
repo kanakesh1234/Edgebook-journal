@@ -11,8 +11,8 @@ import { cn, uid } from "@/lib/utils";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import {
-  CheckRow, ChoiceCard, Chip, Disclosure, FLOW_EASE, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
-  SheetFrame, StepTitle, StepTransition, TextBlock, TextBox,
+  CheckRow, ChoiceCard, Chip, Disclosure, FLOW_EASE, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
+  Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox,
 } from "./flow-ui";
 
 /**
@@ -25,11 +25,18 @@ import {
  * state, and Continue stays disabled until the step's rules are satisfied.
  */
 type StepId = "plan" | "setup" | "trade" | "chart" | "autopsy" | "done";
+type NewsEvent = { id: string; name: string; time: string };
 type ImportRow = { date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null };
 
 const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
 const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
 const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
+const IconPlus = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+);
+const IconMinus = () => (
+  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
+);
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 
 export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -46,6 +53,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [thesis, setThesis] = useState("");
   const [emotion, setEmotion] = useState<(typeof PLAN_EMOTIONS)[number] | "">("");
   const [moreEmotions, setMoreEmotions] = useState(false);
+  const [emotionReason, setEmotionReason] = useState("");
+  const [newsAnswer, setNewsAnswer] = useState<boolean | null>(null);
+  const [newsEvents, setNewsEvents] = useState<NewsEvent[]>([]);
   const [instrument, setInstrument] = useState("");
   const [draw, setDraw] = useState("");
   const [invalidation, setInvalidation] = useState("");
@@ -90,21 +100,34 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const prev = (s: StepId): StepId | null => { const i = order.indexOf(s); return i > 0 ? order[i - 1]! : null; };
   const next = (s: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(s) + 1)]!;
 
-  const recentInstruments = useMemo(() => {
-    const seen: string[] = [];
+  // Optional suggestions for the Instrument field: MNQ first, then recently used ones.
+  const suggestedInstruments = useMemo(() => {
+    const seen: string[] = ["MNQ"];
     for (const e of [...entries].sort((a, b) => b.createdAt - a.createdAt)) {
-      const i = e.instrument?.trim();
+      const i = e.instrument?.trim().toUpperCase();
       if (i && i !== "—" && !seen.includes(i)) seen.push(i);
       if (seen.length === 4) break;
     }
     return seen;
   }, [entries]);
 
+  // Question reveal (same pattern as the Autopsy): only the next unanswered question appears,
+  // answered ones stay put. Once shown, a question is never hidden again by clearing an earlier answer.
+  const showFeeling = thesis.trim().length > 0 || emotion !== "";
+  const showReason = emotion !== "" || emotionReason.trim().length > 0;
+  const showNews = emotionReason.trim().length > 0 || newsAnswer !== null;
+  const showDetail = newsAnswer !== null;
+  const chooseNews = (v: boolean) => {
+    setNewsAnswer(v);
+    if (v && newsEvents.length === 0) setNewsEvents([{ id: uid("ev"), name: "", time: "" }]);
+  };
+  const patchEvent = (id: string, patch: Partial<NewsEvent>) => setNewsEvents((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
   // Fresh start every time the flow opens.
   useEffect(() => {
     if (!open) return;
     setStep("plan"); setDir(1);
-    setThesis(""); setEmotion(""); setMoreEmotions(false); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
+    setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
     setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setTradeInstrument("");
@@ -124,6 +147,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       case "plan":
         if (!thesis.trim()) return { ok: false, hint: "Write your plan to continue" };
         if (!emotion) return { ok: false, hint: "Pick how you feel" };
+        if (!emotionReason.trim()) return { ok: false, hint: "Say what's behind that feeling" };
+        if (newsAnswer === null) return { ok: false, hint: "Any news or events today?" };
+        if (newsAnswer && !newsEvents.some((e) => e.name.trim())) return { ok: false, hint: "Name the event, or choose No news" };
         return { ok: true, hint: null };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
@@ -283,34 +309,104 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       >
         <StepTransition stepKey={step} dir={dir}>
           {step === "plan" && (
-            <div className="space-y-8">
+            // No space-y here: each revealed question carries its own lead-in spacing, so gaps are even
+            // and animate with the unfold (no doubled margins).
+            <div>
               <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
-              <div className="space-y-2.5">
+              <div className="space-y-2.5 pt-7">
                 <Label done={thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
                 <TextBlock id="flow-plan" autoFocus value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="Where do you expect price to go, and why?" />
               </div>
-              <div className="space-y-3">
-                <Label done={emotion !== ""}>How are you feeling?</Label>
-                <div className="flex flex-wrap gap-2">
-                  {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                  {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                  {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
-                </div>
-              </div>
-              <div className="space-y-2.5">
-                <Label hint="optional" htmlFor="flow-instrument">Instrument</Label>
-                <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="NQ" className="max-w-[12rem] font-mono" />
-                {recentInstruments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {recentInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
+              {showFeeling && (
+                <Reveal>
+                  <div className="space-y-3">
+                    <Label done={emotion !== ""}>How are you feeling?</Label>
+                    <Stagger className="flex flex-wrap gap-2" delay={0.08}>
+                      {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                      {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                      {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
+                    </Stagger>
                   </div>
-                )}
-              </div>
-              <Disclosure label="Add detail">
-                <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
-                <div className="space-y-2.5"><Label htmlFor="flow-inval">What would invalidate it?</Label><TextBox id="flow-inval" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} /></div>
-                <div className="space-y-2.5"><Label htmlFor="flow-break">What could make you break the plan?</Label><TextBox id="flow-break" value={breakPlan} onChange={(e) => setBreakPlan(e.target.value)} /></div>
-              </Disclosure>
+                </Reveal>
+              )}
+              {showReason && (
+                <Reveal focus>
+                  <div className="space-y-2.5">
+                    <Label done={emotionReason.trim().length > 0} htmlFor="flow-reason">{emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}</Label>
+                    <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
+                  </div>
+                </Reveal>
+              )}
+              {showNews && (
+                <Reveal>
+                  <div className="space-y-3">
+                    <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                    <Stagger className="flex flex-wrap gap-2" delay={0.08}>
+                      <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>Yes</Chip>
+                      <Chip selected={newsAnswer === false} onClick={() => chooseNews(false)}>No news</Chip>
+                    </Stagger>
+                    <AnimatePresence initial={false}>
+                      {newsAnswer && (
+                        <motion.div key="news-list" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
+                          {/* Inset-grouped list: one rounded group, hairline dividers, compact time field, "add" row last. */}
+                          <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                            <AnimatePresence initial={false}>
+                              {newsEvents.map((ev) => (
+                                <motion.li key={ev.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
+                                  <div className="flex items-center gap-2 px-4 py-2.5 transition-colors focus-within:bg-gold/[0.04]">
+                                    <input
+                                      autoFocus
+                                      aria-label="Event name"
+                                      value={ev.name}
+                                      onChange={(e) => patchEvent(ev.id, { name: e.target.value })}
+                                      placeholder="Event name, e.g. CPI, FOMC"
+                                      maxLength={80}
+                                      className="min-w-0 flex-1 bg-transparent py-1.5 text-[16px] text-ink outline-none placeholder:text-faint"
+                                    />
+                                    <input
+                                      type="time"
+                                      aria-label="Event time"
+                                      value={ev.time}
+                                      onChange={(e) => patchEvent(ev.id, { time: e.target.value })}
+                                      className="shrink-0 rounded-lg bg-ink/[0.05] px-2.5 py-1.5 text-[15px] tabular-nums text-ink outline-none transition-colors hover:bg-ink/[0.08] focus:bg-ink/[0.08]"
+                                    />
+                                    {newsEvents.length > 1 && (
+                                      <button type="button" aria-label="Remove event" onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90">
+                                        <IconMinus />
+                                      </button>
+                                    )}
+                                  </div>
+                                </motion.li>
+                              ))}
+                            </AnimatePresence>
+                            <li>
+                              <button type="button" onClick={() => setNewsEvents((l) => [...l, { id: uid("ev"), name: "", time: "" }])} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]">
+                                <IconPlus /> Add event
+                              </button>
+                            </li>
+                          </ul>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </Reveal>
+              )}
+              {showDetail && (
+                <Reveal delay={0.12}>
+                  <Disclosure label="Add detail" autoFocusOnOpen>
+                    <div className="space-y-2.5">
+                      <Label hint="optional" htmlFor="flow-instrument">Instrument</Label>
+                      <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
+                      <Stagger className="flex flex-wrap gap-2" delay={0.05}>
+                        {suggestedInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
+                      </Stagger>
+                    </div>
+                    <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
+                    <div className="space-y-2.5"><Label htmlFor="flow-inval">What would invalidate it?</Label><TextBox id="flow-inval" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} /></div>
+                    <div className="space-y-2.5"><Label htmlFor="flow-break">What could make you break the plan?</Label><TextBox id="flow-break" value={breakPlan} onChange={(e) => setBreakPlan(e.target.value)} /></div>
+                  </Disclosure>
+                </Reveal>
+              )}
             </div>
           )}
 
