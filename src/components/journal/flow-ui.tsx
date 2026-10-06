@@ -395,9 +395,9 @@ export function CheckRow({ checked, onClick, title, note }: { checked: boolean; 
 }
 
 /** Glass segmented switch (a control, so it may use glass). */
-export function Segmented<T extends string>({ value, options, onChange, layoutId = "seg-pill", compact = false, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; /** Unique per instance when two switches can be on screen together. */ layoutId?: string; compact?: boolean; label?: string }) {
+export function Segmented<T extends string>({ value, options, onChange, layoutId = "seg-pill", compact = false, label, fullWidth = false, className }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; /** Unique per instance when two switches can be on screen together. */ layoutId?: string; compact?: boolean; label?: string; /** Stretch to the container width and share it equally between options. */ fullWidth?: boolean; className?: string }) {
   return (
-    <div role="tablist" aria-label={label} className={cn("relative inline-grid rounded-full p-1", glass.control)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div role="tablist" aria-label={label} className={cn("relative rounded-full p-1", fullWidth ? "grid w-full" : "inline-grid", glass.control, className)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
         <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (value !== o.id) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full font-medium transition-colors", compact ? "px-3.5 py-1 text-[13px]" : "px-5 py-1.5 text-[14px]", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
           {value === o.id && <motion.span layoutId={layoutId} transition={{ type: "spring", stiffness: 500, damping: 36 }} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
