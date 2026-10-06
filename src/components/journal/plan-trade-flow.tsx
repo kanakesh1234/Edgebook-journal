@@ -73,7 +73,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [rr, setRr] = useState("");
   const [entryTime, setEntryTime] = useState("");
   const [exitTime, setExitTime] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [pnlDone, setPnlDone] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -133,7 +133,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
-    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setQuantity(""); setPnlDone(false);
+    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setQuantity("1"); setPnlDone(false);
     setImportRows(null); setImportError(null);
     setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
@@ -502,7 +502,20 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   )}
 
                   {direction !== null && (
-                    <Reveal focus>
+                    <Reveal>
+                      <div className="space-y-3">
+                        <Label hint="optional">Entry &amp; exit time</Label>
+                        {/* Inset-grouped list (same pattern as the news events): one rounded group, hairline divider. */}
+                        <div className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                          <TimeRow id="flow-in" label="Entry" value={entryTime} onChange={setEntryTime} />
+                          <TimeRow id="flow-out" label="Exit" value={exitTime} onChange={setExitTime} />
+                        </div>
+                      </div>
+                    </Reveal>
+                  )}
+
+                  {direction !== null && (
+                    <Reveal delay={0.1}>
                       <div className="space-y-3">
                         <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">Quantity</Label>
                         {/* Apple HIG: the stepper (two-segment control) sits next to the field that shows the value. */}
@@ -530,8 +543,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
                         <div className="space-y-2.5"><Label htmlFor="flow-rr">R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
-                        <div className="space-y-2.5"><Label htmlFor="flow-in">Entry time</Label><TextBox id="flow-in" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} /></div>
-                        <div className="space-y-2.5"><Label htmlFor="flow-out">Exit time</Label><TextBox id="flow-out" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} /></div>
                       </div>
                     </Disclosure>
                   </div>
@@ -594,5 +605,41 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         </StepTransition>
       </SheetFrame>
     </Modal>
+  );
+}
+
+/** One row of the inset-grouped time list: label left, native time input right, tap anywhere to edit. */
+function TimeRow({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const open = (e: React.MouseEvent) => {
+    const el = ref.current;
+    if (!el || e.target === el) return;
+    el.focus();
+    try { el.showPicker?.(); } catch { /* picker needs a user gesture; focus is enough */ }
+  };
+  return (
+    <div onClick={open} className="flex h-14 cursor-pointer items-center justify-between gap-3 px-4 transition-colors hover:bg-ink/[0.03]">
+      <label htmlFor={id} className="text-[16px] text-ink">{label}</label>
+      <div className="flex items-center gap-2.5">
+        {value && (
+          <button
+            type="button"
+            aria-label={`Clear ${label.toLowerCase()} time`}
+            onClick={(e) => { e.stopPropagation(); onChange(""); }}
+            className="grid h-5 w-5 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
+          >
+            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M3 3l6 6M9 3l-6 6" /></svg>
+          </button>
+        )}
+        <input
+          ref={ref}
+          id={id}
+          type="time"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn("w-[7.25rem] border-0 bg-transparent p-0 text-right font-mono text-[17px] !shadow-none !outline-none !ring-0", value ? "text-ink" : "text-faint")}
+        />
+      </div>
+    </div>
   );
 }
