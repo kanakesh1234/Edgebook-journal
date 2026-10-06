@@ -11,6 +11,7 @@ import { Children, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/button";
+import { haptic } from "@/lib/haptics";
 
 export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
 /**
@@ -219,6 +220,16 @@ export function QuietButton({ children, onClick, disabled }: { children: React.R
   );
 }
 
+/** Apple-style back button: leading chevron + "Back", quiet until hovered. */
+export function BackButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <button type="button" disabled={disabled} onClick={() => { haptic.selection(); onClick(); }} className="inline-flex items-center gap-0.5 rounded-full py-2 pl-2 pr-3.5 text-[15px] font-medium text-muted transition-all hover:text-ink active:scale-[0.96] disabled:opacity-40">
+      <IconBack />
+      Back
+    </button>
+  );
+}
+
 export function StepTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div>
@@ -262,7 +273,7 @@ export function Chip({ selected, onClick, children, tone = "gold" }: { selected:
     <button
       type="button"
       aria-pressed={selected}
-      onClick={onClick}
+      onClick={() => { haptic.selection(); onClick(); }}
       className={cn("rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150 active:scale-[0.96]", selected ? on : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
     >
       {children}
@@ -277,7 +288,7 @@ export function ChoiceCard({ selected, onClick, title, meta }: { selected: boole
       type="button"
       role="radio"
       aria-checked={selected}
-      onClick={onClick}
+      onClick={() => { haptic.selection(); onClick(); }}
       className={cn(
         "relative w-full rounded-[22px] border px-5 py-4 text-left transition-all duration-200 active:scale-[0.985]",
         selected ? "border-gold/60 bg-gold/[0.07] shadow-[0_10px_24px_-14px_var(--gold-strong)]" : "border-line bg-raised hover:border-line-strong hover:shadow-rest",
@@ -299,7 +310,7 @@ export function CheckRow({ checked, onClick, title, note }: { checked: boolean; 
       type="button"
       role="checkbox"
       aria-checked={checked}
-      onClick={onClick}
+      onClick={() => { haptic.selection(); onClick(); }}
       className={cn("flex w-full items-start gap-3.5 rounded-2xl border px-4 py-3.5 text-left transition-all duration-200 active:scale-[0.99]", checked ? "border-profit/35 bg-profit/[0.06]" : "border-line bg-raised hover:border-line-strong")}
     >
       <span className={cn("mt-px grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-200", checked ? "border-profit bg-profit text-canvas" : "border-line-strong text-transparent")}>
@@ -314,12 +325,14 @@ export function CheckRow({ checked, onClick, title, note }: { checked: boolean; 
 }
 
 /** Glass segmented switch (a control, so it may use glass). */
-export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void }) {
+/** Equal-width segments (Apple HIG). `fullWidth` stretches the control to its container. */
+export function Segmented<T extends string>({ value, options, onChange, fullWidth = false }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; fullWidth?: boolean }) {
+  const reduce = useReducedMotion();
   return (
-    <div role="tablist" className={cn("relative inline-grid rounded-full p-1", glass.control)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div role="tablist" className={cn("relative rounded-full p-1", fullWidth ? "grid w-full" : "inline-grid", glass.control)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
-        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => onChange(o.id)} className={cn("relative z-10 rounded-full px-5 py-1.5 text-[14px] font-medium transition-colors", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
-          {value === o.id && <motion.span layoutId="seg-pill" transition={{ type: "spring", stiffness: 500, damping: 36 }} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
+        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (o.id !== value) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full px-5 py-1.5 text-[14px] font-medium transition-colors", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
+          {value === o.id && <motion.span layoutId="seg-pill" transition={reduce ? { duration: 0 } : FLOW_SPRING} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
           {o.label}
         </button>
       ))}
@@ -336,7 +349,7 @@ export function BinaryChoice({ value, onChange, options }: { value: boolean | nu
           key={label}
           type="button"
           aria-pressed={value === v}
-          onClick={() => onChange(v)}
+          onClick={() => { haptic.selection(); onChange(v); }}
           className={cn(
             "rounded-2xl border py-3.5 text-[16px] font-semibold transition-all duration-150 active:scale-[0.97]",
             value === v ? (tone === "profit" ? "border-profit/50 bg-profit/10 text-profit" : "border-loss/50 bg-loss/10 text-loss") : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink",
@@ -376,6 +389,44 @@ export function Disclosure({ label, children, defaultOpen = false, autoFocusOnOp
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * Stepper — Apple HIG: "a two-segment control" that sits NEXT TO a field showing the value
+ * (the stepper itself shows no value). Press and hold to repeat; Shift-click steps by 10.
+ * Pass a functional updater as `onStep` so repeated steps never read stale state.
+ */
+export function Stepper({ label, onStep, canDecrement = true }: { label: string; onStep: (delta: number) => void; canDecrement?: boolean }) {
+  const delay = useRef<number | undefined>(undefined);
+  const repeat = useRef<number | undefined>(undefined);
+  const stop = () => { window.clearTimeout(delay.current); window.clearInterval(repeat.current); };
+  useEffect(() => stop, []);
+
+  const press = (dir: 1 | -1) => (e: React.PointerEvent) => {
+    const step = dir * (e.shiftKey ? 10 : 1);
+    haptic.selection();
+    onStep(step);
+    stop();
+    delay.current = window.setTimeout(() => {
+      repeat.current = window.setInterval(() => { haptic.selection(); onStep(step); }, 90);
+    }, 450);
+  };
+  // Keyboard activation (Enter / Space) arrives as a click with detail 0; pointer presses are handled above.
+  const key = (dir: 1 | -1) => (e: React.MouseEvent) => { if (e.detail === 0) onStep(dir); };
+
+  const seg = "grid h-full w-12 touch-manipulation select-none place-items-center text-ink transition-colors hover:bg-ink/[0.05] active:bg-ink/[0.12] disabled:pointer-events-none disabled:opacity-35";
+  const icon = "h-4 w-4";
+  return (
+    <div role="group" aria-label={label} className="inline-flex h-11 shrink-0 items-stretch overflow-hidden rounded-xl bg-ink/[0.06]" onContextMenu={(e) => e.preventDefault()}>
+      <button type="button" aria-label={`Decrease ${label.toLowerCase()}`} disabled={!canDecrement} onPointerDown={press(-1)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onClick={key(-1)} className={seg}>
+        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
+      </button>
+      <span aria-hidden className="my-2.5 w-px bg-line-strong" />
+      <button type="button" aria-label={`Increase ${label.toLowerCase()}`} onPointerDown={press(1)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onClick={key(1)} className={seg}>
+        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+      </button>
     </div>
   );
 }

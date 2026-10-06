@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { useApp } from "@/lib/store";
+import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
 import { currencySymbol, todayKey } from "@/lib/format";
@@ -11,7 +11,7 @@ import { cn, uid } from "@/lib/utils";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import {
-  CheckRow, ChoiceCard, Chip, Disclosure, FLOW_EASE, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
+  BinaryChoice, CheckRow, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EASE, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
   Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox,
 } from "./flow-ui";
 
@@ -73,7 +73,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [rr, setRr] = useState("");
   const [entryTime, setEntryTime] = useState("");
   const [exitTime, setExitTime] = useState("");
-  const [tradeInstrument, setTradeInstrument] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [pnlDone, setPnlDone] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
@@ -84,7 +85,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const autopsy = useAutopsy(createdId, step === "autopsy");
+  // The autopsy session starts once the trade exists and lasts until the flow closes, so Back / Continue never lose answers.
+  const autopsy = useAutopsy(createdId, open && createdId !== null);
+  const planIdRef = useRef<string | null>(null);
 
   const selectedPlaybook = playbook.find((p) => p.id === playbookId);
   const rules = useMemo(() => setupRules(selectedPlaybook), [selectedPlaybook]);
@@ -130,9 +133,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
-    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setTradeInstrument("");
+    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setQuantity(""); setPnlDone(false);
     setImportRows(null); setImportError(null);
-    setCreatedId(null); setImages([]); setSaving(false); setSaveError(null);
+    setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
 
   /* ---------------- gating + quiet hints per step ---------------- */
@@ -140,7 +143,14 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const pnlValue = pnlText === "" ? NaN : Number(pnlText);
   const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlValue);
   const manualReady = Number.isFinite(pnlValue);
-  const finalInstrument = (instrument.trim() || tradeInstrument.trim()).toUpperCase();
+  // Instrument comes from the plan step; the trade step no longer asks for it.
+  const finalInstrument = instrument.trim().toUpperCase();
+  const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
+  const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
+  // Functional update so press-and-hold repeats never read stale state.
+  const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
+  // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
+  useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
 
   const gate: { ok: boolean; hint: string | null } = (() => {
     switch (step) {
@@ -159,11 +169,13 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         if (mode === "import") return importRows?.length ? { ok: true, hint: null } : { ok: false, hint: "Choose a file to import" };
         if (!pnlText) return { ok: false, hint: "Enter the net P&L" };
         if (pnlInvalid) return { ok: false, hint: "Numbers only — negative for a loss" };
+        if (!direction) return { ok: false, hint: "Choose long or short" };
+        if (!quantityOk) return { ok: false, hint: "Enter the quantity" };
         return { ok: true, hint: null };
       case "chart":
         return images.length ? { ok: true, hint: null } : { ok: false, hint: "Add a chart, or skip for now" };
       case "autopsy":
-        return autopsy.ready ? { ok: true, hint: null } : { ok: false, hint: "Answer the first three to finish" };
+        return autopsy.ready ? { ok: true, hint: null } : { ok: false, hint: autopsy.hint };
       default:
         return { ok: true, hint: null };
     }
@@ -171,7 +183,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   /* ---------------- persistence ---------------- */
   const buildPlan = (): TradePlan => ({
-    id: uid(`pl-${Date.now().toString(36)}`),
+    id: (planIdRef.current ??= uid(`pl-${Date.now().toString(36)}`)),
     date: todayKey(),
     challengeId: useApp.getState().settings.primaryChallengeId ?? challenges[0]?.id ?? undefined,
     playbookId: playbookId || undefined,
@@ -200,7 +212,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       const plan = buildPlan();
       await useApp.getState().savePlan(plan);
       if (mode === "manual") {
-        const created = await useApp.getState().createEntry({
+        // Coming back from the chart step and saving again UPDATES the same trade (never a duplicate).
+        const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
+        const draft: EntryDraft = {
           date: tradeDate <= todayKey() ? tradeDate : todayKey(),
           pnl: Math.round(pnlValue * 100) / 100,
           rr: rr.trim() === "" || !Number.isFinite(Number(rr)) ? null : Number(rr),
@@ -208,14 +222,17 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           direction,
           setup: selectedPlaybook?.name ?? "",
           setupId: playbookId || undefined,
-          notes: "",
-          images: [],
+          notes: live?.notes ?? "",
+          images: live?.images ?? [],
+          compareImage: live?.compareImage,
           challengeId: challengeId(),
           planId: plan.id,
           entryTime: entryTime.trim() || undefined,
           exitTime: exitTime.trim() || undefined,
-        });
-        setCreatedId(created.id);
+          quantity: quantityValue,
+        };
+        if (live) await useApp.getState().updateEntry(live.id, draft);
+        else setCreatedId((await useApp.getState().createEntry(draft)).id);
       } else if (importRows?.length) {
         const created = await useApp.getState().createEntries(importRows.map((row, i) => ({
           date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument, direction: row.direction,
@@ -289,7 +306,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   const continueLabel = step === "trade" ? (mode === "import" && importRows ? `Import ${importRows.length}` : "Save trade") : step === "autopsy" ? "Finish" : step === "done" ? "Done" : "Continue";
   // Going back is only possible before the trade is saved (never re-creates it) and from autopsy to the chart.
-  const back = step === "plan" || step === "chart" || step === "done" ? null : step === "autopsy" ? "chart" : prev(step);
+  // Back works on every step except the first and the final screen. From the chart it returns to the trade
+  // (manual entries only — an imported batch can't be edited in place).
+  const back = step === "plan" || step === "done" ? null : step === "chart" ? (mode === "manual" ? "trade" : null) : step === "autopsy" ? "chart" : prev(step);
 
   const hintText = saveError ?? autopsy.error ?? gate.hint;
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
@@ -444,11 +463,15 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           {step === "trade" && (
             <div className="space-y-8">
               <StepTitle title="Log the trade" />
-              <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />
+              {!createdId && <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />}
 
               {mode === "manual" && (
-                <div className="space-y-7">
-                  <div className="rounded-[26px] border border-line bg-raised px-6 py-7 text-center">
+                <div>
+                  {/* The whole card is the input: tap anywhere to type. No inner box — the card itself shows focus. */}
+                  <div
+                    onClick={() => document.getElementById("flow-pnl")?.focus()}
+                    className="cursor-text rounded-[26px] border border-line bg-raised px-6 py-7 text-center transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
+                  >
                     <Label htmlFor="flow-pnl">Net P&amp;L</Label>
                     <div className="mt-3 flex items-baseline justify-center gap-1.5">
                       <span className="text-[28px] text-faint">{sym}</span>
@@ -456,38 +479,62 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         id="flow-pnl"
                         autoFocus
                         inputMode="decimal"
+                        enterKeyHint="next"
+                        autoComplete="off"
                         value={pnl}
                         onChange={(e) => setPnl(cleanNumber(e.target.value))}
                         placeholder="0.00"
                         aria-invalid={pnlInvalid || undefined}
-                        className={cn("w-44 bg-transparent text-center font-mono text-[44px] tracking-tight outline-none placeholder:text-faint/60", pnlValue > 0 && "text-profit", pnlValue < 0 && "text-loss", pnlInvalid && "text-loss")}
+                        style={{ width: `${Math.max(pnl.length, 4)}ch` }}
+                        className={cn("max-w-full border-0 bg-transparent p-0 text-center font-mono text-[44px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/60", pnlValue > 0 && "text-profit", pnlValue < 0 && "text-loss", pnlInvalid && "text-loss")}
                       />
                     </div>
                     <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
                   </div>
-                  <div className="space-y-3">
-                    <Label hint="optional">Direction</Label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {(["long", "short"] as const).map((d) => (
-                        <button key={d} type="button" aria-pressed={direction === d} onClick={() => setDirection(direction === d ? null : d)}
-                          className={cn("rounded-2xl border py-3.5 text-[16px] font-semibold capitalize transition-all duration-150 active:scale-[0.97]",
-                            direction === d ? (d === "long" ? "border-profit/50 bg-profit/10 text-profit" : "border-loss/50 bg-loss/10 text-loss") : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}>
-                          {d}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {!instrument.trim() && (
-                    <div className="space-y-2.5"><Label hint="optional" htmlFor="flow-tinst">Instrument</Label><TextBox id="flow-tinst" value={tradeInstrument} onChange={(e) => setTradeInstrument(e.target.value.toUpperCase())} placeholder="NQ" className="max-w-[12rem] font-mono" /></div>
+
+                  {(pnlDone || direction !== null) && (
+                    <Reveal>
+                      <div className="space-y-3">
+                        <Label done={direction !== null}>Direction</Label>
+                        <BinaryChoice value={direction === null ? null : direction === "long"} onChange={(v) => setDirection(v ? "long" : "short")} options={["Long", "Short"]} />
+                      </div>
+                    </Reveal>
                   )}
-                  <Disclosure label="More detail">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
-                      <div className="space-y-2.5"><Label htmlFor="flow-rr">R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
-                      <div className="space-y-2.5"><Label htmlFor="flow-in">Entry time</Label><TextBox id="flow-in" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} /></div>
-                      <div className="space-y-2.5"><Label htmlFor="flow-out">Exit time</Label><TextBox id="flow-out" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} /></div>
-                    </div>
-                  </Disclosure>
+
+                  {direction !== null && (
+                    <Reveal focus>
+                      <div className="space-y-3">
+                        <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">Quantity</Label>
+                        {/* Apple HIG: the stepper (two-segment control) sits next to the field that shows the value. */}
+                        <div className="flex items-center gap-3">
+                          <div onClick={() => document.getElementById("flow-qty")?.focus()} className="flex h-14 min-w-0 flex-1 cursor-text items-center rounded-2xl border border-line bg-raised px-5 transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10">
+                            <input
+                              id="flow-qty"
+                              inputMode="decimal"
+                              enterKeyHint="done"
+                              autoComplete="off"
+                              value={quantity}
+                              onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))}
+                              placeholder="1"
+                              className="w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
+                            />
+                          </div>
+                          <Stepper label="Quantity" onStep={stepQuantity} canDecrement={!(quantityValue <= 1)} />
+                        </div>
+                      </div>
+                    </Reveal>
+                  )}
+
+                  <div className="pt-7">
+                    <Disclosure label="More detail">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
+                        <div className="space-y-2.5"><Label htmlFor="flow-rr">R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
+                        <div className="space-y-2.5"><Label htmlFor="flow-in">Entry time</Label><TextBox id="flow-in" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} /></div>
+                        <div className="space-y-2.5"><Label htmlFor="flow-out">Exit time</Label><TextBox id="flow-out" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} /></div>
+                      </div>
+                    </Disclosure>
+                  </div>
                 </div>
               )}
 

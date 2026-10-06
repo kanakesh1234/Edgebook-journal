@@ -336,6 +336,12 @@ export interface TradeReviewData {
   followUp?: {
     strongestEvidence?: string;
     biggestMistake?: string;
+    /** Mistake of the day — the main error in this trade ("none" = clean execution). */
+    mistake?: string;
+    /** What exactly went wrong — written for the reviewer months later. */
+    mistakeNote?: string;
+    /** Blunder level: 0 = no mistake, 1 = slip, 2 = costly, 3 = blunder. */
+    blunderLevel?: 0 | 1 | 2 | 3;
     conceptApplied?: string;
     conceptMisunderstood?: string;
     watchNext?: string;

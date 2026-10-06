@@ -234,11 +234,6 @@ export function ReflectionFlow({
             Skip for now
           </Button>
           <div className="flex items-center gap-2.5">
-            {step > 0 && (
-              <Button variant="subtle" size="sm" onClick={() => setStep((s) => s - 1)} disabled={saving}>
-                Back
-              </Button>
-            )}
             <Button variant="gold" size="sm" onClick={() => void next()} loading={saving} disabled={saving || !canContinue}>
               {step === steps.length - 1 ? (
                 <>
