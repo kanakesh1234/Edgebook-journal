@@ -13,13 +13,13 @@
  * seen, so the review is never wrongly marked "incomplete".
  */
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import type { JournalEntry, TradeReviewData } from "@/lib/types";
 import { formatSignedMoney, weekdayLong } from "@/lib/format";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
-import { BinaryChoice, Chip, FLOW_EXPAND, FLOW_FADE, IconCheck, Label, Segmented, TextBlock } from "./flow-ui";
+import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, Reveal, Segmented, TextBlock } from "./flow-ui";
 
 type Emotion = "calm" | "fomo" | "revenge" | "fear" | "";
 
@@ -170,38 +170,6 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
 }
 
 export type AutopsyState = ReturnType<typeof useAutopsy>;
-
-/**
- * A step unfolds when it appears and folds away when it leaves (wrap in <AnimatePresence>).
- * The 32px lead-in lives INSIDE the step, so collapsing it leaves no stray gap. Clipping applies
- * only while animating, so focus rings are never cut off.
- */
-function Reveal({ children, focus = false }: { children: React.ReactNode; focus?: boolean }) {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const [clip, setClip] = useState(true);
-  useEffect(() => {
-    if (!focus) return;
-    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 160);
-    return () => window.clearTimeout(t);
-  }, [focus]);
-  const hidden = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const shown = reduce ? { opacity: 1 } : { opacity: 1, height: "auto" };
-  return (
-    <motion.section
-      ref={ref}
-      initial={hidden}
-      animate={shown}
-      exit={hidden}
-      transition={reduce ? { duration: 0.18 } : FLOW_EXPAND}
-      onAnimationStart={() => setClip(true)}
-      onAnimationComplete={() => setClip(false)}
-      className={cn(clip && "overflow-hidden")}
-    >
-      <div className="pt-8">{children}</div>
-    </motion.section>
-  );
-}
 
 /**
  * Answered steps fold away; their answers live in an iOS "inset grouped" list (Apple HIG: lists and tables).

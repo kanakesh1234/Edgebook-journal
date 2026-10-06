@@ -1,14 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import {
-  MAX_IMAGES_PER_ENTRY,
-  reviewStatusOf,
-  type JournalEntry,
-  type TradeDirection,
-} from "@/lib/types";
-import { todayKey, formatDateMedium, formatSignedMoney, weekdayLong } from "@/lib/format";
+import { AnimatePresence, motion } from "motion/react";
+import { setupRules, type JournalEntry, type TradeDirection } from "@/lib/types";
+import { currencySymbol, formatDateMedium, formatSignedMoney, todayKey, weekdayLong } from "@/lib/format";
 import { useApp, persistFailedSince, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { toast } from "@/components/ui/toast";
@@ -18,16 +13,75 @@ import { Modal } from "@/components/ui/modal";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { TradeReviewFlow } from "./trade-review-flow";
 import { cn } from "@/lib/utils";
-import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, PencilIcon, ShieldIcon, UploadIcon } from "@/components/ui/icons";
+import { AlertTriangleIcon, CheckIcon } from "@/components/ui/icons";
+import {
+  BinaryChoice, ChoiceCard, Chip, Collapse, Disclosure, FLOW_EXPAND, GlyphArrowIn, GlyphArrowOut, GlyphTimer, Hint, IconCheck, IconTile, Label, PrimaryButton, Reveal, Segmented,
+  SheetFrame, Stagger, Stepper, StepTitle, StepTransition, TextBlock, TextBox,
+} from "./flow-ui";
+
+/** New trades start at the NY open; change it if the trade was at another time. */
+const DEFAULT_TIME = "09:30";
 
 const INSTRUMENT_SUGGESTIONS = [
   "NQ", "ES", "MES", "MNQ", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD",
   "XAUUSD", "CL", "SPY", "QQQ", "AAPL", "TSLA", "NVDA",
 ];
 
+/** trade → timing → setup (only with a playbook) → challenge → chart. Each stage advances with Continue. */
+type StepId = "trade" | "timing" | "setup" | "challenge" | "chart";
+
+// Same helpers as Plan Trade (kept local so this file has no dependency on plan-trade-flow.tsx).
+const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
+
+/** One row of the inset-grouped time list: icon tile, label, native time input; tap anywhere to edit. */
+function TimeRow({ id, label, value, onChange, tile, icon }: { id: string; label: string; value: string; onChange: (v: string) => void; tile: string; icon: React.ReactNode }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const open = (e: React.MouseEvent) => {
+    const el = ref.current;
+    if (!el || e.target === el) return;
+    el.focus();
+    try { el.showPicker?.(); } catch { /* picker needs a user gesture; focus is enough */ }
+  };
+  return (
+    <div onClick={open} className="flex min-h-14 cursor-pointer items-center gap-3 px-4 transition-colors hover:bg-ink/[0.03] active:bg-ink/[0.06]">
+      <IconTile tile={tile}>{icon}</IconTile>
+      <label htmlFor={id} className="flex-1 text-[17px] text-ink">{label}</label>
+      <div className="flex items-center gap-2.5">
+        {value && (
+          <button
+            type="button"
+            aria-label={`Clear ${label.toLowerCase()} time`}
+            onClick={(e) => { e.stopPropagation(); onChange(""); }}
+            className="grid h-5 w-5 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
+          >
+            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M3 3l6 6M9 3l-6 6" /></svg>
+          </button>
+        )}
+        <input
+          ref={ref}
+          id={id}
+          type="time"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn("w-[7.25rem] border-0 bg-transparent p-0 text-right font-mono text-[17px] !shadow-none !outline-none !ring-0", value ? "text-ink" : "text-faint")}
+        />
+      </div>
+    </div>
+  );
+}
+
+const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(/[^\d.\-−]/g, "").replace("−", "-")));
+
 /**
- * Create/edit composer — challenge-aware, with execution guard rails:
- * premature-entry warning, third-trade lockout gate, post-loss gate.
+ * ADD TRADE — the same calm, one-question-at-a-time ritual as Plan Trade.
+ *
+ *   trade (progressive questions) → chart → save
+ *
+ * Only the next unanswered question appears; answered ones stay put. Nothing is
+ * persisted until the final step, so the save path is identical to the old form
+ * (one createEntry / updateEntry call, images included).
+ *
+ * Also used for editing: every question is already answered, so all of them show.
  */
 export function EntryFormModal({
   open: openProp,
@@ -45,10 +99,16 @@ export function EntryFormModal({
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const challenges = useMemo(() => settings.challenges ?? [], [settings]);
+  const playbook = useMemo(() => settings.playbook ?? [], [settings]);
+  const sym = currencySymbol(settings.currency);
 
   const open = openProp ?? globalOpen;
   const onClose = onCloseProp ?? closeGlobal;
   const editing = entryProp ?? null;
+
+  const [step, setStep] = useState<StepId>("trade");
+  const [dir, setDir] = useState<1 | -1>(1);
+  const [mode, setMode] = useState<"manual" | "import">("manual");
 
   const [date, setDate] = useState(todayKey());
   const [pnl, setPnl] = useState("");
@@ -66,32 +126,66 @@ export function EntryFormModal({
   const [exitPrice, setExitPrice] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [holdDuration, setHoldDuration] = useState("");
   const [challengeId, setChallengeId] = useState("");
   const [newChallengeName, setNewChallengeName] = useState("");
   const [tradeNumber, setTradeNumber] = useState<1 | 2>(1);
-  const [errors, setErrors] = useState<{ date?: string; pnl?: string; rr?: string }>({});
   const [saving, setSaving] = useState(false);
-  const [mode, setMode] = useState<"manual" | "import">("manual");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [reflecting, setReflecting] = useState<JournalEntry | null>(null);
+
+  // Latches: once a question has been answered it stays on screen, even if the answer is edited or cleared.
+  const [pnlDone, setPnlDone] = useState(false);
+  const [setupPicked, setSetupPicked] = useState(false);
+  const [timesDone, setTimesDone] = useState(false);
+  const [entryEdited, setEntryEdited] = useState(false); // the user changed the entry time (not just the 09:30 default)
+  const [holdDone, setHoldDone] = useState(false);
+  const [challengePicked, setChallengePicked] = useState(false);
+  const [creatingChallenge, setCreatingChallenge] = useState(false);
 
   // Guard-rail state
   const [showPremature, setShowPremature] = useState(false);
-  const [showThirdTradeGate, setShowThirdTradeGate] = useState(false);
-  const [gateAcknowledged, setGateAcknowledged] = useState(false);
   const [showPostLossGate, setShowPostLossGate] = useState<JournalEntry | null>(null);
 
-  const playbook = useMemo(() => settings.playbook ?? [], [settings]);
+  const imp = useTradeImport({ onImported: (first) => { onClose(); setReflecting(first); }, onClose });
 
-  const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(/[^\d.\-−]/g, "").replace("−", "-")));
+  // Optional suggestions for Instrument: MNQ first, then recently used ones (same as Plan Trade).
+  const suggestedInstruments = useMemo(() => {
+    const seen: string[] = ["MNQ"];
+    for (const e of [...entries].sort((a, b) => b.createdAt - a.createdAt)) {
+      const i = e.instrument?.trim().toUpperCase();
+      if (i && i !== "—" && !seen.includes(i)) seen.push(i);
+      if (seen.length === 4) break;
+    }
+    return seen;
+  }, [entries]);
 
-  // Hydrate/reset each time the dialog opens. Deliberately reads the latest
-  // settings imperatively so an unrelated settings update never re-runs this
-  // effect and wipes the user's in-progress form.
+  // A legacy/custom setup name stays selectable even when it isn't in the playbook.
+  const legacySetup = editing?.setup && !playbook.some((p) => p.id === editing.setupId) ? editing.setup : "";
+  const setupVisible = playbook.length > 0 || !!legacySetup;
+
+  const order: StepId[] = useMemo(() => {
+    const o: StepId[] = ["trade", "timing"];
+    if (setupVisible) o.push("setup");
+    o.push("challenge", "chart");
+    return o;
+  }, [setupVisible]);
+  const go = (to: StepId) => {
+    setDir(order.indexOf(to) >= order.indexOf(step) ? 1 : -1);
+    setSaveError(null);
+    setStep(to);
+  };
+  const prevStep = (st: StepId): StepId | null => { const i = order.indexOf(st); return i > 0 ? order[i - 1]! : null; };
+  const nextStep = (st: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(st) + 1)]!;
+
+  // Hydrate/reset each time the dialog opens. Reads the latest settings imperatively so an unrelated
+  // settings update never re-runs this effect and wipes the user's in-progress answers.
   useEffect(() => {
     if (!open) return;
-    const firstChallenge = useApp.getState().settings.challenges?.[0]?.id ?? "";
+    setStep("trade");
+    setDir(1);
+    setSaveError(null);
     if (editing) {
       setDate(editing.date);
       setPnl(String(editing.pnl));
@@ -99,7 +193,6 @@ export function EntryFormModal({
       setInstrument(editing.instrument === "—" ? "" : editing.instrument);
       setDirection(editing.direction);
       setSetupId(editing.setupId ?? "");
-      // Legacy/custom setup names stay selectable even when not in the playbook.
       setSetup(editing.setup);
       setNotes(editing.notes);
       setImages(editing.images.map((m) => ({ meta: m, blob: null })));
@@ -112,8 +205,13 @@ export function EntryFormModal({
       setTakeProfit(editing.takeProfit != null ? String(editing.takeProfit) : "");
       setQuantity(editing.quantity != null ? String(editing.quantity) : "");
       setHoldDuration(editing.holdDuration ?? "");
-      setChallengeId(editing.challengeId ?? firstChallenge);
+      setChallengeId(editing.challengeId ?? "");
       setTradeNumber(editing.tradeNumber ?? 1);
+      setPnlDone(true);
+      setSetupPicked(true);
+      setTimesDone(true);
+      setHoldDone(true);
+      setChallengePicked(true);
     } else {
       setDate(presetDate && presetDate <= todayKey() ? presetDate : todayKey());
       setPnl("");
@@ -125,47 +223,119 @@ export function EntryFormModal({
       setNotes("");
       setImages([]);
       setCompareImage([]);
-      setEntryTime("");
-      setExitTime("");
+      setEntryTime(DEFAULT_TIME);
+      setExitTime(DEFAULT_TIME);
       setEntryPrice("");
       setExitPrice("");
       setStopLoss("");
       setTakeProfit("");
-      setQuantity("");
+      setQuantity("1");
       setHoldDuration("");
-      setChallengeId(firstChallenge);
+      setChallengeId("");
       setTradeNumber(1);
       setMode("manual");
+      setPnlDone(false);
+      setSetupPicked(false);
+      setTimesDone(false);
+      setHoldDone(false);
+      setChallengePicked(false);
     }
+    setCreatingChallenge(false);
+    setEntryEdited(false);
     setNewChallengeName("");
-    setErrors({});
     setReflecting(null);
     setShowPremature(false);
-    setShowThirdTradeGate(false);
-    setGateAcknowledged(false);
     setShowPostLossGate(null);
+    imp.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, presetDate]);
 
-  const pnlNumber = pnl.trim() === "" ? NaN : Number(pnl);
+  /* ---------------- answers, gating + quiet hints ---------------- */
+  const pnlText = pnl.trim();
+  const pnlNumber = pnlText === "" ? NaN : Number(pnlText);
+  const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlNumber);
+  const manualReady = Number.isFinite(pnlNumber);
   const rrNumber = rr.trim() === "" ? null : Number(rr);
+  const rrInvalid = rrNumber !== null && !Number.isFinite(rrNumber);
+  const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
+  const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
+  // Functional update so press-and-hold repeats never read stale state.
+  const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
 
-  // Losses already recorded for the selected date (third-trade gate)
-  const lossesToday = useMemo(
-    () => entries.filter((e) => e.date === date && e.pnl < 0).length,
-    [entries, date],
-  );
-  const tradesToday = useMemo(() => entries.filter((e) => e.date === date).length, [entries, date]);
-  const gateRequired = !editing && lossesToday >= 2;
+  // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
+  useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
+  useEffect(() => { if (entryTime && exitTime) setTimesDone(true); }, [entryTime, exitTime]);
+  useEffect(() => { if (holdDuration.trim()) setHoldDone(true); }, [holdDuration]);
+
+  // Question reveal (same pattern as Plan Trade): only the next unanswered question appears.
+  // When editing, every answer already exists, so everything is shown.
+  const showDirection = !!editing || pnlDone || direction !== null;
+  // Timing stage: times first, then hold duration, then quantity — each appears once the one before is answered.
+  const showHold = !!editing || timesDone;
+  const showQty = !!editing || holdDone;
+
+  // A helpful default for hold duration, derived from the two times (only when exit is after entry).
+  const suggestedHold = useMemo(() => {
+    if (!entryTime || !exitTime) return "";
+    const [h1, m1] = entryTime.split(":").map(Number);
+    const [h2, m2] = exitTime.split(":").map(Number);
+    const d = (h2! * 60 + m2!) - (h1! * 60 + m1!);
+    if (!Number.isFinite(d) || d <= 0) return "";
+    return d < 60 ? `${d} min` : `${Math.floor(d / 60)}h${d % 60 ? ` ${d % 60}m` : ""}`;
+  }, [entryTime, exitTime]);
+
+  const pickSetup = (id: string) => {
+    const found = playbook.find((p) => p.id === id);
+    setSetupId(found?.id ?? "");
+    setSetup(found?.name ?? "");
+    setSetupPicked(true);
+  };
+  const keepLegacySetup = () => { setSetupId(""); setSetup(legacySetup); setSetupPicked(true); };
+  const clearSetup = () => { setSetupId(""); setSetup(""); setSetupPicked(true); };
+  const pickChallenge = (id: string) => { setChallengeId(id); setNewChallengeName(""); setCreatingChallenge(false); setChallengePicked(true); };
+  const startCreatingChallenge = () => { setChallengeId(""); setCreatingChallenge(true); setChallengePicked(true); };
 
   // Premature entry: before 9:33 AM NY trading time
-  const premature = entryTime !== "" && entryTime < "09:33";
-
+  const premature = entryEdited && entryTime !== "" && entryTime < "09:33";
   useEffect(() => {
     if (premature && !editing) setShowPremature(true);
     else setShowPremature(false);
   }, [premature, editing]);
 
+  const importing = mode === "import" && !editing;
+
+  // Entry/exit time, hold duration and quantity are mandatory. Older entries that never had them stay editable.
+  const missingOk = (v: unknown) => !!editing && (v === undefined || v === null || v === "");
+
+  const gate: { ok: boolean; hint: string | null } = (() => {
+    if (step === "chart") return { ok: true, hint: images.length ? null : "Screenshots are optional" };
+    if (importing) return { ok: imp.ready, hint: imp.hint };
+    switch (step) {
+      case "trade":
+        if (!date) return { ok: false, hint: "Pick a trading day (see Add details)" };
+        if (date > todayKey()) return { ok: false, hint: "That day hasn't happened yet" };
+        if (!pnlText) return { ok: false, hint: "Enter the net P&L" };
+        if (pnlInvalid) return { ok: false, hint: "Numbers only — negative for a loss" };
+        if (!editing && !direction) return { ok: false, hint: "Choose long or short" };
+        if (rrInvalid) return { ok: false, hint: "R multiple should be a number like 2.5 (see Add details)" };
+        return { ok: true, hint: null };
+      case "timing":
+        if (!entryTime && !missingOk(editing?.entryTime)) return { ok: false, hint: "Set the entry time" };
+        if (!exitTime && !missingOk(editing?.exitTime)) return { ok: false, hint: "Set the exit time" };
+        if (!holdDuration.trim() && !missingOk(editing?.holdDuration)) return { ok: false, hint: "How long did you hold it?" };
+        if (!quantityOk && !(quantity.trim() === "" && missingOk(editing?.quantity))) return { ok: false, hint: "Enter the quantity" };
+        return { ok: true, hint: null };
+      case "setup":
+        return setupPicked ? { ok: true, hint: null } : { ok: false, hint: "Choose a setup, or no setup" };
+      case "challenge":
+        if (creatingChallenge) return newChallengeName.trim() ? { ok: true, hint: null } : { ok: false, hint: "Name the new challenge" };
+        return challengePicked ? { ok: true, hint: null } : { ok: false, hint: "Choose where this trade is saved" };
+      default:
+        return { ok: true, hint: null };
+    }
+  })();
+
+  /* ---------------- persistence (unchanged semantics) ---------------- */
   const buildDraft = (): EntryDraft => ({
     date,
     pnl: Math.round(pnlNumber * 100) / 100,
@@ -189,21 +359,17 @@ export function EntryFormModal({
     holdDuration: holdDuration.trim() || null,
   });
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const next: typeof errors = {};
-    if (!date) next.date = "Pick a trading day.";
-    else if (date > todayKey()) next.date = "That day hasn't happened yet.";
-    if (Number.isNaN(pnlNumber)) next.pnl = "Enter a number — negative for a loss.";
-    if (rrNumber !== null && !Number.isFinite(rrNumber)) next.rr = "Use a number like 2.5";
-    setErrors(next);
-    if (Object.keys(next).length > 0 || saving) return;
-
-    // Third-trade lockout gate — genuine friction, not a toast.
-    if (gateRequired && !gateAcknowledged) {
-      setShowThirdTradeGate(true);
+  const submit = async () => {
+    if (saving) return;
+    // Defensive re-check: the gate already blocks these, but never save a malformed trade.
+    if (!date || date > todayKey() || Number.isNaN(pnlNumber) || rrInvalid) {
+      setStep("trade");
+      setDir(-1);
+      setSaveError("Check the trade details — something needs fixing.");
       return;
     }
+
+    setSaveError(null);
 
     // Create a new challenge inline when requested
     let effectiveChallengeId = challengeId;
@@ -259,387 +425,256 @@ export function EntryFormModal({
     }
   };
 
+  const onContinue = () => {
+    if (!gate.ok || saving || imp.saving) return;
+    if (importing) void imp.run();
+    else if (step === "chart") void submit();
+    else go(nextStep(step));
+  };
+
+  const continueLabel =
+    step === "chart" ? (editing ? "Save changes" : "Add to journal")
+    : importing ? (imp.rows.length > 0 ? `Import ${imp.rows.length} ${imp.rows.length === 1 ? "trade" : "trades"}` : "Import")
+    : "Continue";
+
   return (
     <>
-    <Modal
-      open={open}
-      onClose={onClose}
-      size="lg"
-      label={editing ? "Edit journal entry" : "New journal entry"}
-      title={editing ? "Edit entry" : "Log a trade"}
-      description={
-        editing
-          ? `${weekdayLong(editing.date)} · ${formatSignedMoney(editing.pnl)}`
-          : "Capture the session while it's fresh."
-      }
-    >
-      <form onSubmit={submit} noValidate className="px-6 py-6">
-        {/* Mode tabs — only for new entries */}
-        {!editing && (
-          <div
-            role="tablist"
-            aria-label="Entry mode"
-            className="mb-6 grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1"
-          >
-            {([
-              { id: "manual", label: "Manual entry", icon: <PencilIcon className="h-3.5 w-3.5" /> },
-              { id: "import", label: "Import trades", icon: <UploadIcon className="h-3.5 w-3.5" /> },
-            ] as const).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={mode === t.id}
-                onClick={() => setMode(t.id)}
-                className={cn(
-                  "flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors",
-                  mode === t.id ? "text-ink" : "text-faint hover:text-muted",
-                )}
-              >
-                {t.icon}
-                {t.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {mode === "import" && !editing ? (
-          <ImportPane onDone={(created) => { onClose(); setReflecting(created); }} saving={saving} setSaving={setSaving} onClose={onClose} />
-        ) : (
-        <>
-        <div className="grid gap-5 sm:grid-cols-2">
-          {/* Left column */}
-          <div className="space-y-5">
-            <Field label="Trading day" error={errors.date} htmlFor="entry-date">
-              <TextInput
-                id="entry-date"
-                type="date"
-                value={date}
-                max={todayKey()}
-                invalid={!!errors.date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </Field>
-
-            <Field label="Net P&L" error={errors.pnl} htmlFor="entry-pnl">
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-faint">
-                  $
-                </span>
-                <TextInput
-                  id="entry-pnl"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder="250.00 or −120.50"
-                  className={cn("pl-8 tabular", pnlNumber > 0 && "text-profit", pnlNumber < 0 && "text-loss")}
-                  value={pnl}
-                  invalid={!!errors.pnl}
-                  onChange={(e) => setPnl(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))}
+      <Modal open={open} onClose={onClose} size="md" label={editing ? "Edit journal entry" : "Add a trade"}>
+        <SheetFrame
+          onClose={onClose}
+          onBack={!importing && prevStep(step) ? () => go(prevStep(step)!) : undefined}
+          hint={<Hint text={saveError ?? gate.hint} tone={saveError ? "warn" : "muted"} />}
+          actions={
+            <>
+              <PrimaryButton disabled={!gate.ok} loading={saving || imp.saving} onClick={onContinue}>{continueLabel}</PrimaryButton>
+            </>
+          }
+        >
+          <StepTransition stepKey={step} dir={dir}>
+            {step === "trade" && (
+              <div className="space-y-8">
+                <StepTitle
+                  title={editing ? "Edit entry" : "Log a trade"}
+                  subtitle={editing ? `${weekdayLong(editing.date)} · ${formatSignedMoney(editing.pnl)}` : "Capture the session while it's fresh."}
                 />
-              </div>
-              {!errors.pnl && pnl.trim() !== "" && Number.isFinite(pnlNumber) && (
-                <motion.p
-                  key={pnl}
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={cn(
-                    "pt-0.5 text-[12px] font-medium",
-                    pnlNumber > 0 ? "text-profit" : pnlNumber < 0 ? "text-loss" : "text-muted",
-                  )}
-                >
-                  {formatSignedMoney(pnlNumber)}
-                </motion.p>
-              )}
-            </Field>
+                {!editing && <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />}
 
-            <Field label="Risk-to-reward" hint="optional" error={errors.rr} htmlFor="entry-rr">
-              <TextInput
-                id="entry-rr"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder="+2.5R"
-                className="tabular"
-                value={rr}
-                invalid={!!errors.rr}
-                onChange={(e) => setRr(e.target.value.replace(/[^\d.\-−]/g, "").replace("−", "-"))}
-              />
-            </Field>
+                {!importing && (
+                  // No space-y here: each revealed question carries its own lead-in spacing, so gaps are even.
+                  <div>
+                    {/* The whole card is the input: tap anywhere to type. */}
+                    <div
+                      onClick={() => document.getElementById("add-pnl")?.focus()}
+                      className="cursor-text rounded-[26px] border border-line bg-raised px-6 py-7 text-center transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
+                    >
+                      <Label htmlFor="add-pnl">Net P&amp;L</Label>
+                      <div className="mt-3 flex items-baseline justify-center gap-1.5">
+                        <span className="text-[28px] text-faint">{sym}</span>
+                        <input
+                          id="add-pnl"
+                          autoFocus={!editing}
+                          inputMode="decimal"
+                          enterKeyHint="next"
+                          autoComplete="off"
+                          value={pnl}
+                          onChange={(e) => setPnl(cleanNumber(e.target.value))}
+                          placeholder="0.00"
+                          aria-invalid={pnlInvalid || undefined}
+                          style={{ width: `${Math.max(pnl.length, 4)}ch` }}
+                          className={cn("max-w-full border-0 bg-transparent p-0 text-center font-mono text-[44px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/60", pnlNumber > 0 && "text-profit", pnlNumber < 0 && "text-loss", pnlInvalid && "text-loss")}
+                        />
+                      </div>
+                      <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
+                    </div>
 
-            {/* Execution times & prices */}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Entry time" hint="NY" htmlFor="entry-time">
-                <TextInput id="entry-time" type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
-              </Field>
-              <Field label="Exit time" hint="NY" htmlFor="exit-time">
-                <TextInput id="exit-time" type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} />
-              </Field>
-              <Field label="Entry price" hint="optional" htmlFor="entry-price">
-                <TextInput id="entry-price" inputMode="decimal" className="tabular" value={entryPrice} onChange={(e) => setEntryPrice(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-              <Field label="Exit price" hint="optional" htmlFor="exit-price">
-                <TextInput id="exit-price" inputMode="decimal" className="tabular" value={exitPrice} onChange={(e) => setExitPrice(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-              <Field label="Stop loss" hint="optional" htmlFor="stop-loss">
-                <TextInput id="stop-loss" inputMode="decimal" className="tabular" value={stopLoss} onChange={(e) => setStopLoss(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-              <Field label="Take profit" hint="optional" htmlFor="take-profit">
-                <TextInput id="take-profit" inputMode="decimal" className="tabular" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-              <Field label="Quantity" hint="optional" htmlFor="entry-quantity">
-                <TextInput id="entry-quantity" inputMode="decimal" className="tabular" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Field>
-              <Field label="Hold duration" hint="optional" htmlFor="hold-duration">
-                <TextInput id="hold-duration" placeholder="e.g. 16 seconds" value={holdDuration} onChange={(e) => setHoldDuration(e.target.value)} />
-              </Field>
-            </div>
-          </div>
-
-          {/* Right column */}
-          <div className="space-y-5">
-            <Field label="Direction" hint="optional">
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Trade direction">
-                {(["long", "short"] as const).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={direction === d}
-                    onClick={() => setDirection((cur) => (cur === d ? null : d))}
-                    className={cn(
-                      "rounded-xl border py-2.5 text-sm font-semibold capitalize transition-all duration-150 active:scale-[0.97]",
-                      direction === d
-                        ? d === "long"
-                          ? "border-profit/50 bg-profit/[0.12] text-profit"
-                          : "border-loss/50 bg-loss/[0.10] text-loss"
-                        : "border-line bg-raised/60 text-muted hover:border-line-strong hover:text-ink",
+                    {showDirection && (
+                      <Reveal>
+                        <div className="space-y-3">
+                          <Label done={direction !== null}>Direction</Label>
+                          <BinaryChoice value={direction === null ? null : direction === "long"} onChange={(v) => setDirection(v ? "long" : "short")} options={["Long", "Short"]} />
+                        </div>
+                      </Reveal>
                     )}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-            </Field>
 
-            <Field label="Instrument" hint="optional" htmlFor="entry-instrument">
-              <TextInput
-                id="entry-instrument"
-                list="instrument-list"
-                placeholder="NQ, EURUSD, BTC…"
-                value={instrument}
-                onChange={(e) => setInstrument(e.target.value.toUpperCase())}
-              />
-              <datalist id="instrument-list">
-                {INSTRUMENT_SUGGESTIONS.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
-            </Field>
-
-            {/* Setup — canonical playbook selector */}
-            <Field label="Setup" hint="from your playbook" htmlFor="entry-setup">
-              <select
-                id="entry-setup"
-                value={setupId || (setup && !playbook.some((p) => p.id === setupId) ? `custom:${setup}` : "")}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v.startsWith("custom:")) {
-                    setSetupId("");
-                    setSetup(v.slice(7));
-                  } else if (v === "") {
-                    setSetupId("");
-                    setSetup("");
-                  } else {
-                    const found = playbook.find((p) => p.id === v);
-                    setSetupId(found?.id ?? "");
-                    setSetup(found?.name ?? "");
-                  }
-                }}
-                className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
-              >
-                <option value="">No setup</option>
-                {playbook.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-                {setup && !playbook.some((p) => p.id === setupId) && (
-                  <option value={`custom:${setup}`}>Keep “{setup}” (not in playbook)</option>
+                    <div className="pt-7">
+                      <Disclosure label="Add details">
+                        <div className="space-y-2.5">
+                          <Label hint="optional" htmlFor="add-instrument">Instrument</Label>
+                          <TextBox id="add-instrument" list="add-instrument-list" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
+                          <datalist id="add-instrument-list">{INSTRUMENT_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
+                          <Stagger className="flex flex-wrap gap-2" delay={0.05}>
+                            {suggestedInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
+                          </Stagger>
+                        </div>
+                        <div className="space-y-2.5">
+                          <Label hint="what did the market teach you?" htmlFor="add-notes">Notes</Label>
+                          <TextBlock id="add-notes" maxLength={4000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What was the plan? What actually happened? What will you do differently?" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2.5"><Label htmlFor="add-date">Day</Label><TextBox id="add-date" type="date" max={todayKey()} value={date} onChange={(e) => setDate(e.target.value)} /></div>
+                          <div className="space-y-2.5"><Label htmlFor="add-rr" hint="optional">R multiple</Label><TextBox id="add-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
+                          <div className="space-y-2.5"><Label htmlFor="add-entry-price" hint="optional">Entry price</Label><TextBox id="add-entry-price" inputMode="decimal" value={entryPrice} onChange={(e) => setEntryPrice(e.target.value.replace(/[^\d.]/g, ""))} className="font-mono" /></div>
+                          <div className="space-y-2.5"><Label htmlFor="add-exit-price" hint="optional">Exit price</Label><TextBox id="add-exit-price" inputMode="decimal" value={exitPrice} onChange={(e) => setExitPrice(e.target.value.replace(/[^\d.]/g, ""))} className="font-mono" /></div>
+                          <div className="space-y-2.5"><Label htmlFor="add-stop" hint="optional">Stop loss</Label><TextBox id="add-stop" inputMode="decimal" value={stopLoss} onChange={(e) => setStopLoss(e.target.value.replace(/[^\d.]/g, ""))} className="font-mono" /></div>
+                          <div className="space-y-2.5"><Label htmlFor="add-tp" hint="optional">Take profit</Label><TextBox id="add-tp" inputMode="decimal" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value.replace(/[^\d.]/g, ""))} className="font-mono" /></div>
+                        </div>
+                        <div className="space-y-2.5">
+                          <Label hint="max 2 per day">Planned trade number</Label>
+                          <div className="flex flex-wrap gap-2">
+                            <Chip selected={tradeNumber === 1} onClick={() => setTradeNumber(1)}>Trade #1</Chip>
+                            <Chip selected={tradeNumber === 2} onClick={() => setTradeNumber(2)}>Trade #2 · requires 7/7</Chip>
+                          </div>
+                        </div>
+                      </Disclosure>
+                    </div>
+                  </div>
                 )}
-              </select>
-              {setupId && (
-                <p className="pt-1 text-[11px] text-faint">
-                  Linked to playbook setup — its rules load automatically when you plan a trade.
-                </p>
-              )}
-            </Field>
 
-            {/* Challenge */}
-            <Field label="Challenge" htmlFor="entry-challenge">
-              <select
-                id="entry-challenge"
-                value={challengeId}
-                onChange={(e) => setChallengeId(e.target.value)}
-                className="w-full rounded-control border border-line bg-raised px-3.5 py-2.5 text-[15px] text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
-              >
-                <option value="">No challenge</option>
-                {challenges.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Or create a new challenge" hint="optional" htmlFor="entry-new-challenge">
-              <TextInput
-                id="entry-new-challenge"
-                placeholder="e.g. March $25K Challenge"
-                value={newChallengeName}
-                onChange={(e) => setNewChallengeName(e.target.value)}
-              />
-            </Field>
-
-            {/* Trade number */}
-            <Field label="Planned trade number" hint="max 2 per day">
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="Trade number">
-                {([1, 2] as const).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    aria-pressed={tradeNumber === n}
-                    onClick={() => setTradeNumber(n)}
-                    className={cn(
-                      "rounded-xl border py-2 text-sm font-semibold transition-all duration-150 active:scale-[0.97]",
-                      tradeNumber === n
-                        ? "border-gold/50 bg-gold/[0.1] text-gold"
-                        : "border-line bg-raised/60 text-muted hover:border-line-strong hover:text-ink",
-                    )}
-                  >
-                    Trade #{n}
-                    {n === 2 && <span className="block text-[10px] font-normal text-faint">requires 7/7</span>}
-                  </button>
-                ))}
+                {importing && <ImportBody imp={imp} challenges={challenges} playbook={playbook} />}
               </div>
-            </Field>
-          </div>
-        </div>
+            )}
 
-        <div className="mt-5 space-y-5">
-          <Field label="Notes & observations" hint="what did the market teach you?" htmlFor="entry-notes">
-            <TextArea
-              id="entry-notes"
-              placeholder="What was the plan? What actually happened? What will you do differently?"
-              value={notes}
-              maxLength={4000}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </Field>
+            {step === "timing" && (
+              // No space-y here: each revealed question carries its own lead-in spacing, so gaps stay even.
+              <div>
+                <StepTitle title="When did you trade?" subtitle="Entry, exit and size — all needed to review it properly." />
+                <div className="space-y-3 pt-7">
+                  <Label done={entryTime !== "" && exitTime !== ""}>Entry &amp; exit time</Label>
+                  <div className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised shadow-rest">
+                    <TimeRow id="add-in" label="Entry" value={entryTime} onChange={(v) => { setEntryEdited(true); setEntryTime(v); }} tile="bg-info" icon={<GlyphArrowIn />} />
+                    <TimeRow id="add-out" label="Exit" value={exitTime} onChange={setExitTime} tile="bg-gold-strong" icon={<GlyphArrowOut />} />
+                  </div>
+                  <AnimatePresence initial={false}>
+                    {showPremature && (
+                      <motion.div key="premature" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden" role="alert">
+                        <p className="flex items-start gap-2.5 rounded-2xl border border-gold/40 bg-gold/[0.07] p-4 text-[13px] leading-relaxed text-ink">
+                          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
+                          <span>
+                            <strong className="text-gold">Premature entry.</strong> Efficiency comes from process-oriented patience, not impulsive execution. Are you acting out of urgency or conviction? If all checklist criteria are not confirmed, stay out.
+                          </span>
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
-          <Field label={`Screenshots (${images.length}/${MAX_IMAGES_PER_ENTRY})`} hint="entry / setup / execution / exit charts">
-            <ImageUploader items={images} onChange={setImages} />
-          </Field>
-          <Field label="Compare chart (optional)" hint="a related-symbol chart for side-by-side review">
-            <ImageUploader items={compareImage} onChange={setCompareImage} max={1} />
-          </Field>
-        </div>
-        </>
-        )}
+                {showHold && (
+                  <Reveal focus={!editing}>
+                    <div className="space-y-3">
+                      <Label done={holdDuration.trim() !== ""} htmlFor="add-hold">Hold duration</Label>
+                      <div onClick={() => document.getElementById("add-hold")?.focus()} className="flex h-14 cursor-text items-center gap-3 rounded-2xl border border-line bg-raised px-4 shadow-rest transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10">
+                        <IconTile tile="bg-profit"><GlyphTimer /></IconTile>
+                        <input
+                          id="add-hold"
+                          autoComplete="off"
+                          enterKeyHint="next"
+                          maxLength={40}
+                          value={holdDuration}
+                          onChange={(e) => setHoldDuration(e.target.value)}
+                          placeholder="e.g. 16 seconds"
+                          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[17px] text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint"
+                        />
+                      </div>
+                      {suggestedHold && holdDuration.trim() === "" && (
+                        <Stagger className="flex flex-wrap gap-2" delay={0.05}>
+                          <Chip selected={false} onClick={() => setHoldDuration(suggestedHold)}>Use {suggestedHold}</Chip>
+                        </Stagger>
+                      )}
+                    </div>
+                  </Reveal>
+                )}
 
-        {/* Premature-entry inline warning */}
-        <AnimatePresence>
-          {showPremature && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              role="alert"
-              className="mt-4 rounded-xl border border-gold/40 bg-gold/[0.07] p-4"
-            >
-              <p className="flex items-start gap-2.5 text-[13px] leading-relaxed text-ink">
-                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
-                <span>
-                  <strong className="text-gold">Premature entry.</strong> Efficiency comes from
-                  process-oriented patience, not impulsive execution. Are you acting out of urgency
-                  or conviction? If all checklist criteria are not confirmed, stay out.
-                </span>
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                {showQty && (
+                  <Reveal>
+                    <div className="space-y-3">
+                      <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="add-qty">Quantity</Label>
+                      {/* Apple HIG: the stepper (two-segment control) sits next to the field that shows the value. */}
+                      <div className="flex items-center gap-3">
+                        <div onClick={() => document.getElementById("add-qty")?.focus()} className="flex h-14 min-w-0 flex-1 cursor-text items-center rounded-2xl border border-line bg-raised px-5 shadow-rest transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10">
+                          <input
+                            id="add-qty"
+                            inputMode="decimal"
+                            enterKeyHint="done"
+                            autoComplete="off"
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))}
+                            placeholder="1"
+                            className="w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
+                          />
+                        </div>
+                        <Stepper label="Quantity" onStep={stepQuantity} canDecrement={!(quantityValue <= 1)} />
+                      </div>
+                    </div>
+                  </Reveal>
+                )}
+              </div>
+            )}
 
-        {!(mode === "import" && !editing) && (
-        <div className="mt-7 flex items-center justify-end gap-2.5 border-t border-line bg-surface pt-5 pb-1 sticky bottom-[-24px] px-0.5 -mx-0.5">
-          <Button type="button" variant="subtle" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="gold" loading={saving} disabled={saving}>
-            {editing ? "Save changes" : "Add to journal"}
-          </Button>
-        </div>
-        )}
-      </form>
-    </Modal>
+            {step === "setup" && (
+              <div className="space-y-8">
+                <StepTitle title="Which setup?" subtitle="The playbook setup you traded." />
+                <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Setup">
+                  {playbook.map((p) => {
+                    const n = setupRules(p).length;
+                    return <ChoiceCard key={p.id} selected={setupPicked && setupId === p.id} title={p.name} meta={`${n} ${n === 1 ? "rule" : "rules"}`} onClick={() => pickSetup(p.id)} />;
+                  })}
+                  {legacySetup && <ChoiceCard selected={setupPicked && !setupId && setup === legacySetup} title={`Keep “${legacySetup}”`} meta="Not in your playbook" onClick={keepLegacySetup} />}
+                  <ChoiceCard selected={setupPicked && !setupId && !setup} title="No setup" onClick={clearSetup} />
+                </div>
+              </div>
+            )}
 
-    {/* Third-trade lockout gate — genuine friction, requires acknowledgement */}
-    <Modal open={showThirdTradeGate} onClose={() => setShowThirdTradeGate(false)} size="md" label="Third trade lockout">
-      <div className="px-6 py-6 sm:px-8">
-        <div className="flex items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
-            <ShieldIcon className="h-5 w-5" />
-          </span>
-          <div>
-            <h2 className="font-display text-xl font-semibold tracking-[-0.02em] text-ink">
-              Manual lockout required in Tradovate right now
-            </h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted">
-              You already have <strong className="text-loss">{lossesToday} losses</strong> today
-              {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a
-              3rd trade winning is only <strong className="text-ink">4%–5%</strong>, whereas
-              tomorrow&apos;s fresh A+ setup holds a <strong className="text-profit">40%–50%</strong> probability.
-              Lock out immediately — preserving mental capital is today&apos;s final win.
-            </p>
-          </div>
-        </div>
-        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-raised/60 p-4">
-          <input
-            type="checkbox"
-            checked={gateAcknowledged}
-            onChange={(e) => setGateAcknowledged(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[var(--gold-strong)]"
-          />
-          <span className="text-[13px] leading-relaxed text-ink">
-            I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan,
-            and I accept full responsibility for breaking my own rule.
-          </span>
-        </label>
-        <div className="mt-5 flex items-center justify-end gap-2.5">
-          <Button variant="subtle" onClick={() => setShowThirdTradeGate(false)}>
-            Close — I&apos;m done for today
-          </Button>
-          <Button
-            variant="danger"
-            disabled={!gateAcknowledged}
-            onClick={() => {
-              setShowThirdTradeGate(false);
-              // Re-trigger submit with the acknowledgement recorded
-              void (async () => {
-                const gateAcknowledgedRef = true;
-                setGateAcknowledged(gateAcknowledgedRef);
-              })();
-            }}
-          >
-            Proceed anyway
-          </Button>
-        </div>
-      </div>
-    </Modal>
+            {step === "challenge" && (
+              <div className="space-y-8">
+                <StepTitle title="Which challenge?" subtitle="Choose where this trade is saved." />
+                <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Challenge">
+                  {challenges.map((c) => (
+                    <ChoiceCard key={c.id} selected={challengePicked && !creatingChallenge && challengeId === c.id} title={c.name} meta={c.id === settings.primaryChallengeId ? "Primary challenge" : undefined} onClick={() => pickChallenge(c.id)} />
+                  ))}
+                  <ChoiceCard selected={challengePicked && !creatingChallenge && challengeId === ""} title="No challenge" meta="Keep it unassigned" onClick={() => pickChallenge("")} />
+                  <ChoiceCard selected={creatingChallenge} title="New challenge" meta="Create one now" onClick={startCreatingChallenge} />
+                </div>
+                <AnimatePresence initial={false}>
+                  {creatingChallenge && (
+                    <Collapse key="new-challenge">
+                      <div className="space-y-2.5 p-1 pt-0">
+                        <Label done={newChallengeName.trim() !== ""} htmlFor="add-new-challenge">Challenge name</Label>
+                        <TextBox id="add-new-challenge" autoFocus value={newChallengeName} onChange={(e) => setNewChallengeName(e.target.value)} placeholder="e.g. March $25K Challenge" maxLength={80} />
+                      </div>
+                    </Collapse>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
 
-    {/* Post-loss gate — capture the internal dialogue */}
-    <PostLossGate
-      entry={showPostLossGate}
-      onClose={() => setShowPostLossGate(null)}
-      onContinue={(entry) => {
-        setShowPostLossGate(null);
-        setReflecting(entry);
-      }}
-    />
+            {step === "chart" && (
+              <div className="space-y-8">
+                <StepTitle title="Add your charts" subtitle="Up to two screenshots — entry, setup, execution or exit." />
+                <ImageUploader items={images} onChange={setImages} />
+                <Disclosure label="Add a compare chart" defaultOpen={compareImage.length > 0}>
+                  <div className="space-y-2.5">
+                    <Label hint="a related-symbol chart for side-by-side review">Compare chart</Label>
+                    <ImageUploader items={compareImage} onChange={setCompareImage} max={1} />
+                  </div>
+                </Disclosure>
+              </div>
+            )}
+          </StepTransition>
+        </SheetFrame>
+      </Modal>
 
-    {/* Post-save reflection — lives outside the form modal so it survives its close */}
-    <TradeReviewFlow open={!!reflecting} entry={reflecting} onClose={() => setReflecting(null)} />
+      {/* Post-loss gate — capture the internal dialogue */}
+      <PostLossGate
+        entry={showPostLossGate}
+        onClose={() => setShowPostLossGate(null)}
+        onContinue={(entry) => {
+          setShowPostLossGate(null);
+          setReflecting(entry);
+        }}
+      />
+
+      {/* Post-save reflection — lives outside the form modal so it survives its close */}
+      <TradeReviewFlow open={!!reflecting} entry={reflecting} onClose={() => setReflecting(null)} />
     </>
   );
 }
@@ -761,20 +796,13 @@ function PostLossGate({
   );
 }
 
-/* ------------------------------ import pane ------------------------------ */
+/* ------------------------------ CSV import ------------------------------ */
 
-function ImportPane({
-  onDone,
-  saving,
-  setSaving,
-  onClose,
-}: {
-  onDone: (firstCreated: JournalEntry | null) => void;
-  saving: boolean;
-  setSaving: (v: boolean) => void;
-  onClose: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
+/**
+ * Import state lives in a hook (same shape as useAutopsy) so the shared SheetFrame footer can drive it:
+ * the sheet's primary button is "Import N trades". Parsing + createEntries logic is unchanged.
+ */
+function useTradeImport({ onImported, onClose }: { onImported: (firstCreated: JournalEntry | null) => void; onClose: () => void }) {
   const settings = useApp((s) => s.settings);
   const challenges = useMemo(() => settings.challenges ?? [], [settings]);
   const playbook = useMemo(() => settings.playbook ?? [], [settings]);
@@ -783,8 +811,16 @@ function ImportPane({
   const [fileError, setFileError] = useState<string | null>(null);
   const [challengeId, setChallengeId] = useState("");
   const [newChallengeName, setNewChallengeName] = useState("");
+  const [challengePicked, setChallengePicked] = useState(false);
   const [setupId, setSetupId] = useState("");
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [setupPicked, setSetupPicked] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setFileName(null); setParsed(null); setFileError(null);
+    setChallengeId(""); setNewChallengeName(""); setChallengePicked(false);
+    setSetupId(""); setSetupPicked(false); setSaving(false);
+  };
 
   const loadFile = async (file: File) => {
     setFileError(null);
@@ -798,11 +834,7 @@ function ImportPane({
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { parseTradesCsv } = await import("@/lib/csv-import");
       const result = parseTradesCsv(text);
-      if (result.error) {
-        setFileError(result.error);
-        setResultNull();
-        return;
-      }
+      if (result.error) { setFileError(result.error); setParsed(null); setFileName(null); return; }
       setFileName(file.name);
       setParsed(result);
       if (result.rows.length === 0 && result.invalid.length === 0) setFileError("No rows found in that file.");
@@ -810,16 +842,26 @@ function ImportPane({
       setFileError("Could not read that file — try re-exporting it.");
     }
   };
-  const setResultNull = () => { setParsed(null); setFileName(null); };
 
   const rows = parsed?.rows ?? [];
   const invalid = parsed?.invalid ?? [];
   const netPnl = rows.reduce((s, r) => s + r.pnl, 0);
+  const needsSetup = playbook.length > 0;
+  const ready = rows.length > 0 && challengePicked && (!needsSetup || setupPicked);
+  const hint =
+    !parsed ? "Choose a file to import"
+    : rows.length === 0 ? "No valid rows to import"
+    : !challengePicked ? "Which challenge do these belong to?"
+    : needsSetup && !setupPicked ? "Tag the trades with a setup, or none"
+    : null;
 
-  const runImport = async () => {
+  const pickChallenge = (id: string) => { setChallengeId(id); setNewChallengeName(""); setChallengePicked(true); };
+  const typeChallenge = (v: string) => { setNewChallengeName(v); setChallengeId(""); if (v.trim()) setChallengePicked(true); };
+  const pickSetup = (id: string) => { setSetupId(id); setSetupPicked(true); };
+
+  const run = async () => {
     if (rows.length === 0 || saving) return;
     setSaving(true);
-    setProgress({ done: 0, total: rows.length });
     let effectiveChallengeId = challengeId;
     try {
       if (newChallengeName.trim()) {
@@ -855,9 +897,6 @@ function ImportPane({
       // repeatedly syncing 25-row chunks made the import flow feel frozen.
       const created = await useApp.getState().createEntries(drafts);
       const ok = created.length;
-      const first = created[0] ?? null;
-      setProgress({ done: ok, total: drafts.length });
-
       if (ok === 0) {
         toast.error("Import failed", "None of the trades could be saved. Please try again.");
       } else {
@@ -866,209 +905,92 @@ function ImportPane({
           `${formatDateMedium(rows[0].date)} → ${formatDateMedium(rows[rows.length - 1].date)} · ${formatSignedMoney(netPnl)} — review required.`,
         );
         onClose();
-        onDone(first);
+        onImported(created[0] ?? null);
       }
     } catch (err) {
       toast.error("Import failed", err instanceof Error ? err.message : "An unexpected error occurred. Please try again.");
     } finally {
       setSaving(false);
-      setProgress(null);
     }
   };
 
+  return { fileName, parsed, fileError, rows, invalid, netPnl, challengeId, newChallengeName, challengePicked, setupId, setupPicked, saving, ready, hint, loadFile, reset, run, pickChallenge, typeChallenge, pickSetup };
+}
+
+type ImportState = ReturnType<typeof useTradeImport>;
+
+function ImportBody({ imp, challenges, playbook }: { imp: ImportState; challenges: { id: string; name: string }[]; playbook: { id: string; name: string }[] }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { rows, invalid } = imp;
   return (
     <div className="space-y-4">
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv,.txt,.tsv,text/csv,text/plain"
-        hidden
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void loadFile(f);
-          e.target.value = "";
-        }}
-      />
-
-      {/* STEP 1 — file */}
-      {!parsed ? (
+      <input ref={inputRef} type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void imp.loadFile(f); e.target.value = ""; }} />
+      {!imp.parsed ? (
         <>
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            className="group flex w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-line-strong bg-raised/40 px-6 py-12 transition-colors hover:border-gold/50"
-          >
-            <span className="grid h-12 w-12 place-items-center rounded-xl border border-line bg-raised text-gold transition-transform duration-200 group-hover:scale-105">
-              <UploadIcon className="h-5 w-5" />
-            </span>
-            <span className="text-sm font-semibold text-ink">Upload a CSV of your trades</span>
-            <span className="max-w-sm text-center text-xs leading-relaxed text-muted">
-              Exported from your broker or a spreadsheet. Columns are detected automatically —
-              date, P&amp;L, R:R, instrument, direction, setup, notes.
-            </span>
+          <button type="button" onClick={() => inputRef.current?.click()} className="flex w-full flex-col items-center gap-1.5 rounded-[26px] border border-dashed border-line-strong bg-raised px-6 py-12 transition-colors hover:border-gold/60">
+            <span className="text-[16px] font-semibold text-ink">Choose a CSV</span>
+            <span className="text-[13px] text-muted">Broker or spreadsheet export</span>
           </button>
-          {fileError && (
-            <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.06] px-3 py-2.5 text-[13px] text-loss">
-              {fileError}
-            </p>
-          )}
-          <div className="flex justify-end border-t border-line pt-4">
-            <Button variant="subtle" onClick={onClose}>Cancel</Button>
-          </div>
+          {imp.fileError && <p role="alert" className="px-1 text-[13px] text-loss">{imp.fileError}</p>}
         </>
       ) : (
-        <>
-          {/* STEP 2 — challenge + setup */}
-          <div className="rounded-xl border border-gold/30 bg-gold/[0.05] p-4">
-            <p className="text-sm font-semibold text-ink">Which challenge should these trades belong to?</p>
-            <div className="mt-3 space-y-2">
-              {challenges.map((c) => (
-                <label key={c.id} className="flex cursor-pointer items-center gap-3 rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm has-[:checked]:border-gold/40 has-[:checked]:bg-gold/[0.06]">
-                  <input type="radio" name="import-challenge" checked={challengeId === c.id} onChange={() => { setChallengeId(c.id); setNewChallengeName(""); }} className="h-4 w-4 accent-[var(--gold-strong)]" />
-                  {c.name}
-                </label>
-              ))}
-              <label className="flex cursor-pointer items-center gap-3 rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm has-[:checked]:border-gold/40 has-[:checked]:bg-gold/[0.06]">
-                <input type="radio" name="import-challenge" checked={challengeId === "" && newChallengeName === ""} onChange={() => { setChallengeId(""); setNewChallengeName(""); }} className="h-4 w-4 accent-[var(--gold-strong)]" />
-                No challenge
-              </label>
-              <div className="flex items-center gap-2 pl-1">
-                <span className="text-xs text-faint">or create:</span>
-                <TextInput
-                  aria-label="New challenge name"
-                  placeholder="e.g. March $25K Challenge"
-                  value={newChallengeName}
-                  onChange={(e) => { setNewChallengeName(e.target.value); setChallengeId(""); }}
-                  className="!py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            {playbook.length > 0 && (
-              <div className="mt-4 border-t border-gold/20 pt-3">
-                <p className="text-sm font-semibold text-ink">Tag with a setup</p>
-                <p className="mt-0.5 text-xs text-muted">
-                  Optional — rows that already carry a setup name keep it. Others get the setup selected here.
-                </p>
-                <select
-                  aria-label="Assign playbook setup to imported trades"
-                  value={setupId}
-                  onChange={(e) => setSetupId(e.target.value)}
-                  className="mt-2 w-full rounded-control border border-line bg-surface px-3.5 py-2.5 text-sm text-ink focus:border-gold/60 focus:outline-none"
-                >
-                  <option value="">No setup</option>
-                  {playbook.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          {/* STEP 3 — preview */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-raised/60 px-4 py-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink">{fileName}</p>
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
-                <span className="flex items-center gap-1 text-profit">
-                  <CheckCircleIcon className="h-3.5 w-3.5" />
-                  <span className="num">{rows.length}</span> valid {rows.length === 1 ? "trade" : "trades"}
-                </span>
-                {invalid.length > 0 && (
-                  <span className="flex items-center gap-1 text-loss">
-                    <AlertTriangleIcon className="h-3.5 w-3.5" />
-                    <span className="num">{invalid.length}</span> invalid — listed below, not imported
-                  </span>
-                )}
-              </p>
-            </div>
+        <div>
+          <div className="space-y-3">
+            <p className="flex items-center gap-2 text-[14px] text-ink">
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-profit"><IconCheck className="h-3 w-3" /></span>
+              {rows.length} {rows.length === 1 ? "trade" : "trades"} ready
+              <button type="button" onClick={() => inputRef.current?.click()} className="ml-auto text-[13px] font-medium text-gold hover:underline">Change file</button>
+            </p>
             {rows.length > 0 && (
-              <p className="num shrink-0 text-[12px] text-muted">
-                {formatDateMedium(rows[0].date)} → {formatDateMedium(rows[rows.length - 1].date)} ·{" "}
-                <span className={netPnl >= 0 ? "text-profit" : "text-loss"}>{formatSignedMoney(netPnl)}</span>
-              </p>
+              <ul className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                {rows.slice(0, 4).map((r) => (
+                  <li key={r.line} className="flex items-center justify-between px-4 py-2.5 text-[14px]">
+                    <span className="text-muted">{r.date} · <span className="text-ink">{r.instrument}</span></span>
+                    <span className={cn("font-mono tabular-nums", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>{formatSignedMoney(r.pnl)}</span>
+                  </li>
+                ))}
+                {rows.length > 4 && <li className="px-4 py-2.5 text-[13px] text-faint">+{rows.length - 4} more</li>}
+              </ul>
+            )}
+            {invalid.length > 0 && (
+              <Disclosure label={`${invalid.length} ${invalid.length === 1 ? "row" : "rows"} can't be imported`}>
+                <ul className="max-h-32 space-y-1 overflow-y-auto text-[13px] text-muted">
+                  {invalid.map((r) => (
+                    <li key={r.line} className="flex items-baseline gap-2">
+                      <span className="shrink-0 font-mono text-faint">line {r.line}</span>
+                      <span className="text-loss">{r.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </Disclosure>
             )}
           </div>
 
           {rows.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-line">
-              <div className="max-h-56 overflow-y-auto">
-                <table className="w-full text-left text-[12.5px]">
-                  <thead className="sticky top-0 bg-raised text-[10px] font-medium uppercase tracking-[0.08em] text-faint">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                      <th className="px-3 py-2 font-medium">P&amp;L</th>
-                      <th className="px-3 py-2 font-medium">R</th>
-                      <th className="px-3 py-2 font-medium">Instrument</th>
-                      <th className="hidden px-3 py-2 font-medium sm:table-cell">Dir</th>
-                      <th className="hidden px-3 py-2 font-medium md:table-cell">Setup</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line-soft">
-                    {rows.map((r) => (
-                      <tr key={r.line} className="bg-surface">
-                        <td className="whitespace-nowrap px-3 py-2 tabular text-muted">{r.date}</td>
-                        <td className={cn("whitespace-nowrap px-3 py-2 num", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>
-                          {formatSignedMoney(r.pnl)}
-                        </td>
-                        <td className="px-3 py-2 tabular text-muted">{r.rr != null ? `${r.rr}R` : "—"}</td>
-                        <td className="px-3 py-2 font-medium text-ink">{r.instrument}</td>
-                        <td className="hidden px-3 py-2 capitalize text-muted sm:table-cell">{r.direction ?? "—"}</td>
-                        <td className="hidden max-w-40 truncate px-3 py-2 text-muted md:table-cell">{r.setup || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <Reveal>
+              <div className="space-y-3">
+                <Label done={imp.challengePicked}>Which challenge do these belong to?</Label>
+                <Stagger className="flex flex-wrap gap-2" delay={0.08}>
+                  {challenges.map((c) => <Chip key={c.id} selected={imp.challengePicked && imp.challengeId === c.id} onClick={() => imp.pickChallenge(c.id)}>{c.name}</Chip>)}
+                  <Chip selected={imp.challengePicked && imp.challengeId === "" && imp.newChallengeName.trim() === ""} onClick={() => imp.pickChallenge("")}>No challenge</Chip>
+                </Stagger>
+                <TextBox aria-label="New challenge name" placeholder="Or create one — e.g. March $25K Challenge" value={imp.newChallengeName} onChange={(e) => imp.typeChallenge(e.target.value)} />
               </div>
-            </div>
+            </Reveal>
           )}
 
-          {invalid.length > 0 && (
-            <div className="rounded-xl border border-loss/25 bg-loss/[0.05] px-4 py-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-loss">
-                <AlertTriangleIcon className="h-3.5 w-3.5" />
-                {invalid.length} {invalid.length === 1 ? "row" : "rows"} could not be imported
-              </p>
-              <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-[12px] text-muted">
-                {invalid.map((r) => (
-                  <li key={r.line} className="flex items-baseline gap-2">
-                    <span className="num shrink-0 text-faint">line {r.line}</span>
-                    <span className="text-loss">{r.reason}</span>
-                    <span className="truncate font-mono text-[11px] text-faint">{r.raw}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {progress && (
-            <div className="rounded-xl border border-line bg-raised/60 px-4 py-3" aria-live="polite">
-              <div className="flex items-center justify-between text-xs text-muted">
-                <span>Importing…</span>
-                <span className="num">{progress.done}/{progress.total}</span>
+          {rows.length > 0 && imp.challengePicked && playbook.length > 0 && (
+            <Reveal>
+              <div className="space-y-3">
+                <Label done={imp.setupPicked} hint="rows that already name a setup keep it">Tag with a setup</Label>
+                <Stagger className="flex flex-wrap gap-2" delay={0.08}>
+                  {playbook.map((p) => <Chip key={p.id} selected={imp.setupPicked && imp.setupId === p.id} onClick={() => imp.pickSetup(p.id)}>{p.name}</Chip>)}
+                  <Chip selected={imp.setupPicked && imp.setupId === ""} onClick={() => imp.pickSetup("")}>No setup</Chip>
+                </Stagger>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line-soft">
-                <div
-                  className="h-full rounded-full bg-gold transition-all duration-300"
-                  style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }}
-                />
-              </div>
-            </div>
+            </Reveal>
           )}
-
-          <div className="flex items-center justify-between gap-2.5 border-t border-line pt-4">
-            <Button variant="subtle" size="sm" onClick={() => inputRef.current?.click()} disabled={saving}>
-              <UploadIcon className="h-3.5 w-3.5" />
-              Different file
-            </Button>
-            <div className="flex gap-2.5">
-              <Button variant="subtle" onClick={onClose} disabled={saving}>Cancel</Button>
-              <Button variant="gold" onClick={() => void runImport()} loading={saving} disabled={saving || rows.length === 0}>
-                Import {rows.length > 0 ? rows.length : ""} {rows.length === 1 ? "trade" : "trades"}
-              </Button>
-            </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

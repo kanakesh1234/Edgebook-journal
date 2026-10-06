@@ -7,24 +7,18 @@
  * action bar, round icon buttons and segmented switches. Everything you read or
  * type into (cards, inputs, checklists) is a solid, quiet Edgebook surface.
  */
-import { Children, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
 export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
-/**
- * Motion language (after Apple's SwiftUI spring model: a spring is defined by duration + bounce).
- *  - SPRING  ≈ SwiftUI .snappy: quick, tiny bounce — used for everything that moves or resizes.
- *  - FADE    quick ease-out for opacity, so content never lags behind its own movement.
- *  - POP     a livelier spring for small confirmations (check marks).
- */
-export const FLOW_SPRING = { type: "spring", duration: 0.4, bounce: 0.1 } as const;
-export const FLOW_FADE = { duration: 0.26, ease: [0.22, 1, 0.36, 1] } as const;
-export const FLOW_POP = { type: "spring", duration: 0.32, bounce: 0.35 } as const;
-/** Height/opacity expand + collapse: spring for size, fast fade for opacity. */
-export const FLOW_EXPAND = { ...FLOW_SPRING, opacity: FLOW_FADE } as const;
+/** Height/opacity transition for steps that unfold in or out. */
+/** Critically-damped spring (no bounce): Apple's default for anything the user can interrupt. */
+export const FLOW_EXPAND = { type: "spring", duration: 0.5, bounce: 0 } as const;
+/** Quick cross-fade for one-line micro feedback. */
+export const FLOW_FADE = { duration: 0.16 } as const;
 
 /** Glass recipes — translucency + blur + a hairline highlight. */
 export const glass = {
@@ -60,7 +54,7 @@ export function GlassIconButton({ label, onClick, children, disabled }: { label:
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={cn("grid h-9 w-9 place-items-center rounded-full text-ink transition-all duration-200 hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40", glass.control)}
+      className={cn("grid h-11 w-11 place-items-center rounded-full text-ink transition-all duration-200 hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-40", glass.control)}
     >
       {children}
     </button>
@@ -75,7 +69,7 @@ export function SheetFrame({ onClose, onBack, hint, actions, children }: { onClo
   return (
     <div className="flex min-h-[30rem] flex-col">
       <header className={cn("sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between px-4", glass.bar)}>
-        <div className="w-9">{onBack && <GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton>}</div>
+        <div className="w-11">{onBack && <GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton>}</div>
         <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
       </header>
       <div className="flex-1 px-7 pb-8 pt-2 sm:px-10">{children}</div>
@@ -90,7 +84,7 @@ export function SheetFrame({ onClose, onBack, hint, actions, children }: { onClo
 /** Slide + fade between steps; direction follows forward/back. */
 export function StepTransition({ stepKey, dir, children }: { stepKey: string; dir: 1 | -1; children: React.ReactNode }) {
   const reduce = useReducedMotion();
-  const dx = reduce ? 0 : 18;
+  const dx = reduce ? 0 : 28;
   return (
     <AnimatePresence mode="wait" initial={false} custom={dir}>
       <motion.div
@@ -98,75 +92,17 @@ export function StepTransition({ stepKey, dir, children }: { stepKey: string; di
         custom={dir}
         variants={{
           enter: (d: number) => ({ opacity: 0, x: d * dx }),
-          center: { opacity: 1, x: 0 },
-          exit: (d: number) => ({ opacity: 0, x: -d * (dx * 0.6) }),
+          // Arrive on a spring; leave quickly so the next screen never waits on the last.
+          center: { opacity: 1, x: 0, transition: { type: "spring", duration: 0.45, bounce: 0 } },
+          exit: (d: number) => ({ opacity: 0, x: -d * (dx * 0.5), transition: { duration: 0.14, ease: "easeIn" } }),
         }}
         initial="enter"
         animate="center"
         exit="exit"
-        transition={{ duration: 0.22, ease: FLOW_EASE }}
       >
         {children}
       </motion.div>
     </AnimatePresence>
-  );
-}
-
-/**
- * A newly revealed question UNFOLDS: its height opens with the snappy spring while it fades in,
- * exactly like the "Yes → add event" list. The gap above it (the parent's space-y) is folded into the
- * animation, so nothing jumps. Place Reveals in a container WITHOUT space-y-* (each Reveal brings its own 28px lead-in). Clipping applies only while animating, so focus rings are never cut off.
- * `focus` puts the cursor in its first field once it starts opening (without scrolling the sheet).
- * Reduce Motion: plain crossfade.
- */
-export function Reveal({ children, delay = 0, focus = false, gap = true }: { children: React.ReactNode; delay?: number; focus?: boolean; gap?: boolean }) {
-  const reduce = useReducedMotion();
-  const ref = useRef<HTMLElement>(null);
-  const [shown, setShown] = useState(false);
-  const [settled, setSettled] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-  useEffect(() => {
-    if (!shown || !focus) return;
-    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true }), 90 + delay * 1000);
-    return () => window.clearTimeout(t);
-  }, [shown, focus, delay]);
-  const hidden = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const visible = reduce ? { opacity: 1 } : { opacity: 1, height: "auto" };
-  return (
-    <motion.section
-      ref={ref}
-      initial={hidden}
-      animate={shown ? visible : hidden}
-      transition={reduce ? { duration: 0.18 } : { ...FLOW_SPRING, delay, opacity: { ...FLOW_FADE, delay } }}
-      onAnimationComplete={() => { if (shown) setSettled(true); }}
-      className={cn(!settled && "overflow-hidden")}
-    >
-      <div className={gap ? "pt-7" : undefined}>{children}</div>
-    </motion.section>
-  );
-}
-
-/** Children cascade in one after another (chips, options). Late additions animate in on their own. */
-export function Stagger({ children, className, step = 0.04, delay = 0 }: { children: React.ReactNode; className?: string; step?: number; delay?: number }) {
-  const reduce = useReducedMotion();
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-  const item = {
-    hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 8 },
-    show: { opacity: 1, y: 0, transition: reduce ? { duration: 0.15 } : { ...FLOW_SPRING, opacity: FLOW_FADE } },
-  };
-  return (
-    <motion.div className={className} initial="hidden" animate={shown ? "show" : "hidden"} variants={{ hidden: {}, show: { transition: { staggerChildren: reduce ? 0 : step, delayChildren: delay } } }}>
-      {Children.toArray(children).map((c, i) => (
-        <motion.div key={(c as { key?: string | number }).key ?? i} variants={item}>{c}</motion.div>
-      ))}
-    </motion.div>
   );
 }
 
@@ -187,6 +123,150 @@ export function Hint({ text, tone = "muted" }: { text: string | null; tone?: "mu
         </motion.span>
       )}
     </AnimatePresence>
+  );
+}
+
+/* ------------------- icon tiles + glyphs (SF Symbols style) -------------------
+ * One stroke weight (2.2), round caps/joins, 24-grid — so every glyph reads as one family,
+ * like SF Symbols at "regular" weight. Tiles are the iOS Settings-style colored squircle. */
+
+const glyph = "h-[17px] w-[17px]";
+const G = ({ children, w = 2.2 }: { children: React.ReactNode; w?: number }) => (
+  <svg viewBox="0 0 24 24" className={glyph} fill="none" stroke="currentColor" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
+);
+/** arrow.down.right — entering the market */
+export const GlyphArrowIn = () => <G><path d="M7 7l10 10M17 8v9H8" /></G>;
+/** arrow.up.right — leaving the market */
+export const GlyphArrowOut = () => <G><path d="M7 17 17 7M8 7h9v9" /></G>;
+/** timer */
+export const GlyphTimer = () => <G><circle cx="12" cy="13.5" r="7" /><path d="M12 10v3.8l2.4 1.4M9.5 3.5h5" /></G>;
+/** flag */
+export const GlyphFlag = () => <G><path d="M6 21V4.5M6 5h11l-2.2 3.8L17 12.5H6" /></G>;
+
+/** Colored squircle that carries a glyph (iOS Settings-style row icon). */
+export function IconTile({ tile, children }: { tile: string; children: React.ReactNode }) {
+  return <span className={cn("grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]", tile)}>{children}</span>;
+}
+
+/* ------------------------- reveal / stagger / stepper ------------------------- */
+
+/**
+ * Height/opacity unfold for content that appears in place (wrap in <AnimatePresence>).
+ * Clips ONLY while animating, so focus rings and shadows of fields inside are never cut off at rest.
+ */
+export function Collapse({ children, id, className }: { children: React.ReactNode; id?: string; className?: string }) {
+  const [clip, setClip] = useState(true);
+  return (
+    <motion.div
+      id={id}
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={FLOW_EXPAND}
+      onAnimationStart={() => setClip(true)}
+      onAnimationComplete={() => setClip(false)}
+      // 8px of built-in room on the sides and bottom (cancelled by negative margins, so layout is unchanged):
+      // a focus ring (4px) or shadow can never be cut, even while the wrapper is still clipping.
+      className={cn("-mx-2 -mb-2 px-2 pb-2", clip && "overflow-hidden", className)}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/**
+ * A question unfolds when it appears (and folds away when it leaves, if wrapped in <AnimatePresence>).
+ * The 32px lead-in lives INSIDE the step, so collapsing it leaves no stray gap. Clipping applies only
+ * while animating, so focus rings are never cut off. `focus` moves the caret into the first field.
+ */
+export function Reveal({ children, focus = false, delay = 0 }: { children: React.ReactNode; focus?: boolean; delay?: number }) {
+  const reduce = useReducedMotion();
+  const ref = useRef<HTMLElement>(null);
+  const [clip, setClip] = useState(true);
+  useEffect(() => {
+    if (!focus) return;
+    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 160 + delay * 1000);
+    return () => window.clearTimeout(t);
+  }, [focus, delay]);
+  const hidden = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
+  const shown = reduce ? { opacity: 1 } : { opacity: 1, height: "auto" };
+  return (
+    <motion.section
+      ref={ref}
+      initial={hidden}
+      animate={shown}
+      exit={hidden}
+      transition={reduce ? { duration: 0.18 } : { ...FLOW_EXPAND, delay }}
+      onAnimationStart={() => setClip(true)}
+      onAnimationComplete={() => setClip(false)}
+      // Same built-in room as Collapse: focus rings and shadows are never cut.
+      className={cn("-mx-2 -mb-2 px-2 pb-2", clip && "overflow-hidden")}
+    >
+      <div className="pt-8">{children}</div>
+    </motion.section>
+  );
+}
+
+/** Children rise in one after another. `delay` is the gap (seconds) between children. */
+export function Stagger({ children, className, delay = 0.05 }: { children: React.ReactNode; className?: string; delay?: number }) {
+  const reduce = useReducedMotion();
+  return (
+    <div className={className}>
+      {Children.toArray(children).map((child, i) => (
+        <motion.span
+          key={i}
+          className="inline-flex"
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: FLOW_EASE, delay: Math.min(i * delay, 0.6) }}
+        >
+          {child}
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
+/** Two-segment − / + control. Press and hold to repeat. `onStep` receives -1 or +1. */
+export function Stepper({ label, onStep, canDecrement = true, canIncrement = true }: { label: string; onStep: (delta: number) => void; canDecrement?: boolean; canIncrement?: boolean }) {
+  const hold = useRef<number | null>(null);
+  const stop = useCallback(() => {
+    if (hold.current !== null) {
+      window.clearTimeout(hold.current);
+      hold.current = null;
+    }
+  }, []);
+  useEffect(() => stop, [stop]);
+
+  const start = (delta: number) => {
+    stop();
+    haptic.selection();
+    onStep(delta);
+    let wait = 420;
+    const tick = () => {
+      haptic.selection();
+      onStep(delta);
+      wait = Math.max(70, wait * 0.8);
+      hold.current = window.setTimeout(tick, wait);
+    };
+    hold.current = window.setTimeout(tick, wait);
+  };
+
+  const seg = "grid h-full w-12 place-items-center text-[22px] font-medium leading-none text-ink transition-colors hover:bg-ink/[0.05] active:bg-ink/[0.09] disabled:pointer-events-none disabled:text-faint/50 select-none touch-none";
+  const handlers = (delta: number) => ({
+    onPointerDown: (e: React.PointerEvent) => { if (e.pointerType === "mouse" && e.button !== 0) return; start(delta); },
+    onPointerUp: stop,
+    onPointerLeave: stop,
+    onPointerCancel: stop,
+    // Keyboard activation (Enter / Space) arrives as a click with detail 0.
+    onClick: (e: React.MouseEvent) => { if (e.detail === 0) { haptic.selection(); onStep(delta); } },
+  });
+
+  return (
+    <div role="group" aria-label={label} className="flex h-14 shrink-0 items-stretch divide-x divide-line overflow-hidden rounded-2xl border border-line bg-raised">
+      <button type="button" aria-label={`Decrease ${label.toLowerCase()}`} disabled={!canDecrement} className={seg} {...handlers(-1)}>−</button>
+      <button type="button" aria-label={`Increase ${label.toLowerCase()}`} disabled={!canIncrement} className={seg} {...handlers(1)}>+</button>
+    </div>
   );
 }
 
@@ -220,16 +300,6 @@ export function QuietButton({ children, onClick, disabled }: { children: React.R
   );
 }
 
-/** Apple-style back button: leading chevron + "Back", quiet until hovered. */
-export function BackButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
-  return (
-    <button type="button" disabled={disabled} onClick={() => { haptic.selection(); onClick(); }} className="inline-flex items-center gap-0.5 rounded-full py-2 pl-2 pr-3.5 text-[15px] font-medium text-muted transition-all hover:text-ink active:scale-[0.96] disabled:opacity-40">
-      <IconBack />
-      Back
-    </button>
-  );
-}
-
 export function StepTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div>
@@ -247,7 +317,7 @@ export function Label({ children, done, hint, htmlFor }: { children: React.React
       {hint && <span className="text-[12px] font-normal text-faint">{hint}</span>}
       <AnimatePresence initial={false}>
         {done && (
-          <motion.span initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} transition={FLOW_POP} className="grid h-4 w-4 place-items-center rounded-full bg-profit/15 text-profit">
+          <motion.span initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} className="grid h-4 w-4 place-items-center rounded-full bg-profit/15 text-profit">
             <IconCheck className="h-2.5 w-2.5" />
           </motion.span>
         )}
@@ -258,7 +328,7 @@ export function Label({ children, done, hint, htmlFor }: { children: React.React
 
 const box =
   "w-full rounded-2xl border border-line bg-raised px-4 py-3 text-[16px] leading-snug text-ink placeholder:text-faint " +
-  "transition-[border-color,box-shadow] duration-100 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
+  "transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
 
 export function TextBox({ className, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "ref">) {
   return <input className={cn(box, className)} {...props} />;
@@ -274,7 +344,7 @@ export function Chip({ selected, onClick, children, tone = "gold" }: { selected:
       type="button"
       aria-pressed={selected}
       onClick={() => { haptic.selection(); onClick(); }}
-      className={cn("rounded-full border px-4 py-2 text-[14px] font-medium transition-all duration-150 active:scale-[0.96]", selected ? on : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
+      className={cn("inline-flex min-h-11 items-center rounded-full border px-4 py-2 text-[15px] font-medium transition-all duration-150 active:scale-[0.96]", selected ? on : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
     >
       {children}
     </button>
@@ -325,14 +395,12 @@ export function CheckRow({ checked, onClick, title, note }: { checked: boolean; 
 }
 
 /** Glass segmented switch (a control, so it may use glass). */
-/** Equal-width segments (Apple HIG). `fullWidth` stretches the control to its container. */
-export function Segmented<T extends string>({ value, options, onChange, fullWidth = false }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; fullWidth?: boolean }) {
-  const reduce = useReducedMotion();
+export function Segmented<T extends string>({ value, options, onChange, layoutId = "seg-pill", compact = false, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; /** Unique per instance when two switches can be on screen together. */ layoutId?: string; compact?: boolean; label?: string }) {
   return (
-    <div role="tablist" className={cn("relative rounded-full p-1", fullWidth ? "grid w-full" : "inline-grid", glass.control)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div role="tablist" aria-label={label} className={cn("relative inline-grid rounded-full p-1", glass.control)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
-        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (o.id !== value) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full px-5 py-1.5 text-[14px] font-medium transition-colors", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
-          {value === o.id && <motion.span layoutId="seg-pill" transition={reduce ? { duration: 0 } : FLOW_SPRING} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
+        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (value !== o.id) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full font-medium transition-colors", compact ? "px-3.5 py-1 text-[13px]" : "px-5 py-1.5 text-[14px]", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
+          {value === o.id && <motion.span layoutId={layoutId} transition={{ type: "spring", stiffness: 500, damping: 36 }} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
           {o.label}
         </button>
       ))}
@@ -363,70 +431,30 @@ export function BinaryChoice({ value, onChange, options }: { value: boolean | nu
 }
 
 /** Progressive disclosure: optional detail stays tucked away until asked for. */
-export function Disclosure({ label, children, defaultOpen = false, autoFocusOnOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean; autoFocusOnOpen?: boolean }) {
+export function Disclosure({ label, children, defaultOpen = false, autoFocusOnOpen = false }: { label: string; children: React.ReactNode; defaultOpen?: boolean; /** Move focus to the first field when the user opens it. */ autoFocusOnOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useRef(`d-${Math.random().toString(36).slice(2, 8)}`).current;
-  const bodyRef = useRef<HTMLDivElement>(null);
-  // Clip only while the height animates; once settled, let focus rings render in full.
-  const [settled, setSettled] = useState(defaultOpen);
-
-  // Opt-in: when the user opens the section, put the cursor in its first field.
+  const body = useRef<HTMLDivElement>(null);
+  const first = useRef(true);
   useEffect(() => {
+    if (first.current) { first.current = false; return; } // never steal focus on mount
     if (!open || !autoFocusOnOpen) return;
-    const t = window.setTimeout(() => bodyRef.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true }), 60);
+    const t = window.setTimeout(() => body.current?.querySelector<HTMLElement>("input, textarea")?.focus({ preventScroll: true }), 240);
     return () => window.clearTimeout(t);
   }, [open, autoFocusOnOpen]);
   return (
     <div>
-      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-[14px] font-medium text-muted transition-colors hover:text-ink">
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => { haptic.selection(); setOpen((o) => !o); }} className="flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted transition-colors hover:text-ink">
         {label}
         <IconChevron open={open} />
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div id={id} initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={FLOW_EXPAND} onAnimationStart={() => setSettled(false)} onAnimationComplete={() => setSettled(true)} className={cn(!settled && "overflow-hidden")}>
-            <div ref={bodyRef} className="-mx-2 space-y-5 px-2 pb-2 pt-4">{children}</div>
-          </motion.div>
+          <Collapse id={id}>
+            <div ref={body} className="-mx-1 space-y-5 px-1 pb-1 pt-3">{children}</div>
+          </Collapse>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-/**
- * Stepper — Apple HIG: "a two-segment control" that sits NEXT TO a field showing the value
- * (the stepper itself shows no value). Press and hold to repeat; Shift-click steps by 10.
- * Pass a functional updater as `onStep` so repeated steps never read stale state.
- */
-export function Stepper({ label, onStep, canDecrement = true }: { label: string; onStep: (delta: number) => void; canDecrement?: boolean }) {
-  const delay = useRef<number | undefined>(undefined);
-  const repeat = useRef<number | undefined>(undefined);
-  const stop = () => { window.clearTimeout(delay.current); window.clearInterval(repeat.current); };
-  useEffect(() => stop, []);
-
-  const press = (dir: 1 | -1) => (e: React.PointerEvent) => {
-    const step = dir * (e.shiftKey ? 10 : 1);
-    haptic.selection();
-    onStep(step);
-    stop();
-    delay.current = window.setTimeout(() => {
-      repeat.current = window.setInterval(() => { haptic.selection(); onStep(step); }, 90);
-    }, 450);
-  };
-  // Keyboard activation (Enter / Space) arrives as a click with detail 0; pointer presses are handled above.
-  const key = (dir: 1 | -1) => (e: React.MouseEvent) => { if (e.detail === 0) onStep(dir); };
-
-  const seg = "grid h-full w-12 touch-manipulation select-none place-items-center text-ink transition-colors hover:bg-ink/[0.05] active:bg-ink/[0.12] disabled:pointer-events-none disabled:opacity-35";
-  const icon = "h-4 w-4";
-  return (
-    <div role="group" aria-label={label} className="inline-flex h-11 shrink-0 items-stretch overflow-hidden rounded-xl bg-ink/[0.06]" onContextMenu={(e) => e.preventDefault()}>
-      <button type="button" aria-label={`Decrease ${label.toLowerCase()}`} disabled={!canDecrement} onPointerDown={press(-1)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onClick={key(-1)} className={seg}>
-        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
-      </button>
-      <span aria-hidden className="my-2.5 w-px bg-line-strong" />
-      <button type="button" aria-label={`Increase ${label.toLowerCase()}`} onPointerDown={press(1)} onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onClick={key(1)} className={seg}>
-        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-      </button>
     </div>
   );
 }

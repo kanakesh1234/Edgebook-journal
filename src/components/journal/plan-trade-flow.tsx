@@ -7,11 +7,12 @@ import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
 import { currencySymbol, todayKey } from "@/lib/format";
 import { Modal } from "@/components/ui/modal";
+import { ShieldIcon } from "@/components/ui/icons";
 import { cn, uid } from "@/lib/utils";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import {
-  BinaryChoice, CheckRow, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EASE, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
+  BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
   Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox,
 } from "./flow-ui";
 
@@ -48,6 +49,15 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   const [step, setStep] = useState<StepId>("plan");
   const [dir, setDir] = useState<1 | -1>(1);
+
+  // Discipline gate: planning a 2nd (or later) trade after a loss stops at the plan until it is acknowledged.
+  const today = todayKey();
+  const lossesToday = useMemo(() => entries.filter((e) => e.date === today && e.pnl < 0).length, [entries, today]);
+  const tradesToday = useMemo(() => entries.filter((e) => e.date === today).length, [entries, today]);
+  const [lockChecked, setLockChecked] = useState(false); // the acknowledgement checkbox
+  const [lockAck, setLockAck] = useState(false); // user chose to proceed
+  const lockOpen = open && step === "plan" && lossesToday >= 1 && !lockAck;
+  const thirdTrade = lossesToday >= 2;
 
   // plan
   const [thesis, setThesis] = useState("");
@@ -129,11 +139,11 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   // Fresh start every time the flow opens.
   useEffect(() => {
     if (!open) return;
-    setStep("plan"); setDir(1);
+    setStep("plan"); setDir(1); setLockAck(false); setLockChecked(false);
     setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
-    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime(""); setExitTime(""); setQuantity("1"); setPnlDone(false);
+    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime("09:30"); setExitTime("09:30"); setQuantity("1"); setPnlDone(false);
     setImportRows(null); setImportError(null);
     setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
@@ -314,6 +324,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
 
   return (
+    <>
     <Modal open={open} onClose={onClose} size="md" label="Plan and record a trade">
       <SheetFrame
         onClose={onClose}
@@ -366,7 +377,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </Stagger>
                     <AnimatePresence initial={false}>
                       {newsAnswer && (
-                        <motion.div key="news-list" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
+                        <Collapse key="news-list">
                           {/* Inset-grouped list: one rounded group, hairline dividers, compact time field, "add" row last. */}
                           <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
                             <AnimatePresence initial={false}>
@@ -404,7 +415,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               </button>
                             </li>
                           </ul>
-                        </motion.div>
+                        </Collapse>
                       )}
                     </AnimatePresence>
                   </div>
@@ -440,7 +451,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
               </div>
               <AnimatePresence initial={false}>
                 {selectedPlaybook && rules.length > 0 && (
-                  <motion.div key={selectedPlaybook.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.26, ease: FLOW_EASE }} className="overflow-hidden">
+                  <Collapse key={selectedPlaybook.id}>
                     <div className="space-y-3 pb-1">
                       <div className="flex items-center justify-between">
                         <p className="text-[13px] font-medium text-muted">Confirm each rule</p>
@@ -454,7 +465,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         })}
                       </div>
                     </div>
-                  </motion.div>
+                  </Collapse>
                 )}
               </AnimatePresence>
             </div>
@@ -605,6 +616,50 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         </StepTransition>
       </SheetFrame>
     </Modal>
+
+    {/* Stop at the plan: a 2nd trade after a loss needs a pause; a 3rd needs a lockout. */}
+    <Modal open={lockOpen} onClose={onClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>
+      <div className="px-6 py-6 sm:px-8">
+        <div className="flex items-start gap-3.5">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
+            <ShieldIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">
+              {thirdTrade ? "Manual lockout required in Tradovate right now" : "Pause before trade #2"}
+            </h2>
+            {thirdTrade ? (
+              <p className="mt-2 text-[15px] leading-relaxed text-muted">
+                You already have <strong className="text-loss">{lossesToday} losses</strong> today
+                {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a
+                3rd trade winning is only <strong className="text-ink">4%–5%</strong>, whereas
+                tomorrow&apos;s fresh A+ setup holds a <strong className="text-profit">40%–50%</strong> probability.
+                Lock out immediately — preserving mental capital is today&apos;s final win.
+              </p>
+            ) : (
+              <p className="mt-2 text-[15px] leading-relaxed text-muted">
+                You already have <strong className="text-loss">1 loss</strong> today. A 2nd trade straight after a loss is where
+                revenge and tilt creep in. Reset, review that trade, and only continue if this is a fresh, planned A+ setup.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="mt-6">
+          <CheckRow
+            checked={lockChecked}
+            onClick={() => setLockChecked((v) => !v)}
+            title={thirdTrade
+              ? "I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan, and I accept full responsibility for breaking my own rule."
+              : "I've reset, I'm not trying to win the loss back, and this trade follows my plan."}
+          />
+        </div>
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <QuietButton onClick={onClose}>Close — I&apos;m done for today</QuietButton>
+          <PrimaryButton disabled={!lockChecked} onClick={() => setLockAck(true)}>{thirdTrade ? "Proceed anyway" : "Continue to plan"}</PrimaryButton>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
 

@@ -172,7 +172,7 @@ export function CalendarView({
                   </span>
 
                   {trades > 0 && (
-                    <span className="text-[9px] font-medium uppercase tracking-wide text-faint">
+                    <span className="hidden text-[9px] font-medium uppercase tracking-wide text-faint sm:block">
                       {trades} {trades === 1 ? "trade" : "trades"}
                     </span>
                   )}
@@ -180,11 +180,11 @@ export function CalendarView({
                   {pnl !== null && pnl !== 0 && (
                     <span
                       className={cn(
-                        "num w-fit rounded-md border px-1.5 py-0.5 text-[14px] font-bold leading-tight",
+                        "num w-fit max-w-full whitespace-nowrap rounded-md border px-0.5 py-0.5 text-[10px] font-bold leading-tight sm:px-1.5 sm:text-[14px]",
                         pnl > 0 ? "border-profit/30 bg-profit/[0.1] text-profit" : "border-loss/30 bg-loss/[0.1] text-loss",
                       )}
                     >
-                      {pnl > 0 ? "+" : "−"}${Math.abs(pnl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                      {pnl > 0 ? "+" : "−"}<span className="hidden sm:inline">$</span>{Math.abs(pnl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                     </span>
                   )}
                 </motion.button>
