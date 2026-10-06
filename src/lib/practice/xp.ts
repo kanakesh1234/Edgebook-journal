@@ -21,3 +21,23 @@ export function xpLevel(totalXp: number): XpLevel {
   const need = cost(level);
   return { level, into: left, need, pct: Math.round((left / need) * 100) };
 }
+
+/**
+ * XP for ONE correct answer.
+ *
+ * A question's base value is 10–12 × its level (up to 50 for chart drills), so paying it out
+ * raw made XP grow linearly with level while the cost of a player level is capped — levelling
+ * got easier the further you went. Square-root pacing keeps harder questions worth more, but
+ * only gently:
+ *
+ *   base  10 → 3     base  24 → 5     base  50 → 7     base 100 → 10     base 144 → 12
+ *
+ * A level-1 round (about six correct answers) is worth ~18 XP, so the first player level takes
+ * around twelve rounds; later levels still take five or six.
+ */
+export function earnedXp(base: number): number {
+  return Math.max(1, Math.round(Math.sqrt(Math.max(0, base))));
+}
+
+/** Daily XP target on Home — about two or three rounds at the new pace. */
+export const DAILY_XP_GOAL = 40;

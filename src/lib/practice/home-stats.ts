@@ -1,10 +1,9 @@
 import type { JournalEntry, JournalSettings } from "@/lib/types";
 import { displayStreak, isUsable, rankOf, weekTrades } from "./engine";
 import { arenaLevels } from "./arena";
-import { xpLevel } from "./xp";
+import { DAILY_XP_GOAL, xpLevel } from "./xp";
 import { matrixAccuracy, matrixTodayXp } from "@/lib/matrix/overview";
 import { matrixStreak } from "@/lib/matrix/attempt";
-import { MATRIX_DAILY_XP_GOAL } from "@/lib/matrix/progression";
 
 /**
  * One source of truth for the Home "Practice arcade" card.
@@ -53,7 +52,7 @@ export function practiceHomeStats(entries: JournalEntry[], settings: JournalSett
     xpLevel: xpLevel(practice.xp + matrix.xp),
     rank: rankOf(practice.xp),
     levels: arenaLevels(practice),
-    dailyGoal: MATRIX_DAILY_XP_GOAL,
+    dailyGoal: DAILY_XP_GOAL,
     todayXp,
     streak: Math.max(displayStreak(practice, today), matrixStreak(matrix, today)),
     accuracy,

@@ -84,4 +84,23 @@ assert.equal(readMissed({ xp: 0, streak: 0, questionBank: bank }).length, 40);
 bank = nextQuestionBank({ xp: 0, streak: 0, questionBank: bank }, readMissed({ xp: 0, streak: 0, questionBank: bank }).map((question) => ({ question, correct: true })));
 assert.deepEqual(bank.map((b) => b.key), ["other"]);
 
+// ---- the progress meter tracks the CURRENT level only
+import { levelBestOf } from "../../src/lib/practice/arena.ts";
+const lb = { xp: 0, streak: 0, arena: { levels: { boss: 4 }, fails: { boss: 0 }, levelBest: { boss: 3 } } };
+assert.equal(levelBestOf(lb, "boss"), 3);
+assert.equal(levelBestOf(undefined, "matrix"), 0);
+// same level: keep the higher of old and new
+const heldOutcome = evaluateRound({ mode: "boss", level: 4, fails: 0, correct: 2, answered: 8, completed: true });
+assert.equal(heldOutcome.outcome, "hold");
+assert.equal(applyOutcome(lb, "boss", heldOutcome, 2).levelBest?.boss, 3);
+assert.equal(applyOutcome(lb, "boss", { ...heldOutcome }, 5).levelBest?.boss, 5);
+// level up and level down both start the next level from zero
+const upOutcome = evaluateRound({ mode: "boss", level: 4, fails: 0, correct: 12, answered: 13, completed: true });
+assert.equal(upOutcome.outcome, "up");
+assert.equal(applyOutcome(lb, "boss", upOutcome, 12).levelBest?.boss, 0);
+const downOutcome = evaluateRound({ mode: "boss", level: 4, fails: 1, correct: 1, answered: 9, completed: true });
+assert.equal(downOutcome.outcome, "down");
+assert.equal(applyOutcome(lb, "boss", downOutcome, 1).levelBest?.boss, 0);
+assert.equal(lb.arena.levelBest.boss, 3); // input untouched
+
 console.log("arena + bank tests passed");

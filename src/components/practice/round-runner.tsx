@@ -13,6 +13,7 @@ import type { PracticeQuestion } from "@/lib/practice/engine";
 import { groupOf } from "@/lib/practice/session";
 import { gateFor, nudge, ROUND_SECONDS, targetDifficulty, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
 import { brief, feedbackDwellMs } from "@/lib/practice/pacing";
+import { earnedXp } from "@/lib/practice/xp";
 import type { Round } from "@/lib/practice/round";
 import { stashUnused } from "@/lib/practice/bank";
 import { DuelSound } from "@/lib/practice/math/sound";
@@ -181,7 +182,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     setTally((t) => ({ correct: t.correct + (ok ? 1 : 0), total: t.total + 1 }));
     log.current.push({ fp: q.fp, tag: q.tag, prompt: q.prompt, level: q.level, correct: ok, yourAnswer: value, correctAnswer: answerText(q), question: q });
     if (ok) {
-      xp.current += q.xp;
+      xp.current += earnedXp(q.xp);
       combo.current.now += 1;
       combo.current.best = Math.max(combo.current.best, combo.current.now);
       sound().cue(combo.current.now >= 3 ? "combo" : "correct");
@@ -334,7 +335,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-baseline gap-x-2.5">
                   <span className={cn("text-[15px] font-semibold", right ? "text-profit" : "text-loss")}>{right ? "Correct" : "Not quite"}</span>
-                  {right && <span className="num text-[13px] text-muted">+{question.xp} XP{comboNow >= 3 ? ` · ×${comboNow} flow` : ""}</span>}
+                  {right && <span className="num text-[13px] text-muted">+{earnedXp(question.xp)} XP{comboNow >= 3 ? ` · ×${comboNow} flow` : ""}</span>}
                   {!right && <span className="text-[14px] text-ink">Answer: <b className="font-semibold">{answerText(question)}</b></span>}
                 </span>
                 {!right && question.explanation && <span className="mt-1 block text-[13.5px] leading-snug text-muted">{brief(question.explanation)}</span>}
