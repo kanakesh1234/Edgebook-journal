@@ -341,6 +341,8 @@ export interface TradeReviewData {
     watchNext?: string;
     mistake?: string;
     mistakeNote?: string;
+    /** Free-text mistake name, used when `mistake` is "other". */
+    mistakeOther?: string;
     blunderLevel?: 0 | 1 | 2 | 3;
   };
   setup?: {

@@ -19,7 +19,7 @@ import { formatSignedMoney, weekdayLong } from "@/lib/format";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
-import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, Reveal, Segmented, TextBlock } from "./flow-ui";
+import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, PrimaryButton, Reveal, Segmented, TextBlock, TextBox } from "./flow-ui";
 
 type Emotion = "calm" | "fomo" | "revenge" | "fear" | "";
 
@@ -39,6 +39,7 @@ const MISTAKES: { key: string; label: string }[] = [
   { key: "plan", label: "Broke plan" },
   { key: "revenge", label: "Revenge trade" },
   { key: "overtrade", label: "Overtraded" },
+  { key: "other", label: "Others" },
 ];
 
 type Blunder = 0 | 1 | 2 | 3;
@@ -62,6 +63,10 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const [mistake, setMistake] = useState("");
   const [blunder, setBlunder] = useState<Blunder | null>(null);
   const [mistakeNote, setMistakeNote] = useState("");
+  /** Custom mistake name, written by the trader when they pick "Others". */
+  const [mistakeOther, setMistakeOther] = useState("");
+  /** True once the trader has confirmed their custom mistake text. */
+  const [otherDone, setOtherDone] = useState(false);
   /** Which answered step is being re-opened from its summary pill. */
   const [editing, setEditing] = useState<"mistake" | "blunder" | null>(null);
   /** The just-tapped option, shown selected for a beat before its step folds away. */
@@ -88,6 +93,8 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     setMistake(r?.followUp?.mistake ?? "");
     setBlunder(r?.followUp?.blunderLevel ?? null);
     setMistakeNote(r?.followUp?.mistakeNote ?? "");
+    setMistakeOther(r?.followUp?.mistakeOther ?? "");
+    setOtherDone(r?.followUp?.mistake === "other" && !!r?.followUp?.mistakeOther?.trim());
     setEditing(null);
     setPending(null);
     setError(null);
@@ -98,19 +105,37 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     window.clearTimeout(settleTimer.current);
     settleTimer.current = window.setTimeout(() => { apply(); setEditing(null); setPending(null); }, 240);
   };
-  const chooseMistake = (m: string) => settle("mistake", m, () => {
+  const chooseMistake = (m: string) => {
+    // "Others" needs a typed answer first, so it stays open instead of folding away.
+    if (m === "other") {
+      setMistake("other");
+      setOtherDone(false);
+      setEditing("mistake");
+      if (blunder === 0) setBlunder(null);
+      return;
+    }
+    settleMistake(m);
+  };
+  const confirmOther = () => {
+    if (!mistakeOther.trim()) return;
+    setOtherDone(true);
+    setEditing(null);
+  };
+  const settleMistake = (m: string) => settle("mistake", m, () => {
     setMistake(m);
     if (m === "none") setBlunder(0);
     else if (blunder === 0) setBlunder(null);
   });
   const chooseBlunder = (v: Blunder) => settle("blunder", String(v), () => setBlunder(v));
+  const otherOk = mistake !== "other" || (mistakeOther.trim().length > 0 && otherDone);
   const blunderDone = mistake === "none" || blunder !== null;
-  const ready = followedPlan !== null && emotion !== "" && goodProcess !== null && mistake !== "" && blunderDone && (mistake === "none" || mistakeNote.trim().length > 0) && lesson.trim().length > 0;
+  const ready = followedPlan !== null && emotion !== "" && goodProcess !== null && mistake !== "" && otherOk && blunderDone && (mistake === "none" || mistakeNote.trim().length > 0) && lesson.trim().length > 0;
   const hint =
     followedPlan === null ? "Did you follow your plan?"
     : emotion === "" ? "Pick how it felt"
     : goodProcess === null ? "Was the process good?"
     : mistake === "" ? "Choose the mistake of the day"
+    : !otherOk ? (mistakeOther.trim().length === 0 ? "Name the mistake" : "Press Continue")
     : !blunderDone ? "Set the blunder level"
     : mistake !== "none" && mistakeNote.trim().length === 0 ? "Describe the mistake"
     : lesson.trim().length === 0 ? "Write one lesson to finish"
@@ -142,7 +167,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
           badTradeDespiteWin: current.pnl > 0 ? goodProcess === false : null,
           processVerdict: goodProcess === true ? "a-plus" : goodProcess === false ? "process-failure" : "",
         },
-        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
+        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
         reviewedAt: Date.now(),
       };
       await useApp.getState().saveTradeReview(current.id, {
@@ -166,7 +191,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     }
   };
 
-  return { entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
+  return { entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, mistakeOther, setMistakeOther, confirmOther, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
 }
 
 export type AutopsyState = ReturnType<typeof useAutopsy>;
@@ -186,7 +211,7 @@ function AnswerRow({ icon, tile, title, value, valueClass, onClick, label }: { i
     >
       <span className={cn("grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]", tile)}>{icon}</span>
       <span className="min-w-0 flex-1 truncate text-[16px] text-ink">{title}</span>
-      <span className={cn("shrink-0 text-[16px] text-muted", valueClass)}>{value}</span>
+      <span className={cn("min-w-0 max-w-[55%] shrink-0 truncate text-[16px] text-muted", valueClass)}>{value}</span>
       <svg viewBox="0 0 24 24" className="h-[15px] w-[15px] shrink-0 text-faint" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 6 6 6-6 6" /></svg>
     </button>
   );
@@ -207,14 +232,15 @@ function AnswerList({ a }: { a: AutopsyState }) {
   const m = MISTAKES.find((x) => x.key === a.mistake);
   const l = a.blunder ? BLUNDER_LEVELS[a.blunder - 1] : null;
   if (!m) return null;
+  const mLabel = a.mistake === "other" && a.mistakeOther.trim() ? a.mistakeOther.trim() : m.label;
   return (
     <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-raised">
       <AnswerRow
-        label={`Mistake: ${m.label}. Change`}
+        label={`Mistake: ${mLabel}. Change`}
         icon={a.mistake === "none" ? <GlyphCheck /> : <GlyphWarning />}
         tile={a.mistake === "none" ? "bg-profit" : "bg-gold-strong"}
         title="Mistake"
-        value={m.label}
+        value={mLabel}
         onClick={() => a.setEditing("mistake")}
       />
       {l && a.mistake !== "none" && (
@@ -241,7 +267,8 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
   // Which step is on screen. Answered steps fold away; "editing" re-opens one from its summary pill.
   const noMistake = a.mistake === "none";
   const hasMistake = a.mistake !== "" && !noMistake;
-  const askMistake = a.goodProcess !== null && (a.mistake === "" || a.editing === "mistake");
+  const otherOpen = a.mistake === "other" && (a.mistakeOther.trim().length === 0 || a.editing === "mistake");
+  const askMistake = a.goodProcess !== null && (a.mistake === "" || a.editing === "mistake" || otherOpen);
   const askBlunder = hasMistake && a.editing !== "mistake" && (a.blunder === null || a.editing === "blunder");
   const askNote = hasMistake && a.blunder !== null && a.editing === null;
   const askLesson = a.editing === null && (noMistake || (hasMistake && a.blunder !== null && (a.mistakeNote.trim().length > 0 || a.lesson.trim().length > 0)));
@@ -299,6 +326,27 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
             </Reveal>
           )}
 
+          {/* 4b — "Others": the trader names the mistake in their own words. Same Reveal as every other step. */}
+          {askMistake && a.mistake === "other" && (
+            <Reveal key="other" focus>
+              <Label done={a.mistakeOther.trim().length > 0 && a.editing === null} htmlFor="autopsy-other">What was the mistake?</Label>
+              <div className="mt-3">
+                <TextBox
+                  id="autopsy-other"
+                  maxLength={60}
+                  value={a.mistakeOther}
+                  onChange={(e) => a.setMistakeOther(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); a.confirmOther(); } }}
+                  placeholder="Name it in a few words — e.g. Ignored news."
+                  enterKeyHint="done"
+                />
+              </div>
+              <div className="mt-3">
+                <PrimaryButton disabled={a.mistakeOther.trim().length === 0} onClick={a.confirmOther}>Continue</PrimaryButton>
+              </div>
+            </Reveal>
+          )}
+
           {/* 5 — Blunder level: one tap, then it folds away. */}
           {askBlunder && (
             <Reveal key="blunder">
@@ -329,7 +377,7 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
           {askNote && (
             <Reveal key="note" focus>
               <AnswerList a={a} />
-              <Label done={a.mistakeNote.trim().length > 0} htmlFor="autopsy-note">What was the mistake that led to this {noun}?</Label>
+              <Label done={a.mistakeNote.trim().length > 0} htmlFor="autopsy-note">{a.mistake === "other" ? `What happened, and what led to this ${noun}?` : `What was the mistake that led to this ${noun}?`}</Label>
               <div className="mt-3"><TextBlock id="autopsy-note" maxLength={400} value={a.mistakeNote} onChange={(e) => a.setMistakeNote(e.target.value)} placeholder="Be specific — you'll read this months from now." /></div>
             </Reveal>
           )}
