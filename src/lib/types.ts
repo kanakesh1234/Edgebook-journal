@@ -339,6 +339,9 @@ export interface TradeReviewData {
     conceptApplied?: string;
     conceptMisunderstood?: string;
     watchNext?: string;
+    mistake?: string;
+    mistakeNote?: string;
+    blunderLevel?: 0 | 1 | 2 | 3;
   };
   setup?: {
     liquiditySwept?: string;
