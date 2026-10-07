@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export type SymName =
   | "list" | "grid" | "folder" | "calendar" | "search" | "filter" | "sort" | "sidebar"
   | "chevronRight" | "chevronLeft" | "chevronDown" | "check" | "xmark" | "trash" | "pencil"
-  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis";
+  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis" | "expand" | "note" | "target" | "heart" | "shield" | "bulb" | "checklist" | "chart";
 
 const D: Record<SymName, ReactNode> = {
   list: (<><path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20" /><circle cx="4.4" cy="6.5" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="12" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="17.5" r=".9" fill="currentColor" stroke="none" /></>),
@@ -34,6 +34,14 @@ const D: Record<SymName, ReactNode> = {
   circleHalf: (<><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" /></>),
   arrowUpRight: <path d="M7 17 17 7M9 7h8v8" />,
   arrowDownRight: <path d="m7 7 10 10M17 9v8H9" />,
+  expand: <path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5" />,
+  note: <path d="M7.5 3.5h6l5 5V19a1.5 1.5 0 0 1-1.5 1.5H7.5A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1.5-1.5zM13.5 3.5v5h5M9.5 12.5h6M9.5 16h4" />,
+  target: (<><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /></>),
+  heart: <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />,
+  shield: <path d="M12 3.5 5 6v5.5c0 4.2 2.9 7.2 7 9 4.1-1.8 7-4.8 7-9V6zM9 12l2.3 2.3L15.5 10" />,
+  bulb: <path d="M9.5 17.5h5M10 20.5h4M12 3.5a5.5 5.5 0 0 0-3.2 10c.5.4.7 1 .7 1.6V17h5v-1.9c0-.6.2-1.2.7-1.6A5.5 5.5 0 0 0 12 3.5z" />,
+  checklist: <path d="M10.5 7H20M10.5 12H20M10.5 17H20M4 7l1.3 1.3L7.5 6M4 12l1.3 1.3 2.2-2.3M4 17l1.3 1.3 2.2-2.3" />,
+  chart: <path d="M4 19.5v-15M4 19.5h16M7.5 15l3.5-4 3 2.5 5-6.5" />,
   ellipsis: (<><circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" /></>),
 };
 
