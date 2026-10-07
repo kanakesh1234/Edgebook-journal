@@ -22,6 +22,8 @@ import { zonedToUtc } from "../tz";
 
 const API = "https://www.googleapis.com";
 const UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
+/** Every Google call is bounded so a stalled connection fails (and retries) instead of hanging the request. */
+const GOOGLE_TIMEOUT_MS = 20_000;
 
 export interface DriveError {
   status: number;
@@ -107,6 +109,7 @@ export async function refreshAccessTokenDetailed(
 ): Promise<RefreshResult> {
   const doFetch = fetchImpl ?? fetch;
   const res = await doFetch("https://oauth2.googleapis.com/token", {
+    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -156,6 +159,7 @@ export async function revokeToken(token: string, fetchImpl?: typeof fetch): Prom
 export async function driveFetch(accessToken: string, path: string, init?: RequestInit, fetchImpl?: typeof fetch) {
   const doFetch = fetchImpl ?? fetch;
   return doFetch(`${API}/drive/v3${path}`, {
+    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
     ...init,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -168,6 +172,7 @@ export async function driveFetch(accessToken: string, path: string, init?: Reque
 async function driveUploadFetch(accessToken: string, path: string, init?: RequestInit, fetchImpl?: typeof fetch) {
   const doFetch = fetchImpl ?? fetch;
   return doFetch(`${UPLOAD_API}${path}`, {
+    signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
     ...init,
     headers: {
       Authorization: `Bearer ${accessToken}`,

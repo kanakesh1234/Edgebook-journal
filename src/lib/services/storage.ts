@@ -114,7 +114,7 @@ export class GoogleDriveDataStore implements DataStore {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 600 * attempt));
       try {
-        const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, {
+        const res = await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, {
           method: "PUT",
           headers: { "Content-Type": "image/jpeg" },
           body: blob,
@@ -130,13 +130,13 @@ export class GoogleDriveDataStore implements DataStore {
   }
 
   async getImage(imageId: string): Promise<Blob | undefined> {
-    const res = await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, { cache: "no-store" });
+    const res = await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, { cache: "no-store" });
     if (!res.ok) return undefined;
     return await res.blob();
   }
 
   async deleteImage(imageId: string): Promise<void> {
-    await fetch(`/api/drive/image/${encodeURIComponent(imageId)}`, { method: "DELETE" });
+    await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, { method: "DELETE" });
   }
 
   async estimateUsage(): Promise<number | null> {
@@ -149,6 +149,23 @@ export class GoogleDriveDataStore implements DataStore {
 const MIRROR_PREFIX = "edgebook:drive-journal:";
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([403, 429, 500, 501, 502, 503, 504]);
+const DRIVE_REQUEST_TIMEOUT_MS = 30_000;
+/** Short debounce: coalesces same-tick saves without making Continue feel slow. */
+const JOURNAL_FLUSH_DELAY_MS = 300;
+
+/** Never leave a save UI pending indefinitely when a browser request stalls. */
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  init?.signal?.addEventListener("abort", onAbort, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(), DRIVE_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", onAbort);
+  }
+}
 
 export class DriveSyncError extends Error {
   constructor(
@@ -236,7 +253,7 @@ class JournalWriteQueue {
       }
       if (!this.writing) {
         if (this.timer) clearTimeout(this.timer);
-        this.timer = setTimeout(() => { void this.flush(); }, 1500);
+        this.timer = setTimeout(() => { void this.flush(); }, JOURNAL_FLUSH_DELAY_MS);
       }
     });
   }
@@ -254,7 +271,7 @@ class JournalWriteQueue {
       job.waiters.forEach(({ reject }) => reject(err));
     } finally {
       this.writing = false;
-      if (this.pending && !this.timer) this.timer = setTimeout(() => { void this.flush(); }, 1500);
+      if (this.pending && !this.timer) this.timer = setTimeout(() => { void this.flush(); }, JOURNAL_FLUSH_DELAY_MS);
     }
   }
 
@@ -263,9 +280,9 @@ class JournalWriteQueue {
     const bytes = new TextEncoder().encode(body).byteLength;
     if (bytes > MAX_JOURNAL_BYTES) throw new DriveSyncError(413, `Journal payload is ${(bytes / 1024 / 1024).toFixed(2)} MB; the 4 MB sync limit was exceeded`, "payload_too_large");
     let last: DriveSyncError | null = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await fetch("/api/drive/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+        const res = await fetchWithTimeout("/api/drive/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
         if (res.ok) return;
         const detail = await res.json().catch(() => ({})) as { message?: string; detail?: string; googleStatus?: number };
         const status = detail.googleStatus ?? res.status;
@@ -273,8 +290,8 @@ class JournalWriteQueue {
       } catch (err) {
         last = new DriveSyncError(0, err instanceof Error ? err.message : "Network error while saving to Drive", "network_error");
       }
-      if (!last || (!RETRYABLE_STATUSES.has(last.status) && last.status !== 0) || attempt === 4) throw last;
-      const delay = Math.min(8_000, 500 * 2 ** attempt) + Math.round(Math.random() * 250);
+      if (!last || (!RETRYABLE_STATUSES.has(last.status) && last.status !== 0) || attempt === 2) throw last;
+      const delay = Math.min(4_000, 500 * 2 ** attempt) + Math.round(Math.random() * 250);
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
     }
     throw last ?? new DriveSyncError(0, "Drive write failed", "unknown");

@@ -126,24 +126,45 @@ export function hasLoadFailed(): boolean {
 }
 
 /**
- * Writes are serialized: each Drive write starts only after the previous one finished, so a slow
- * earlier snapshot can never land after (and overwrite) a newer one. A write that was queued but
- * has since been superseded waits on the newest write instead of uploading a stale snapshot — this
- * keeps rapid back-to-back saves to one or two uploads while every caller still sees the real result.
+ * Writes are serialized AND coalesced, without ever waiting on themselves.
+ *
+ * At most ONE write runs at a time. Calls that arrive while a write is running (or queued) share a
+ * single pending slot that always holds the NEWEST snapshot, so rapid back-to-back saves collapse
+ * into one or two uploads and a slow earlier snapshot can never land after a newer one. Every caller
+ * is resolved/rejected with the real result of the write that carried its change.
+ *
+ * (The previous version let a superseded job `return _latestWrite`, while that newest job was itself
+ * chained behind the superseded one — a circular wait. Two saves in the same tick, e.g. savePlan()
+ * + createEntry(), froze the whole queue forever and every later "Continue" spun indefinitely.)
  */
+type PersistArgs = [userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]];
+type PersistWaiter = { resolve: () => void; reject: (err: unknown) => void };
 let _writeChain: Promise<void> = Promise.resolve();
-let _writeSeq = 0;
-let _latestWrite: Promise<void> = Promise.resolve();
+let _pendingWrite: { args: PersistArgs; waiters: PersistWaiter[] } | null = null;
+
+async function runPendingWrite(): Promise<void> {
+  const job = _pendingWrite;
+  _pendingWrite = null; // anything arriving from now on gets the NEXT write
+  if (!job) return;
+  try {
+    await persistNow(...job.args);
+    job.waiters.forEach((w) => w.resolve());
+  } catch (err) {
+    job.waiters.forEach((w) => w.reject(err));
+  }
+}
 
 function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]): Promise<void> {
-  const seq = ++_writeSeq;
-  const job = _writeChain.then(() => {
-    if (seq < _writeSeq) return _latestWrite; // a newer snapshot is queued — it carries this change too
-    return persistNow(userId, entries, settings, dayLogs, plans);
+  return new Promise<void>((resolve, reject) => {
+    const args: PersistArgs = [userId, entries, settings, dayLogs, plans];
+    if (_pendingWrite) {
+      _pendingWrite.args = args; // newest snapshot wins
+      _pendingWrite.waiters.push({ resolve, reject });
+      return;
+    }
+    _pendingWrite = { args, waiters: [{ resolve, reject }] };
+    _writeChain = _writeChain.then(runPendingWrite, runPendingWrite);
   });
-  _latestWrite = job;
-  _writeChain = job.catch(() => undefined);
-  return job;
 }
 
 async function persistNow(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
@@ -163,7 +184,11 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
   const snapshotKey = `${Date.now()}`;
 
   // Snapshot to Supabase working memory for fast recovery (fire-and-forget).
-  const cleanup = await snapshotToWorkingMemory(userId, snapshotKey, payload);
+  // Supabase is advisory — cap how long it can delay the Drive write.
+  const cleanup = await Promise.race([
+    snapshotToWorkingMemory(userId, snapshotKey, payload),
+    new Promise<() => void>((resolve) => setTimeout(() => resolve(() => undefined), 2500)),
+  ]);
 
   try {
     await dataStore.saveJournal(userId, payload);
@@ -295,7 +320,7 @@ export const useApp = create<AppState>((set, get) => ({
   async createEntry(draft, blobs) {
     const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    if (blobs) for (const [id, blob] of blobs) await dataStore.putImage(id, blob);
+    if (blobs) await Promise.all([...blobs].map(([id, blob]) => dataStore.putImage(id, blob)));
 
     const entry: JournalEntry = {
       id: uid("e"),
@@ -325,25 +350,32 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async updateEntry(id, draft, blobs) {
-    const { user, entries, settings, dayLogs } = get();
+    const { user } = get();
     if (!user) throw new Error("Not signed in");
 
+    const before = get().entries.find((e) => e.id === id);
+    if (!before) throw new Error("Entry not found");
+
+    // New binaries go up in parallel; the journal is only updated once every upload succeeded.
+    if (blobs) await Promise.all([...blobs].map(([imgId, blob]) => dataStore.putImage(imgId, blob)));
+
+    // Images detached during editing are removed best-effort — a failed delete must never block saving.
+    const detached = [...before.images, ...(before.compareImage ? [before.compareImage] : [])]
+      .filter((img) => !draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id);
+    await Promise.all(detached.map(async (img) => {
+      try { await dataStore.deleteImage(img.id); } catch { /* orphaned blob is harmless */ }
+      dropImageUrl(img.id);
+    }));
+
+    // Re-read the store AFTER the awaits: anything saved while the uploads ran (plan, autopsy, another
+    // edit) must not be overwritten by a stale snapshot taken before them.
+    const { entries, settings, dayLogs, plans } = get();
     const prev = entries.find((e) => e.id === id);
     if (!prev) throw new Error("Entry not found");
-
-    // Remove image binaries that were detached during editing
-    for (const img of [...prev.images, ...(prev.compareImage ? [prev.compareImage] : [])]) {
-      if (!draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id) {
-        await dataStore.deleteImage(img.id);
-        dropImageUrl(img.id);
-      }
-    }
-    if (blobs) for (const [id2, blob] of blobs) await dataStore.putImage(id2, blob);
-
     const updated: JournalEntry = { ...prev, ...draft, updatedAt: Date.now() };
     const next = entries.map((e) => (e.id === id ? updated : e));
     set({ entries: next });
-    await persist(user.id, next, settings, dayLogs, get().plans);
+    await persist(user.id, next, settings, dayLogs, plans);
     return updated;
   },
 

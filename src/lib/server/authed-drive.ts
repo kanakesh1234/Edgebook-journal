@@ -262,7 +262,7 @@ async function resolveImpl(session: AppSession, config: GoogleConfig): Promise<R
     try {
       res = await fetch(
         `https://www.googleapis.com/drive/v3/files/${account.folderId}?fields=id,name,trashed,mimeType`,
-        { headers: { Authorization: `Bearer ${tok.token}` } },
+        { headers: { Authorization: `Bearer ${tok.token}` }, signal: AbortSignal.timeout(20_000) },
       );
     } catch (netErr) {
       diag("RESOLVE_FAIL", { requestId, operation: "verify_stored_root", handle, rootFolderId: account.folderId, result: "network_error", message: String(netErr), tokenRefreshSucceeded: true });
