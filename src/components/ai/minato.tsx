@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
@@ -179,6 +180,75 @@ export function Minato() {
   // "thinking" the entire time the panel was open, even at rest.
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
+  /* ---------------------------------------------------------------- */
+  /*  Launcher visibility — hidden until needed.                       */
+  /*  Appears when: the panel is open · the page is scrolled to its    */
+  /*  end · the pointer visits the bottom-right corner · it receives   */
+  /*  keyboard focus. Otherwise a quiet edge handle is all you see.    */
+  /* ---------------------------------------------------------------- */
+  const pathname = usePathname();
+  const [atEnd, setAtEnd] = useState(false);
+  const [peek, setPeek] = useState(false);
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasOpen = useRef(open);
+
+  const holdPeek = () => {
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    setPeek(true);
+  };
+  const releasePeek = (ms = 1400) => {
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    peekTimer.current = setTimeout(() => setPeek(false), ms);
+  };
+
+  useEffect(() => {
+    const check = () => {
+      const el = document.documentElement;
+      const scrollable = el.scrollHeight > window.innerHeight + 40;
+      setAtEnd(scrollable && el.scrollHeight - (window.scrollY + window.innerHeight) < 160);
+    };
+    check();
+    const settle = window.setTimeout(check, 450); // after the new route has rendered
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    const ro = new ResizeObserver(check);
+    ro.observe(document.body);
+    return () => {
+      window.clearTimeout(settle);
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+      ro.disconnect();
+    };
+  }, [pathname]);
+
+  // Mouse visiting the bottom-right corner brings the launcher in (like the Dock).
+  useEffect(() => {
+    let inCorner = false;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse") return;
+      const now = window.innerWidth - e.clientX < 170 && window.innerHeight - e.clientY < 110;
+      if (now === inCorner) return;
+      inCorner = now;
+      if (now) holdPeek();
+      else releasePeek();
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, []);
+
+  // After closing the panel, linger briefly so the launcher doesn't vanish under the cursor.
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      holdPeek();
+      releasePeek(1800);
+    }
+    wasOpen.current = open;
+  }, [open]);
+
+  useEffect(() => () => { if (peekTimer.current) clearTimeout(peekTimer.current); }, []);
+
+  const launcherVisible = open || peek || atEnd;
+
   // Greet on open
   useEffect(() => {
     if (open) {
@@ -334,13 +404,50 @@ export function Minato() {
       </AnimatePresence>
 
       {/* Floating companion */}
-      <button
+      {/* Edge handle — the only trace of MINATO while the launcher is tucked away. */}
+      <AnimatePresence>
+        {!launcherVisible && (
+          <motion.button
+            key="minato-handle"
+            type="button"
+            aria-label="Open MINATO — your trading companion"
+            onClick={() => setOpen(true)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="group fixed bottom-28 right-0 z-[89] flex h-14 w-6 items-center justify-end lg:bottom-24"
+          >
+            <span className="block h-9 w-[4px] rounded-l-full bg-ink/20 transition-all duration-200 group-hover:w-[7px] group-hover:bg-gold/60 group-active:w-[9px]" />
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <motion.button
         type="button"
         aria-label={open ? "Close MINATO" : "Open MINATO — your trading companion"}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          holdPeek();
+        }}
+        onPointerEnter={holdPeek}
+        onPointerLeave={() => releasePeek()}
+        onFocus={holdPeek}
+        onBlur={() => releasePeek(300)}
+        initial={false}
+        animate={
+          launcherVisible
+            ? { opacity: 1, y: 0, scale: 1 }
+            : reduce
+              ? { opacity: 0 }
+              : { opacity: 0, y: 18, scale: 0.92 }
+        }
+        whileTap={launcherVisible ? { scale: 0.95 } : undefined}
+        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+        style={{ pointerEvents: launcherVisible ? "auto" : "none" }}
         className={cn(
-          "fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-all duration-200 hover:scale-[1.03] active:scale-95",
+          "fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200",
           open ? "border-gold/50" : "border-line-strong",
         )}
       >
@@ -376,7 +483,7 @@ export function Minato() {
             {state === "idle" ? "sensei" : state}
           </span>
         </span>
-      </button>
+      </motion.button>
 
       {/* Panel */}
       <AnimatePresence>
@@ -469,7 +576,14 @@ export function Minato() {
                         : "rounded-bl-md border border-line bg-raised text-ink",
                     )}
                   >
-                    {renderMinatoText(m.text)}
+                    {m.role === "user" ? (
+                      // The user's own words are plain text — never run through the
+                      // assistant formatter, whose first line forces dark `text-ink`
+                      // (invisible on the dark user bubble).
+                      <p className="whitespace-pre-wrap break-words text-canvas">{m.text}</p>
+                    ) : (
+                      renderMinatoText(m.text)
+                    )}
                   </div>
                 </div>
               ))}

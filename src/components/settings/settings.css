@@ -1,0 +1,269 @@
+/* ==========================================================================
+   Edgebook Settings — inset-grouped list system
+   Modelled on Apple's HIG lists: 44pt rows, hairline separators inset to the
+   text edge, grouped surfaces with no heavy borders, and quiet press states.
+   Uses the app's own theme tokens so light/dark and colours stay in sync.
+   ========================================================================== */
+
+.st-root {
+  --st-radius: 12px;
+  --st-fs: 16px; /* 16px also stops iOS Safari zooming into inputs */
+}
+@media (min-width: 1024px) {
+  .st-root { --st-fs: 15px; }
+}
+@media (min-width: 1280px) {
+  .st-root { --st-fs: 16px; }
+}
+
+.st-large-title {
+  margin: 0 0 20px 4px;
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.024em;
+  color: var(--ink);
+}
+
+.st-section { margin-top: 28px; }
+.st-section:first-child,
+.st-large-title + .st-section,
+.st-pane-title + .st-section { margin-top: 0; }
+
+.st-header {
+  margin: 0 0 7px 16px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.st-footer {
+  margin: 8px 16px 0;
+  font-size: 13px;
+  line-height: 1.42;
+  color: var(--muted);
+}
+.st-footer[data-tone="error"] { color: var(--loss); }
+
+.st-group {
+  overflow: hidden;
+  border-radius: var(--st-radius);
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--line-strong) 70%, transparent);
+}
+
+/* ------------------------------- rows -------------------------------- */
+.st-row {
+  --inset: 16px;
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: var(--st-fs);
+  line-height: 1.3;
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+.st-row[data-icon="true"] { --inset: 58px; }
+.st-row[data-large="true"] { min-height: 76px; --inset: 88px; }
+
+.st-row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: var(--inset);
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--line);
+  transform: scaleY(0.5);
+  transform-origin: bottom;
+  pointer-events: none;
+}
+
+.st-row[data-interactive="true"] {
+  cursor: pointer;
+  transition: background-color 0.4s ease;
+}
+@media (hover: hover) {
+  .st-row[data-interactive="true"]:hover {
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+    transition-duration: 0.12s;
+  }
+}
+.st-row[data-interactive="true"]:active {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  transition-duration: 0s;
+}
+.st-row[data-selected="true"] {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.st-row:disabled { cursor: default; opacity: 0.55; }
+.st-row[data-centered="true"] { justify-content: center; }
+.st-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--gold) 75%, transparent);
+  outline-offset: -2px;
+  border-radius: 0;
+}
+
+.st-title { display: block; }
+.st-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.st-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.st-chev {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-right: -2px;
+  color: var(--faint);
+}
+
+/* ---------------------------- editable rows --------------------------- */
+.st-row[data-field="true"] { min-height: 48px; }
+.st-row[data-field="true"]:focus-within {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.st-field-label { width: 96px; flex: none; color: var(--ink); }
+.st-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: inherit;
+  outline: none;
+  caret-color: var(--gold);
+}
+.st-input::placeholder { color: color-mix(in srgb, var(--muted) 65%, transparent); }
+.st-input[aria-invalid="true"] { color: var(--loss); }
+
+.st-text-btn {
+  min-height: 44px;
+  margin-right: -4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gold);
+  transition: opacity 0.15s ease;
+}
+.st-text-btn:active { opacity: 0.45; }
+
+/* ------------------------------ stepper ------------------------------ */
+.st-stepper {
+  display: inline-flex;
+  height: 32px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.st-stepper button {
+  position: relative;
+  display: grid;
+  width: 46px;
+  place-items: center;
+  color: var(--ink);
+  transition: background-color 0.12s ease, opacity 0.12s ease;
+}
+.st-stepper button::after { /* 44px-tall touch target */
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+}
+.st-stepper button + button::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+.st-stepper button:active:not(:disabled) { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.st-stepper button:disabled { opacity: 0.32; }
+.st-stepper button:focus-visible { outline-offset: -2px; border-radius: 8px; }
+
+/* ------------------------------ nav bits ------------------------------ */
+.st-back {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 2px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 17px;
+  color: var(--gold);
+  transition: opacity 0.15s ease;
+}
+.st-back:active { opacity: 0.45; }
+
+.st-pane-title {
+  margin: 0 0 22px 4px;
+  font-size: 28px;
+  line-height: 1.12;
+  font-weight: 650;
+  letter-spacing: -0.022em;
+  color: var(--ink);
+  outline: none;
+}
+
+/* ------------------------------ action sheet ------------------------------ */
+.st-sheet-btn {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 17px;
+  color: var(--gold);
+  background: transparent;
+  transition: background-color 0.12s ease;
+}
+.st-sheet-btn + .st-sheet-btn::before,
+.st-sheet-head + .st-sheet-btn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--line);
+  transform: scaleY(0.5);
+  transform-origin: top;
+}
+.st-sheet-btn[data-destructive="true"] { color: var(--loss); }
+.st-sheet-btn:active:not(:disabled) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.st-sheet-btn:disabled { opacity: 0.5; }
+.st-sheet-btn:focus-visible { outline-offset: -3px; border-radius: 14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .st-row[data-interactive="true"], .st-text-btn, .st-back, .st-sheet-btn { transition: none; }
+}
