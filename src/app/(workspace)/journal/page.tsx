@@ -1,138 +1,213 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp, persistFailedSince } from "@/lib/store";
-import { setupRules, type JournalEntry } from "@/lib/types";
-import { setupStats, tradesForSetup } from "@/lib/setup-stats";
+import type { JournalEntry } from "@/lib/types";
+import { tradesForSetup } from "@/lib/setup-stats";
 import { formatSignedMoney } from "@/lib/format";
-import { BookOpenIcon, ChevronRightIcon, SearchIcon, SlidersIcon, SortIcon } from "@/components/ui/icons";
-import { Button } from "@/components/ui/button";
-import { Select, TextInput } from "@/components/ui/input";
+import { haptic } from "@/lib/haptics";
 import { EmptyState } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import { EntryCard } from "@/components/journal/entry-card";
+import { toast } from "@/components/ui/toast";
 import { EntryDetailModal } from "@/components/journal/entry-detail-modal";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
 import { SetupDetail } from "@/components/lab/setup-detail";
-import { toast } from "@/components/ui/toast";
+import { Sym } from "@/components/journal/symbols";
+import { ContextMenu, EASE, MenuDivider, MenuItem, SPRING } from "@/components/journal/journal-ui";
+import { JournalToolbar, type Crumb } from "@/components/journal/journal-toolbar";
+import { SidebarContent } from "@/components/journal/journal-sidebar";
+import { FolderList, Timeline, type Money, type RowProps } from "@/components/journal/journal-views";
+import {
+  buildTree, childrenOf, filterEntries, needsReview, parentPath, pathLabel, pct, sortEntries, summarize,
+  type Lens, type Outcome, type SortKey, type ViewMode,
+} from "@/components/journal/journal-model";
 import { cn } from "@/lib/utils";
 
-type Outcome = "all" | "win" | "loss" | "flat";
-type SortKey = "newest" | "oldest" | "best" | "worst" | "rr";
-type View = "trades" | "setups";
+const VIEW_KEY = "edgebook.journal.view";
 
+/**
+ * Journal — a logbook you browse like Files or Photos.
+ *   Browse  → sidebar (Library · Dates · Setups) and a List / Grid / Folders switcher
+ *   Find    → Search, Go to date, filters, sort — all in one quiet toolbar
+ *   Open    → single click, ← → to step through the visible order, right-click for actions
+ *   Review  → the entry sheet; Learn → "Next time" and the setup folders
+ * All data comes from the existing store; this file only owns view state.
+ */
 export default function JournalPage() {
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const playbook = useMemo(() => settings.playbook ?? [], [settings]);
+  const money: Money = useCallback((n) => formatSignedMoney(n, settings.currency), [settings.currency]);
 
-  const [view, setView] = useState<View>("trades");
+  // ── view state ────────────────────────────────────────────────
+  const [view, setViewState] = useState<ViewMode>("list");
+  const [lens, setLens] = useState<Lens>({ kind: "all" });
+  const [path, setPathState] = useState(""); // "" | YYYY | YYYY-MM | YYYY-MM-DD
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<Outcome>("all");
   const [instrument, setInstrument] = useState("all");
   const [sort, setSort] = useState<SortKey>("newest");
+  const dirRef = useRef(1);
 
+  useEffect(() => {
+    try { const v = localStorage.getItem(VIEW_KEY); if (v === "list" || v === "grid" || v === "folders") setViewState(v); } catch { /* ignore */ }
+  }, []);
+  const setView = (v: ViewMode) => { haptic.selection(); setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
+  const setPath = useCallback((next: string) => {
+    setPathState((cur) => { dirRef.current = next.length >= cur.length ? 1 : -1; return next; });
+    setMobileNav(false);
+  }, []);
+
+  // ── overlays ──────────────────────────────────────────────────
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [openSetupId, setOpenSetupId] = useState<string | null>(null);
   const [editing, setEditing] = useState<JournalEntry | null>(null);
   const [deleting, setDeleting] = useState<JournalEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const [menu, setMenu] = useState<{ entry: JournalEntry; x: number; y: number } | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+  // The navigator docks beside the content only when the page itself is wide enough (measured, not viewport-based);
+  // otherwise it is a slide-over sheet, so desktop-in-a-narrow-column, tablet and phone all share one layout.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const el = rootRef.current; if (!el) return;
+    const ro = new ResizeObserver(([e]) => setWide(e.contentRect.width >= 1040));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  // Multi-select + bulk delete
+  // ── selection ─────────────────────────────────────────────────
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const anchorRef = useRef<string | null>(null);
 
-  // Press "/" anywhere on the page to jump into search
+  // ── derived data ──────────────────────────────────────────────
+  const setupInfos = useMemo(() => playbook.map((s) => ({ setup: s, trades: tradesForSetup(s, entries) })), [playbook, entries]);
+  const activeSetup = lens.kind === "setup" ? setupInfos.find((i) => i.setup.id === lens.id) ?? null : null;
+  const effLens: Lens = lens.kind === "setup" && !activeSetup ? { kind: "all" } : lens;
+
+  const base = useMemo(() => {
+    if (effLens.kind === "review") return entries.filter(needsReview);
+    if (effLens.kind === "setup" && activeSetup) { const ids = new Set(activeSetup.trades.map((t) => t.id)); return entries.filter((e) => ids.has(e.id)); }
+    return entries;
+  }, [entries, effLens.kind, activeSetup]);
+
+  const tree = useMemo(() => buildTree(base), [base]);
+  const scoped = useMemo(() => (path ? base.filter((e) => e.date.startsWith(path)) : base), [base, path]);
+  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query }), sort), [scoped, outcome, instrument, query, sort]);
+  const folderNodes = useMemo(() => childrenOf(buildTree(filtered, sort === "oldest"), path), [filtered, sort, path]);
+  const summary = useMemo(() => summarize(filtered), [filtered]);
+  const instruments = useMemo(() => [...new Set(entries.map((e) => e.instrument))].filter((i) => i !== "—").sort(), [entries]);
+  const reviewCount = useMemo(() => entries.filter(needsReview).length, [entries]);
+
+  // If the folder you're in empties out (deleted trades), step back up.
+  useEffect(() => { if (path && !base.some((e) => e.date.startsWith(path))) setPath(parentPath(path)); }, [base, path, setPath]);
+
+  const searching = query.trim().length > 0;
+  const chronological = sort === "newest" || sort === "oldest";
+  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : "Journal";
+  const title = path ? pathLabel(path) : rootTitle;
+  const filtersActive = outcome !== "all" || instrument !== "all" || searching;
+
+  const crumbs: Crumb[] = useMemo(() => {
+    const out: Crumb[] = [{ label: rootTitle, onClick: () => setPath("") }];
+    if (path.length >= 4) out.push({ label: path.slice(0, 4), onClick: () => setPath(path.slice(0, 4)) });
+    if (path.length >= 7) out.push({ label: pathLabel(path.slice(0, 7)).split(" ")[0], onClick: () => setPath(path.slice(0, 7)) });
+    if (path.length === 10) out.push({ label: pathLabel(path), onClick: () => setPath(path) });
+    return out;
+  }, [rootTitle, path, setPath]);
+
+  // ── refs / layout plumbing ────────────────────────────────────
+  const searchRef = useRef<HTMLInputElement>(null);
+  const tbRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [tbH, setTbH] = useState(52);
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const el = tbRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setTbH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = sentinelRef.current; if (!el) return;
+    const io = new IntersectionObserver(([e]) => setScrolled(!e.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  // ── selection helpers ─────────────────────────────────────────
+  const selectedCount = useMemo(() => entries.filter((e) => selectedIds.has(e.id)).length, [entries, selectedIds]);
+  const allInView = filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
+  const exitSelect = useCallback(() => { setSelectMode(false); setSelectedIds(new Set()); anchorRef.current = null; }, []);
+  const toggleAll = () => setSelectedIds((prev) => {
+    const next = new Set(prev);
+    if (filtered.every((e) => next.has(e.id))) filtered.forEach((e) => next.delete(e.id)); else filtered.forEach((e) => next.add(e.id));
+    return next;
+  });
+  const onToggle = useCallback((entry: JournalEntry, shift: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const a = anchorRef.current ? filtered.findIndex((e) => e.id === anchorRef.current) : -1;
+      const b = filtered.findIndex((e) => e.id === entry.id);
+      if (shift && a >= 0 && b >= 0) { const [lo, hi] = a < b ? [a, b] : [b, a]; for (let i = lo; i <= hi; i++) next.add(filtered[i].id); }
+      else if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id);
+      return next;
+    });
+    anchorRef.current = entry.id;
+  }, [filtered]);
+
+  // ── navigation actions ────────────────────────────────────────
+  const goUp = () => { haptic.selection(); setPath(parentPath(path)); };
+  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); };
+  const jumpToDate = (date: string) => {
+    if (!date || entries.length === 0) return;
+    const all = [...new Set(entries.map((e) => e.date))].sort();
+    const target = [...all].reverse().find((d) => d <= date) ?? all[0];
+    setLens({ kind: "all" }); clearFilters(); setSort("newest");
+    setPath(view === "folders" ? target : target.slice(0, 7));
+    haptic.selection();
+    if (view !== "folders") requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`day-${target}`)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+  };
+  const toggleSidebar = () => { if (wide) setCollapsed((c) => !c); else setMobileNav(true); };
+
+  // ── keyboard ──────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable;
-      if (e.key === "/" && !typing) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
+      const t = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable;
+      if (typing) return;
+      if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
+      else if (e.key === "Escape" && selectMode && !viewingId) exitSelect();
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selectMode) { e.preventDefault(); setSelectedIds(new Set(filtered.map((x) => x.id))); }
+      else if (e.key === "Backspace" && path && !viewingId && !editing && !deleting) { e.preventDefault(); setPath(parentPath(path)); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selectMode, viewingId, editing, deleting, path, filtered, exitSelect, setPath]);
 
-  const instruments = useMemo(
-    () => [...new Set(entries.map((e) => e.instrument))].filter((i) => i !== "—").sort(),
-    [entries],
-  );
-
-  const filtered = useMemo(() => {
-    let list = entries;
-    if (outcome === "win") list = list.filter((e) => e.pnl > 0);
-    else if (outcome === "loss") list = list.filter((e) => e.pnl < 0);
-    else if (outcome === "flat") list = list.filter((e) => e.pnl === 0);
-
-    if (instrument !== "all") list = list.filter((e) => e.instrument === instrument);
-
-    const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter((e) =>
-        [e.notes, e.instrument, e.setup].some((field) => field.toLowerCase().includes(q)),
-      );
-    }
-
-    return [...list].sort((a, b) => {
-      switch (sort) {
-        case "oldest":
-          return a.date.localeCompare(b.date);
-        case "best":
-          return b.pnl - a.pnl;
-        case "worst":
-          return a.pnl - b.pnl;
-        case "rr": {
-          const ra = a.rr ?? -Infinity;
-          const rb = b.rr ?? -Infinity;
-          return rb - ra || b.date.localeCompare(a.date);
-        }
-        default:
-          return b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
-      }
-    });
-  }, [entries, outcome, instrument, query, sort]);
-
-  const filteredPnl = useMemo(() => filtered.reduce((s, e) => s + e.pnl, 0), [filtered]);
+  // ── review sheet ──────────────────────────────────────────────
   const viewing = entries.find((e) => e.id === viewingId) ?? null;
+  const viewIndex = viewingId ? filtered.findIndex((e) => e.id === viewingId) : -1;
+  const stepView = (d: 1 | -1) => { const n = filtered[viewIndex + d]; if (n) { haptic.selection(); setViewingId(n.id); } };
+  const onOpen = useCallback((e: JournalEntry) => setViewingId(e.id), []);
+  const onContext = useCallback((entry: JournalEntry, x: number, y: number) => setMenu({ entry, x, y }), []);
 
-  // Setup folders — one canonical playbook entity, stats computed per setup.
-  const setupInfos = useMemo(
-    () =>
-      playbook.map((s) => {
-        const trades = tradesForSetup(s, entries);
-        return { setup: s, trades, rules: setupRules(s), stats: setupStats(trades) };
-      }),
-    [playbook, entries],
-  );
-  const openSetup = openSetupId ? setupInfos.find((i) => i.setup.id === openSetupId) : null;
-
-  // Only ever act on selected trades that still exist.
-  const selectedCount = useMemo(() => entries.filter((e) => selectedIds.has(e.id)).length, [entries, selectedIds]);
-  const allInViewSelected = filtered.length > 0 && filtered.every((e) => selectedIds.has(e.id));
-  const toggleSelected = (entry: JournalEntry) =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(entry.id)) next.delete(entry.id);
-      else next.add(entry.id);
-      return next;
-    });
-  const toggleAllInView = () =>
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (filtered.every((e) => next.has(e.id))) filtered.forEach((e) => next.delete(e.id));
-      else filtered.forEach((e) => next.add(e.id));
-      return next;
-    });
-  const exitSelectMode = () => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    const t0 = Date.now();
+    try {
+      await useApp.getState().deleteEntry(deleting.id);
+      if (!persistFailedSince(t0)) toast.success("Entry deleted");
+      setViewingId(null); setDeleting(null);
+    } catch { toast.error("Could not delete the entry"); } finally { setDeleteBusy(false); }
   };
   const confirmBulkDelete = async () => {
     const ids = entries.filter((e) => selectedIds.has(e.id)).map((e) => e.id);
@@ -142,309 +217,167 @@ export default function JournalPage() {
     try {
       const removed = await useApp.getState().deleteEntries(ids);
       if (!persistFailedSince(t0)) toast.success(`${removed} ${removed === 1 ? "entry" : "entries"} deleted`);
-      setBulkOpen(false);
-      exitSelectMode();
-    } catch {
-      toast.error("Could not delete the selected entries");
-    } finally {
-      setBulkBusy(false);
-    }
+      setBulkOpen(false); exitSelect();
+    } catch { toast.error("Could not delete the selected entries"); } finally { setBulkBusy(false); }
   };
 
-  const confirmDelete = async () => {
-    if (!deleting) return;
-    setDeleteBusy(true);
-    const t0 = Date.now();
-    try {
-      await useApp.getState().deleteEntry(deleting.id);
-      if (!persistFailedSince(t0)) toast.success("Entry deleted");
-      setViewingId(null);
-      setDeleting(null);
-    } catch {
-      toast.error("Could not delete the entry");
-    } finally {
-      setDeleteBusy(false);
-    }
-  };
+  const rowProps: RowProps = { money, selectMode, selectedIds, onOpen, onToggle, onContext };
+  const sidebar = (
+    <SidebarContent
+      total={entries.length} review={reviewCount} tree={tree} path={path} lens={effLens}
+      setups={setupInfos.map((i) => ({ id: i.setup.id, name: i.setup.name, count: i.trades.length }))}
+      onLens={(l) => { setLens(l); }} onPath={setPath}
+    />
+  );
+
+  // ── content ───────────────────────────────────────────────────
+  const empty = entries.length === 0;
+  const showFolders = view === "folders" && !searching && path.length < 10;
+  let content: React.ReactNode;
+  if (empty) {
+    content = <EmptyState icon={<Sym name="book" className="h-7 w-7" />} title="Your journal awaits its first page" body="Log today's session — result, R multiple, screenshots — and the analytics start building themselves." />;
+  } else if (filtered.length === 0) {
+    content = (
+      <EmptyState
+        icon={<Sym name="search" className="h-6 w-6" />}
+        title={effLens.kind === "review" && !filtersActive ? "All caught up" : "Nothing matches"}
+        body={effLens.kind === "review" && !filtersActive ? "Every trade in this view has been reviewed." : "Try another word, or clear the filters."}
+        action={filtersActive ? <Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
+      />
+    );
+  } else if (showFolders) {
+    content = <FolderList nodes={folderNodes} money={money} onOpen={(k) => { haptic.selection(); setPath(k); }} />;
+  } else {
+    content = <Timeline entries={filtered} layout={view === "grid" ? "grid" : "list"} grouped={chronological && !searching} p={rowProps} />;
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold">Journal</h1>
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
-            {entries.length} {entries.length === 1 ? "entry" : "entries"} recorded
-            {filtered.length !== entries.length && (
-              <>
-                <span className="text-faint">·</span>
-                <span className="text-muted">
-                  {filtered.length} matching ·{" "}
-                  <span className={formatSignedMoney(filteredPnl).startsWith("+") ? "text-profit" : "text-loss"}>
-                    {formatSignedMoney(filteredPnl, settings.currency)}
-                  </span>{" "}
-                  in view
-                </span>
-              </>
-            )}
-          </p>
-        </div>
-        {view === "trades" && entries.length > 0 && (
-          <Button variant={selectMode ? "subtle" : "outline"} size="sm" onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}>
-            {selectMode ? "Cancel selection" : "Select"}
-          </Button>
+    <div ref={rootRef} className="flex min-h-[calc(100dvh-4rem)]" style={{ "--tb": `${tbH}px` } as CSSProperties}>
+      {/* Sidebar — desktop */}
+      {wide && (
+        <aside className={cn("shrink-0 overflow-hidden transition-[width] duration-300 ease-[cubic-bezier(.32,.72,0,1)]", collapsed ? "w-0" : "w-[236px]")} aria-hidden={collapsed}>
+          <div className="sticky top-0 h-[100dvh] w-[236px] overflow-y-auto pr-3 pt-1">{sidebar}</div>
+        </aside>
+      )}
+
+      {/* Sidebar — small screens */}
+      <AnimatePresence>
+        {mobileNav && !wide && (
+          <div className="fixed inset-0 z-50">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNav(false)} className="absolute inset-0 bg-black/30" />
+            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ duration: 0.35, ease: EASE }} className="absolute inset-y-0 left-0 w-[280px] overflow-y-auto bg-surface/95 pt-4 shadow-2xl backdrop-blur-2xl">
+              {sidebar}
+            </motion.div>
+          </div>
         )}
-      </header>
+      </AnimatePresence>
+
+      <main className="min-w-0 flex-1 pb-28">
+        <div ref={sentinelRef} className="h-px" aria-hidden />
+        <div ref={tbRef} className={cn("sticky top-0 z-30 border-b bg-canvas/80 backdrop-blur-xl transition-colors duration-200", scrolled ? "border-line-soft" : "border-transparent")}>
+          <JournalToolbar
+            view={view} onView={setView} crumbs={crumbs} onUp={path ? goUp : undefined} onSidebar={toggleSidebar}
+            query={query} onQuery={setQuery} searchRef={searchRef}
+            outcome={outcome} onOutcome={setOutcome} instrument={instrument} instruments={instruments} onInstrument={setInstrument}
+            sort={sort} onSort={setSort} onJump={jumpToDate}
+            selectMode={selectMode} onSelectMode={() => (selectMode ? exitSelect() : setSelectMode(true))} canSelect={!empty && !showFolders}
+          />
+        </div>
+
+        {!empty && (
+          <header className="pb-5 pt-5 sm:pt-7">
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="font-display text-[32px] font-semibold tracking-[-0.03em] text-ink sm:text-[36px]">{searching ? "Search" : title}</h1>
+              {activeSetup && !path && (
+                <Button variant="outline" size="sm" onClick={() => setOpenSetupId(activeSetup.setup.id)}>Setup details</Button>
+              )}
+            </div>
+            <p className="mt-1 text-[14.5px] text-muted">
+              {summary.count === 0 ? "No trades" : (
+                <>
+                  <span className={cn("font-semibold tabular-nums", summary.net > 0 ? "text-profit" : summary.net < 0 ? "text-loss" : "text-ink")}>{money(summary.net)}</span>
+                  {` across ${summary.count} ${summary.count === 1 ? "trade" : "trades"}. ${pct(summary.wins, summary.count)} won${summary.avgR != null ? `, ${summary.avgR > 0 ? "+" : ""}${summary.avgR.toFixed(2)}R on average` : ""}.`}
+                </>
+              )}
+              {searching && path && (
+                <> Searching in {pathLabel(path)}. <button type="button" onClick={() => setPath("")} className="font-medium text-gold hover:opacity-75">Search all</button></>
+              )}
+              {filtersActive && !searching && <> <button type="button" onClick={clearFilters} className="font-medium text-gold hover:opacity-75">Clear filters</button></>}
+            </p>
+          </header>
+        )}
+
+        <AnimatePresence mode="wait" initial={false} custom={dirRef.current}>
+          <motion.div
+            key={`${view}:${showFolders ? path : "flat"}:${effLens.kind}`}
+            custom={dirRef.current}
+            variants={{ in: (d: number) => ({ opacity: 0, x: showFolders ? d * 28 : 0, y: showFolders ? 0 : 6 }), on: { opacity: 1, x: 0, y: 0 }, out: (d: number) => ({ opacity: 0, x: showFolders ? -d * 20 : 0, transition: { duration: 0.12 } }) }}
+            initial="in" animate="on" exit="out" transition={SPRING}
+            className=""
+          >
+            {content}
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
       {/* Selection bar */}
-      {view === "trades" && selectMode && (
-        <div className="panel sticky top-2 z-20 flex flex-wrap items-center justify-between gap-3 border-gold/40 p-3">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <button onClick={toggleAllInView} className="rounded-lg border border-line bg-raised px-3 py-1.5 text-xs font-bold text-ink hover:border-gold-strong">
-              {allInViewSelected ? "Clear selection" : `Select all ${filtered.length} in view`}
+      <AnimatePresence>
+        {selectMode && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }} transition={SPRING}
+            className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-[16px] bg-surface/90 p-1.5 pl-4 shadow-[0_12px_40px_-8px_rgb(0_0_0/0.3),0_0_0_0.5px_rgb(0_0_0/0.12)] backdrop-blur-2xl"
+          >
+            <p className="mr-2 text-[14px] text-muted"><b className="font-semibold text-ink">{selectedCount}</b> selected</p>
+            <button type="button" onClick={toggleAll} className="h-8 rounded-[10px] px-3 text-[14px] font-medium text-gold transition-colors hover:bg-gold/10 active:scale-[0.97]">{allInView ? "Deselect all" : "Select all"}</button>
+            <button type="button" disabled={selectedCount === 0} onClick={() => setBulkOpen(true)} className="flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-[14px] font-medium text-loss transition-[background-color,transform] hover:bg-loss/10 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-30">
+              <Sym name="trash" className="h-4 w-4" />Delete
             </button>
-            <span className="text-muted">
-              <b className="text-ink">{selectedCount}</b> selected
-            </span>
-          </div>
-          <Button variant="danger" size="sm" disabled={selectedCount === 0} onClick={() => setBulkOpen(true)}>
-            Delete selected{selectedCount > 0 ? ` (${selectedCount})` : ""}
-          </Button>
-        </div>
-      )}
-
-      {/* View tabs — trades or setup folders */}
-      <div
-        role="tablist"
-        aria-label="Journal view"
-        className="grid max-w-[280px] grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1"
-      >
-        {([
-          ["trades", "Trades"],
-          ["setups", "Setups"],
-        ] as const).map(([id, label]) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={view === id}
-            onClick={() => setView(id)}
-            className={cn(
-              "rounded-lg py-1.5 text-sm font-medium transition-colors",
-              view === id ? "border border-line-strong bg-raised text-ink shadow-sm" : "text-faint hover:text-muted",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Toolbar */}
-      {view === "trades" && (
-      <div className="panel flex flex-col gap-3 p-3.5 md:flex-row md:items-center">
-        <div className="relative flex-1">
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-          <TextInput
-            ref={searchRef}
-            aria-label="Search journal"
-            placeholder="Search notes, instruments, setups…"
-            className="!pl-9"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-line bg-raised px-1.5 py-0.5 font-mono text-[10px] text-faint md:block">
-            /
-          </kbd>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 md:flex md:w-auto">
-          <Select aria-label="Filter by outcome" value={outcome} onChange={(e) => setOutcome(e.target.value as Outcome)}>
-            <option value="all">All results</option>
-            <option value="win">Wins</option>
-            <option value="loss">Losses</option>
-            <option value="flat">Breakeven</option>
-          </Select>
-
-          <Select
-            aria-label="Filter by instrument"
-            value={instrument}
-            onChange={(e) => setInstrument(e.target.value)}
-            disabled={instruments.length === 0}
-          >
-            <option value="all">Instruments</option>
-            {instruments.map((i) => (
-              <option key={i} value={i}>
-                {i}
-              </option>
-            ))}
-          </Select>
-
-          <Select aria-label="Sort entries" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="best">Best P&L</option>
-            <option value="worst">Worst P&L</option>
-            <option value="rr">Highest R</option>
-          </Select>
-        </div>
-
-        {(query || outcome !== "all" || instrument !== "all") && (
-          <button
-            onClick={() => {
-              setQuery("");
-              setOutcome("all");
-              setInstrument("all");
-            }}
-            className="flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-faint transition-colors hover:text-ink"
-          >
-            <SlidersIcon className="h-3.5 w-3.5" />
-            Reset
-          </button>
-        )}
-      </div>
-      )}
-
-      {/* Setup folders */}
-      {view === "setups" && (
-        setupInfos.length === 0 ? (
-          <EmptyState
-            icon={<BookOpenIcon className="h-7 w-7" />}
-            title="No setups yet"
-            body="Define a setup in the Trading Lab, then tag your trades with it — performance builds itself here."
-          />
-        ) : (
-          <motion.div layout className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {setupInfos.map((info) => {
-              const st = info.stats;
-              return (
-                <motion.button
-                  key={info.setup.id}
-                  layout
-                  type="button"
-                  onClick={() => setOpenSetupId(info.setup.id)}
-                  whileHover={{ y: -3 }}
-                  className="group rounded-control border border-line bg-raised/60 p-4 text-left panel-hover"
-                  aria-label={`Open setup ${info.setup.name}`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink">
-                      <span aria-hidden className="text-base">📁</span>
-                      <span className="truncate">{info.setup.name}</span>
-                    </p>
-                    <ChevronRightIcon className="mt-1 h-4 w-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-gold" />
-                  </div>
-                  <p className="num mt-2 text-[11px] text-muted">
-                    {info.rules.length} {info.rules.length === 1 ? "rule" : "rules"} · {st.trades} {st.trades === 1 ? "trade" : "trades"}
-                  </p>
-                  <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line-soft pt-2.5 text-[11px]">
-                    <span className={cn("num font-semibold", st.totalPnl > 0 ? "text-profit" : st.totalPnl < 0 ? "text-loss" : "text-faint")}>
-                      {st.trades > 0 ? formatSignedMoney(st.totalPnl, settings.currency) : "—"}
-                    </span>
-                    <span className="text-faint">P&L</span>
-                    <span className="num ml-auto font-semibold text-ink">
-                      {st.winRate != null ? `${Math.round(st.winRate * 100)}%` : "—"}
-                    </span>
-                    <span className="text-faint">win rate</span>
-                  </div>
-                </motion.button>
-              );
-            })}
+            <button type="button" onClick={exitSelect} aria-label="Done selecting" className="grid h-8 w-8 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[0.06]"><Sym name="xmark" className="h-4 w-4" /></button>
           </motion.div>
-        )
-      )}
+        )}
+      </AnimatePresence>
 
-      {/* Trade cards */}
-      {view === "trades" && (entries.length === 0 ? (
-        <EmptyState
-          icon={<BookOpenIcon className="h-7 w-7" />}
-          title="Your journal awaits its first page"
-          body="Log today's session — result, R multiple, screenshots — and the analytics start building themselves."
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<SearchIcon className="h-6 w-6" />}
-          title="Nothing matches those filters"
-          body="Try a different search term or reset the filters."
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setQuery("");
-                setOutcome("all");
-                setInstrument("all");
-              }}
-            >
-              Clear filters
-            </Button>
-          }
-        />
-      ) : (
-        <motion.div layout className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <AnimatePresence mode="popLayout">
-            {filtered.map((entry, i) => (
-              <EntryCard
-                key={entry.id}
-                entry={entry}
-                index={i}
-                onOpen={(e) => setViewingId(e.id)}
-                selectMode={selectMode}
-                selected={selectedIds.has(entry.id)}
-                onToggle={toggleSelected}
-              />
-            ))}
-          </AnimatePresence>
-        </motion.div>
-      ))}
+      {/* Context menu */}
+      <AnimatePresence>
+        {menu && (
+          <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+            <MenuItem icon="book" onClick={() => { setViewingId(menu.entry.id); setMenu(null); }}>Open</MenuItem>
+            <MenuItem icon="pencil" onClick={() => { setEditing(menu.entry); setMenu(null); }}>Edit entry</MenuItem>
+            <MenuItem icon="check" onClick={() => { setSelectMode(true); setSelectedIds(new Set([menu.entry.id])); anchorRef.current = menu.entry.id; setMenu(null); }}>Select</MenuItem>
+            <MenuDivider />
+            <MenuItem icon="trash" danger onClick={() => { setDeleting(menu.entry); setMenu(null); }}>Delete</MenuItem>
+          </ContextMenu>
+        )}
+      </AnimatePresence>
 
-      {/* Setup detail (folder view) */}
-      {openSetup && (
-        <SetupDetail
-          key={`${openSetup.setup.id}:${openSetup.setup.updatedAt}`}
-          setup={openSetup.setup}
-          trades={openSetup.trades}
-          onClose={() => setOpenSetupId(null)}
-          onEdit={() => {
-            setOpenSetupId(null);
-            toast.info("Edit this setup in the Trading Lab", "The Lab has the full setup editor.");
-          }}
-          onDelete={() => {
-            setOpenSetupId(null);
-            void useApp.getState().deleteSetup(openSetup.setup.id);
-          }}
-        />
-      )}
+      {/* Setup details */}
+      {openSetupId && (() => {
+        const info = setupInfos.find((i) => i.setup.id === openSetupId);
+        if (!info) return null;
+        return (
+          <SetupDetail
+            key={`${info.setup.id}:${info.setup.updatedAt}`}
+            setup={info.setup} trades={info.trades} onClose={() => setOpenSetupId(null)}
+            onEdit={() => { setOpenSetupId(null); toast.info("Edit this setup in the Trading Lab", "The Lab has the full setup editor."); }}
+            onDelete={() => { setOpenSetupId(null); setLens({ kind: "all" }); void useApp.getState().deleteSetup(info.setup.id); }}
+          />
+        );
+      })()}
 
-      {/* Overlays */}
       <EntryDetailModal
-        open={!!viewing && !editing && !deleting}
-        onClose={() => setViewingId(null)}
-        entry={viewing}
-        onEdit={(e) => setEditing(e)}
-        onDelete={(e) => setDeleting(e)}
+        open={!!viewing && !editing && !deleting} onClose={() => setViewingId(null)} entry={viewing}
+        position={viewIndex >= 0 ? { index: viewIndex, total: filtered.length } : undefined} onStep={stepView}
+        onEdit={(e) => setEditing(e)} onDelete={(e) => setDeleting(e)}
       />
-
-      {editing && (
-        <EntryFormModal open onClose={() => setEditing(null)} entry={editing} />
-      )}
+      {editing && <EntryFormModal open onClose={() => setEditing(null)} entry={editing} />}
 
       <ConfirmDialog
-        open={!!deleting}
-        onClose={() => setDeleting(null)}
-        onConfirm={() => void confirmDelete()}
-        busy={deleteBusy}
+        open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => void confirmDelete()} busy={deleteBusy}
         title="Delete this entry?"
-        body={
-          deleting
-            ? `${deleting.date} · ${formatSignedMoney(deleting.pnl, settings.currency)} will be permanently removed along with its screenshots.`
-            : ""
-        }
+        body={deleting ? `${deleting.date} · ${formatSignedMoney(deleting.pnl, settings.currency)} will be permanently removed along with its screenshots.` : ""}
       />
-
       <ConfirmDialog
-        open={bulkOpen}
-        onClose={() => setBulkOpen(false)}
-        onConfirm={() => void confirmBulkDelete()}
-        busy={bulkBusy}
+        open={bulkOpen} onClose={() => setBulkOpen(false)} onConfirm={() => void confirmBulkDelete()} busy={bulkBusy}
         title={`Delete ${selectedCount} ${selectedCount === 1 ? "entry" : "entries"}?`}
         body="These trades are permanently removed along with their screenshots, reviews and Practise history. This cannot be undone."
         confirmLabel={`Delete ${selectedCount}`}

@@ -1,18 +1,32 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import type { JournalEntry } from "@/lib/types";
-import { formatSignedMoney, monthName, relativeDayLabel, weekdayShort } from "@/lib/format";
+import { reviewStatusOf } from "@/lib/types";
+import { formatDateMedium, formatSignedMoney } from "@/lib/format";
 import { useImageUrls } from "@/lib/hooks";
-import { Pill } from "@/components/ui/misc";
-import {
-  ImageIcon,
-  TrendingDownIcon,
-  TrendingUpIcon,
-} from "@/components/ui/icons";
+import { CheckIcon, ImageIcon, TrendingDownIcon, TrendingUpIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
-import { EASE } from "@/components/landing/reveal";
 
+const SPRING = { type: "spring", stiffness: 420, damping: 34 } as const;
+
+/** Review state as a quiet dot — never a badge. */
+export function ReviewDot({ entry }: { entry: JournalEntry }) {
+  const s = entry.reviewStatus ?? reviewStatusOf(entry);
+  const map = {
+    reviewed: ["bg-profit", "Reviewed"],
+    in_progress: ["bg-gold-strong", "Review in progress"],
+    incomplete: ["bg-gold-strong", "Review incomplete"],
+    not_reviewed: ["bg-line-strong", "Not reviewed"],
+  } as const;
+  const [cls, label] = map[s] ?? map.not_reviewed;
+  return <span role="img" aria-label={label} title={label} className={cn("h-2 w-2 shrink-0 rounded-full", cls)} />;
+}
+
+/**
+ * One trade, one line of reading: thumbnail · what it was · how it ended.
+ * Rendered as a list row (not a tile) so a month of trades scans like a logbook.
+ */
 export function EntryCard({
   entry,
   index = 0,
@@ -20,35 +34,35 @@ export function EntryCard({
   selectMode = false,
   selected = false,
   onToggle,
+  showDate = false,
 }: {
   entry: JournalEntry;
   index?: number;
   onOpen: (entry: JournalEntry) => void;
-  /** Multi-select mode: clicking toggles selection instead of opening. */
   selectMode?: boolean;
   selected?: boolean;
   onToggle?: (entry: JournalEntry) => void;
+  /** Ranked (non-chronological) lists need the date on the row itself. */
+  showDate?: boolean;
 }) {
+  const reduce = useReducedMotion();
   const activate = () => (selectMode && onToggle ? onToggle(entry) : onOpen(entry));
-  const urls = useImageUrls(entry.images.map((i) => i.id));
-  const rel = relativeDayLabel(entry.date);
-  const d = new Date(entry.date + "T00:00:00");
-  const dayNum = d.getDate();
-  const month = monthName(d.getMonth()).slice(0, 3);
-  const wd = weekdayShort(entry.date);
+  const urls = useImageUrls(entry.images.slice(0, 1).map((i) => i.id));
+  const thumb = entry.images[0] ? urls[entry.images[0].id] : null;
+  const tone = entry.pnl > 0 ? "text-profit" : entry.pnl < 0 ? "text-loss" : "text-muted";
+  const Dir = entry.direction === "short" ? TrendingDownIcon : TrendingUpIcon;
+  const title = [entry.instrument !== "—" ? entry.instrument : null, entry.direction, entry.tradeNumber ? `Trade ${entry.tradeNumber}` : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <motion.article
-      layout
-      initial={{ opacity: 0, y: 22 }}
+      layout="position"
+      initial={reduce ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ duration: 0.45, delay: Math.min(index * 0.05, 0.3), ease: EASE }}
-      whileHover={{ y: -4 }}
-      className={cn(
-        "panel panel-hover group relative flex cursor-pointer flex-col overflow-hidden",
-        selectMode && selected && "!border-gold-strong ring-2 ring-gold-strong/60",
-      )}
+      exit={{ opacity: 0 }}
+      transition={{ ...SPRING, delay: Math.min(index * 0.025, 0.2) }}
+      whileTap={reduce ? undefined : { scale: 0.985 }}
       onClick={activate}
       role="button"
       tabIndex={0}
@@ -59,143 +73,61 @@ export function EntryCard({
         }
       }}
       aria-pressed={selectMode ? selected : undefined}
-      aria-label={`Journal entry ${entry.date}, ${formatSignedMoney(entry.pnl)}`}
+      aria-label={`Trade ${entry.date}, ${formatSignedMoney(entry.pnl)}`}
+      className={cn(
+        "group flex cursor-pointer items-center gap-3.5 rounded-[18px] border border-line bg-surface p-2.5 pr-4 transition-[border-color,box-shadow,background-color] duration-200",
+        "hover:border-line-strong hover:shadow-[0_10px_26px_-16px_rgb(48_40_24/0.3)] dark:hover:shadow-[0_12px_28px_-16px_rgb(0_0_0/0.6)]",
+        selectMode && selected && "!border-gold-strong bg-gold/[0.05]",
+      )}
     >
-      {/* Visual */}
-      <div className={cn("relative bg-canvas", entry.images.length === 2 ? "grid grid-cols-2 gap-px" : "")}>
-        {entry.images.length > 0 ? (
-          entry.images.map((img, i) => {
-            const url = urls[img.id];
-            return (
-              <div
-                key={img.id}
-                className={cn(
-                  "relative aspect-[16/9] overflow-hidden",
-                  i === 1 && entry.images.length === 2 && "border-l border-line",
-                )}
-              >
-                {url ? (
-                  <img
-                    src={url}
-                    alt=""
-                    loading="lazy"
-                    draggable={false}
-                    className="h-full w-full object-cover opacity-90 transition-all duration-500 group-hover:scale-[1.04] group-hover:opacity-100"
-                  />
-                ) : (
-                  <div className="h-full w-full animate-pulse bg-raised" />
-                )}
-              </div>
-            );
-          })
-        ) : (
-          <div className="dot-backdrop relative flex aspect-[16/7] items-center justify-center">
-              <span
-                className={cn(
-                  "kpi text-3xl transition-transform duration-500 group-hover:scale-110",
-                  entry.pnl >= 0 ? "text-profit/25" : "text-loss/25",
-                )}
-              >
-              {entry.pnl > 0 ? "+" : ""}
-              {Math.abs(Math.round(entry.pnl))}
-            </span>
-          </div>
-        )}
-
-        {selectMode && (
-          <span
-            aria-hidden
-            className={cn(
-              "absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-md border-2 text-xs font-bold transition-colors",
-              selected ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line-strong bg-canvas/80 text-transparent",
-            )}
-          >
-            ✓
-          </span>
-        )}
-
-        {/* P&L badge */}
+      {selectMode && (
         <span
+          aria-hidden
           className={cn(
-            "num absolute left-3 top-3 rounded-lg border px-2 py-1 text-xs backdrop-blur-md",
-            entry.pnl > 0
-              ? "border-profit/40 bg-canvas/80 text-profit"
-              : entry.pnl < 0
-                ? "border-loss/40 bg-canvas/80 text-loss"
-                : "border-line bg-canvas/70 text-muted",
+            "ml-1 grid h-5 w-5 shrink-0 place-items-center rounded-full border transition-colors",
+            selected ? "border-gold-strong bg-gold-strong text-on-gold" : "border-line-strong text-transparent",
           )}
         >
-          {formatSignedMoney(entry.pnl)}
+          <CheckIcon className="h-3 w-3" />
         </span>
+      )}
+
+      <div className="relative h-[54px] w-[76px] shrink-0 overflow-hidden rounded-[12px] border border-line-soft bg-canvas">
+        {thumb ? (
+          <img src={thumb} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]" />
+        ) : entry.images.length > 0 ? (
+          <div className="h-full w-full animate-pulse bg-raised" />
+        ) : (
+          <div className={cn("grid h-full w-full place-items-center", entry.pnl >= 0 ? "bg-profit/[0.07] text-profit/70" : "bg-loss/[0.07] text-loss/70")}>
+            <Dir className="h-5 w-5" />
+          </div>
+        )}
+        {entry.images.length > 1 && (
+          <span className="absolute bottom-1 right-1 flex items-center gap-0.5 rounded-full bg-black/55 px-1.5 py-px text-[10px] font-medium text-white backdrop-blur">
+            <ImageIcon className="h-2.5 w-2.5" />
+            {entry.images.length}
+          </span>
+        )}
       </div>
 
-      {/* Body */}
-      <div className="flex flex-1 flex-col p-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-lg font-bold leading-none text-ink">{dayNum}</span>
-            <span className="text-xs font-medium uppercase tracking-wide text-faint">{month}</span>
-            <span className="text-xs text-faint">·</span>
-            <span className="text-xs text-muted">{wd}</span>
-            {rel && (
-              <span className="rounded-full border border-gold/25 bg-gold/[0.07] px-1.5 py-0.5 text-[10px] font-semibold text-gold">
-                {rel}
-              </span>
-            )}
-          </div>
-          {entry.rr != null && (
-              <span
-                className={cn(
-                  "num text-xs",
-                  entry.rr > 0 ? "text-info" : "text-faint",
-                )}
-              >
-              {entry.rr > 0 ? "+" : ""}
-              {entry.rr}R
-            </span>
-          )}
-        </div>
-
-        {(entry.instrument !== "—" || entry.setup || entry.direction) && (
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {entry.instrument !== "—" && (
-              <Pill className="font-mono !py-0.5 !text-[10px] !text-ink">{entry.instrument}</Pill>
-            )}
-            {entry.direction && (
-              <Pill
-                className={cn(
-                  "!py-0.5 !text-[10px]",
-                  entry.direction === "long"
-                    ? "!border-profit/25 !text-profit"
-                    : "!border-loss/25 !text-loss",
-                )}
-              >
-                {entry.direction === "long" ? (
-                  <TrendingUpIcon className="h-3 w-3" />
-                ) : (
-                  <TrendingDownIcon className="h-3 w-3" />
-                )}
-                {entry.direction}
-              </Pill>
-            )}
-            {entry.setup && (
-              <Pill className="max-w-full truncate !border-gold/20 !py-0.5 !text-[10px] !text-gold">
-                {entry.setup}
-              </Pill>
-            )}
-          </div>
-        )}
-
-        <p className="mt-2.5 line-clamp-2 min-h-10 flex-1 text-[13px] leading-relaxed text-muted">
-          {entry.notes || <span className="italic text-faint">No notes for this session.</span>}
-        </p>
-
-        {entry.images.length > 0 && (
-          <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-faint">
-            <ImageIcon className="h-3.5 w-3.5" />
-            {entry.images.length} screenshot{entry.images.length > 1 ? "s" : ""}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <ReviewDot entry={entry} />
+          <p className="truncate text-[14.5px] font-semibold capitalize tracking-[-0.01em] text-ink">
+            {title || "Trade"}
           </p>
-        )}
+          {showDate && <span className="shrink-0 text-[12px] text-faint">{formatDateMedium(entry.date)}</span>}
+        </div>
+        <p className="mt-0.5 truncate text-[13px] text-muted">
+          {entry.setup ? <span className="text-gold">{entry.setup}</span> : null}
+          {entry.setup && entry.notes ? <span className="text-faint"> · </span> : null}
+          {entry.notes || (!entry.setup ? <span className="text-faint">No notes</span> : null)}
+        </p>
+      </div>
+
+      <div className="shrink-0 text-right">
+        <p className={cn("kpi text-[16px] tabular-nums", tone)}>{formatSignedMoney(entry.pnl)}</p>
+        {entry.rr != null && <p className="num mt-0.5 text-[12px] text-faint">{entry.rr > 0 ? "+" : ""}{entry.rr}R</p>}
       </div>
     </motion.article>
   );
