@@ -7,7 +7,7 @@ import { MAX_IMAGES_PER_ENTRY } from "@/lib/types";
 import { ImageError, processImageFile } from "@/lib/images";
 import { useImageUrls } from "@/lib/hooks";
 import { bytesToSize } from "@/lib/format";
-import { toast } from "@/components/ui/toast";
+import { toast, useToasts } from "@/components/ui/toast";
 import { EyeIcon, ImageIcon, PlusIcon, XIcon } from "@/components/ui/icons";
 import { Spinner } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
@@ -227,7 +227,33 @@ export function ImageUploader({
     return () => document.removeEventListener("paste", onPaste);
   }, [uploaderId]);
 
-  const removeAt = (id: string) => onChange(items.filter((i) => i.meta.id !== id));
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  /** Apple-style delete: no confirmation dialog — the tile shrinks away and an Undo is offered instead. */
+  const removeAt = (id: string) => {
+    const index = itemsRef.current.findIndex((i) => i.meta.id === id);
+    if (index < 0 || removingId) return;
+    const removed = itemsRef.current[index];
+    setRemovingId(id);
+    haptic.selection();
+    window.setTimeout(() => {
+      const next = itemsRef.current.filter((i) => i.meta.id !== id);
+      itemsRef.current = next;
+      onChangeRef.current(next);
+      setRemovingId(null);
+      useToasts.getState().push("info", "Screenshot removed", undefined, {
+        label: "Undo",
+        onClick: () => {
+          if (itemsRef.current.some((i) => i.meta.id === id) || itemsRef.current.length >= max) return;
+          const restored = [...itemsRef.current];
+          restored.splice(Math.min(index, restored.length), 0, removed);
+          itemsRef.current = restored;
+          onChangeRef.current(restored);
+          haptic.success();
+        },
+      });
+    }, 170);
+  };
 
   const used = items.length + pending.length;
   const slots = Array.from({ length: max }, (_, i) => i);
@@ -314,14 +340,23 @@ export function ImageUploader({
             );
           }
 
+          const leaving = removingId === item.meta.id;
           return (
             <motion.div
               key={item.meta.id}
+              role="group"
+              tabIndex={0}
+              aria-label={`Screenshot ${idx + 1} of ${max}. Press Delete to remove.`}
+              onKeyDown={(e) => {
+                if (e.key === "Backspace" || e.key === "Delete") {
+                  e.preventDefault();
+                  removeAt(item.meta.id);
+                }
+              }}
               initial={previewByIdRef.current[item.meta.id] ? false : { opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.94 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="group relative aspect-[16/10] overflow-hidden rounded-xl border border-line-strong bg-canvas"
+              animate={leaving ? { opacity: 0, scale: 0.88 } : { opacity: 1, scale: 1 }}
+              transition={{ duration: leaving ? 0.17 : 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="group relative aspect-[16/10] overflow-hidden rounded-xl border border-line-strong bg-canvas outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
             >
               {url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -335,13 +370,14 @@ export function ImageUploader({
                 <span className="rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white/85 backdrop-blur-sm">
                   {idx + 1}/{max}
                 </span>
+                {/* Always visible, like the badge on an iOS attachment — works on touch, no hover needed. */}
                 <button
                   type="button"
                   onClick={() => removeAt(item.meta.id)}
-                  aria-label={`Remove ${item.meta.name}`}
-                  className="grid h-6 w-6 place-items-center rounded-md bg-black/60 text-white/80 opacity-0 backdrop-blur-sm transition-all hover:bg-loss/80 hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+                  aria-label={`Remove screenshot ${idx + 1}`}
+                  className="grid h-[22px] w-[22px] place-items-center rounded-full bg-black/45 text-white/90 shadow-[0_1px_4px_rgba(0,0,0,0.25),inset_0_0_0_0.5px_rgba(255,255,255,0.22)] backdrop-blur-xl transition-[transform,background-color] duration-150 hover:bg-black/65 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
                 >
-                  <XIcon className="h-3.5 w-3.5" />
+                  <XIcon className="h-3 w-3" />
                 </button>
               </div>
               <AnimatePresence>
