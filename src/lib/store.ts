@@ -123,7 +123,28 @@ export function hasLoadFailed(): boolean {
   return _loadFailed;
 }
 
-async function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
+/**
+ * Writes are serialized: each Drive write starts only after the previous one finished, so a slow
+ * earlier snapshot can never land after (and overwrite) a newer one. A write that was queued but
+ * has since been superseded waits on the newest write instead of uploading a stale snapshot — this
+ * keeps rapid back-to-back saves to one or two uploads while every caller still sees the real result.
+ */
+let _writeChain: Promise<void> = Promise.resolve();
+let _writeSeq = 0;
+let _latestWrite: Promise<void> = Promise.resolve();
+
+function persist(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]): Promise<void> {
+  const seq = ++_writeSeq;
+  const job = _writeChain.then(() => {
+    if (seq < _writeSeq) return _latestWrite; // a newer snapshot is queued — it carries this change too
+    return persistNow(userId, entries, settings, dayLogs, plans);
+  });
+  _latestWrite = job;
+  _writeChain = job.catch(() => undefined);
+  return job;
+}
+
+async function persistNow(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
   if (_loadFailed && dataStore.kind === "cloud") {
     // The authoritative cloud data was never loaded — saving now could
     // destroy it. Refuse honestly instead of pretending.

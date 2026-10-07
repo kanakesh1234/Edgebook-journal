@@ -220,7 +220,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setSaveError(null);
     try {
       const plan = buildPlan();
-      await useApp.getState().savePlan(plan);
+      // Local state updates instantly; the Drive sync runs in the background (queued in order, with
+      // its own "Unsaved, Retry" toast on failure) so the next step opens without waiting on the network.
+      void useApp.getState().savePlan(plan).catch(() => undefined);
       if (mode === "manual") {
         // Coming back from the chart step and saving again UPDATES the same trade (never a duplicate).
         const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
@@ -241,8 +243,20 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           exitTime: exitTime.trim() || undefined,
           quantity: quantityValue,
         };
-        if (live) await useApp.getState().updateEntry(live.id, draft);
-        else setCreatedId((await useApp.getState().createEntry(draft)).id);
+        if (live) {
+          void useApp.getState().updateEntry(live.id, draft).catch(() => setSaveError("Couldn't save — try again."));
+        } else {
+          const before = new Set(useApp.getState().entries.map((e) => e.id));
+          const pending = useApp.getState().createEntry(draft);
+          // createEntry adds the entry to the store synchronously, before its network write.
+          const fresh = useApp.getState().entries.find((e) => !before.has(e.id));
+          if (fresh) {
+            setCreatedId(fresh.id);
+            void pending.catch(() => setSaveError("Couldn't save — try again."));
+          } else {
+            setCreatedId((await pending).id); // rare: surfaces the real error (e.g. signed out)
+          }
+        }
       } else if (importRows?.length) {
         const created = await useApp.getState().createEntries(importRows.map((row, i) => ({
           date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument, direction: row.direction,
