@@ -1,0 +1,117 @@
+/* ==========================================================================
+   MINATO — Apple-style companion
+   Translucent material panel, iMessage-style bubbles, quiet controls.
+   All colours come from the app's theme tokens (light + dark).
+   ========================================================================== */
+
+.mn-panel {
+  background: color-mix(in srgb, var(--overlay) 88%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow:
+    0 0 0 0.5px color-mix(in srgb, var(--line-strong) 80%, transparent),
+    0 24px 64px -20px rgb(0 0 0 / 0.35);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mn-panel { background: var(--overlay); }
+}
+
+.mn-head {
+  border-bottom: 0.5px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+}
+
+/* Round icon buttons (options, close) */
+.mn-icon-btn {
+  position: relative;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--muted);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.mn-icon-btn::after { content: ""; position: absolute; inset: -6px; } /* 44px target */
+.mn-icon-btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); color: var(--ink); }
+.mn-icon-btn:active { transform: scale(0.92); }
+.mn-icon-btn[aria-expanded="true"] { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold); }
+
+/* Launcher */
+.mn-launcher {
+  background: var(--overlay);
+  box-shadow:
+    0 0 0 0.5px var(--line-strong),
+    0 10px 28px -10px rgb(0 0 0 / 0.4);
+}
+
+/* Composer */
+.mn-field { transition: background-color 0.2s ease, box-shadow 0.2s ease; }
+.mn-field:focus-within {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 45%, transparent);
+}
+.mn-send {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--gold-strong);
+  color: var(--on-gold);
+  transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
+}
+.mn-send:active:not(:disabled) { transform: scale(0.9); }
+.mn-send:disabled {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--muted);
+}
+
+/* Suggestion chips fade out at the right edge */
+.mn-chips {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+
+/* Typing indicator (three dots, like Messages) */
+.mn-typing { display: inline-flex; align-items: center; gap: 4px; }
+.mn-typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+  opacity: 0.4;
+  animation: mn-typing 1.2s ease-in-out infinite;
+}
+.mn-typing i:nth-child(2) { animation-delay: 0.15s; }
+.mn-typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes mn-typing {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* Structured findings inside replies: quiet tinted rows, no borders or badges */
+.mn-panel .minato-finding {
+  grid-template-columns: 1rem minmax(0, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.mn-panel .minato-finding-number {
+  width: auto;
+  height: auto;
+  background: transparent;
+  color: var(--gold);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mn-typing i { animation: none; opacity: 0.7; }
+  .mn-icon-btn, .mn-send, .mn-field { transition: none; }
+}

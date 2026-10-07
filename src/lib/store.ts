@@ -4,6 +4,8 @@ import { create } from "zustand";
 import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, PlaybookSetup, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
 import { dataStore, DriveSyncError, loadJournalMirror, type JournalPayload } from "./services/storage";
+import { snapshotToWorkingMemory, markSnapshotFailed } from "./supabase-integration";
+import { clearWorkingMemory } from "./services/supabase-memory";
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl } from "./images";
 import { uid } from "./utils";
@@ -156,13 +158,22 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
     }
     return;
   }
+
+  const payload: JournalPayload = { entries, settings, dayLogs, plans, version: 2 };
+  const snapshotKey = `${Date.now()}`;
+
+  // Snapshot to Supabase working memory for fast recovery (fire-and-forget).
+  const cleanup = await snapshotToWorkingMemory(userId, snapshotKey, payload);
+
   try {
-    await dataStore.saveJournal(userId, { entries, settings, dayLogs, plans, version: 2 });
+    await dataStore.saveJournal(userId, payload);
     _persistFailedAt = 0;
+    // Drive confirmed — remove the Supabase working copy.
+    cleanup();
   } catch (err) {
-    // Known failure mode: drive_write_failed:<status> (e.g. 502 from Google).
-    // The UI state is already updated — report the sync failure clearly and
-    // keep the app usable. NEVER fake a successful cloud save.
+    // Drive write failed — keep the Supabase snapshot for recovery.
+    markSnapshotFailed(userId, snapshotKey);
+
     _persistFailedAt = Date.now();
     const syncError = err instanceof DriveSyncError ? err : null;
     const status = syncError?.status || (err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "");
@@ -276,6 +287,8 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       await fetch("/api/auth/google/signout", { method: "POST" });
     } catch { /* offline */ }
+    // Clear Supabase working memory for this session.
+    clearWorkingMemory();
     set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
   },
 

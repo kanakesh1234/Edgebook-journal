@@ -13,8 +13,10 @@ import { computeInsights, topState, type MinatoState } from "@/lib/minato/insigh
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { QUICK_PROMPTS } from "@/lib/minato/respond";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import "./minato.css";
 import { cn } from "@/lib/utils";
+import { SlidersIcon, XIcon } from "@/components/ui/icons";
 import { EASE } from "@/components/landing/reveal";
 
 const STATE_DOT: Record<MinatoState, string> = {
@@ -27,15 +29,35 @@ const STATE_DOT: Record<MinatoState, string> = {
   celebration: "bg-profit",
 };
 
-const STATE_GLYPH: Record<MinatoState, string> = {
-  idle: "·",
-  curious: "?",
-  thinking: "…",
-  warning: "!",
-  firm: "!!",
-  proud: "✓",
-  celebration: "★",
+const STATE_LABEL: Record<MinatoState, string> = {
+  idle: "Your trading companion",
+  curious: "Curious",
+  thinking: "Thinking…",
+  warning: "Heads up",
+  firm: "Being firm",
+  proud: "Proud of you",
+  celebration: "Celebrating",
 };
+
+/** MINATO's portrait, with a quiet monogram fallback if the image is missing. */
+function Portrait() {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="grid h-full w-full place-items-center bg-ink/[0.08] text-[1em] font-semibold text-muted">M</span>;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/minato-avatar.jpg"
+      alt=""
+      width={256}
+      height={256}
+      draggable={false}
+      className="h-full w-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 /**
  * Rotates on every welcome pop-up so the login/signup greeting doesn't
@@ -173,6 +195,8 @@ export function Minato() {
   const [busy, setBusy] = useState(false);
   const [analysisStep, setAnalysisStep] = useState(0);
   const [replySizeDraft, setReplySizeDraft] = useState<string | null>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // "thinking" should reflect an actual in-flight request, not just
@@ -351,59 +375,67 @@ export function Minato() {
     }
   };
 
+  const stateLabel = state === "thinking" || busy ? "Thinking…" : STATE_LABEL[state];
+
+  // Focus the composer on devices with a precise pointer (never pops a phone keyboard).
+  useEffect(() => {
+    if (!open) return;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    const t = window.setTimeout(() => inputRef.current?.focus(), 260);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  const commitReplySize = () => {
+    const nextLimit = Math.min(8_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
+    setReplySizeDraft(null);
+    if (nextLimit !== responseTokenLimit) {
+      void updateSettings({ aiPrefs: { ...(rawSettings.aiPrefs ?? { includeNotes: true }), responseTokenLimit: nextLimit } });
+    }
+  };
+
   return (
     <>
-      {/* Full-screen welcome overlay — login/signup only, separate from the chat panel */}
+      {/* Welcome — a centred sheet over a soft blurred scrim (login/signup only) */}
       <AnimatePresence>
         {showWelcome && (
           <motion.div
             role="dialog"
+            aria-modal="true"
             aria-label="Welcome from MINATO"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: EASE }}
+            transition={{ duration: 0.3, ease: EASE }}
             onClick={() => setShowWelcome(false)}
-            className="fixed inset-0 z-[200] flex cursor-pointer flex-col items-center justify-center gap-5 bg-ink/50 px-6 backdrop-blur-md"
+            className="fixed inset-0 z-[200] grid cursor-pointer place-items-center bg-black/35 px-6 backdrop-blur-xl"
           >
-            <motion.span
-              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.9 }}
-              animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-              transition={{ duration: 0.4, ease: EASE, delay: 0.05 }}
-              className="grid h-24 w-24 place-items-center overflow-hidden rounded-full border-2 border-gold/50 bg-raised text-3xl font-bold text-gold shadow-overlay"
-              aria-hidden
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/minato-avatar.jpg"
-                alt=""
-                width={256}
-                height={256}
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.style.display = "none";
-                  e.currentTarget.nextElementSibling?.classList.remove("hidden");
-                }}
-              />
-              <span className="hidden">M</span>
-            </motion.span>
             <motion.div
-              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10 }}
-              animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: EASE, delay: 0.15 }}
-              className="max-w-sm text-center"
+              onClick={(e) => e.stopPropagation()}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 24, scale: 0.95 }}
+              animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+              transition={{ type: "spring", stiffness: 340, damping: 30, delay: 0.05 }}
+              className="w-full max-w-[340px] cursor-default rounded-[26px] bg-overlay px-7 pb-6 pt-8 text-center shadow-overlay"
             >
-              <p className="text-lg font-semibold tracking-[-0.01em] text-canvas">
+              <span className="mx-auto block h-[88px] w-[88px] overflow-hidden rounded-full shadow-lift" aria-hidden>
+                <Portrait />
+              </span>
+              <p className="mt-5 text-[22px] font-semibold tracking-[-0.02em] text-ink">
                 Welcome back{ctx.userFirstName ? `, ${ctx.userFirstName}` : ""}.
               </p>
-              <p className="mt-2 text-[15px] italic leading-relaxed text-canvas/80">&ldquo;{welcomeQuote}&rdquo;</p>
-              <p className="mt-4 text-[11px] uppercase tracking-wider text-canvas/50">Tap anywhere to continue</p>
+              <p className="mt-2.5 text-[15px] leading-relaxed text-muted">{welcomeQuote}</p>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setShowWelcome(false)}
+                className="mt-6 w-full rounded-[13px] bg-gold-strong py-3 text-[16px] font-semibold text-on-gold transition-transform active:scale-[0.98]"
+              >
+                Continue
+              </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Floating companion */}
       {/* Edge handle — the only trace of MINATO while the launcher is tucked away. */}
       <AnimatePresence>
         {!launcherVisible && (
@@ -423,6 +455,7 @@ export function Minato() {
         )}
       </AnimatePresence>
 
+      {/* Launcher — a single round portrait with a status dot */}
       <motion.button
         type="button"
         aria-label={open ? "Close MINATO" : "Open MINATO — your trading companion"}
@@ -441,48 +474,44 @@ export function Minato() {
             ? { opacity: 1, y: 0, scale: 1 }
             : reduce
               ? { opacity: 0 }
-              : { opacity: 0, y: 18, scale: 0.92 }
+              : { opacity: 0, y: 18, scale: 0.9 }
         }
-        whileTap={launcherVisible ? { scale: 0.95 } : undefined}
+        whileTap={launcherVisible ? { scale: 0.92 } : undefined}
         transition={{ type: "spring", stiffness: 380, damping: 32 }}
         style={{ pointerEvents: launcherVisible ? "auto" : "none" }}
-        className={cn(
-          "fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200",
-          open ? "border-gold/50" : "border-line-strong",
-        )}
+        className="mn-launcher fixed bottom-5 right-5 z-[90] grid h-[54px] w-[54px] place-items-center rounded-full"
       >
-        <span
-          className={cn(
-            "grid h-8 w-8 place-items-center overflow-hidden rounded-full border text-sm font-bold",
-            open ? "border-gold/60 bg-gold/15 text-gold" : "border-line-strong bg-raised text-gold",
-          )}
-          aria-hidden
-        >
+        <AnimatePresence mode="wait" initial={false}>
           {open ? (
-            "×"
+            <motion.span
+              key="x"
+              initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
+              animate={{ opacity: 1, rotate: 0, scale: 1 }}
+              exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
+              transition={{ duration: 0.18 }}
+              className="text-ink"
+            >
+              <XIcon className="h-5 w-5" />
+            </motion.span>
           ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src="/minato-avatar.jpg"
-              alt=""
-              width={256}
-              height={256}
-              className="h-full w-full object-cover"
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-                e.currentTarget.nextElementSibling?.classList.remove("hidden");
-              }}
-            />
+            <motion.span
+              key="face"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.18 }}
+              className="block h-[46px] w-[46px] overflow-hidden rounded-full"
+            >
+              <Portrait />
+            </motion.span>
           )}
-          {!open && <span className="hidden">{STATE_GLYPH[state]}</span>}
-        </span>
-        <span className="text-left">
-          <span className="block text-[11px] font-bold tracking-wide text-ink">MINATO</span>
-          <span className="flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-faint">
-            <span className={cn("h-1.5 w-1.5 rounded-full", STATE_DOT[state])} />
-            {state === "idle" ? "sensei" : state}
-          </span>
-        </span>
+        </AnimatePresence>
+        {!open && (
+          <span
+            aria-hidden
+            className={cn("absolute bottom-0 right-0 h-[14px] w-[14px] rounded-full ring-[3px] ring-overlay", STATE_DOT[state])}
+          />
+        )}
       </motion.button>
 
       {/* Panel */}
@@ -491,122 +520,167 @@ export function Minato() {
           <motion.div
             role="dialog"
             aria-label="MINATO — trading companion"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 24, scale: 0.97 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={{ duration: 0.3, ease: EASE }}
-            className="panel fixed bottom-20 right-5 z-[90] flex max-h-[min(600px,calc(100dvh-7rem))] w-[min(400px,calc(100vw-2.5rem))] flex-col overflow-hidden shadow-overlay"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setOpen(false);
+            }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.92, y: 14 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8, transition: { duration: 0.16 } }}
+            transition={{ type: "spring", stiffness: 380, damping: 34 }}
+            style={{ transformOrigin: "bottom right" }}
+            className="mn-panel fixed bottom-[88px] right-5 z-[90] flex max-h-[min(640px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-[22px] max-sm:inset-x-3 max-sm:w-auto"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-              <div className="flex items-center gap-2.5">
-                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/minato-avatar.jpg"
-                    alt=""
-                    width={256}
-                    height={256}
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                      e.currentTarget.nextElementSibling?.classList.remove("hidden");
-                    }}
-                  />
-                  <span className="hidden">M</span>
-                </span>
-                <div>
-                  <p className="text-sm font-bold tracking-wide text-ink">MINATO SENSEI</p>
-                  <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
-                    <span className={cn("h-1.5 w-1.5 rounded-full bg-profit")} />
-                    trading companion
+            <header className="mn-head flex items-center gap-3 px-4 pb-3 pt-3.5">
+              <span className="block h-10 w-10 shrink-0 overflow-hidden rounded-full" aria-hidden>
+                <Portrait />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-[16px] font-semibold leading-tight tracking-[-0.01em] text-ink">MINATO</h2>
+                <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted">
+                  <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", STATE_DOT[state])} />
+                  {stateLabel}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="mn-icon-btn"
+                aria-label="Reply options"
+                aria-expanded={optionsOpen}
+                aria-controls="minato-options"
+                onClick={() => setOptionsOpen((v) => !v)}
+              >
+                <SlidersIcon className="h-4 w-4" />
+              </button>
+              <button type="button" className="mn-icon-btn" aria-label="Close MINATO" onClick={() => setOpen(false)}>
+                <XIcon className="h-4 w-4" />
+              </button>
+            </header>
+
+            {/* Reply options (collapsed by default) */}
+            <AnimatePresence initial={false}>
+              {optionsOpen && (
+                <motion.div
+                  id="minato-options"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: EASE }}
+                  className="overflow-hidden"
+                >
+                  <div className="mx-4 mt-3 rounded-[12px] bg-ink/[0.05] px-3.5 py-3">
+                    <label
+                      className="flex items-center justify-between gap-3 text-[14px] text-ink"
+                      title="Set a custom reply budget from 250 to 8,000 tokens"
+                    >
+                      Reply size
+                      <span className="flex items-center gap-2 text-[13px] text-muted">
+                        <input
+                          aria-label="MINATO reply size in tokens"
+                          type="number"
+                          min={250}
+                          max={8000}
+                          step={250}
+                          value={replySizeDraft ?? responseTokenLimit}
+                          onChange={(e) => setReplySizeDraft(e.target.value)}
+                          onBlur={commitReplySize}
+                          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                          className="w-[72px] rounded-[8px] bg-raised px-2 py-1 text-right text-[14px] text-ink tabular-nums shadow-[0_0_0_0.5px_var(--line-strong)] focus:outline-none focus:ring-2 focus:ring-gold/50"
+                        />
+                        tokens
+                      </span>
+                    </label>
+                    <p className="mt-1.5 text-[12px] leading-snug text-muted">
+                      The longest reply MINATO will write.{" "}
+                      <Link href="/settings?pane=minato" className="text-gold underline-offset-2 hover:underline">
+                        More in Settings
+                      </Link>
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Scope + insights */}
+            {(challenge || insights.length > 0) && (
+              <div className="mx-4 mt-3 overflow-hidden rounded-[12px] bg-ink/[0.05] [&>*+*]:border-t-[0.5px] [&>*+*]:border-line-strong/50">
+                {challenge && (
+                  <p className="px-3.5 py-2 text-[12px] text-muted">
+                    Analysing only <strong className="font-semibold text-ink">{challenge.name}</strong>
                   </p>
-                </div>
-              </div>
-              <label className="ml-3 flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 8,000 tokens">
-                <span>Reply</span>
-                <input
-                  aria-label="MINATO reply size in tokens"
-                  type="number"
-                  min={250}
-                  max={8000}
-                  step={250}
-                  value={replySizeDraft ?? responseTokenLimit}
-                  onChange={(e) => setReplySizeDraft(e.target.value)}
-                  onBlur={() => {
-                    const nextLimit = Math.min(8_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
-                    setReplySizeDraft(null);
-                    if (nextLimit !== responseTokenLimit) {
-                      void updateSettings({ aiPrefs: { ...(rawSettings.aiPrefs ?? { includeNotes: true }), responseTokenLimit: nextLimit } });
-                    }
-                  }}
-                  className="w-14 rounded border border-line bg-raised px-1 py-1 text-right text-[10px] text-ink focus:border-gold/60 focus:outline-none"
-                />
-                <span>tokens</span>
-              </label>
-            </div>
-
-            {challenge && (
-              <div className="border-b border-line-soft bg-gold/5 px-4 py-2 text-[11px] text-muted">
-                Analysing only: <strong className="font-semibold text-ink">{challenge.name}</strong>
-              </div>
-            )}
-
-            {/* Insights */}
-            {insights.length > 0 && (
-              <div className="space-y-2 border-b border-line-soft bg-raised/40 px-4 py-3">
+                )}
                 {insights.slice(0, 2).map((ins) => (
-                  <div key={ins.id} className="flex items-start gap-2.5">
-                    <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT[ins.state])} aria-hidden />
-                    <p className="text-[12.5px] leading-relaxed text-muted">{ins.message}</p>
+                  <div key={ins.id} className="flex items-start gap-2.5 px-3.5 py-2.5">
+                    <span className={cn("mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT[ins.state])} aria-hidden />
+                    <p className="text-[13px] leading-snug text-muted">{ins.message}</p>
                   </div>
                 ))}
               </div>
             )}
 
             {/* Messages */}
-            <div ref={listRef} className="min-h-40 flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
+            <div
+              ref={listRef}
+              role="log"
+              aria-live="polite"
+              aria-label="Conversation with MINATO"
+              className="min-h-40 flex-1 space-y-2 overflow-y-auto px-4 py-4"
+            >
               {messages.map((m, i) => (
-                <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                <motion.div
+                  key={i}
+                  initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.28, ease: EASE }}
+                  style={{ transformOrigin: m.role === "user" ? "bottom right" : "bottom left" }}
+                  className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
+                >
                   <div
                     className={cn(
-                      "max-w-[88%] rounded-2xl px-3.5 py-3 text-[13px] leading-relaxed",
+                      "max-w-[88%] rounded-[18px] px-3.5 py-2.5 text-[14px] leading-[1.45]",
                       m.role === "user"
-                        ? "rounded-br-md bg-ink text-canvas"
-                        : "rounded-bl-md border border-line bg-raised text-ink",
+                        ? "rounded-br-[6px] bg-gold-strong text-on-gold"
+                        : "rounded-bl-[6px] bg-ink/[0.06] text-ink",
                     )}
                   >
                     {m.role === "user" ? (
-                      // The user's own words are plain text — never run through the
-                      // assistant formatter, whose first line forces dark `text-ink`
-                      // (invisible on the dark user bubble).
-                      <p className="whitespace-pre-wrap break-words text-canvas">{m.text}</p>
+                      // The user's own words are plain text — never run through the assistant
+                      // formatter (its first line forces `text-ink`, unreadable on a filled bubble).
+                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
                     ) : (
                       renderMinatoText(m.text)
                     )}
                   </div>
-                </div>
+                </motion.div>
               ))}
               {busy && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-line bg-raised px-3.5 py-2.5 text-[12px] text-muted">
-                    <span className="minato-thinking-dot" aria-hidden />
-                    <span>{reduce ? "Analyzing your journal…" : ANALYSIS_STEPS[analysisStep]}</span>
+                <motion.div
+                  initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex justify-start"
+                >
+                  <div className="flex items-center gap-2.5 rounded-[18px] rounded-bl-[6px] bg-ink/[0.06] px-3.5 py-3 text-[13px] text-muted">
+                    <span className="mn-typing" aria-hidden>
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    <span>{reduce ? "Analysing your journal…" : ANALYSIS_STEPS[analysisStep]}</span>
                   </div>
-                </div>
+                </motion.div>
               )}
             </div>
 
-            {/* Quick prompts */}
+            {/* Suggestions */}
             {QUICK_PROMPTS.length > 0 && (
-              <div className="flex gap-1.5 overflow-x-auto border-t border-line-soft px-4 py-2.5 [scrollbar-width:none]">
+              <div className="mn-chips flex gap-2 overflow-x-auto px-4 pb-2.5 pt-1 [scrollbar-width:none]">
                 {QUICK_PROMPTS.map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => void ask(p)}
                     disabled={busy}
-                    className="shrink-0 rounded-full border border-line bg-raised/60 px-3 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+                    className="shrink-0 rounded-[10px] bg-ink/[0.06] px-3 py-2 text-[13px] text-ink transition-all hover:bg-ink/[0.1] active:scale-[0.97] disabled:opacity-50"
                   >
                     {p}
                   </button>
@@ -614,24 +688,31 @@ export function Minato() {
               </div>
             )}
 
-            {/* Input */}
+            {/* Composer */}
             <form
-              className="flex items-center gap-2 border-t border-line px-4 py-3"
+              className="px-3 pb-3 pt-1"
               onSubmit={(e) => {
                 e.preventDefault();
                 void ask(input);
               }}
             >
-              <input
-                aria-label="Ask MINATO"
-                placeholder="Ask about your journal…"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="min-w-0 flex-1 rounded-control border border-line bg-raised px-3 py-2 text-[13px] text-ink placeholder:text-faint focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
-              />
-              <Button type="submit" variant="gold" size="sm" disabled={busy || !input.trim()}>
-                Ask
-              </Button>
+              <div className="mn-field flex items-center gap-1.5 rounded-[22px] bg-ink/[0.06] py-1 pl-4 pr-1">
+                <input
+                  ref={inputRef}
+                  aria-label="Ask MINATO"
+                  placeholder="Ask about your journal"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  enterKeyHint="send"
+                  autoComplete="off"
+                  className="min-w-0 flex-1 bg-transparent py-2 text-[16px] text-ink placeholder:text-muted/70 focus:outline-none sm:text-[14px]"
+                />
+                <button type="submit" className="mn-send" aria-label="Send" disabled={busy || !input.trim()}>
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />
+                  </svg>
+                </button>
+              </div>
             </form>
           </motion.div>
         )}

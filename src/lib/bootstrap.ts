@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useApp } from "./store";
 import type { User } from "./services/auth";
 import { GoogleDriveDataStore, IdbDataStore, setActiveStore } from "./services/storage";
+import { useSessionHeartbeat, scheduleWorkingMemoryCleanup } from "./supabase-integration";
 import { useUi, type DriveStatus } from "./ui-store";
 
 /**
@@ -20,7 +21,12 @@ let bootstrapped = false;
 
 export function useBootstrap() {
   const init = useApp((s) => s.init);
+  const user = useApp((s) => s.user);
   const setDriveStatus = useUi((s) => s.setDriveStatus);
+
+  // Supabase session heartbeat — registers this tab and sends periodic pings.
+  useSessionHeartbeat(user?.id ?? null);
+
   useEffect(() => {
     if (bootstrapped) return;
     bootstrapped = true;
@@ -75,6 +81,8 @@ export function useBootstrap() {
         );
         console.info(`[BOOTSTRAP] bootstrap_authenticated drive=${driveState}`);
         await init(googleUser);
+        // Supabase working memory: clean stale records from previous sessions.
+        scheduleWorkingMemoryCleanup(googleUser.id);
         return;
       }
 
