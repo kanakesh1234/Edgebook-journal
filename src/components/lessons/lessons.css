@@ -12,6 +12,9 @@
 /* ------------------------------------------------------------------ */
 /*  Lesson body (shared by the reader and the writer's preview)        */
 /* ------------------------------------------------------------------ */
+.lesson-cover { position: relative; margin-inline: 0; overflow: hidden; border-radius: 18px; aspect-ratio: 16 / 10; background: var(--raised); }
+.lesson-cover::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 6%, transparent); }
+.lesson-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .lesson-prose { font-size: 1.05rem; line-height: 1.8; overflow-wrap: break-word; }
 .lesson-prose p { margin: 0 0 1.1em; }
 .lesson-prose h2 { font-size: 1.6rem; font-weight: 650; line-height: 1.22; letter-spacing: -.022em; margin: 1.9em 0 .55em; }

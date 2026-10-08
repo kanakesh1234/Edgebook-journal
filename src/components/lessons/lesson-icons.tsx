@@ -131,3 +131,10 @@ export const ArrowDownIcon = (p: IconProps) => (
     <path d="m19 12-7 7-7-7" />
   </Svg>
 );
+
+export const PencilIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17 3.5a2.12 2.12 0 0 1 3 3L7.5 19l-4 1 1-4Z" />
+    <path d="m15 5.5 3 3" />
+  </Svg>
+);

@@ -16,6 +16,7 @@ import {
   CommentIcon,
   HeartIcon,
   MoreIcon,
+  PencilIcon,
   RepostIcon,
   ShareIcon,
   TrashIcon,
@@ -292,6 +293,19 @@ export default function LessonPage() {
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                     onKeyDown={(e) => e.key === "Escape" && setMenuOpen(false)}
                   >
+                    {l.mine && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          router.push(`/lessons/${id}/edit`);
+                        }}
+                      >
+                        <PencilIcon className="h-4 w-4" />
+                        Edit lesson
+                      </button>
+                    )}
                     {entry && (
                       <button
                         type="button"
@@ -362,6 +376,14 @@ export default function LessonPage() {
           )}
         </AnimatePresence>
       </header>
+
+      {/* Custom cover (only when the author picked one; otherwise the lesson opens as before) */}
+      {l.customCover && (
+        <figure className="lesson-cover mt-8 sm:mt-10">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={l.customCover} alt="" decoding="async" />
+        </figure>
+      )}
 
       {/* Body */}
       <div ref={proseRef} className="lesson-prose mt-9 sm:mt-11" dangerouslySetInnerHTML={{ __html: l.html }} />

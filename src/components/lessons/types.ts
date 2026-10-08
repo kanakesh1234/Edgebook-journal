@@ -6,6 +6,8 @@ export interface LessonView {
   createdAt: number;
   html: string;
   cover: string | null;
+  /** The cover the author picked, or null when the cover is chosen automatically. */
+  customCover: string | null;
   excerpt: string;
   hook: string;
   readMins: number;

@@ -11,6 +11,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import { TextStyle, Color } from "@tiptap/extension-text-style";
 import { Placeholder } from "@tiptap/extensions";
 import { useApp } from "@/lib/store";
+import type { LessonView } from "@/components/lessons/types";
 import { Audio, CtaButton, Video } from "@/components/lessons/extensions";
 import { Caret, Icon, type IconName } from "@/components/lessons/writer-icons";
 import "@fontsource/spectral/400.css";
@@ -26,11 +27,12 @@ import "@/components/lessons/writer.css";
 /* ------------------------------------------------------------------ */
 
 type Settings = { comments: boolean; reposts: boolean };
-interface Draft { title: string; subtitle: string; html: string; bylines: string[]; header: string; footer: string; settings: Settings }
+interface Draft { title: string; subtitle: string; html: string; bylines: string[]; header: string; footer: string; settings: Settings; cover: string | null }
 interface Snapshot { at: number; title: string; subtitle: string; html: string; words: number }
 
 const DRAFT = "edgebook-lesson-draft";
 const HISTORY = "edgebook-lesson-history";
+const COVER_URL = /^\/api\/lessons\/media\?id=[a-z0-9]+\.(png|jpg|gif|webp)$/;
 const VID = /^video\/(mp4|webm|quicktime)$/;
 const AUD = /^audio\/(mpeg|wav|x-wav|mp4|x-m4a|ogg)$/;
 // Images are normalised in the browser (see prepareLessonImage), so anything the browser can decode is welcome.
@@ -149,11 +151,20 @@ function ModalHead({ title, onClose }: { title: string; onClose: () => void }) {
 /*  Entry: read the saved draft first, then mount the editor once       */
 /* ------------------------------------------------------------------ */
 
-export default function LessonWriter() {
+export default function LessonWriter({ lesson }: { lesson?: LessonView }) {
   const name = useApp((s) => s.user?.name) ?? "You";
   const [draft, setDraft] = useState<Draft | null>(null);
 
   useEffect(() => {
+    // Editing a published lesson: start from it, not from the new-lesson draft.
+    if (lesson) {
+      setDraft({
+        title: lesson.title, subtitle: lesson.subtitle, html: lesson.html,
+        bylines: lesson.bylines, header: "", footer: "",
+        settings: { ...lesson.settings }, cover: lesson.customCover,
+      });
+      return;
+    }
     let d: Partial<Draft> | null = null;
     try { d = JSON.parse(localStorage.getItem(DRAFT) ?? "null") as Partial<Draft> | null; } catch { d = null; }
     setDraft({
@@ -161,18 +172,19 @@ export default function LessonWriter() {
       bylines: d?.bylines?.length ? d.bylines : [name],
       header: d?.header ?? "", footer: d?.footer ?? "",
       settings: { comments: d?.settings?.comments !== false, reposts: d?.settings?.reposts !== false },
+      cover: typeof d?.cover === "string" && COVER_URL.test(d.cover) ? d.cover : null,
     });
-  }, [name]);
+  }, [name, lesson]);
 
   if (!draft) return <div className="wr" />;
-  return <Writer initial={draft} author={name} />;
+  return <Writer initial={draft} author={name} editId={lesson?.id} />;
 }
 
 /* ------------------------------------------------------------------ */
 /*  The writer                                                         */
 /* ------------------------------------------------------------------ */
 
-function Writer({ initial, author }: { initial: Draft; author: string }) {
+function Writer({ initial, author, editId }: { initial: Draft; author: string; editId?: string }) {
   const router = useRouter();
   const [title, setTitle] = useState(initial.title);
   const [subtitle, setSubtitle] = useState(initial.subtitle);
@@ -181,6 +193,8 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
   const [header, setHeader] = useState(initial.header);
   const [footer, setFooter] = useState(initial.footer);
   const [settings, setSettings] = useState(initial.settings);
+  const [cover, setCover] = useState<string | null>(initial.cover);
+  const [coverBusy, setCoverBusy] = useState(false);
 
   const [menu, setMenu] = useState<string | null>(null);
   const [modal, setModal] = useState<null | "hf" | "settings" | "preview" | "continue">(null);
@@ -207,6 +221,7 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const subRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const coverRef = useRef<HTMLInputElement>(null);
   const kindRef = useRef<"image" | "video" | "audio">("image");
   const menuRef = useRef(setMenu);
   menuRef.current = setMenu;
@@ -256,6 +271,29 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
     setMenu(null);
   };
 
+  /* ----- cover photo (optional) ----- */
+  const addCover = useCallback(async (picked: File) => {
+    if (!imageTypeOf(picked)) return say("Choose an image (png, jpg, gif or webp) for the cover.");
+    setCoverBusy(true);
+    try {
+      let file: File;
+      try { file = await prepareLessonImage(picked); }
+      catch (err) { return say(err instanceof ImageError ? err.message : "That image could not be read."); }
+      const fd = new FormData(); fd.append("file", file);
+      const r = await fetch("/api/lessons/media", { method: "POST", body: fd }).catch(() => null);
+      if (!r) return say("Upload failed — check your connection and try again.");
+      if (!r.ok) {
+        const code = ((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? "";
+        return say(r.status === 413 ? "That file is too large to upload." : ERR_TEXT[code] ?? `Upload failed (${r.status}). Try again.`);
+      }
+      const d = (await r.json()) as { url: string; kind: string };
+      if (d.kind !== "image" || !COVER_URL.test(d.url)) return say("That file can’t be used as a cover.");
+      setCover(d.url);
+    } finally {
+      setCoverBusy(false);
+    }
+  }, [say]);
+
   /* ----- editor ----- */
   const ed = useEditor({
     immediatelyRender: false,
@@ -301,12 +339,13 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
   }, [html, title, subtitle, words]);
 
   useEffect(() => {
-    if (!(title || subtitle || html.replace(/<[^>]+>/g, "").trim() || header || footer)) return;
+    if (editId) return; // editing a published lesson never touches the new-lesson draft
+    if (!(title || subtitle || html.replace(/<[^>]+>/g, "").trim() || header || footer || cover)) return;
     setStatus("saving");
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try {
-        const d: Draft = { title, subtitle, html, bylines, header, footer, settings };
+        const d: Draft = { title, subtitle, html, bylines, header, footer, settings, cover };
         localStorage.setItem(DRAFT, JSON.stringify(d));
         if (title || words > 0) snapshot();
         setStatus("saved");
@@ -315,7 +354,7 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
     return () => clearTimeout(saveTimer.current);
     // snapshot is intentionally excluded: it changes with html and would restart the timer twice
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, subtitle, html, bylines, header, footer, settings]);
+  }, [title, subtitle, html, bylines, header, footer, settings, cover]);
 
   useEffect(() => { if (corner === "history") setHistory(readHistory()); }, [corner]);
   useEffect(() => {
@@ -376,24 +415,32 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
   const readMins = Math.max(1, Math.ceil(words / 200));
   const byline = bylines.length ? bylines.join(", ") : author;
 
+  const verb = editId ? "save" : "publish";
   const publish = async () => {
     if (!title.trim()) return setErr("Add a title first.");
     setBusy(true); setErr("");
+    const payload = editId
+      ? { action: "update", id: editId, title, subtitle, html: finalHtml, bylines, settings, cover } // cover: null removes it
+      : { action: "create", title, subtitle, html: finalHtml, bylines, settings, ...(cover ? { cover } : {}) };
     const r = await fetch("/api/lessons", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "create", title, subtitle, html: finalHtml, bylines, settings }),
+      body: JSON.stringify(payload),
     }).catch(() => null);
     const d = (await r?.json().catch(() => ({}))) as { id?: string; error?: string } | undefined;
     setBusy(false);
     if (!r?.ok || !d?.id) return setErr(
-      r?.status === 413 ? "This lesson is too long to publish."
-      : r?.status === 401 ? "You're signed out. Sign in again, then publish."
-      : d?.error === "rate_limited" ? "You're publishing too fast. Wait a bit and retry."
+      r?.status === 413 ? `This lesson is too long to ${verb}.`
+      : r?.status === 401 ? `You're signed out. Sign in again, then ${verb}.`
+      : r?.status === 404 ? "This lesson no longer exists or isn't yours to edit."
+      : d?.error === "bad_cover" ? "That cover photo isn't valid. Remove it and choose another."
+      : d?.error === "rate_limited" ? `You're ${editId ? "saving" : "publishing"} too fast. Wait a bit and retry.`
       : d?.error === "storage_unavailable" ? "Lessons storage isn't reachable right now. Try again in a moment."
-      : "Couldn’t publish. Check your connection and try again.");
-    localStorage.removeItem(DRAFT);
+      : `Couldn’t ${verb}. Check your connection and try again.`);
+    if (!editId) localStorage.removeItem(DRAFT);
     router.push(`/lessons/${d.id}`);
   };
+  const dirty = !!editId && (title !== initial.title || subtitle !== initial.subtitle || html !== initial.html || cover !== initial.cover
+    || JSON.stringify(bylines) !== JSON.stringify(initial.bylines) || JSON.stringify(settings) !== JSON.stringify(initial.settings));
 
   const ago = (t: number) => {
     const m = Math.round((Date.now() - t) / 60000);
@@ -406,14 +453,18 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
       <div className="wr-top">
         <div className="wr-topbar">
           <div className="wr-left">
-            <button type="button" className="wr-back" aria-label="Back to Lessons" onClick={() => router.push("/lessons")}><Icon name="chevronLeft" size={20} /></button>
-            <span className={"wr-saved" + (status === "saving" ? " is-saving" : status === "error" ? " is-error" : "")}>
-              <i />{status === "saving" ? "Saving…" : status === "error" ? "Not saved" : "Saved"}
-            </span>
+            <button type="button" className="wr-back" aria-label="Back to Lessons" onClick={() => router.push(editId ? `/lessons/${editId}` : "/lessons")}><Icon name="chevronLeft" size={20} /></button>
+            {editId ? (
+              <span className={"wr-saved" + (dirty ? " is-saving" : "")}><i />{dirty ? "Unsaved changes" : "Editing"}</span>
+            ) : (
+              <span className={"wr-saved" + (status === "saving" ? " is-saving" : status === "error" ? " is-error" : "")}>
+                <i />{status === "saving" ? "Saving…" : status === "error" ? "Not saved" : "Saved"}
+              </span>
+            )}
           </div>
           <div className="wr-right">
             <button type="button" className="wr-pill" onClick={() => setModal("preview")}>Preview</button>
-            <button type="button" className="wr-pill is-orange" onClick={() => { setErr(""); setModal("continue"); }}>Continue</button>
+            <button type="button" className="wr-pill is-orange" onClick={() => { setErr(""); setModal("continue"); }}>{editId ? "Save" : "Continue"}</button>
           </div>
         </div>
 
@@ -517,9 +568,31 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
       {/* ---------- page ---------- */}
       <div className="wr-scroll">
         <div className="wr-col">
-          <button type="button" className={"wr-hf" + (header.trim() || footer.trim() ? " has-content" : "")} onClick={() => setModal("hf")}>
-            <Icon name="headerFooter" size={15} />Email header / footer
-          </button>
+          <div className="wr-tools">
+            <button type="button" className={"wr-hf" + (header.trim() || footer.trim() ? " has-content" : "")} onClick={() => setModal("hf")}>
+              <Icon name="headerFooter" size={15} />Email header / footer
+            </button>
+            {!cover && (
+              <button type="button" className="wr-hf" disabled={coverBusy} onClick={() => coverRef.current?.click()}
+                title="Shown on the lesson card. Without one, the first image in your lesson is used.">
+                <Icon name="image" size={15} />{coverBusy ? "Uploading…" : "Add cover photo"}
+              </button>
+            )}
+          </div>
+          {cover && (
+            <div className={"wr-cover" + (coverBusy ? " is-busy" : "")}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={cover} alt="Cover photo" />
+              <div className="wr-cover-acts">
+                <button type="button" className="wr-cover-btn" disabled={coverBusy} onClick={() => coverRef.current?.click()}>
+                  <Icon name="image" size={14} />{coverBusy ? "Uploading…" : "Change"}
+                </button>
+                <button type="button" className="wr-cover-btn" disabled={coverBusy} aria-label="Remove cover photo" onClick={() => setCover(null)}>
+                  <Icon name="trash" size={14} />Remove
+                </button>
+              </div>
+            </div>
+          )}
 
           <textarea ref={titleRef} rows={1} className="wr-title" placeholder="Title" aria-label="Title" value={title} maxLength={200}
             onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
@@ -549,9 +622,12 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
       <input ref={fileRef} type="file" hidden
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void addFile(f); e.target.value = ""; }} />
 
+      <input ref={coverRef} type="file" accept="image/*" hidden
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void addCover(f); e.target.value = ""; }} />
+
       {/* ---------- corners ---------- */}
       <div className="wr-corner is-l">
-        <div style={{ position: "relative" }}>
+        {!editId && <div style={{ position: "relative" }}>
           <button type="button" className={"wr-sq" + (corner === "history" ? " is-on" : "")} aria-label="Version history" onClick={() => setCorner(corner === "history" ? null : "history")}><Icon name="history" /></button>
           {corner === "history" && (
             <div className="wr-panel">
@@ -563,7 +639,7 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
               ))}
             </div>
           )}
-        </div>
+        </div>}
         <div style={{ position: "relative" }}>
           <button type="button" className={"wr-sq" + (corner === "info" ? " is-on" : "")} aria-label="Info and shortcuts" onClick={() => setCorner(corner === "info" ? null : "info")}><Icon name="info" /></button>
           {corner === "info" && (
@@ -626,18 +702,19 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
       {modal === "continue" && (
         <Backdrop onClose={() => setModal(null)}>
           <div className="wr-modal" role="dialog" aria-label="Ready to publish">
-            <ModalHead title="Ready to publish?" onClose={() => setModal(null)} />
+            <ModalHead title={editId ? "Save your changes?" : "Ready to publish?"} onClose={() => setModal(null)} />
             <div className="wr-stat"><span>Title</span><b style={{ maxWidth: 260, textAlign: "right" }}>{title.trim() || "Missing"}</b></div>
             <div className="wr-stat"><span>By</span><b>{byline}</b></div>
             <div className="wr-stat"><span>Length</span><b>{words} words · {readMins} min read</b></div>
+            <div className="wr-stat"><span>Cover</span><b>{cover ? "Custom photo" : "Automatic"}</b></div>
             <div className="wr-stat"><span>Comments / reposts</span><b>{settings.comments ? "On" : "Off"} / {settings.reposts ? "On" : "Off"}</b></div>
-            {!title.trim() && <p className="wr-err">A lesson needs a title before it can be published.</p>}
+            {!title.trim() && <p className="wr-err">A lesson needs a title before it can be {editId ? "saved" : "published"}.</p>}
             {title.trim() && !hasBody && <p className="wr-err" style={{ color: "var(--wr-muted)" }}>The lesson has no text yet. You can still publish it.</p>}
             {err && <p className="wr-err">{err}</p>}
             <div className="wr-actions">
               <button type="button" className="wr-pill" onClick={() => setModal("settings")}>Settings</button>
               <button type="button" className="wr-pill" onClick={() => setModal(null)}>Keep editing</button>
-              <button type="button" className="wr-pill is-orange" disabled={busy || !title.trim()} onClick={publish}>{busy ? "Publishing…" : "Publish now"}</button>
+              <button type="button" className="wr-pill is-orange" disabled={busy || !title.trim()} onClick={publish}>{editId ? (busy ? "Saving…" : "Save changes") : busy ? "Publishing…" : "Publish now"}</button>
             </div>
           </div>
         </Backdrop>
@@ -651,6 +728,10 @@ function Writer({ initial, author }: { initial: Draft; author: string }) {
             <button type="button" className="wr-pill" onClick={() => setModal(null)}>Close</button>
           </div>
           <article className="wr-article">
+            {cover && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img className="cover" src={cover} alt="" />
+            )}
             <h1>{title.trim() || "Untitled"}</h1>
             {subtitle.trim() && <p className="sub">{subtitle}</p>}
             <p className="by">{byline} · {new Date().toLocaleDateString()} · {readMins} min read</p>

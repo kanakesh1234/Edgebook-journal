@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sessionEmail, rateLimited } from "@/lib/server/auth";
 import { listAccounts } from "@/lib/server/accounts";
 import { listFor } from "@/lib/server/friends";
-import { readLessons, updateLessons, removeMedia, uid, type Lesson } from "@/lib/server/lessons-store";
+import { readLessons, updateLessons, removeMedia, removeUnusedMedia, isCoverUrl, uid, type Lesson } from "@/lib/server/lessons-store";
 import { blocksToHtml, cleanHtml, coverOf, hookOf, readMinutes, textOf } from "@/lib/server/lessons-html";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +18,9 @@ async function circle(me: string): Promise<Set<string>> {
   }
   return set;
 }
+
+const parseBylines = (v: unknown) =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 60)).filter(Boolean).slice(0, 5) : [];
 
 type Names = (email: string) => { handle: string; name: string };
 
@@ -37,7 +40,8 @@ function present(l: Lesson, me: string, who: Names) {
     title: l.title,
     subtitle: l.subtitle,
     html,
-    cover: coverOf(html),
+    cover: l.cover ?? coverOf(html),
+    customCover: l.cover ?? null,
     excerpt: textOf(html).slice(0, 180),
     hook: hookOf(html),
     readMins: readMinutes(html),
@@ -89,6 +93,7 @@ export async function POST(request: Request) {
   const b = (await request.json().catch(() => ({}))) as {
     action?: unknown; id?: unknown; title?: unknown; subtitle?: unknown; html?: unknown; body?: unknown; ids?: unknown; bylines?: unknown;
     settings?: { comments?: unknown; reposts?: unknown };
+    cover?: unknown;
   };
   const str = (v: unknown) => (typeof v === "string" ? v : "");
 
@@ -98,15 +103,45 @@ export async function POST(request: Request) {
       const title = str(b.title).trim();
       if (!title) return NextResponse.json({ error: "title_required" }, { status: 400 });
       if (str(b.html).length > MAX_HTML) return NextResponse.json({ error: "too_long" }, { status: 413 });
+      if (typeof b.cover === "string" && !isCoverUrl(b.cover)) return NextResponse.json({ error: "bad_cover" }, { status: 400 });
       const lesson: Lesson = {
         id: uid(), author: me, title: title.slice(0, 200), subtitle: str(b.subtitle).slice(0, 300),
         blocks: [], html: cleanHtml(str(b.html)), createdAt: Date.now(),
-        bylines: Array.isArray(b.bylines) ? b.bylines.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 60)).filter(Boolean).slice(0, 5) : [],
+        ...(typeof b.cover === "string" ? { cover: b.cover } : {}),
+        bylines: parseBylines(b.bylines),
         settings: { comments: b.settings?.comments !== false, reposts: b.settings?.reposts !== false },
         likes: [], reposts: [], saves: [], comments: [],
       };
       await updateLessons((all) => ({ next: [lesson, ...all], result: null }));
       return NextResponse.json({ ok: true, id: lesson.id });
+    }
+
+    if (b.action === "update") {
+      const title = str(b.title).trim();
+      if (!title) return NextResponse.json({ error: "title_required" }, { status: 400 });
+      if (str(b.html).length > MAX_HTML) return NextResponse.json({ error: "too_long" }, { status: 413 });
+      // `cover`: a URL sets it, null removes it, anything else (omitted) leaves it as it was.
+      if (typeof b.cover === "string" && !isCoverUrl(b.cover)) return NextResponse.json({ error: "bad_cover" }, { status: 400 });
+      const html = cleanHtml(str(b.html));
+
+      type Media = Pick<Lesson, "html" | "blocks" | "cover">;
+      const outcome = await updateLessons<{ before: Media; after: Media } | null>((all) => {
+        const l = all.find((x) => x.id === str(b.id) && x.author === me); // you can only edit your own
+        if (!l) return { result: null };
+        const before = { html: l.html, blocks: l.blocks ?? [], cover: l.cover };
+        l.title = title.slice(0, 200);
+        l.subtitle = str(b.subtitle).slice(0, 300);
+        l.html = html;
+        l.blocks = []; // legacy blocks are superseded by html once edited
+        l.bylines = parseBylines(b.bylines);
+        l.settings = { comments: b.settings?.comments !== false, reposts: b.settings?.reposts !== false };
+        if (typeof b.cover === "string") l.cover = b.cover;
+        else if (b.cover === null) delete l.cover;
+        return { next: all, result: { before, after: { html: l.html, blocks: l.blocks, cover: l.cover } } };
+      });
+      if (!outcome) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      await removeUnusedMedia(outcome.before, outcome.after);
+      return NextResponse.json({ ok: true, id: str(b.id) });
     }
 
     if (b.action === "delete") {

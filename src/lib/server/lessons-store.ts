@@ -17,6 +17,8 @@ export interface Lesson {
   blocks: Block[]; // legacy lessons only
   html?: string; // sanitized rich text (current format)
   createdAt: number;
+  /** Optional custom cover photo (a Lessons media URL). When absent, the cover is the first image in the lesson, as before. */
+  cover?: string;
   /** Names shown under the title. Display only; `author` stays the owner. */
   bylines?: string[];
   settings?: { comments: boolean; reposts: boolean };
@@ -67,7 +69,21 @@ const MEDIA_REF = /\/api\/lessons\/media\?id=([a-z0-9]+\.(?:png|jpg|gif|webp|mp4
 /** Delete the uploaded files that belonged to removed lessons. Best effort — a failed cleanup never blocks a delete. */
 export async function removeMedia(lessons: Lesson[]) {
   for (const l of lessons) {
-    const text = (l.html ?? "") + " " + l.blocks.map((b) => b.v).join(" ");
+    const text = (l.html ?? "") + " " + l.blocks.map((b) => b.v).join(" ") + " " + (l.cover ?? "");
     for (const m of text.matchAll(MEDIA_REF)) await deleteMetaFile(`lm-${m[1]}`).catch(() => {});
   }
+}
+
+/** A custom cover must be an image that was uploaded through Lessons. */
+export const isCoverUrl = (v: string) => MEDIA_URL_EXACT.test(v) && /\.(png|jpg|gif|webp)$/.test(v);
+
+const mediaIds = (l: Pick<Lesson, "html" | "blocks" | "cover">) => {
+  const text = (l.html ?? "") + " " + (l.blocks ?? []).map((b) => b.v).join(" ") + " " + (l.cover ?? "");
+  return new Set([...text.matchAll(MEDIA_REF)].map((m) => m[1]));
+};
+
+/** After an edit: delete uploaded files the lesson used before but no longer references. Best effort. */
+export async function removeUnusedMedia(before: Pick<Lesson, "html" | "blocks" | "cover">, after: Pick<Lesson, "html" | "blocks" | "cover">) {
+  const keep = mediaIds(after);
+  for (const id of mediaIds(before)) if (!keep.has(id)) await deleteMetaFile(`lm-${id}`).catch(() => {});
 }
