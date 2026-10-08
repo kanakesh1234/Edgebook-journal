@@ -30,7 +30,7 @@ import { getGoogleConfig, type GoogleConfig } from "./google-config";
 import { APP_SESSION_COOKIE, openAppSession, readCookie, type AppSession } from "./session";
 import { accountRefreshToken, getAccount, upsertAccount } from "./accounts";
 import {
-  createFolder, ensureFolder, findAppRoot, refreshAccessTokenDetailed,
+  createFolder, driveFetch, ensureFolder, findAppRoot, refreshAccessTokenDetailed,
   type DriveError, type EdgeBookFolders,
 } from "./drive";
 
@@ -357,19 +357,21 @@ async function resolveImpl(session: AppSession, config: GoogleConfig): Promise<R
 async function ensureSubfolders(accessToken: string, rootId: string, requestId: string, handle: string): Promise<EdgeBookFolders> {
   const subs = ["trades", "journals", "screenshots", "challenges", "exports"] as const;
   const result: Record<string, string> = { root: rootId };
-  for (const sub of subs) {
-    result[sub] = await ensureFolder(accessToken, sub, rootId);
+
+  // ONE list call returns every existing subfolder (was 5 sequential find calls on every cold start).
+  const found = new Map<string, string>();
+  const q = `'${rootId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  const res = await driveFetch(accessToken, `/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=100`);
+  if (res.ok) {
+    const json = (await res.json()) as { files?: { id: string; name: string }[] };
+    for (const f of json.files ?? []) if (!found.has(f.name)) found.set(f.name, f.id); // first match wins, like findFolder
   }
+  // If the list call failed we fall back to the per-folder find-or-create below (never creates blindly).
+
+  // Distinct names → safe to resolve/create in parallel.
+  await Promise.all(subs.map(async (sub) => {
+    result[sub] = found.get(sub) ?? (await ensureFolder(accessToken, sub, rootId));
+  }));
   diag("SUBFOLDERS_READY", { requestId, operation: "ensureSubfolders", handle, rootFolderId: rootId });
   return result as unknown as EdgeBookFolders;
-}
-
-export { readCookie, APP_SESSION_COOKIE };
-
-/** TEST-ONLY: clears per-process caches so tests can simulate a cold restart. */
-export function __resetDriveCachesForTests(): void {
-  cachedFolders.clear();
-  cachedTokens.clear();
-  inflightResolution.clear();
-  inflightTokenRefresh.clear();
 }

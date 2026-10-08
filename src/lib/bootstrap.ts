@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useApp } from "./store";
 import type { User } from "./services/auth";
-import { GoogleDriveDataStore, IdbDataStore, setActiveStore } from "./services/storage";
+import { GoogleDriveDataStore, IdbDataStore, prefetchJournal, setActiveStore } from "./services/storage";
 import { useSessionHeartbeat, scheduleWorkingMemoryCleanup } from "./supabase-integration";
 import { useUi, type DriveStatus } from "./ui-store";
 
@@ -32,6 +32,8 @@ export function useBootstrap() {
     bootstrapped = true;
 
     const boot = async () => {
+      // Start downloading the journal NOW, in parallel with the session check (saves one full round-trip chain).
+      prefetchJournal();
       let googleUser: User | null = null;
       let driveState: "connected" | "auth_required" | "temporarily_unavailable" | "not_authorized" | null = null;
       let serverReachable = false;

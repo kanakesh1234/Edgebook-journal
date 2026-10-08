@@ -79,6 +79,26 @@ export class IdbDataStore implements DataStore {
 /* -------------------- Cloud persistence (Google Drive) -------------------- */
 
 /**
+ * Bootstrap used to run strictly one after the other: session check → THEN journal download.
+ * The journal request is independent (the server validates the cookie itself and answers 401 for
+ * guests), so it is started alongside the session check and consumed by loadJournal().
+ */
+let _prefetchedJournal: { at: number; promise: Promise<Response> } | null = null;
+
+export function prefetchJournal(): void {
+  if (typeof window === "undefined" || _prefetchedJournal) return;
+  const promise = fetch("/api/drive/data", { cache: "no-store" });
+  promise.catch(() => undefined); // never an unhandled rejection if it ends up unused
+  _prefetchedJournal = { at: Date.now(), promise };
+}
+
+function takePrefetchedJournal(): Promise<Response> | null {
+  const p = _prefetchedJournal;
+  _prefetchedJournal = null;
+  return p && Date.now() - p.at < 20_000 ? p.promise : null;
+}
+
+/**
  * Drive-backed DataStore — talks exclusively to this app's own server
  * route handlers. The browser never sees tokens; the server resolves the
  * caller's session-bound EdgeBook folder, so user isolation is enforced
@@ -89,7 +109,14 @@ export class GoogleDriveDataStore implements DataStore {
   readonly kind = "cloud" as const;
 
   async loadJournal(_userId: string): Promise<JournalPayload | null> {
-    const res = await fetch("/api/drive/data", { cache: "no-store" });
+    // Use the speculative request started at bootstrap (runs in parallel with the session check)
+    // when it is fresh and succeeded; otherwise do a normal, bounded fetch.
+    let res: Response | null = null;
+    const early = takePrefetchedJournal();
+    if (early) {
+      try { const r = await early; if (r.ok || r.status === 404) res = r; } catch { /* fall through to a fresh fetch */ }
+    }
+    if (!res) res = await fetchWithTimeout("/api/drive/data", { cache: "no-store" });
     // 200 = file found (or new user with no file) — safe to proceed
     if (res.ok) {
       const json = (await res.json()) as { payload: JournalPayload | null };

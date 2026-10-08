@@ -183,21 +183,19 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
   const payload: JournalPayload = { entries, settings, dayLogs, plans, version: 2 };
   const snapshotKey = `${Date.now()}`;
 
-  // Snapshot to Supabase working memory for fast recovery (fire-and-forget).
-  // Supabase is advisory — cap how long it can delay the Drive write.
-  const cleanup = await Promise.race([
-    snapshotToWorkingMemory(userId, snapshotKey, payload),
-    new Promise<() => void>((resolve) => setTimeout(() => resolve(() => undefined), 2500)),
-  ]);
+  // Supabase working memory is an advisory crash-recovery copy. It starts at the same moment as the
+  // Drive write but NEVER delays it (it used to be awaited first: token fetch + full-journal upsert
+  // added 1-3s to every Plan / Add trade save).
+  const snapshot: Promise<() => void> = snapshotToWorkingMemory(userId, snapshotKey, payload).catch(() => () => undefined);
 
   try {
     await dataStore.saveJournal(userId, payload);
     _persistFailedAt = 0;
-    // Drive confirmed — remove the Supabase working copy.
-    cleanup();
+    // Drive confirmed — remove the Supabase working copy (in the background).
+    void snapshot.then((cleanup) => cleanup());
   } catch (err) {
     // Drive write failed — keep the Supabase snapshot for recovery.
-    markSnapshotFailed(userId, snapshotKey);
+    void snapshot.then(() => markSnapshotFailed(userId, snapshotKey)); // only after the snapshot row exists
 
     _persistFailedAt = Date.now();
     const syncError = err instanceof DriveSyncError ? err : null;

@@ -36,8 +36,39 @@ export interface EdgeBookAccount {
   updatedAt: number;
 }
 
+/**
+ * accounts.json lives in Google Drive, so every read costs ~3-4 Google round-trips (admin token,
+ * meta folder, file lookup, download) and is hit by EVERY request (session check, journal load,
+ * image load, friends…). Reads are served from a short per-instance cache with single-flight;
+ * every mutation invalidates it. Mutations themselves (updateMetaJson) always read fresh from
+ * Drive, so the cache can never cause a lost update — worst case a read is a few seconds stale.
+ */
+const ACCOUNTS_CACHE_TTL_MS = 30_000;
+let accountsCache: { at: number; data: Record<string, EdgeBookAccount> } | null = null;
+let accountsInflight: Promise<Record<string, EdgeBookAccount>> | null = null;
+
+function invalidateAccountsCache(): void {
+  accountsCache = null;
+}
+
+/** Every mutation goes through here: runs under the file lock, then drops the cache AFTER the write lands. */
+async function updateAccounts<R>(
+  fn: (current: Record<string, EdgeBookAccount>) => { next?: Record<string, EdgeBookAccount>; result: R } | Promise<{ next?: Record<string, EdgeBookAccount>; result: R }>,
+): Promise<R> {
+  try {
+    return await updateMetaJson<Record<string, EdgeBookAccount>, R>(STORE_FILE, {}, fn);
+  } finally {
+    invalidateAccountsCache();
+  }
+}
+
 async function readAll(): Promise<Record<string, EdgeBookAccount>> {
-  return readMetaJson<Record<string, EdgeBookAccount>>(STORE_FILE, {});
+  if (accountsCache && Date.now() - accountsCache.at < ACCOUNTS_CACHE_TTL_MS) return accountsCache.data;
+  if (accountsInflight) return accountsInflight;
+  accountsInflight = readMetaJson<Record<string, EdgeBookAccount>>(STORE_FILE, {})
+    .then((data) => { accountsCache = { at: Date.now(), data }; return data; })
+    .finally(() => { accountsInflight = null; });
+  return accountsInflight;
 }
 
 export async function listAccounts(): Promise<EdgeBookAccount[]> {
@@ -65,7 +96,7 @@ export async function findByHandle(handle: string): Promise<EdgeBookAccount | nu
 
 export async function addEdgePoints(email: string, points: number): Promise<EdgeBookAccount | null> {
   const key = email.toLowerCase();
-  return updateMetaJson<Record<string, EdgeBookAccount>, EdgeBookAccount | null>(STORE_FILE, {}, (accounts) => {
+  return updateAccounts<EdgeBookAccount | null>((accounts) => {
     const existing = accounts[key];
     if (!existing) return { result: null };
     const updated = { ...existing, edgePoints: Math.max(0, (existing.edgePoints ?? 0) + points), updatedAt: Date.now() };
@@ -77,7 +108,7 @@ export async function addEdgePoints(email: string, points: number): Promise<Edge
 export async function claimHandle(email: string, handle: string): Promise<"ok" | "taken" | "missing"> {
   const key = email.toLowerCase();
   const h = handle.toLowerCase();
-  return updateMetaJson<Record<string, EdgeBookAccount>, "ok" | "taken" | "missing">(STORE_FILE, {}, (accounts) => {
+  return updateAccounts<"ok" | "taken" | "missing">((accounts) => {
     const me = accounts[key];
     if (!me) return { result: "missing" };
     if (Object.values(accounts).some((a) => a.email !== key && a.handle.toLowerCase() === h)) return { result: "taken" };
@@ -99,7 +130,7 @@ export async function upsertAccount(patch: {
   edgePoints?: number;
 }): Promise<EdgeBookAccount> {
   const key = patch.email.toLowerCase();
-  return updateMetaJson<Record<string, EdgeBookAccount>, EdgeBookAccount>(STORE_FILE, {}, (accounts) => {
+  return updateAccounts<EdgeBookAccount>((accounts) => {
     const existing = accounts[key];
     const now = Date.now();
     const account: EdgeBookAccount = {
@@ -122,7 +153,7 @@ export async function upsertAccount(patch: {
 /** Explicit disconnect: revoke happened at Google; drop the stored authorization. */
 export async function clearDriveAuth(email: string): Promise<void> {
   const key = email.toLowerCase();
-  await updateMetaJson<Record<string, EdgeBookAccount>, null>(STORE_FILE, {}, (accounts) => {
+  await updateAccounts<null>((accounts) => {
     const existing = accounts[key];
     if (!existing) return { result: null };
     return { next: { ...accounts, [key]: { ...existing, encRefreshToken: null, driveAuthorizedAt: null, folderId: null, updatedAt: Date.now() } }, result: null };
