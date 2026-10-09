@@ -80,7 +80,7 @@ export default function JournalPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [menu, setMenu] = useState<{ entry: JournalEntry; x: number; y: number } | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
   // The navigator docks beside the content only when the page itself is wide enough (measured, not viewport-based);
   // otherwise it is a slide-over sheet, so desktop-in-a-narrow-column, tablet and phone all share one layout.
