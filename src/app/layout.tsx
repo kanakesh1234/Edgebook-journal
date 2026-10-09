@@ -21,6 +21,7 @@ export const viewport: Viewport = {
   ],
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 /** Runs before first paint — prevents theme flash. Mirrors lib/theme.ts. */

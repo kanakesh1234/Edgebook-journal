@@ -325,7 +325,7 @@ export function Minato() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
-            className="group fixed bottom-28 right-0 z-[89] flex h-14 w-6 items-center justify-end lg:bottom-24"
+            className="group fixed bottom-[calc(var(--tabbar-h)+5.5rem)] right-0 z-[89] flex h-14 w-6 items-center justify-end md:bottom-24"
           >
             <span className="block h-9 w-[4px] rounded-l-full bg-ink/20 transition-all duration-200 group-hover:w-[7px] group-hover:bg-gold/60 group-active:w-[9px]" />
           </motion.button>
@@ -356,7 +356,7 @@ export function Minato() {
         transition={{ type: "spring", stiffness: 380, damping: 32 }}
         style={{ pointerEvents: launcherVisible ? "auto" : "none" }}
         className={cn(
-          "fixed bottom-5 right-5 z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200",
+          "fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200 md:bottom-5 md:right-5",
           open ? "border-gold/50" : "border-line-strong",
         )}
       >
@@ -404,7 +404,7 @@ export function Minato() {
             animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
             transition={{ duration: 0.3, ease: EASE }}
-            className="panel fixed bottom-20 right-5 z-[90] flex max-h-[min(600px,calc(100dvh-7rem))] w-[min(400px,calc(100vw-2.5rem))] flex-col overflow-hidden shadow-overlay"
+            className="panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex max-h-[min(600px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden shadow-overlay md:inset-x-auto md:bottom-20 md:right-5 md:max-h-[min(600px,calc(100dvh-7rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-line px-5 py-3.5">

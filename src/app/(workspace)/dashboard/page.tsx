@@ -1,9 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { motion } from "motion/react";
-import { useApp } from "@/lib/store";
+import { useApp, sortEntriesNewestFirst } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
 import { evaluateRules } from "@/lib/rules";
 import { scopeToPrimary } from "@/lib/challenges";
@@ -12,11 +11,11 @@ import { CalendarView } from "@/components/calendar/calendar-view";
 import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
+import { TodayPanel, type RiskPosture } from "@/components/dashboard/today-panel";
 import { MatrixHome } from "@/components/matrix/matrix-home";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { EASE } from "@/components/landing/reveal";
 import { BookOpenIcon, PlusIcon, SparklesIcon } from "@/components/ui/icons";
 
 export default function DashboardPage() {
@@ -86,80 +85,93 @@ export default function DashboardPage() {
   })();
   const brokenWeek = violations.filter((v) => v.date >= weekCutoff).length;
   const riskUsed = stats.drawdownBudgetUsed;
-  const risk =
+  const risk: { label: string; dot: string; text: string; tone: RiskPosture["tone"] } =
     brokenToday > 0
-      ? { label: `Rule broken today${brokenToday > 1 ? ` ×${brokenToday}` : ""}`, dot: "bg-loss", text: "text-loss" }
+      ? { label: `Rule broken today${brokenToday > 1 ? ` ×${brokenToday}` : ""}`, dot: "bg-loss", text: "text-loss", tone: "loss" }
       : brokenWeek > 0
-        ? { label: "Rules under watch", dot: "bg-gold", text: "text-gold" }
+        ? { label: "Rules under watch", dot: "bg-gold", text: "text-gold", tone: "gold" }
         : riskUsed >= 0.8
-          ? { label: "Drawdown stretched", dot: "bg-loss", text: "text-loss" }
-          : { label: "Risk healthy", dot: "bg-profit", text: "text-profit" };
+          ? { label: "Drawdown stretched", dot: "bg-loss", text: "text-loss", tone: "loss" }
+          : { label: "Risk healthy", dot: "bg-profit", text: "text-profit", tone: "profit" };
+  const recent = sortEntriesNewestFirst(entries).slice(0, 5);
 
   return (
-    <div className="space-y-8 sm:space-y-10">
+    <div className="space-y-6 md:space-y-8">
       <Header
         greeting={greeting}
         firstName={firstName}
         status={
+          // On desktop the status lives in the Today rail; here it covers phone + tablet.
           <span className="inline-flex items-center gap-2" role="status">
             <span className={cn("h-1.5 w-1.5 rounded-full", risk.dot)} />
             <span className={risk.text}>{risk.label}</span>
           </span>
         }
       >
-        <div className="flex items-center gap-2.5">
-          <Button variant="outline" size="md" onClick={openNewEntry} className="hidden rounded-full px-5 lg:inline-flex">
+        {/* Phone: the centre tab is "Add trade", so the header carries only a compact planning CTA. */}
+        <div className="flex shrink-0 items-center gap-2.5">
+          <Button variant="outline" size="md" onClick={openNewEntry} className="hidden rounded-full px-5 md:inline-flex">
             <PlusIcon className="h-4 w-4" />
             Add trade
           </Button>
-          <Button variant="gold" size="md" onClick={() => setPlanOpen(true)} className="rounded-full px-5">
-            Plan a trade
+          <Button variant="gold" size="md" onClick={() => setPlanOpen(true)} className="rounded-full px-4 sm:px-5">
+            <span className="sm:hidden">Plan trade</span>
+            <span className="hidden sm:inline">Plan a trade</span>
           </Button>
         </div>
       </Header>
 
-      {futureIntention && (
-        <motion.aside
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: EASE }}
-          className="flex flex-col gap-1.5 border-l-2 border-gold/60 py-0.5 pl-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-8"
-          aria-label="Pre-market intention"
-        >
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-gold">Pre-market intention · sealed by Future Self</p>
-            <p className="mt-1 text-[15px] font-medium leading-snug text-ink">“{futureIntention.rule}”</p>
-          </div>
-          <Link href="/practice" className="shrink-0 text-[13px] font-semibold text-gold hover:underline">
-            {futureIntention.outcome ? `Marked ${futureIntention.outcome}` : "Open training"}
-          </Link>
-        </motion.aside>
-      )}
+      {/*
+        One grid, three compositions:
+          phone    single column — Performance → Today → Practice → Calendar
+          tablet   single column, Today becomes a two-up card (see TodayPanel)
+          desktop  main column + sticky 21rem "Today" rail
+      */}
+      <div className="grid gap-6 md:gap-8 xl:grid-cols-[minmax(0,1fr)_21rem] xl:gap-x-8">
+        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+          <Performance
+            stats={stats}
+            currency={settings.currency}
+            startingEquity={settings.startingEquity}
+            targetEquity={settings.targetEquity}
+            maxDrawdown={settings.maxDrawdown}
+            eyebrow={challenge ? `${challenge.name} · equity` : "Equity"}
+            streak={streak}
+            emptyHint={
+              challenge && stats.tradingDays === 0
+                ? "Tag trades with this challenge to track its progress."
+                : "Your curve appears after your first trading day."
+            }
+          />
+        </div>
 
-      <Performance
-        stats={stats}
-        currency={settings.currency}
-        startingEquity={settings.startingEquity}
-        targetEquity={settings.targetEquity}
-        maxDrawdown={settings.maxDrawdown}
-        eyebrow={challenge ? `${challenge.name} · equity` : "Equity"}
-        streak={streak}
-        emptyHint={
-          challenge && stats.tradingDays === 0
-            ? "Tag trades with this challenge to track its progress."
-            : "Your curve appears after your first trading day."
-        }
-      />
+        <TodayPanel
+          className="min-w-0 xl:sticky xl:top-8 xl:col-start-2 xl:row-span-3 xl:row-start-1 xl:self-start"
+          risk={{ label: risk.label, tone: risk.tone }}
+          drawdownUsed={riskUsed}
+          drawdown={stats.drawdown}
+          drawdownLimit={settings.maxDrawdown}
+          currency={settings.currency}
+          brokenToday={brokenToday}
+          brokenWeek={brokenWeek}
+          intention={futureIntention ? { rule: futureIntention.rule, outcome: futureIntention.outcome } : null}
+          recent={recent}
+        />
 
-      <MatrixHome />
+        <div className="min-w-0 xl:col-start-1 xl:row-start-2">
+          <MatrixHome />
+        </div>
 
-      <CalendarView
-        entries={entries}
-        dayLogs={dayLogs}
-        challenges={settings.challenges ?? []}
-        currency={settings.currency}
-        defaultChallengeId={challenge?.id ?? null}
-      />
+        <div className="min-w-0 xl:col-start-1 xl:row-start-3">
+          <CalendarView
+            entries={entries}
+            dayLogs={dayLogs}
+            challenges={settings.challenges ?? []}
+            currency={settings.currency}
+            defaultChallengeId={challenge?.id ?? null}
+          />
+        </div>
+      </div>
 
       <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />
     </div>
@@ -170,23 +182,23 @@ export default function DashboardPage() {
 
 function Header({ greeting, firstName, status, children }: { greeting: string; firstName: string; status?: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4">
+    <header className="flex items-end justify-between gap-3 sm:gap-4">
       <div>
         <motion.h1
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45 }}
-          className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl sm:font-semibold"
+          className="font-display text-[24px] font-semibold leading-[1.15] tracking-[-0.02em] text-ink sm:text-3xl"
         >
           {greeting}, <span className="text-gold">{firstName}</span>.
         </motion.h1>
-        <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+        <p className="mt-1.5 flex flex-col gap-y-1 text-[13px] text-muted sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:text-sm">
           <span className="capitalize">{formatDateFull(todayKey())}</span>
           {status && (
-            <>
-              <span className="text-line-strong" aria-hidden>·</span>
+            <span className="inline-flex items-center gap-3 xl:hidden">
+              <span className="hidden text-line-strong sm:inline" aria-hidden>·</span>
               {status}
-            </>
+            </span>
           )}
         </p>
       </div>

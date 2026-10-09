@@ -6,7 +6,7 @@ import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useBootstrap } from "@/lib/bootstrap";
 import { LogoMark } from "@/components/landing/logo";
-import { BottomTabs, MobileTopBar, Sidebar } from "@/components/shell/nav";
+import { BottomTabs, MobileTopBar, Sidebar, TabletRail } from "@/components/shell/nav";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
 import { Minato } from "@/components/ai/minato";
 import { AppErrorBoundary } from "@/components/ui/error-boundary";
@@ -61,8 +61,12 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     );
   }
 
+  // Pages that earn extra width on large screens (the dashboard's context rail).
+  const wide = pathname.startsWith("/dashboard");
+  const isSettings = pathname.startsWith("/settings");
+
   return (
-    <div className="min-h-dvh bg-canvas">
+    <div className="min-h-dvh bg-canvas" data-wide={wide ? "true" : undefined}>
       {/* Keyboard shortcut: jump straight past navigation */}
       <a
         href="#content"
@@ -71,15 +75,15 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
         Skip to content
       </a>
 
+      {/* One shell per device class — only one is visible at a time (see shell/nav.tsx). */}
       <Sidebar />
+      <TabletRail />
       <MobileTopBar />
 
-      <main
-        id="content"
-        tabIndex={-1}
-        className={`relative mx-auto min-h-dvh w-full ${pathname.startsWith("/settings") ? "max-w-[1400px]" : "max-w-6xl"} px-4 pb-12 pt-6 outline-none sm:px-6 lg:pl-[264px] lg:pr-8 xl:pl-[272px]`}
-      >
-        <AppErrorBoundary>{children}</AppErrorBoundary>
+      <main id="content" tabIndex={-1} className="app-main relative min-h-dvh w-full outline-none">
+        <div className={`mx-auto w-full max-w-[var(--content-max)] ${isSettings ? "xl:max-w-[87.5rem]" : ""}`}>
+          <AppErrorBoundary>{children}</AppErrorBoundary>
+        </div>
       </main>
 
       <BottomTabs />

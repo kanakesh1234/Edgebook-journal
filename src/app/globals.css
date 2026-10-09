@@ -402,6 +402,124 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* ============================================================
+   Device shells
+   Three deliberately different layouts, switched at Tailwind's
+   md (768px) and xl (1280px) breakpoints:
+
+     phone    < 768     bottom tab bar · one column · thumb-first
+     tablet   768–1279  icon rail · two-up grids · touch targets
+     desktop  ≥ 1280    full sidebar · context rail · dense grids
+
+   Components read these variables instead of hard-coding offsets,
+   so fixed elements (Minato, toasts, sheets) always clear the chrome.
+=========================================================== */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  --topbar-h: calc(3.25rem + var(--safe-top));
+  --tabbar-h: calc(4rem + var(--safe-bottom));
+  --rail-w: 0px;
+  --sidebar-w: 0px;
+  --content-max: 72rem;
+}
+@media (min-width: 768px) {
+  :root {
+    --topbar-h: 0px;
+    --tabbar-h: 0px;
+    --rail-w: 5rem;
+    --content-max: 60rem;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --rail-w: 0px;
+    --sidebar-w: 16.5rem;
+    --content-max: 72rem;
+  }
+}
+/* Pages that earn extra width (dashboard's context rail) opt in. */
+[data-wide="true"] {
+  --content-max: 60rem;
+}
+@media (min-width: 1280px) {
+  [data-wide="true"] {
+    --content-max: 80rem;
+  }
+}
+@media (min-width: 1536px) {
+  [data-wide="true"] {
+    --content-max: 88rem;
+  }
+}
+
+/* The scrolling page frame. Padding, not margin, so the fixed chrome
+   (sidebar / rail / tab bar) never overlaps content at any size. */
+.app-main {
+  padding-top: 1rem;
+  padding-right: calc(1rem + var(--safe-right));
+  padding-left: calc(1rem + var(--safe-left));
+  padding-bottom: calc(var(--tabbar-h) + 1.75rem);
+}
+@media (min-width: 768px) {
+  .app-main {
+    padding-top: 1.75rem;
+    padding-right: calc(1.75rem + var(--safe-right));
+    padding-left: calc(var(--rail-w) + 1.75rem + var(--safe-left));
+    padding-bottom: 3rem;
+  }
+}
+@media (min-width: 1280px) {
+  .app-main {
+    padding-top: 2.25rem;
+    padding-right: 2.5rem;
+    padding-left: calc(var(--sidebar-w) + 2.5rem);
+    padding-bottom: 4rem;
+  }
+}
+
+/* Hide scrollbars on horizontal chip rows / tab strips */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Touch devices: guarantee a 44px hit area on icon buttons and
+   suppress hover-only affordances that stick after a tap. */
+@media (pointer: coarse) {
+  .hit-44 {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  button,
+  [role="button"],
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+@media (hover: none) {
+  .panel-hover:hover {
+    box-shadow: var(--shadow-rest);
+    border-color: var(--line);
+  }
+}
+
+/* Bottom sheets: drag handle + safe-area padding */
+.sheet-handle {
+  width: 2.25rem;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--line-strong);
+}
+.pb-safe {
+  padding-bottom: max(1rem, var(--safe-bottom));
+}
+
+/* ============================================================
    Reduced motion
 =========================================================== */
 @media (prefers-reduced-motion: reduce) {
