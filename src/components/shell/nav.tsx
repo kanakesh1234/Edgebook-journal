@@ -49,7 +49,7 @@ export const NAV_ITEMS = [
 type NavItem = (typeof NAV_ITEMS)[number];
 
 /** Phone tab bar shows the four daily destinations; the rest live in the menu sheet. */
-const TAB_HREFS = ["/dashboard", "/journal", "/lab", "/practice"] as const;
+const TAB_HREFS = ["/dashboard", "/lessons", "/journal", "/practice"] as const;
 const TAB_ITEMS = TAB_HREFS.map((h) => NAV_ITEMS.find((i) => i.href === h)!);
 const MORE_ITEMS = NAV_ITEMS.filter((i) => !(TAB_HREFS as readonly string[]).includes(i.href));
 
@@ -516,11 +516,11 @@ function TabLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-/** < md — Home · Journal · ＋ · Lab · Practise. The primary action sits under the thumb. */
+/** < md — Home · Lessons · ＋ · Journal · Practise. The primary action sits under the thumb. */
 export function BottomTabs() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
-  const [home, journal, lab, practice] = TAB_ITEMS;
+  const [home, lessons, journal, practice] = TAB_ITEMS;
 
   return (
     <nav
@@ -528,7 +528,7 @@ export function BottomTabs() {
       className="fixed inset-x-0 bottom-0 z-40 grid h-[var(--tabbar-h)] grid-cols-5 border-t border-line bg-surface/90 pb-[var(--safe-bottom)] pl-[var(--safe-left)] pr-[var(--safe-right)] backdrop-blur-xl md:hidden"
     >
       <TabLink item={home} active={isActive(pathname, home.href)} />
-      <TabLink item={journal} active={isActive(pathname, journal.href)} />
+      <TabLink item={lessons} active={isActive(pathname, lessons.href)} />
 
       <div className="relative flex items-start justify-center">
         <button
@@ -543,7 +543,7 @@ export function BottomTabs() {
         </button>
       </div>
 
-      <TabLink item={lab} active={isActive(pathname, lab.href)} />
+      <TabLink item={journal} active={isActive(pathname, journal.href)} />
       <TabLink item={practice} active={isActive(pathname, practice.href)} />
     </nav>
   );
