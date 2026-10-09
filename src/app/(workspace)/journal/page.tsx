@@ -25,7 +25,7 @@ import {
 } from "@/components/journal/journal-model";
 import { cn } from "@/lib/utils";
 
-const VIEW_KEY = "edgebook.journal.view";
+const VIEW_KEY = "edgebook.journal.view-v2";
 
 /**
  * Journal — a logbook you browse like Files or Photos.
@@ -42,7 +42,7 @@ export default function JournalPage() {
   const money: Money = useCallback((n) => formatSignedMoney(n, settings.currency), [settings.currency]);
 
   // ── view state ────────────────────────────────────────────────
-  const [view, setViewState] = useState<ViewMode>("list");
+  const [view, setViewState] = useState<ViewMode>("grid");
   const [lens, setLens] = useState<Lens>({ kind: "all" });
   const [path, setPathState] = useState(""); // "" | YYYY | YYYY-MM | YYYY-MM-DD
   const [query, setQuery] = useState("");
@@ -67,7 +67,8 @@ export default function JournalPage() {
   const [deleting, setDeleting] = useState<JournalEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [menu, setMenu] = useState<{ entry: JournalEntry; x: number; y: number } | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  // The navigator starts closed; the sidebar button in the toolbar opens it.
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
   // The navigator docks beside the content only when the page itself is wide enough (measured, not viewport-based);
   // otherwise it is a slide-over sheet, so desktop-in-a-narrow-column, tablet and phone all share one layout.
