@@ -61,22 +61,106 @@ export function GlassIconButton({ label, onClick, children, disabled }: { label:
   );
 }
 
+/** True at laptop/desktop widths (matches Tailwind `lg`). Used to widen the modal. */
+export function useIsDesktop() {
+  const [yes, setYes] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setYes(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return yes;
+}
+
+function useIsMac() {
+  const [mac, setMac] = useState(false);
+  useEffect(() => setMac(/Mac|iPhone|iPad/.test(navigator.platform)), []);
+  return mac;
+}
+
+export type RailStep = { id: string; label: string };
+export type Rail = { steps: RailStep[]; /** Id of the active step; an id that is not in `steps` (e.g. "done") marks them all complete. */ current: string; /** Quiet context pinned to the bottom of the rail. */ aside?: React.ReactNode };
+
+/** Desktop-only progress rail: where you are in the ritual, at a glance. Purely informational. */
+function StepRail({ rail }: { rail: Rail }) {
+  const idx = rail.steps.findIndex((s) => s.id === rail.current);
+  const finished = idx === -1;
+  return (
+    <aside aria-label="Progress" className="hidden w-[15.5rem] shrink-0 border-r border-line/60 bg-ink/[0.025] lg:block">
+      <div className="sticky top-0 flex min-h-[36rem] flex-col px-7 py-9">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gold">Plan &amp; record</p>
+        <ol className="mt-10">
+          {rail.steps.map((s, i) => {
+            const state = finished || i < idx ? "done" : i === idx ? "current" : "todo";
+            return (
+              <li key={s.id} aria-current={state === "current" ? "step" : undefined} className="relative flex items-center gap-3.5 pb-7 last:pb-0">
+                {i < rail.steps.length - 1 && (
+                  <span aria-hidden className={cn("absolute left-[11px] top-[26px] h-[calc(100%-28px)] w-px transition-colors duration-500", state === "done" ? "bg-profit/40" : "bg-line-strong")} />
+                )}
+                <span
+                  className={cn(
+                    "relative z-10 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300",
+                    state === "done" && "border-profit bg-profit text-canvas",
+                    state === "current" && "border-gold bg-gold/10 ring-4 ring-gold/15",
+                    state === "todo" && "border-line-strong bg-transparent",
+                  )}
+                >
+                  {state === "done" && <IconCheck className="h-3 w-3" />}
+                  {state === "current" && <span className="h-1.5 w-1.5 rounded-full bg-gold-strong" />}
+                </span>
+                <span className={cn("text-[14px] tracking-[-0.01em] transition-colors duration-300", state === "current" ? "font-semibold text-ink" : state === "done" ? "text-muted" : "text-faint")}>{s.label}</span>
+              </li>
+            );
+          })}
+        </ol>
+        {rail.aside && <div className="mt-auto border-t border-line/60 pt-5">{rail.aside}</div>}
+      </div>
+    </aside>
+  );
+}
+
 /**
  * Sheet layout used inside <Modal>: a glass top bar, quiet scrolling content,
  * and a glass action bar. Both bars are sticky, so content softly blurs under them.
+ *
+ * With `rail`, laptop/desktop widths (lg+) get a left progress rail, a centered reading column,
+ * a labelled Back button, and a footer aligned to that column. Below lg it is the same mobile sheet,
+ * plus a small "Step 2 of 5" in the top bar.
  */
-export function SheetFrame({ onClose, onBack, hint, actions, children }: { onClose: () => void; onBack?: () => void; hint?: React.ReactNode; actions: React.ReactNode; children: React.ReactNode }) {
+export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: { onClose: () => void; onBack?: () => void; hint?: React.ReactNode; actions: React.ReactNode; children: React.ReactNode; rail?: Rail }) {
+  const idx = rail ? rail.steps.findIndex((s) => s.id === rail.current) : -1;
   return (
-    <div className="flex min-h-[30rem] flex-col">
-      <header className={cn("sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between px-4", glass.bar)}>
-        <div className="w-11">{onBack && <GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton>}</div>
-        <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
-      </header>
-      <div className="flex-1 px-7 pb-8 pt-2 sm:px-10">{children}</div>
-      <footer className={cn("sticky bottom-0 z-20 flex shrink-0 items-center justify-between gap-4 border-t border-line/60 px-5 py-3.5", glass.bar)}>
-        <div className="min-w-0 flex-1 text-[12.5px] text-faint">{hint}</div>
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
-      </footer>
+    <div className={cn("flex min-h-[30rem]", rail ? "flex-col lg:min-h-[36rem] lg:flex-row" : "flex-col")}>
+      {rail && <StepRail rail={rail} />}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className={cn("sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between px-4", rail && "lg:h-16 lg:px-6", glass.bar)}>
+          <div className="flex min-w-11 items-center">
+            {onBack && (
+              <>
+                <span className={cn(rail && "lg:hidden")}><GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton></span>
+                {rail && (
+                  <button type="button" onClick={onBack} className="hidden h-9 items-center gap-1 rounded-full pl-2 pr-3.5 text-[14px] font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink lg:inline-flex">
+                    <IconBack /> Back
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {rail && idx >= 0 && <p className="text-[12.5px] font-medium tabular-nums text-faint lg:hidden">Step {idx + 1} of {rail.steps.length}</p>}
+          <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
+        </header>
+        <div className={cn("flex-1 px-7 pb-8 pt-2 sm:px-10", rail && "lg:px-14 lg:pb-12 lg:pt-4")}>
+          <div className={cn(rail && "lg:mx-auto lg:max-w-[34rem]")}>{children}</div>
+        </div>
+        <footer className={cn("sticky bottom-0 z-20 shrink-0 border-t border-line/60 px-5 py-3.5", rail && "lg:px-14 lg:py-4", glass.bar)}>
+          <div className={cn("flex items-center justify-between gap-4", rail && "lg:mx-auto lg:max-w-[34rem]")}>
+            <div className="min-w-0 flex-1 text-[12.5px] text-faint">{hint}</div>
+            <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          </div>
+        </footer>
+      </div>
     </div>
   );
 }
@@ -272,8 +356,9 @@ export function Stepper({ label, onStep, canDecrement = true, canIncrement = tru
 
 /* ------------------------------- controls ------------------------------- */
 
-export function PrimaryButton({ children, onClick, disabled, loading }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; loading?: boolean }) {
+export function PrimaryButton({ children, onClick, disabled, loading, shortcut = false }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; loading?: boolean; /** Show the ⌘↵ / Ctrl↵ keycap on desktop (the parent wires the key itself). */ shortcut?: boolean }) {
   const off = disabled || loading;
+  const mac = useIsMac();
   return (
     <button
       type="button"
@@ -287,7 +372,10 @@ export function PrimaryButton({ children, onClick, disabled, loading }: { childr
       )}
     >
       {loading && <Spinner className="absolute h-4 w-4" />}
-      <span className={cn(loading && "opacity-0")}>{children}</span>
+      <span className={cn("inline-flex items-center", loading && "opacity-0")}>
+        {children}
+        {shortcut && !disabled && <kbd className="ml-2.5 hidden rounded-md bg-black/10 px-1.5 py-0.5 font-mono text-[11px] font-medium opacity-70 lg:inline">{mac ? "⌘" : "Ctrl"} ↵</kbd>}
+      </span>
     </button>
   );
 }
@@ -303,7 +391,7 @@ export function QuietButton({ children, onClick, disabled }: { children: React.R
 export function StepTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div>
-      <h2 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.025em] text-ink sm:text-[32px]">{title}</h2>
+      <h2 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.025em] text-ink sm:text-[32px] lg:text-[36px]">{title}</h2>
       {subtitle && <p className="mt-2 text-[15px] leading-snug text-muted">{subtitle}</p>}
     </div>
   );
@@ -344,7 +432,7 @@ export function Chip({ selected, onClick, children, tone = "gold" }: { selected:
       type="button"
       aria-pressed={selected}
       onClick={() => { haptic.selection(); onClick(); }}
-      className={cn("inline-flex min-h-11 items-center rounded-full border px-4 py-2 text-[15px] font-medium transition-all duration-150 active:scale-[0.96]", selected ? on : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
+      className={cn("inline-flex min-h-11 items-center rounded-full border px-4 py-2 lg:min-h-10 text-[15px] font-medium transition-all duration-150 active:scale-[0.96]", selected ? on : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
     >
       {children}
     </button>

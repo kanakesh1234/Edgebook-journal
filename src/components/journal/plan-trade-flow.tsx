@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
-import { currencySymbol, todayKey } from "@/lib/format";
+import { currencySymbol, formatDateMedium, todayKey, weekdayLong } from "@/lib/format";
 import { Modal } from "@/components/ui/modal";
 import { ShieldIcon } from "@/components/ui/icons";
 import { cn, uid } from "@/lib/utils";
@@ -13,7 +13,7 @@ import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import {
   BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
-  Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox,
+  Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox, useIsDesktop, type Rail,
 } from "./flow-ui";
 
 /**
@@ -29,6 +29,7 @@ type StepId = "plan" | "setup" | "trade" | "chart" | "autopsy" | "done";
 type NewsEvent = { id: string; name: string; time: string };
 type ImportRow = { date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null };
 
+const RAIL_LABEL: Record<StepId, string> = { plan: "Plan", setup: "Setup", trade: "Log trade", chart: "Chart", autopsy: "Review", done: "Done" };
 const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
 const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
 const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
@@ -47,6 +48,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const challenges = settings.challenges ?? [];
   const sym = currencySymbol(settings.currency);
 
+  const desktop = useIsDesktop();
   const [step, setStep] = useState<StepId>("plan");
   const [dir, setDir] = useState<1 | -1>(1);
 
@@ -334,20 +336,45 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   // (manual entries only — an imported batch can't be edited in place).
   const back = step === "plan" || step === "done" ? null : step === "chart" ? (mode === "manual" ? "trade" : null) : step === "autopsy" ? "chart" : prev(step);
 
+  // ⌘/Ctrl + Enter continues from anywhere, including inside a text area.
+  const continueRef = useRef(onContinue);
+  continueRef.current = onContinue;
+  useEffect(() => {
+    if (!open || lockOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); continueRef.current(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, lockOpen]);
+
+  // Desktop progress rail. "done" is not a rail step, so the final screen shows every step complete.
+  const rail: Rail = {
+    steps: order.filter((s) => s !== "done").map((id) => ({ id, label: RAIL_LABEL[id] })),
+    current: step,
+    aside: (
+      <>
+        <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">{weekdayLong(today)}</p>
+        <p className="mt-0.5 text-[12.5px] text-faint">{formatDateMedium(today)}</p>
+      </>
+    ),
+  };
+
   const hintText = saveError ?? autopsy.error ?? gate.hint;
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
 
   return (
     <>
-    <Modal open={open} onClose={onClose} size="md" label="Plan and record a trade">
+    <Modal open={open} onClose={onClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
       <SheetFrame
+        rail={rail}
         onClose={onClose}
         onBack={back ? () => go(back) : undefined}
         hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
         actions={
           <>
             {step === "chart" && <QuietButton disabled={saving} onClick={() => go("autopsy")}>Skip for now</QuietButton>}
-            <PrimaryButton disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>{continueLabel}</PrimaryButton>
+            <PrimaryButton shortcut disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>{continueLabel}</PrimaryButton>
           </>
         }
       >
@@ -359,7 +386,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
               <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
               <div className="space-y-2.5 pt-7">
                 <Label done={thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
-                <TextBlock id="flow-plan" autoFocus value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="Where do you expect price to go, and why?" />
+                <TextBlock id="flow-plan" autoFocus value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="Where do you expect price to go, and why?" className="lg:min-h-32" />
               </div>
               {showFeeling && (
                 <Reveal>
