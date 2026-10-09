@@ -1,0 +1,109 @@
+/* ==================================================================
+   Trading Lab — cards, grouped lists, sheets.
+   Built only from Edgebook tokens (canvas · surface · raised · line ·
+   ink · muted · faint · gold), so light and dark inherit automatically.
+   Blur is used only where content scrolls beneath it: the sticky bar
+   and the sheets. Everything you read sits on flat, quiet surfaces.
+   ================================================================== */
+
+/* ------------------------------ sticky bar ------------------------------ */
+/* The blur lives on a pseudo-element so the bar never traps fixed children. */
+.lab-bar { isolation: isolate; }
+.lab-bar::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--canvas) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid var(--line);
+  transition: opacity .25s ease;
+}
+.lab-bar.is-stuck::before { opacity: 1; }
+
+/* ------------------------------- card grid ------------------------------- */
+.lb-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .lb-grid { gap: 18px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); } }
+
+.lb-card {
+  position: relative; display: flex; flex-direction: column; min-width: 0; height: 100%;
+  border: 1px solid var(--line); border-radius: 20px; background: var(--surface);
+  box-shadow: var(--shadow-rest);
+  transition: border-color .25s ease, box-shadow .4s cubic-bezier(.16, 1, .3, 1), transform .4s cubic-bezier(.16, 1, .3, 1);
+}
+@media (hover: hover) {
+  .lb-card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+}
+.lb-card:has(.lb-hit:focus-visible) { outline: 2px solid color-mix(in srgb, var(--gold) 65%, transparent); outline-offset: 3px; }
+.lb-card:has([aria-expanded="true"]) { z-index: 20; }
+.lb-card[data-primary="true"] { border-color: color-mix(in srgb, var(--gold) 42%, var(--line)); }
+
+.lb-card-body { display: flex; flex-direction: column; flex: 1; min-width: 0; padding: 18px 18px 16px 20px; }
+.lb-title { font-size: 17px; font-weight: 620; line-height: 1.25; letter-spacing: -.018em; color: var(--ink); }
+.lb-hit { display: block; max-width: 100%; text-align: left; font: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-hit::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 20px; }
+.lb-hit:focus-visible { outline: none; }
+.lb-meta { margin-top: 3px; font-size: 13px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lb-dek { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.lb-kebab-wrap { position: relative; z-index: 2; margin: -6px -8px 0 0; }
+
+.lb-foot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: auto; border-top: 1px solid var(--line-soft); }
+.lb-foot > div { min-width: 0; padding: 12px 8px 13px 20px; }
+.lb-foot > div + div { border-left: 1px solid var(--line-soft); }
+.lb-foot dt { font-size: 11.5px; font-weight: 500; color: var(--faint); }
+.lb-foot dd { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; letter-spacing: -.01em; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* ------------------------------ grouped lists ------------------------------ */
+.lb-group { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-rest); overflow: hidden; }
+.lb-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 13px 16px; text-align: left; transition: background-color .15s ease; }
+.lb-row + .lb-row { border-top: 1px solid var(--line-soft); }
+button.lb-row:focus-visible { outline-offset: -2px; border-radius: 0; }
+@media (hover: hover) { button.lb-row:hover { background: color-mix(in srgb, var(--ink) 3.5%, transparent); } }
+button.lb-row:active { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+
+.lb-dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; padding: 11px 16px; }
+.lb-dl > div + div { border-top: 1px solid var(--line-soft); }
+.lb-dl dt { flex: none; font-size: 14px; color: var(--muted); }
+.lb-dl dd { min-width: 0; text-align: right; font-size: 14px; font-weight: 560; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.lb-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--line); }
+.lb-stats > div { min-width: 0; padding: 12px 14px; background: var(--surface); }
+.lb-stats dt { font-size: 11.5px; font-weight: 500; color: var(--faint); }
+.lb-stats dd { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; letter-spacing: -.012em; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* -------------------------------- progress -------------------------------- */
+.lb-track { height: 6px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.lb-track[data-size="lg"] { height: 8px; }
+.lb-fill { height: 100%; border-radius: inherit; background: var(--gold-strong); transform-origin: left center; }
+.lb-fill[data-tone="profit"] { background: var(--profit); }
+.lb-fill[data-tone="loss"] { background: var(--loss); }
+
+/* ------------------------------ focus / continue ------------------------------ */
+.lb-focus { padding: 22px 22px 20px; }
+@media (min-width: 640px) { .lb-focus { padding: 26px 28px 24px; } }
+.lb-continue { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; text-align: left; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-rest); transition: border-color .25s ease, box-shadow .4s cubic-bezier(.16, 1, .3, 1), transform .4s cubic-bezier(.16, 1, .3, 1); }
+@media (hover: hover) { .lb-continue:hover { border-color: var(--line-strong); transform: translateY(-1px); box-shadow: var(--shadow-lift); } }
+.lb-continue:active { transform: scale(.995); }
+
+/* ---------------------------------- sheets ---------------------------------- */
+.lb-scrim { position: fixed; inset: 0; z-index: 70; background: rgb(0 0 0 / .32); }
+[data-theme="dark"] .lb-scrim { background: rgb(0 0 0 / .52); }
+.lb-sheet {
+  position: fixed; z-index: 71; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; max-height: 92dvh; outline: none;
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 24px 24px 0 0;
+  background: color-mix(in srgb, var(--overlay) 94%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%);
+  box-shadow: 0 -24px 64px -28px rgb(48 40 24 / .35);
+}
+[data-theme="dark"] .lb-sheet { box-shadow: 0 -24px 64px -24px rgb(0 0 0 / .7); }
+@media (min-width: 640px) {
+  .lb-sheet { left: auto; top: 12px; right: 12px; bottom: 12px; width: min(540px, calc(100vw - 24px)); max-height: none; border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow-overlay); }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .lb-sheet { background: var(--overlay); } }
+.lb-grab { flex: none; display: grid; place-items: center; height: 22px; touch-action: none; cursor: grab; }
+.lb-grab::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line-strong); }
+@media (min-width: 640px) { .lb-grab { display: none; } }
+.lb-sheet-body { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.lb-sheet-foot { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 20px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--overlay) 96%, transparent); }
+
+/* ---------------------------------- bits ---------------------------------- */
+.lb-step { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); font-size: 11px; font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lb-seg-input { width: 100%; }
