@@ -371,34 +371,6 @@ function Overview({ friend, onCompare, onRemove }: { friend: FriendItem; onCompa
   );
 }
 
-function Scoreboard({ you, youSeed, youPalette, themPalette, them, friend, yourLeads, theirLeads }: { you: string; youSeed: string; youPalette: number; themPalette: number; them: string; friend: FriendItem; yourLeads: number; theirLeads: number }) {
-  const lead = yourLeads === theirLeads ? "All square" : yourLeads > theirLeads ? "You're ahead" : `${them} is ahead`;
-  return (
-    <div className="fr-squircle" style={{ background: "var(--fr-group)", borderRadius: 16, padding: "16px 12px 14px", boxShadow: "0 0 0 1px var(--fr-hairline)", textAlign: "center" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 6 }}>
-        <div style={{ display: "grid", justifyItems: "center", gap: 6, minWidth: 0 }}>
-          <Avatar name={you} seed={youSeed} palette={youPalette} size={44} />
-          <span className="fr-footnote" style={{ color: "var(--muted)" }}>You</span>
-        </div>
-        <div className="fr-num" style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 36, lineHeight: "40px", fontWeight: 700, letterSpacing: "-0.03em" }}>
-          <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...BOUNCY, delay: 0.05 }} style={{ color: yourLeads >= theirLeads ? "var(--ink)" : "var(--faint)" }}>
-            {yourLeads}
-          </motion.span>
-          <span style={{ fontSize: 20, color: "var(--faint)", fontWeight: 500 }}>–</span>
-          <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...BOUNCY, delay: 0.12 }} style={{ color: theirLeads >= yourLeads ? "var(--ink)" : "var(--faint)" }}>
-            {theirLeads}
-          </motion.span>
-        </div>
-        <div style={{ display: "grid", justifyItems: "center", gap: 6, minWidth: 0 }}>
-          <Avatar name={friend.displayName} seed={friend.handle} palette={themPalette} size={44} />
-          <span className="fr-footnote truncate" style={{ color: "var(--muted)", maxWidth: "100%" }}>{friend.displayName}</span>
-        </div>
-      </div>
-      <p className="fr-subhead" style={{ marginTop: 10, color: "var(--ink)", fontWeight: 600 }}>{lead}</p>
-    </div>
-  );
-}
-
 function fmt(v: number | null, unit: "" | "%", signed = false): string {
   if (v == null) return "—";
   const n = unit === "%" ? Math.round(v * 10) / 10 : Math.round(v);
@@ -406,18 +378,45 @@ function fmt(v: number | null, unit: "" | "%", signed = false): string {
   return `${n < 0 ? "−" : signed && n > 0 ? "+" : ""}${s}${unit}`;
 }
 
-
-function Bar({ value, max, color, delay, dim }: { value: number | null; max: number; color: string; delay: number; dim: boolean }) {
+/** One bar split between two people: each side's share of the pair. Shifts negatives so returns compare sensibly. */
+function Split({ you, them, youColor, themColor, delay }: { you: number | null; them: number | null; youColor: string; themColor: string; delay: number }) {
   const reduce = useReducedMotion();
-  const w = value == null || max === 0 ? 0 : Math.max(value === 0 ? 0 : 3, (Math.abs(value) / max) * 100);
+  const base = Math.min(you ?? 0, them ?? 0, 0);
+  const a = (you ?? 0) - base;
+  const b = (them ?? 0) - base;
+  const share = a + b === 0 ? 50 : (a / (a + b)) * 100;
+  const left = Math.min(90, Math.max(10, share)); // both sides always stay visible
+  const t = reduce ? INSTANT : { ...spring(0.7, 0.86), delay };
   return (
-    <div style={{ height: 8, borderRadius: 4, background: "var(--fr-fill)", overflow: "hidden" }}>
-      <motion.div
-        initial={{ width: reduce ? `${w}%` : 0 }}
-        animate={{ width: `${w}%` }}
-        transition={reduce ? INSTANT : { ...spring(0.7, 0.86), delay }}
-        style={{ height: "100%", borderRadius: 4, background: color, opacity: dim ? 0.45 : 1 }}
-      />
+    <div style={{ display: "flex", gap: 3, height: 8 }} aria-hidden="true">
+      <motion.div initial={{ flexGrow: reduce ? left : 50 }} animate={{ flexGrow: left }} transition={t} style={{ flexBasis: 0, borderRadius: "4px 2px 2px 4px", background: youColor }} />
+      <motion.div initial={{ flexGrow: reduce ? 100 - left : 50 }} animate={{ flexGrow: 100 - left }} transition={t} style={{ flexBasis: 0, borderRadius: "2px 4px 4px 2px", background: themColor }} />
+    </div>
+  );
+}
+
+function Name({ children, align }: { children: React.ReactNode; align: "center" }) {
+  return (
+    <span className="fr-footnote" style={{ display: "block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", textAlign: align }}>
+      {children}
+    </span>
+  );
+}
+
+function NotEnoughData({ meEmpty, themEmpty, name }: { meEmpty: boolean; themEmpty: boolean; name: string }) {
+  const body =
+    meEmpty && themEmpty
+      ? "Neither of you has logged a trading day yet. Head to head unlocks once you both have."
+      : themEmpty
+        ? `${name} hasn't logged a trading day yet. Head to head unlocks as soon as they do.`
+        : "Log a trading day in your journal and Head to head unlocks.";
+  return (
+    <div style={{ padding: "30px 28px 38px", textAlign: "center" }}>
+      <span className="fr-squircle" style={{ display: "inline-grid", placeItems: "center", width: 64, height: 64, borderRadius: 21, background: "color-mix(in srgb, var(--gold) 14%, transparent)", color: "var(--gold)" }}>
+        <Icon.Bars className="h-8 w-8" />
+      </span>
+      <h3 className="fr-title2" style={{ marginTop: 16, color: "var(--ink)" }}>Not enough data yet</h3>
+      <p className="fr-subhead" style={{ margin: "6px auto 0", maxWidth: 300, color: "var(--muted)" }}>{body}</p>
     </div>
   );
 }
@@ -429,13 +428,12 @@ function Versus({ friend, api, active }: { friend: FriendItem; api: FriendsApi; 
   if (state.status === "loading") {
     return (
       <div style={{ padding: "6px 20px 24px", display: "grid", gap: 14 }} aria-busy="true" aria-label="Loading comparison">
-        <div className="fr-skel fr-squircle" style={{ height: 128, borderRadius: 16 }} />
-        <div className="fr-squircle" style={{ background: "var(--fr-group)", borderRadius: 16, padding: 16, display: "grid", gap: 18, boxShadow: "0 0 0 1px var(--fr-hairline)" }}>
+        <div className="fr-skel fr-squircle" style={{ height: 118, borderRadius: 16 }} />
+        <div className="fr-squircle" style={{ background: "var(--fr-group)", borderRadius: 16, padding: 16, display: "grid", gap: 20, boxShadow: "0 0 0 1px var(--fr-hairline)" }}>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} style={{ display: "grid", gap: 8 }}>
-              <span className="fr-skel" style={{ height: 11, width: 90, animationDelay: `${i * 90}ms` }} />
-              <span className="fr-skel" style={{ height: 8, width: `${70 - i * 8}%`, animationDelay: `${i * 90}ms` }} />
-              <span className="fr-skel" style={{ height: 8, width: `${52 - i * 6}%`, animationDelay: `${i * 90 + 40}ms` }} />
+            <div key={i} style={{ display: "grid", gap: 9, justifyItems: "center" }}>
+              <span className="fr-skel" style={{ height: 10, width: 80, animationDelay: `${i * 90}ms` }} />
+              <span className="fr-skel" style={{ height: 8, width: "100%", animationDelay: `${i * 90 + 40}ms` }} />
             </div>
           ))}
         </div>
@@ -462,43 +460,73 @@ function Versus({ friend, api, active }: { friend: FriendItem; api: FriendsApi; 
   }
 
   const { me, them } = state.data;
+  const meEmpty = me.trades === 0;
+  const themEmpty = them.trades === 0;
+  // Two people can only be compared when both have actually traded.
+  if (meEmpty || themEmpty) return <NotEnoughData meEmpty={meEmpty} themEmpty={themEmpty} name={friend.displayName} />;
+
   const v = compareMetrics(me, them);
   const youPalette = paletteIndex(me.handle);
   const themPalette = paletteIndex(friend.handle, youPalette);
-  const theirColor = paletteDeep(themPalette);
   const youColor = paletteDeep(youPalette);
+  const themColor = paletteDeep(themPalette);
+
+  const scored = v.rows.filter((r) => r.lead);
+  const biggest = scored
+    .filter((r) => r.lead !== "tie" && r.you != null && r.them != null)
+    .map((r) => ({ r, gap: Math.abs((r.you as number) - (r.them as number)) / Math.max(Math.abs(r.you as number), Math.abs(r.them as number), 1) }))
+    .sort((x, y) => y.gap - x.gap)[0]?.r;
+
+  const headline =
+    v.yourLeads === v.theirLeads ? "All square" : v.yourLeads > v.theirLeads ? `You lead in ${v.yourLeads} of ${v.scored}` : `${friend.displayName} leads in ${v.theirLeads} of ${v.scored}`;
+  const detail = biggest ? `Biggest gap: ${biggest.label.toLowerCase()} — ${fmt(biggest.you, biggest.unit, biggest.key === "return")} vs ${fmt(biggest.them, biggest.unit, biggest.key === "return")}` : "Dead even on every measure";
 
   return (
     <div style={{ padding: "6px 20px 24px", display: "grid", gap: 14 }}>
-      <Scoreboard you={me.displayName} youSeed={me.handle} youPalette={youPalette} themPalette={themPalette} them={friend.displayName} friend={friend} yourLeads={v.yourLeads} theirLeads={v.theirLeads} />
+      {/* Scoreboard */}
+      <div className="fr-squircle" style={{ background: "var(--fr-group)", borderRadius: 16, padding: "16px 14px 14px", boxShadow: "0 0 0 1px var(--fr-hairline)", textAlign: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "grid", justifyItems: "center", gap: 6, minWidth: 0 }}>
+            <Avatar name={me.displayName} seed={me.handle} palette={youPalette} size={44} />
+            <Name align="center">You</Name>
+          </div>
+          <div className="fr-num" style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 36, lineHeight: "40px", fontWeight: 700, letterSpacing: "-0.03em" }}>
+            <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...BOUNCY, delay: 0.05 }} style={{ color: v.yourLeads >= v.theirLeads ? "var(--ink)" : "var(--faint)" }}>{v.yourLeads}</motion.span>
+            <span style={{ fontSize: 20, color: "var(--faint)", fontWeight: 500 }}>–</span>
+            <motion.span initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...BOUNCY, delay: 0.12 }} style={{ color: v.theirLeads >= v.yourLeads ? "var(--ink)" : "var(--faint)" }}>{v.theirLeads}</motion.span>
+          </div>
+          <div style={{ display: "grid", justifyItems: "center", gap: 6, minWidth: 0 }}>
+            <Avatar name={friend.displayName} seed={friend.handle} palette={themPalette} size={44} />
+            <Name align="center">{friend.displayName}</Name>
+          </div>
+        </div>
+        <p className="fr-subhead" style={{ marginTop: 12, color: "var(--ink)", fontWeight: 600 }}>{headline}</p>
+        <p className="fr-footnote" style={{ marginTop: 2, color: "var(--muted)" }}>{detail}</p>
+      </div>
 
+      {/* Categories: your value · one split bar · their value */}
       <div className="fr-squircle" style={{ background: "var(--fr-group)", borderRadius: 16, boxShadow: "0 0 0 1px var(--fr-hairline)", overflow: "hidden" }}>
         {v.rows.map((r, i) => {
-          const max = Math.max(Math.abs(r.you ?? 0), Math.abs(r.them ?? 0));
+          const signed = r.key === "return";
+          const tone = (n: number | null, leads: boolean) =>
+            !leads ? "var(--muted)" : signed && n != null ? (n > 0 ? "var(--profit)" : n < 0 ? "var(--loss)" : "var(--ink)") : "var(--ink)";
           const youLeads = r.lead === "you";
           const themLeads = r.lead === "them";
-          const signed = r.key === "return";
-          const tone = (n: number | null) => (r.key === "return" && n != null ? (n > 0 ? "var(--profit)" : n < 0 ? "var(--loss)" : "var(--ink)") : "var(--ink)");
+          const info = r.lead === null;
           return (
             <div
               key={r.key}
               role="group"
               aria-label={`${r.label}: you ${fmt(r.you, r.unit, signed)}, ${friend.displayName} ${fmt(r.them, r.unit, signed)}`}
-              style={{ padding: "13px 16px 14px", position: "relative" }}
+              style={{ position: "relative", padding: info ? "11px 16px 12px" : "12px 16px 14px" }}
             >
               {i > 0 && <span style={{ position: "absolute", top: 0, left: 16, right: 0, height: 1, background: "var(--fr-sep)" }} />}
-              <p className="fr-footnote" style={{ color: "var(--muted)", marginBottom: 9 }}>{r.label}</p>
-              {[
-                { who: "you", val: r.you, color: youColor, win: youLeads, lose: themLeads },
-                { who: "them", val: r.them, color: theirColor, win: themLeads, lose: youLeads },
-              ].map((b, j) => (
-                <div key={b.who} style={{ display: "grid", gridTemplateColumns: "1fr 64px", alignItems: "center", gap: 12, marginTop: j ? 7 : 0 }}>
-                  <Bar value={b.val} max={max} color={b.color} delay={0.1 + i * 0.05 + j * 0.03} dim={b.lose} />
-                  <span className="fr-num" style={{ textAlign: "right", fontSize: 14, fontWeight: b.win ? 700 : 500, color: b.lose ? "var(--muted)" : tone(b.val) }}>
-                    {fmt(b.val, r.unit, signed)}
-                  </span>
-                </div>
-              ))}
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", alignItems: "baseline", gap: 10, marginBottom: info ? 0 : 8 }}>
+                <span className="fr-num" style={{ fontSize: 15, fontWeight: youLeads ? 700 : 500, color: tone(r.you, youLeads || info) }}>{fmt(r.you, r.unit, signed)}</span>
+                <span className="fr-footnote" style={{ color: "var(--muted)", textAlign: "center" }}>{r.label}</span>
+                <span className="fr-num" style={{ fontSize: 15, fontWeight: themLeads ? 700 : 500, textAlign: "right", color: tone(r.them, themLeads || info) }}>{fmt(r.them, r.unit, signed)}</span>
+              </div>
+              {!info && <Split you={r.you} them={r.them} youColor={youColor} themColor={themColor} delay={0.1 + i * 0.05} />}
             </div>
           );
         })}
