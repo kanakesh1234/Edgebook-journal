@@ -39,10 +39,10 @@ import { LessonsIcon } from "@/components/lessons/lessons-icon";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", short: "Home", icon: ChartLineIcon, blurb: "Equity, risk and today" },
-  { href: "/journal", label: "Journal", short: "Journal", icon: BookOpenIcon, blurb: "Every trade, reviewed" },
-  { href: "/lab", label: "Trading Lab", short: "Lab", icon: FlaskIcon, blurb: "Challenges, playbook, backtests" },
-  { href: "/practice", label: "Practise", short: "Practise", icon: RouteIcon, blurb: "Daily reps and the Matrix" },
   { href: "/lessons", label: "Lessons", short: "Lessons", icon: LessonsIcon, blurb: "Your written playbook" },
+  { href: "/journal", label: "Journal", short: "Journal", icon: BookOpenIcon, blurb: "Every trade, reviewed" },
+  { href: "/practice", label: "Practise", short: "Practise", icon: RouteIcon, blurb: "Daily reps and the Matrix" },
+  { href: "/lab", label: "Trading Lab", short: "Lab", icon: FlaskIcon, blurb: "Challenges, playbook, backtests" },
   { href: "/friends", label: "Friends", short: "Friends", icon: UserIcon, blurb: "Compete and compare" },
 ] as const;
 

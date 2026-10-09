@@ -12,7 +12,6 @@ import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
 import { TodayPanel, type RiskPosture } from "@/components/dashboard/today-panel";
-import { MatrixHome } from "@/components/matrix/matrix-home";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -93,7 +92,7 @@ export default function DashboardPage() {
         : riskUsed >= 0.8
           ? { label: "Drawdown stretched", dot: "bg-loss", text: "text-loss", tone: "loss" }
           : { label: "Risk healthy", dot: "bg-profit", text: "text-profit", tone: "profit" };
-  const recent = sortEntriesNewestFirst(entries).slice(0, 5);
+  const recent = sortEntriesNewestFirst(entries.filter((e) => e.date === todayStr));
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -123,7 +122,7 @@ export default function DashboardPage() {
 
       {/*
         One grid, three compositions:
-          phone    single column — Performance → Today → Practice → Calendar
+          phone    single column — Performance → Today → Calendar
           tablet   single column, Today becomes a two-up card (see TodayPanel)
           desktop  main column + sticky 21rem "Today" rail
       */}
@@ -146,7 +145,7 @@ export default function DashboardPage() {
         </div>
 
         <TodayPanel
-          className="min-w-0 xl:sticky xl:top-8 xl:col-start-2 xl:row-span-3 xl:row-start-1 xl:self-start"
+          className="min-w-0 xl:sticky xl:top-8 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:self-start"
           risk={{ label: risk.label, tone: risk.tone }}
           drawdownUsed={riskUsed}
           drawdown={stats.drawdown}
@@ -159,10 +158,6 @@ export default function DashboardPage() {
         />
 
         <div className="min-w-0 xl:col-start-1 xl:row-start-2">
-          <MatrixHome />
-        </div>
-
-        <div className="min-w-0 xl:col-start-1 xl:row-start-3">
           <CalendarView
             entries={entries}
             dayLogs={dayLogs}

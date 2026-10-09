@@ -11,7 +11,7 @@
  */
 import Link from "next/link";
 import type { CurrencyCode, JournalEntry } from "@/lib/types";
-import { formatMoney, formatSignedMoney, relativeDayLabel, weekdayShort } from "@/lib/format";
+import { formatMoney, formatSignedMoney, weekdayShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { ChevronRightIcon } from "@/components/ui/icons";
 
@@ -49,6 +49,7 @@ export function TodayPanel({
   brokenToday: number;
   brokenWeek: number;
   intention?: { rule: string; outcome?: string | null } | null;
+  /** Trades taken today only. */
   recent: JournalEntry[];
   className?: string;
 }) {
@@ -108,26 +109,26 @@ export function TodayPanel({
           </section>
 
           {/* ---- recent trades ---- */}
-          <section className="p-5 @2xl:p-6" aria-label="Recent trades">
+          <section className="p-5 @2xl:p-6" aria-label="Today's trades">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Recent trades</p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Today's trades</p>
               <Link href="/journal" className="text-[12.5px] font-semibold text-gold hover:underline">
                 Journal →
               </Link>
             </div>
 
             {recent.length === 0 ? (
-              <p className="mt-4 text-[13px] leading-relaxed text-muted">Trades you log show up here, newest first.</p>
+              <p className="mt-4 text-[13px] leading-relaxed text-muted">No trades taken today.</p>
             ) : (
               <ul className="mt-2 divide-y divide-line-soft">
-                {recent.map((e, i) => (
-                  <li key={e.id} className={cn(i >= 3 && "max-md:hidden")}>
+                {recent.map((e) => (
+                  <li key={e.id}>
                     <Link
                       href={`/review/${e.id}`}
                       className="group -mx-2 flex min-h-[52px] items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-ink/[0.03] active:bg-ink/[0.06]"
                     >
                       <span className="w-11 shrink-0 text-[11.5px] leading-tight text-faint">
-                        <span className="block font-medium text-muted">{relativeDayLabel(e.date) ?? weekdayShort(e.date)}</span>
+                        <span className="block font-medium text-muted">{weekdayShort(e.date)}</span>
                         <span className="block">{e.date.slice(5).replace("-", "/")}</span>
                       </span>
                       <span className="min-w-0 flex-1">
