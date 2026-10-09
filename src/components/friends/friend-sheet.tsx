@@ -6,14 +6,15 @@ import { AnimatePresence, animate, motion, useDragControls, useReducedMotion } f
 import { Spinner } from "@/components/ui/button";
 import { compareMetrics, type FriendItem, type Metrics } from "./friends-state";
 import type { FriendsApi } from "./use-friends";
-import { Avatar, BOUNCY, INSTANT, Icon, SHEET, SMOOTH, SNAPPY, SwapLabel, Tile, paletteDeep, paletteIndex, spring, useCopy } from "./primitives";
+import { Avatar, BOUNCY, INSTANT, Icon, SHEET, SMOOTH, SNAPPY, Segmented, SwapLabel, Tile, paletteDeep, paletteIndex, spring, useCopy } from "./primitives";
 
 /* ================================================================== */
 /*  Small hooks                                                        */
 /* ================================================================== */
 
 function useMediaQuery(query: string): boolean {
-  const [match, setMatch] = useState(false);
+  // The sheet only mounts after a click, so `window` exists — start with the right answer, not a flash of the wrong layout.
+  const [match, setMatch] = useState(() => (typeof window === "undefined" ? false : window.matchMedia(query).matches));
   useEffect(() => {
     const mq = window.matchMedia(query);
     const on = () => setMatch(mq.matches);
@@ -256,117 +257,138 @@ function StatTile({
 /*  Screens                                                            */
 /* ================================================================== */
 
-function Overview({ friend, onCompare, onRemove }: { friend: FriendItem; onCompare: () => void; onRemove: () => void }) {
+/** Avatar in its score ring, name, handle and connection status. */
+function Hero({ friend }: { friend: FriendItem }) {
   const m = friend.metrics;
-  const { copied, copy } = useCopy();
   const nameId = useId();
   const noData = !!m && m.trades === 0 && m.processScore === 0;
+  const score = useCountUp(m ? m.processScore : null);
+  return (
+    <div style={{ padding: "8px 24px 0", textAlign: "center" }}>
+      <ScoreRing score={m ? m.processScore : null} empty={noData}>
+        <Avatar name={friend.displayName} seed={friend.handle} size={100} layoutId={`fr-avatar-${friend.key}`} />
+      </ScoreRing>
 
+      {/* Process score, overlapping the ring like a level badge */}
+      <div style={{ position: "relative", height: 0 }}>
+        <span
+          className="fr-num"
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: -20,
+            transform: "translateX(-50%)",
+            display: "inline-flex",
+            alignItems: "baseline",
+            gap: 6,
+            padding: "4px 12px",
+            borderRadius: 999,
+            background: "var(--fr-group)",
+            boxShadow: "0 0 0 1px var(--fr-hairline), 0 2px 8px rgb(0 0 0 / 0.12)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span className="fr-caption" style={{ color: "var(--muted)" }}>
+            Process
+          </span>
+          {m ? (
+            noData ? (
+              <span className="fr-headline" style={{ color: "var(--faint)" }}>—</span>
+            ) : (
+              <span className="fr-headline" style={{ color: "var(--ink)" }}>{score ?? 0}</span>
+            )
+          ) : (
+            <span className="fr-skel" style={{ display: "inline-block", width: 22, height: 14, alignSelf: "center" }} />
+          )}
+        </span>
+      </div>
+
+      <h2 id={nameId} className="fr-title2" style={{ marginTop: 32, color: "var(--ink)", overflowWrap: "anywhere" }}>
+        {friend.displayName}
+      </h2>
+      <p className="fr-subhead fr-num" style={{ color: "var(--muted)", marginTop: 1, overflowWrap: "anywhere" }}>
+        @{friend.handle}
+      </p>
+      <p className="fr-caption" style={{ marginTop: 9, display: "inline-flex", alignItems: "center", gap: 6, color: friend.syncing ? "var(--muted)" : "var(--profit)" }}>
+        {friend.syncing ? (
+          <>
+            <Spinner className="h-3 w-3" /> Syncing stats
+          </>
+        ) : (
+          <>
+            <span style={{ width: 7, height: 7, borderRadius: 4, background: "var(--profit)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--profit) 20%, transparent)" }} />
+            Friends
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+/** Compare · Copy ID · Remove */
+function Actions({ friend, onCompare, onRemove, padding }: { friend: FriendItem; onCompare: () => void; onRemove: () => void; padding: string }) {
+  const m = friend.metrics;
+  const { copied, copy } = useCopy();
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, padding }}>
+      <ActionTile icon={<Icon.Bars className="h-[22px] w-[22px]" />} label="Compare" onClick={onCompare} disabled={!m} hint="Available once their stats sync" />
+      <ActionTile
+        icon={copied ? <Icon.Check className="h-[22px] w-[22px]" /> : <Icon.Copy className="h-[22px] w-[22px]" />}
+        label={<SwapLabel id={copied ? "c" : "n"}>{copied ? "Copied" : "Copy ID"}</SwapLabel>}
+        onClick={() => void copy(`@${friend.handle}`)}
+      />
+      <ActionTile icon={<Icon.PersonMinus className="h-[22px] w-[22px]" />} label="Remove" tone="danger" onClick={onRemove} disabled={friend.syncing} hint="Available once their stats sync" />
+    </div>
+  );
+}
+
+/** The four headline numbers. */
+function StatsGrid({ friend, padding }: { friend: FriendItem; padding: string }) {
+  const m = friend.metrics;
   const ep = useCountUp(m ? m.edgePoints : null);
   const win = useCountUp(m && m.winRate != null ? m.winRate : null);
   const days = useCountUp(m ? m.trades : null);
   const ret = useCountUp(m ? m.returnPct : null, 1);
-  const score = useCountUp(m ? m.processScore : null);
-
   const retTone = !m ? undefined : m.returnPct > 0 ? "var(--profit)" : m.returnPct < 0 ? "var(--loss)" : undefined;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding }}>
+      <StatTile icon={<Icon.Bolt className="h-[15px] w-[15px]" />} color="var(--gold-strong)" fg="var(--on-gold)" label="Edge Points" value={ep == null ? null : ep.toLocaleString()} caption="Virtual points" />
+      <StatTile
+        icon={<Icon.Target className="h-[15px] w-[15px]" />}
+        color="var(--profit)"
+        label="Win rate"
+        value={m ? (m.winRate == null ? "—" : win == null ? null : `${Math.round(win)}%`) : null}
+        caption="of trading days"
+      />
+      <StatTile icon={<Icon.Calendar className="h-[15px] w-[15px]" />} color="var(--info)" label="Trading days" value={days == null ? null : String(Math.round(days))} caption="Logged so far" />
+      <StatTile
+        icon={<Icon.TrendUp className="h-[15px] w-[15px]" />}
+        color="var(--muted)"
+        label="Return"
+        value={ret == null ? null : `${ret > 0 ? "+" : ""}${ret.toFixed(1)}%`}
+        caption="On starting balance"
+        tone={retTone}
+      />
+    </div>
+  );
+}
 
+function PrivacyNote({ padding }: { padding: string }) {
+  return (
+    <p className="fr-footnote" style={{ color: "var(--faint)", padding, textAlign: "center" }}>
+      Friends see only competition-safe totals — never journals, notes or screenshots.
+    </p>
+  );
+}
+
+/** Phone / tablet: everything in one scrolling column. */
+function Overview({ friend, onCompare, onRemove }: { friend: FriendItem; onCompare: () => void; onRemove: () => void }) {
   return (
     <div>
-      {/* Hero */}
-      <div style={{ padding: "8px 24px 0", textAlign: "center" }}>
-        <ScoreRing score={m ? m.processScore : null} empty={noData}>
-          <Avatar name={friend.displayName} seed={friend.handle} size={100} layoutId={`fr-avatar-${friend.key}`} />
-        </ScoreRing>
-
-        {/* Process score, overlapping the ring like a level badge */}
-        <div style={{ position: "relative", height: 0 }}>
-          <span
-            className="fr-num"
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: -20,
-              transform: "translateX(-50%)",
-              display: "inline-flex",
-              alignItems: "baseline",
-              gap: 6,
-              padding: "4px 12px",
-              borderRadius: 999,
-              background: "var(--fr-group)",
-              boxShadow: "0 0 0 1px var(--fr-hairline), 0 2px 8px rgb(0 0 0 / 0.12)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span className="fr-caption" style={{ color: "var(--muted)" }}>
-              Process
-            </span>
-            {m ? (
-              noData ? (
-                <span className="fr-headline" style={{ color: "var(--faint)" }}>—</span>
-              ) : (
-                <span className="fr-headline" style={{ color: "var(--ink)" }}>{score ?? 0}</span>
-              )
-            ) : (
-              <span className="fr-skel" style={{ display: "inline-block", width: 22, height: 14, alignSelf: "center" }} />
-            )}
-          </span>
-        </div>
-
-        <h2 id={nameId} className="fr-title2" style={{ marginTop: 32, color: "var(--ink)", overflowWrap: "anywhere" }}>
-          {friend.displayName}
-        </h2>
-        <p className="fr-subhead fr-num" style={{ color: "var(--muted)", marginTop: 1 }}>
-          @{friend.handle}
-        </p>
-        <p className="fr-caption" style={{ marginTop: 9, display: "inline-flex", alignItems: "center", gap: 6, color: friend.syncing ? "var(--muted)" : "var(--profit)" }}>
-          {friend.syncing ? (
-            <>
-              <Spinner className="h-3 w-3" /> Syncing stats
-            </>
-          ) : (
-            <>
-              <span style={{ width: 7, height: 7, borderRadius: 4, background: "var(--profit)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--profit) 20%, transparent)" }} />
-              Friends
-            </>
-          )}
-        </p>
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, padding: "20px 20px 0" }}>
-        <ActionTile icon={<Icon.Bars className="h-[22px] w-[22px]" />} label="Compare" onClick={onCompare} disabled={!m} hint="Available once their stats sync" />
-        <ActionTile
-          icon={copied ? <Icon.Check className="h-[22px] w-[22px]" /> : <Icon.Copy className="h-[22px] w-[22px]" />}
-          label={<SwapLabel id={copied ? "c" : "n"}>{copied ? "Copied" : "Copy ID"}</SwapLabel>}
-          onClick={() => void copy(`@${friend.handle}`)}
-        />
-        <ActionTile icon={<Icon.PersonMinus className="h-[22px] w-[22px]" />} label="Remove" tone="danger" onClick={onRemove} disabled={friend.syncing} hint="Available once their stats sync" />
-      </div>
-
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 20px 0" }}>
-        <StatTile icon={<Icon.Bolt className="h-[15px] w-[15px]" />} color="var(--gold-strong)" fg="var(--on-gold)" label="Edge Points" value={ep == null ? null : ep.toLocaleString()} caption="Virtual points" />
-        <StatTile
-          icon={<Icon.Target className="h-[15px] w-[15px]" />}
-          color="var(--profit)"
-          label="Win rate"
-          value={m ? (m.winRate == null ? "—" : win == null ? null : `${Math.round(win)}%`) : null}
-          caption="of trading days"
-        />
-        <StatTile icon={<Icon.Calendar className="h-[15px] w-[15px]" />} color="var(--info)" label="Trading days" value={days == null ? null : String(Math.round(days))} caption="Logged so far" />
-        <StatTile
-          icon={<Icon.TrendUp className="h-[15px] w-[15px]" />}
-          color="var(--muted)"
-          label="Return"
-          value={ret == null ? null : `${ret > 0 ? "+" : ""}${ret.toFixed(1)}%`}
-          caption="On starting balance"
-          tone={retTone}
-        />
-      </div>
-
-      <p className="fr-footnote" style={{ color: "var(--faint)", padding: "14px 28px 18px", textAlign: "center" }}>
-        Friends see only competition-safe totals — never journals, notes or screenshots.
-      </p>
+      <Hero friend={friend} />
+      <Actions friend={friend} onCompare={onCompare} onRemove={onRemove} padding="20px 20px 0" />
+      <StatsGrid friend={friend} padding="14px 20px 0" />
+      <PrivacyNote padding="14px 28px 18px" />
     </div>
   );
 }
@@ -609,6 +631,11 @@ export function FriendSheet({ friend, api, onClose }: { friend: FriendItem | nul
 
 type Screen = "overview" | "versus";
 
+const WIDE_TABS: { value: Screen; label: string }[] = [
+  { value: "overview", label: "Overview" },
+  { value: "versus", label: "Head to head" },
+];
+
 const screenVariants = {
   enter: (d: number) => ({ x: d > 0 ? "26%" : "-26%", opacity: 0 }),
   center: { x: 0, opacity: 1 },
@@ -618,6 +645,7 @@ const screenVariants = {
 function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsApi; onClose: () => void }) {
   const reduce = useReducedMotion();
   const isMobile = useMediaQuery("(max-width: 639px)");
+  const isWide = useMediaQuery("(min-width: 900px)");
   const panelRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const drag = useDragControls();
@@ -680,7 +708,7 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
     const ro = new ResizeObserver(() => setHeight(Math.ceil(el.getBoundingClientRect().height)));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [screen]);
+  }, [screen, isWide]);
 
   const titleId = useId();
   const openInitial = isMobile ? { y: "100%" } : { opacity: 0, y: 28 };
@@ -704,8 +732,8 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={screen === "overview" ? undefined : titleId}
-        aria-label={screen === "overview" ? `${friend.displayName}'s profile` : undefined}
+        aria-labelledby={!isWide && screen === "versus" ? titleId : undefined}
+        aria-label={!isWide && screen === "versus" ? undefined : `${friend.displayName}'s profile`}
         tabIndex={-1}
         className="fr-material fr-sheet fr-squircle"
         initial={reduce ? { opacity: 0 } : openInitial}
@@ -723,7 +751,7 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
         style={{
           position: "relative",
           width: "100%",
-          maxWidth: isMobile ? undefined : 408,
+          maxWidth: isMobile ? undefined : isWide ? 860 : 408,
           maxHeight: isMobile ? "92dvh" : "min(92dvh, 780px)",
           display: "flex",
           flexDirection: "column",
@@ -732,7 +760,8 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
           paddingBottom: isMobile ? "env(safe-area-inset-bottom)" : 0,
         }}
       >
-        {/* Top bar: grabber, back, title, close. Dragging it moves the sheet on phones. */}
+        {/* Top bar: grabber, back, title, close. Dragging it moves the sheet on phones. (Desktop uses the two-pane layout below.) */}
+        {!isWide && (
         <div
           onPointerDown={(e) => isMobile && drag.start(e)}
           style={{ position: "relative", flex: "none", display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", height: 56, padding: "8px 14px 0", touchAction: isMobile ? "none" : undefined }}
@@ -769,10 +798,48 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
             <Icon.Xmark className="h-4 w-4" />
           </button>
         </div>
+        )}
 
         {/* Screens */}
         <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
           <motion.div initial={false} animate={{ height }} transition={reduce ? INSTANT : SMOOTH} style={{ position: "relative", overflow: "hidden" }}>
+            {isWide ? (
+              /* Desktop: the person on the left, always visible; the detail on the right. */
+              <div ref={innerRef} style={{ display: "grid", gridTemplateColumns: "316px minmax(0, 1fr)" }}>
+                <aside style={{ padding: "34px 0 28px", borderRight: "1px solid var(--fr-sep)" }}>
+                  <Hero friend={friend} />
+                  <Actions friend={friend} onCompare={() => go("versus")} onRemove={() => setConfirming(true)} padding="24px 22px 0" />
+                </aside>
+                <section style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "18px 18px 10px 22px" }}>
+                    <Segmented label="Profile section" value={screen} onChange={go} options={WIDE_TABS} />
+                    <button type="button" onClick={onClose} aria-label="Close" className="fr-glyph-btn">
+                      <Icon.Xmark className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div style={{ position: "relative", flex: 1 }}>
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      <motion.div
+                        key={screen}
+                        initial={reduce ? false : { opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                        transition={reduce ? INSTANT : SNAPPY}
+                      >
+                        {screen === "overview" ? (
+                          <>
+                            <StatsGrid friend={friend} padding="6px 22px 0" />
+                            <PrivacyNote padding="16px 28px 24px" />
+                          </>
+                        ) : (
+                          <Versus friend={friend} api={api} active />
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                </section>
+              </div>
+            ) : (
             <AnimatePresence mode="popLayout" custom={dir} initial={false}>
               <motion.div
                 key={screen}
@@ -791,6 +858,7 @@ function SheetBody({ friend, api, onClose }: { friend: FriendItem; api: FriendsA
                 )}
               </motion.div>
             </AnimatePresence>
+            )}
           </motion.div>
         </div>
 
