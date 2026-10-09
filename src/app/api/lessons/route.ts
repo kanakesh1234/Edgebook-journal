@@ -33,13 +33,14 @@ async function nameLookup(): Promise<Names> {
   };
 }
 
-function present(l: Lesson, me: string, who: Names) {
+function present(l: Lesson, me: string, who: Names, brief = false) {
   const html = l.html ?? blocksToHtml(l.blocks ?? []);
   return {
+    // `brief` drops the body and comments: a light index for pickers and link chips (the Journal).
     id: l.id,
     title: l.title,
     subtitle: l.subtitle,
-    html,
+    html: brief ? "" : html,
     cover: l.cover ?? coverOf(html),
     customCover: l.cover ?? null,
     excerpt: textOf(html).slice(0, 180),
@@ -56,7 +57,7 @@ function present(l: Lesson, me: string, who: Names) {
     repostedByMe: l.reposts.includes(me),
     savedByMe: (l.saves ?? []).includes(me),
     repostedBy: l.reposts.filter((e) => e !== me).slice(0, 2).map((e) => who(e).name),
-    comments: l.comments.map((c) => ({ id: c.id, body: c.body, at: c.at, by: who(c.by).name })),
+    comments: brief ? [] : l.comments.map((c) => ({ id: c.id, body: c.body, at: c.at, by: who(c.by).name })),
   };
 }
 
@@ -79,7 +80,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ lesson: present(l, me, who) });
     }
     visible.sort((a, b) => b.createdAt - a.createdAt);
-    return NextResponse.json({ lessons: visible.map((l) => present(l, me, who)) });
+    const brief = new URL(request.url).searchParams.get("brief") === "1";
+    return NextResponse.json({ lessons: visible.map((l) => present(l, me, who, brief)) });
   } catch (err) {
     return unavailable(err);
   }

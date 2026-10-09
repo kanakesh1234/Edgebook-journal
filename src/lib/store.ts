@@ -41,6 +41,8 @@ export interface EntryDraft {
   review?: JournalEntry["review"];
   reviewStatus?: JournalEntry["reviewStatus"];
   planId?: string;
+  /** Lessons linked to this trade (references only). */
+  lessonIds?: string[];
 }
 
 interface AppState {
@@ -68,6 +70,10 @@ interface AppState {
 
   /** Attach or update the post-trade reflection on an entry. */
   saveReflection(entryId: string, reflection: TradeReflection): Promise<void>;
+  /** Replace the lessons linked to one trade. Empty list removes the field entirely. */
+  setEntryLessons(entryId: string, lessonIds: string[]): Promise<void>;
+  /** Make exactly these trades the ones linked to a lesson — one save, however many trades change. */
+  setLessonTrades(lessonId: string, tradeIds: string[]): Promise<void>;
   /** Record a trading weekday without trades. */
   logNoTradeDay(date: string, reason?: string): Promise<void>;
   removeNoTradeDay(date: string): Promise<void>;
@@ -404,6 +410,40 @@ export const useApp = create<AppState>((set, get) => ({
     const next = entries.map((e) => (e.id === entryId ? updated : e));
     set({ entries: next });
     await persist(user.id, next, settings, dayLogs, get().plans);
+  },
+
+  async setEntryLessons(entryId, lessonIds) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    const prev = entries.find((e) => e.id === entryId);
+    if (!prev) throw new Error("Entry not found");
+    const clean = [...new Set(lessonIds.filter((x) => typeof x === "string" && x))].slice(0, 20);
+    const { lessonIds: _old, ...rest } = prev;
+    void _old;
+    const updated: JournalEntry = { ...rest, ...(clean.length ? { lessonIds: clean } : {}), updatedAt: Date.now() };
+    const next = entries.map((e) => (e.id === entryId ? updated : e));
+    set({ entries: next });
+    await persist(user.id, next, settings, dayLogs, plans);
+  },
+
+  async setLessonTrades(lessonId, tradeIds) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    const want = new Set(tradeIds);
+    let changed = false;
+    const next = entries.map((e) => {
+      const has = !!e.lessonIds?.includes(lessonId);
+      if (has === want.has(e.id)) return e;
+      changed = true;
+      const rest = (e.lessonIds ?? []).filter((x) => x !== lessonId);
+      const ids = has ? rest : [...rest, lessonId].slice(0, 20);
+      const { lessonIds: _old, ...base } = e;
+      void _old;
+      return { ...base, ...(ids.length ? { lessonIds: ids } : {}), updatedAt: Date.now() } as JournalEntry;
+    });
+    if (!changed) return;
+    set({ entries: next });
+    await persist(user.id, next, settings, dayLogs, plans);
   },
 
   async logNoTradeDay(date, reason) {

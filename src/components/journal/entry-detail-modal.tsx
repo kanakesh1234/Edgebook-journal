@@ -11,6 +11,12 @@ import { ReflectionFlow } from "./reflection-flow";
 import { Sym, type SymName } from "./symbols";
 import { IconButton, SPRING } from "./journal-ui";
 import { buildReviewGroups, type ReviewGroup } from "./review-model";
+import { useApp } from "@/lib/store";
+import { toast } from "@/components/ui/toast";
+import { fmtShort } from "@/components/lessons/format";
+import { statusOf, useReadProgress } from "@/components/lessons/progress";
+import { useLessonIndex } from "@/components/lessons/use-lesson-index";
+import { LessonPeek, LessonPicker, LessonThumb } from "./lesson-links";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
@@ -34,12 +40,16 @@ export function EntryDetailModal({
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null);
   const [reflecting, setReflecting] = useState(false);
+  /** Lesson sheets stack on top of the trade sheet (it stays visible underneath, like iOS). */
+  const [lessonSheet, setLessonSheet] = useState<{ kind: "pick" } | { kind: "peek"; id: string } | null>(null);
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<Tab>("overview"); // lives here so stepping through trades keeps your place
   const urls = useImageUrls(entry?.images.map((i) => i.id) ?? []);
   const visible = open && !!entry;
   const covered = !!zoomed || reflecting; // the lightbox / reflection flow take over the screen
   useEffect(() => setMounted(true), []);
+  useEffect(() => { if (!visible) setLessonSheet(null); }, [visible]);
+  const blocked = covered || !!lessonSheet;
 
   useEffect(() => {
     if (!visible) return;
@@ -52,14 +62,14 @@ export function EntryDetailModal({
     if (!visible) return;
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || covered) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || blocked) return;
       if (e.key === "Escape") onClose();
       if (onStep && e.key === "ArrowRight") onStep(1);
       if (onStep && e.key === "ArrowLeft") onStep(-1);
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [visible, onStep, onClose, covered]);
+  }, [visible, onStep, onClose, blocked]);
 
   const hasImg = !!entry && entry.images.length > 0;
   const stepper = !!position && !!onStep && position.total > 1;
@@ -108,7 +118,7 @@ export function EntryDetailModal({
                 className={cn("min-h-0 flex-1 overflow-y-auto lg:overflow-hidden", hasImg && "lg:grid lg:grid-cols-[minmax(0,1.5fr)_minmax(420px,1fr)] lg:grid-rows-[minmax(0,1fr)]")}
               >
                 {hasImg && <Stage entry={entry} urls={urls} onZoom={setZoomed} />}
-                <Story entry={entry} tab={tab} onTab={setTab} scroll={hasImg} onReflect={() => setReflecting(true)} canEdit={!!onEdit} />
+                <Story entry={entry} tab={tab} onTab={setTab} scroll={hasImg} onReflect={() => setReflecting(true)} canEdit={!!onEdit} onPickLesson={() => setLessonSheet({ kind: "pick" })} onPeekLesson={(id) => setLessonSheet({ kind: "peek", id })} />
               </motion.div>
             </AnimatePresence>
           </motion.div>
@@ -122,6 +132,11 @@ export function EntryDetailModal({
       {mounted && createPortal(sheet, document.body)}
       <Lightbox src={zoomed} onClose={() => setZoomed(null)} alt="Trade screenshot" />
       <ReflectionFlow open={reflecting && !!entry} entry={entry} onClose={() => setReflecting(false)} />
+      <LessonPicker open={lessonSheet?.kind === "pick" && !!entry} entry={entry} onClose={() => setLessonSheet(null)} />
+      <LessonPeek
+        id={lessonSheet?.kind === "peek" ? lessonSheet.id : null} onClose={() => setLessonSheet(null)}
+        onUnlink={onEdit && entry ? (id) => { setLessonSheet(null); void unlinkLesson(entry, id); } : undefined}
+      />
     </>
   );
 }
@@ -206,11 +221,11 @@ function GroupHeader({ icon, tint, title, aside }: { icon: SymName; tint: string
 }
 
 /** Inset grouped list — separators are inset from the leading edge, like iOS Settings. */
-function Inset({ children, lead }: { children: React.ReactNode; lead?: boolean }) {
+function Inset({ children, lead }: { children: React.ReactNode; lead?: boolean | "thumb" }) {
   return (
     <div className={cn(
       "overflow-hidden rounded-[14px] bg-ink/[0.035] ring-1 ring-inset ring-ink/[0.05] [&>*]:relative [&>*]:after:absolute [&>*]:after:bottom-0 [&>*]:after:right-0 [&>*]:after:h-px [&>*]:after:bg-line-soft [&>*:last-child]:after:hidden",
-      lead ? "[&>*]:after:left-[54px]" : "[&>*]:after:left-4",
+      lead === "thumb" ? "[&>*]:after:left-[64px]" : lead ? "[&>*]:after:left-[54px]" : "[&>*]:after:left-4",
     )}>
       {children}
     </div>
@@ -429,8 +444,86 @@ function MoreDetails({ groups }: { groups: ReviewGroup[] }) {
   );
 }
 
+/* ───────────── Lessons linked to this trade ───────────── */
+async function unlinkLesson(entry: JournalEntry, lessonId: string) {
+  try {
+    await useApp.getState().setEntryLessons(entry.id, (entry.lessonIds ?? []).filter((x) => x !== lessonId));
+    toast.success("Lesson unlinked");
+  } catch {
+    toast.error("Couldn’t unlink the lesson", "Check your connection and try again.");
+  }
+}
+
+function LinkedLessons({ entry, canEdit, onPick, onPeek }: { entry: JournalEntry; canEdit: boolean; onPick: () => void; onPeek: (id: string) => void }) {
+  const { lessons, byId } = useLessonIndex();
+  const progress = useReadProgress();
+  const ids = entry.lessonIds ?? [];
+  if (ids.length === 0 && !canEdit) return null;
+
+  return (
+    <section aria-label="Lessons">
+      <GroupHeader
+        icon="book" tint="#ff9f0a" title="Lessons"
+        aside={canEdit && ids.length > 0 ? (
+          <button type="button" onClick={onPick} className="-mr-2 flex h-8 items-center gap-1.5 rounded-full px-3 text-[13.5px] font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 active:scale-95 focus-visible:ring-2 focus-visible:ring-gold-strong/50">
+            <Sym name="link" className="h-3.5 w-3.5" />Link
+          </button>
+        ) : undefined}
+      />
+      {ids.length === 0 ? (
+        <button type="button" onClick={onPick} className="group flex w-full items-center gap-3 rounded-[14px] bg-ink/[0.035] p-3 pr-4 text-left ring-1 ring-inset ring-ink/[0.05] outline-none transition-[background-color,transform] hover:bg-ink/[0.06] active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-gold-strong/50">
+          <Tile icon="plus" tint="#ff9f0a" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14.5px] font-medium text-ink">Link a lesson</span>
+            <span className="block truncate text-[12.5px] text-muted">Tie this trade to what it taught you.</span>
+          </span>
+          <Sym name="chevronRight" className="h-4 w-4 text-faint transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+        </button>
+      ) : (
+        <Inset lead="thumb">
+          <AnimatePresence initial={false}>
+            {ids.map((id) => {
+              const l = byId.get(id);
+              const loading = lessons === null;
+              const gone = !loading && !l;
+              const st = statusOf(progress[id]);
+              return (
+                <motion.div key={id} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }} transition={SPRING} className="group/row flex min-h-[60px] items-center gap-1 pr-2">
+                  <button
+                    type="button" disabled={gone} onClick={() => onPeek(id)}
+                    className="group flex min-w-0 flex-1 items-center gap-3 rounded-[12px] py-2 pl-3 pr-1 text-left outline-none transition-colors hover:bg-ink/[0.03] active:bg-ink/[0.06] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold-strong/50 disabled:pointer-events-none"
+                  >
+                    {loading ? <span className="h-10 w-10 shrink-0 animate-pulse rounded-[10px] bg-ink/[0.07]" /> : <LessonThumb l={l} className={cn("h-10 w-10", gone && "opacity-40 grayscale")} />}
+                    <span className="min-w-0 flex-1">
+                      <span className={cn("block truncate text-[14.5px] font-medium tracking-[-0.01em]", gone ? "text-muted" : "text-ink")}>{l?.title ?? (loading ? "Loading…" : "Lesson unavailable")}</span>
+                      <span className="flex items-center gap-1.5 truncate text-[12.5px] text-muted">
+                        {l ? `${l.readMins} min read · ${fmtShort(l.createdAt)}` : gone ? "Deleted or no longer shared" : " "}
+                        {st === "read" && <span className="flex items-center gap-0.5 font-medium text-profit"><Sym name="check" className="h-3 w-3" strokeWidth={2.6} />Read</span>}
+                        {st === "reading" && <span className="num font-medium text-gold">{Math.round((progress[id]?.p ?? 0) * 100)}%</span>}
+                      </span>
+                    </span>
+                    {!gone && <Sym name="chevronRight" className="h-4 w-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5" strokeWidth={2} />}
+                  </button>
+                  {canEdit && (
+                    <button
+                      type="button" aria-label={`Unlink ${l?.title ?? "lesson"}`} title="Unlink" onClick={() => void unlinkLesson(entry, id)}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-faint opacity-0 outline-none transition-[opacity,background-color,color,transform] hover:bg-loss/10 hover:text-loss focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-loss/40 group-hover/row:opacity-100 active:scale-90 [@media(hover:none)]:opacity-100"
+                    >
+                      <Sym name="unlink" className="h-4 w-4" />
+                    </button>
+                  )}
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+        </Inset>
+      )}
+    </section>
+  );
+}
+
 /* ───────────── Right: the review ───────────── */
-function Story({ entry, tab, onTab, scroll, onReflect, canEdit }: { entry: JournalEntry; tab: Tab; onTab: (t: Tab) => void; scroll: boolean; onReflect: () => void; canEdit: boolean }) {
+function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, onPeekLesson }: { entry: JournalEntry; tab: Tab; onTab: (t: Tab) => void; scroll: boolean; onReflect: () => void; canEdit: boolean; onPickLesson: () => void; onPeekLesson: (id: string) => void }) {
   const rel = relativeDayLabel(entry.date);
   const status = entry.reviewStatus ?? reviewStatusOf(entry);
   const reviewed = status === "reviewed";
@@ -564,6 +657,8 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit }: { entry: Journ
                 )}
 
                 {lesson && <Callout label="Next time" text={lesson} />}
+
+                <LinkedLessons entry={entry} canEdit={canEdit} onPick={onPickLesson} onPeek={onPeekLesson} />
 
                 {entry.notes && (
                   <section aria-label="Notes">

@@ -8,6 +8,7 @@ import { monthLabel, type Lens, type YearNode } from "./journal-model";
 import { cn } from "@/lib/utils";
 
 export type SidebarSetup = { id: string; name: string; count: number };
+export type SidebarLesson = { id: string; title: string; count: number };
 
 function Row({ icon, label, count, selected, onClick, indent = 0, lead }: {
   icon?: SymName; label: string; count?: number; selected?: boolean; onClick: () => void; indent?: number; lead?: React.ReactNode;
@@ -36,9 +37,9 @@ const Heading = ({ children }: { children: React.ReactNode }) => (
 
 /** The navigator: Library · Dates (Year ▸ Month) · Setups. Selection mirrors the Folder view's path. */
 export function SidebarContent({
-  total, review, tree, path, lens, setups, onLens, onPath,
+  total, review, tree, path, lens, setups, lessons = [], onLens, onPath,
 }: {
-  total: number; review: number; tree: YearNode[]; path: string; lens: Lens; setups: SidebarSetup[];
+  total: number; review: number; tree: YearNode[]; path: string; lens: Lens; setups: SidebarSetup[]; lessons?: SidebarLesson[];
   onLens: (l: Lens) => void; onPath: (p: string) => void;
 }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(tree[0] ? [tree[0].key] : []));
@@ -85,6 +86,15 @@ export function SidebarContent({
       {setups.map((s) => (
         <Row key={s.id} icon="book" label={s.name} count={s.count} selected={lens.kind === "setup" && lens.id === s.id} onClick={() => { onLens({ kind: "setup", id: s.id }); onPath(""); }} />
       ))}
+
+      {lessons.length > 0 && <Heading>Lessons</Heading>}
+      <AnimatePresence initial={false}>
+        {lessons.map((l) => (
+          <motion.div key={l.id} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING}>
+            <Row icon="bulb" label={l.title} count={l.count} selected={lens.kind === "lesson" && lens.id === l.id} onClick={() => { onLens({ kind: "lesson", id: l.id }); onPath(""); }} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </nav>
   );
 }

@@ -14,18 +14,21 @@ import { toast } from "@/components/ui/toast";
 import { EntryDetailModal } from "@/components/journal/entry-detail-modal";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
 import { SetupDetail } from "@/components/lab/setup-detail";
+import { LessonPicker } from "@/components/journal/lesson-links";
+import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import { Sym } from "@/components/journal/symbols";
+import Link from "next/link";
 import { ContextMenu, EASE, MenuDivider, MenuItem, SPRING } from "@/components/journal/journal-ui";
 import { JournalToolbar, type Crumb } from "@/components/journal/journal-toolbar";
 import { SidebarContent } from "@/components/journal/journal-sidebar";
 import { FolderList, Timeline, type Money, type RowProps } from "@/components/journal/journal-views";
 import {
-  buildTree, childrenOf, filterEntries, needsReview, parentPath, pathLabel, pct, sortEntries, summarize,
+  buildTree, childrenOf, filterEntries, needsReview, parentPath, pathLabel, pct, sortEntries, summarize, tradesForLesson,
   type Lens, type Outcome, type SortKey, type ViewMode,
 } from "@/components/journal/journal-model";
 import { cn } from "@/lib/utils";
 
-const VIEW_KEY = "edgebook.journal.view-v2";
+const VIEW_KEY = "edgebook.journal.view";
 
 /**
  * Journal — a logbook you browse like Files or Photos.
@@ -42,7 +45,7 @@ export default function JournalPage() {
   const money: Money = useCallback((n) => formatSignedMoney(n, settings.currency), [settings.currency]);
 
   // ── view state ────────────────────────────────────────────────
-  const [view, setViewState] = useState<ViewMode>("grid");
+  const [view, setViewState] = useState<ViewMode>("list");
   const [lens, setLens] = useState<Lens>({ kind: "all" });
   const [path, setPathState] = useState(""); // "" | YYYY | YYYY-MM | YYYY-MM-DD
   const [query, setQuery] = useState("");
@@ -53,6 +56,15 @@ export default function JournalPage() {
 
   useEffect(() => {
     try { const v = localStorage.getItem(VIEW_KEY); if (v === "list" || v === "grid" || v === "folders") setViewState(v); } catch { /* ignore */ }
+  }, []);
+  // Deep links from Lessons: /journal?trade=ID opens that trade, /journal?lesson=ID shows the trades linked to a lesson.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const trade = q.get("trade"), lesson = q.get("lesson");
+    if (!trade && !lesson) return;
+    if (lesson) setLens({ kind: "lesson", id: lesson });
+    if (trade) setViewingId(trade);
+    window.history.replaceState(null, "", window.location.pathname);
   }, []);
   const setView = (v: ViewMode) => { haptic.selection(); setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
   const setPath = useCallback((next: string) => {
@@ -67,8 +79,8 @@ export default function JournalPage() {
   const [deleting, setDeleting] = useState<JournalEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [menu, setMenu] = useState<{ entry: JournalEntry; x: number; y: number } | null>(null);
-  // The navigator starts closed; the sidebar button in the toolbar opens it.
-  const [collapsed, setCollapsed] = useState(true);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   // The navigator docks beside the content only when the page itself is wide enough (measured, not viewport-based);
   // otherwise it is a slide-over sheet, so desktop-in-a-narrow-column, tablet and phone all share one layout.
@@ -91,13 +103,23 @@ export default function JournalPage() {
   // ── derived data ──────────────────────────────────────────────
   const setupInfos = useMemo(() => playbook.map((s) => ({ setup: s, trades: tradesForSetup(s, entries) })), [playbook, entries]);
   const activeSetup = lens.kind === "setup" ? setupInfos.find((i) => i.setup.id === lens.id) ?? null : null;
-  const effLens: Lens = lens.kind === "setup" && !activeSetup ? { kind: "all" } : lens;
+
+  // Lessons: which of my lessons have trades linked to them (the Lessons list in the sidebar).
+  const { byId: lessonById } = useLessonIndex();
+  const lessonInfos = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of entries) for (const id of e.lessonIds ?? []) counts.set(id, (counts.get(id) ?? 0) + 1);
+    return { counts, list: [...counts].flatMap(([id, count]) => { const l = lessonById.get(id); return l ? [{ id, title: l.title, count }] : []; }).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title)) };
+  }, [entries, lessonById]);
+  const activeLessonId = lens.kind === "lesson" && (lessonInfos.counts.get(lens.id) ?? 0) > 0 ? lens.id : null;
+  const effLens: Lens = (lens.kind === "setup" && !activeSetup) || (lens.kind === "lesson" && !activeLessonId) ? { kind: "all" } : lens;
 
   const base = useMemo(() => {
     if (effLens.kind === "review") return entries.filter(needsReview);
+    if (effLens.kind === "lesson" && activeLessonId) return tradesForLesson(activeLessonId, entries);
     if (effLens.kind === "setup" && activeSetup) { const ids = new Set(activeSetup.trades.map((t) => t.id)); return entries.filter((e) => ids.has(e.id)); }
     return entries;
-  }, [entries, effLens.kind, activeSetup]);
+  }, [entries, effLens.kind, activeSetup, activeLessonId]);
 
   const tree = useMemo(() => buildTree(base), [base]);
   const scoped = useMemo(() => (path ? base.filter((e) => e.date.startsWith(path)) : base), [base, path]);
@@ -112,7 +134,7 @@ export default function JournalPage() {
 
   const searching = query.trim().length > 0;
   const chronological = sort === "newest" || sort === "oldest";
-  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : "Journal";
+  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : "Journal";
   const title = path ? pathLabel(path) : rootTitle;
   const filtersActive = outcome !== "all" || instrument !== "all" || searching;
 
@@ -227,6 +249,7 @@ export default function JournalPage() {
     <SidebarContent
       total={entries.length} review={reviewCount} tree={tree} path={path} lens={effLens}
       setups={setupInfos.map((i) => ({ id: i.setup.id, name: i.setup.name, count: i.trades.length }))}
+      lessons={lessonInfos.list}
       onLens={(l) => { setLens(l); }} onPath={setPath}
     />
   );
@@ -292,6 +315,11 @@ export default function JournalPage() {
               {activeSetup && !path && (
                 <Button variant="outline" size="sm" onClick={() => setOpenSetupId(activeSetup.setup.id)}>Setup details</Button>
               )}
+              {activeLessonId && !path && (
+                <Link href={`/lessons/${activeLessonId}`} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-line bg-raised px-3 text-[13.5px] font-medium text-ink transition-[border-color,transform] hover:border-line-strong active:scale-[0.97]">
+                  <Sym name="book" className="h-4 w-4" />Open lesson
+                </Link>
+              )}
             </div>
             <p className="mt-1 text-[14.5px] text-muted">
               {summary.count === 0 ? "No trades" : (
@@ -344,6 +372,7 @@ export default function JournalPage() {
           <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
             <MenuItem icon="book" onClick={() => { setViewingId(menu.entry.id); setMenu(null); }}>Open</MenuItem>
             <MenuItem icon="pencil" onClick={() => { setEditing(menu.entry); setMenu(null); }}>Edit entry</MenuItem>
+            <MenuItem icon="link" onClick={() => { setLinkingId(menu.entry.id); setMenu(null); }}>Link a lesson…</MenuItem>
             <MenuItem icon="check" onClick={() => { setSelectMode(true); setSelectedIds(new Set([menu.entry.id])); anchorRef.current = menu.entry.id; setMenu(null); }}>Select</MenuItem>
             <MenuDivider />
             <MenuItem icon="trash" danger onClick={() => { setDeleting(menu.entry); setMenu(null); }}>Delete</MenuItem>
@@ -371,6 +400,7 @@ export default function JournalPage() {
         onEdit={(e) => setEditing(e)} onDelete={(e) => setDeleting(e)}
       />
       {editing && <EntryFormModal open onClose={() => setEditing(null)} entry={editing} />}
+      <LessonPicker open={!!linkingId} entry={entries.find((e) => e.id === linkingId) ?? null} onClose={() => setLinkingId(null)} />
 
       <ConfirmDialog
         open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => void confirmDelete()} busy={deleteBusy}

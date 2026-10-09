@@ -9,7 +9,10 @@ import { formatDateMedium, monthName } from "@/lib/format";
 export type Outcome = "all" | "win" | "loss" | "flat";
 export type SortKey = "newest" | "oldest" | "best" | "worst" | "rr";
 export type ViewMode = "list" | "grid" | "folders";
-export type Lens = { kind: "all" } | { kind: "review" } | { kind: "setup"; id: string };
+export type Lens = { kind: "all" } | { kind: "review" } | { kind: "setup"; id: string } | { kind: "lesson"; id: string };
+
+/** Trades linked to one lesson. */
+export const tradesForLesson = (lessonId: string, list: JournalEntry[]) => list.filter((e) => e.lessonIds?.includes(lessonId));
 
 export const needsReview = (e: JournalEntry) => (e.reviewStatus ?? reviewStatusOf(e)) !== "reviewed";
 
@@ -119,32 +122,3 @@ export function groupMonthDay(list: JournalEntry[]): MonthGroup[] {
 export const tradeTitle = (e: JournalEntry) =>
   [e.instrument !== "—" ? e.instrument : null, e.direction].filter(Boolean).join(" ") || "Trade";
 export const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "—");
-
-/* ---------------- MNQ default contract ---------------- */
-const MNQ_MONTH_CODES: Record<number, string> = { 2: "H", 5: "M", 8: "U", 11: "Z" }; // Mar, Jun, Sep, Dec (0-based)
-const MNQ_ROLL_DAYS = 8; // volume rolls to the next contract ~8 days before expiry (Thursday of the week prior)
-
-/**
- * Front-month MNQ symbol for a date (default: today), e.g. MNQU26, MNQZ26, MNQH27, MNQM27.
- * Contracts expire on the 3rd Friday of Mar/Jun/Sep/Dec; once the roll date passes, the next quarter is used.
- */
-export function defaultMnqSymbol(on: Date | string = new Date()): string {
-  const d = typeof on === "string" ? asDate(on.slice(0, 10)) : on;
-  const year = d.getFullYear();
-  const today = new Date(year, d.getMonth(), d.getDate());
-  for (let y = year; y <= year + 1; y++) {
-    for (const m of [2, 5, 8, 11]) {
-      const firstDow = new Date(y, m, 1).getDay();
-      const thirdFriday = 1 + ((5 - firstDow + 7) % 7) + 14;
-      const roll = new Date(y, m, thirdFriday - MNQ_ROLL_DAYS);
-      if (today < roll) return `MNQ${MNQ_MONTH_CODES[m]}${String(y).slice(-2)}`;
-    }
-  }
-  return "MNQ";
-}
-
-/** The user's explicit symbol (trimmed, upper-cased) or, when blank / the legacy "—" placeholder, the default MNQ contract. */
-export const resolveInstrument = (value: string | null | undefined, on?: Date | string): string => {
-  const v = (value ?? "").trim();
-  return v && v !== "—" ? v.toUpperCase() : defaultMnqSymbol(on);
-};

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export type SymName =
   | "list" | "grid" | "folder" | "calendar" | "search" | "filter" | "sort" | "sidebar"
   | "chevronRight" | "chevronLeft" | "chevronDown" | "check" | "xmark" | "trash" | "pencil"
-  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis" | "expand" | "note" | "target" | "heart" | "shield" | "bulb" | "checklist" | "chart";
+  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis" | "expand" | "note" | "target" | "heart" | "shield" | "bulb" | "checklist" | "chart" | "link" | "plus" | "unlink";
 
 const D: Record<SymName, ReactNode> = {
   list: (<><path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20" /><circle cx="4.4" cy="6.5" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="12" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="17.5" r=".9" fill="currentColor" stroke="none" /></>),
@@ -42,6 +42,9 @@ const D: Record<SymName, ReactNode> = {
   bulb: <path d="M9.5 17.5h5M10 20.5h4M12 3.5a5.5 5.5 0 0 0-3.2 10c.5.4.7 1 .7 1.6V17h5v-1.9c0-.6.2-1.2.7-1.6A5.5 5.5 0 0 0 12 3.5z" />,
   checklist: <path d="M10.5 7H20M10.5 12H20M10.5 17H20M4 7l1.3 1.3L7.5 6M4 12l1.3 1.3 2.2-2.3M4 17l1.3 1.3 2.2-2.3" />,
   chart: <path d="M4 19.5v-15M4 19.5h16M7.5 15l3.5-4 3 2.5 5-6.5" />,
+  link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
+  unlink: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1M4 4l16 16" />,
+  plus: <path d="M12 5v14M5 12h14" />,
   ellipsis: (<><circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" /></>),
 };
 

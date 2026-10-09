@@ -72,6 +72,12 @@ export const TradeRow = memo(function TradeRow({ entry, showDate, p }: { entry: 
         <p className="truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">
           {tradeTitle(entry)}
           {entry.tradeNumber ? <span className="ml-2 font-normal text-faint">Trade {entry.tradeNumber}</span> : null}
+          {entry.lessonIds?.length ? (
+            <span title={`${entry.lessonIds.length} linked ${entry.lessonIds.length === 1 ? "lesson" : "lessons"}`} className="ml-2 inline-flex translate-y-[2px] items-center gap-0.5 font-normal text-gold">
+              <Sym name="bulb" className="h-3.5 w-3.5" /><span className="sr-only">{entry.lessonIds.length} linked lessons</span>
+              {entry.lessonIds.length > 1 && <span aria-hidden className="num text-[11.5px]">{entry.lessonIds.length}</span>}
+            </span>
+          ) : null}
         </p>
         <p className="mt-px truncate text-[13px] text-muted">
           {showDate && <span>{dayShort(entry.date)}{entry.setup || entry.notes ? " · " : ""}</span>}
@@ -117,6 +123,11 @@ export const TradeTile = memo(function TradeTile({ entry, showDate, p, anchor }:
         )}
         {p.selectMode && <span className="absolute left-2 top-2"><SelectDot on={selected} /></span>}
         {!p.selectMode && unreviewed && <span aria-label="Needs review" className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-gold-strong ring-2 ring-white/70" />}
+        {entry.lessonIds?.length ? (
+          <span title="Linked to a lesson" className="absolute bottom-2 left-2 grid h-[22px] w-[22px] place-items-center rounded-full bg-black/45 text-white backdrop-blur-md">
+            <Sym name="bulb" className="h-3.5 w-3.5" />
+          </span>
+        ) : null}
         {entry.images.length > 1 && (
           <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[11px] font-medium text-white backdrop-blur-md">
             <Sym name="photo" className="h-3 w-3" />{entry.images.length}

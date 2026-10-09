@@ -68,6 +68,11 @@ export interface JournalEntry {
   setupId?: string;
   /** Pre-trade plan this trade executed (plan ↔ trade link, no duplication). */
   planId?: string;
+  /**
+   * Lessons this trade is linked to (id references only — the lesson itself lives in the Lessons store
+   * and is never copied here, so nothing from a lesson reaches Minato through the journal).
+   */
+  lessonIds?: string[];
   /** Planned trade number within the day (1 or 2). */
   tradeNumber?: 1 | 2 | null;
   /** Entry / exit clock time in NY trading time, "HH:MM". */

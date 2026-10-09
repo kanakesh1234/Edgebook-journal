@@ -25,6 +25,12 @@ import { LessonsIcon } from "@/components/lessons/lessons-icon";
 import { Portal } from "@/components/lessons/portal";
 import { readEntry, recordProgress, resetProgress, useReadProgress } from "@/components/lessons/progress";
 import type { LessonAction, LessonView } from "@/components/lessons/types";
+import { useApp } from "@/lib/store";
+import { formatSignedMoney } from "@/lib/format";
+import { dayShort, tradeTitle } from "@/components/journal/journal-model";
+import { Sym } from "@/components/journal/symbols";
+import { TradePicker } from "@/components/journal/lesson-links";
+import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/misc";
 import { toast } from "@/components/ui/toast";
@@ -103,7 +109,7 @@ export default function LessonPage() {
     setBusy(true);
     const ok = await lessonsPost({ action: "delete", ids: [id] });
     setBusy(false);
-    if (ok) router.push("/lessons");
+    if (ok) { invalidateLessonIndex(); router.push("/lessons"); }
     else setConfirmOpen(false);
   };
 
@@ -394,6 +400,9 @@ export default function LessonPage() {
         <span className="h-px flex-1 bg-line" />
       </div>
 
+      {/* Trades this lesson is linked to (the other half of the Journal link) */}
+      <LinkedTrades lessonId={l.id} title={l.title} />
+
       {/* Discussion — collapsed until asked for */}
       {l.settings.comments && (
         <section id="discussion" className="mt-8 scroll-mt-24">
@@ -515,6 +524,68 @@ export default function LessonPage() {
         confirmLabel="Delete"
       />
     </div>
+  );
+}
+
+/** Trades linked to this lesson — the same link you can make from a trade in the Journal. */
+function LinkedTrades({ lessonId, title }: { lessonId: string; title: string }) {
+  const entries = useApp((s) => s.entries);
+  const currency = useApp((s) => s.settings.currency);
+  const [picking, setPicking] = useState(false);
+  const linked = entries.filter((e) => e.lessonIds?.includes(lessonId)).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  const net = linked.reduce((n, e) => n + e.pnl, 0);
+  const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
+
+  return (
+    <section aria-label="Linked trades" className="mt-8">
+      <div className="flex min-h-12 items-center justify-between gap-3 px-1">
+        <h2 className="text-[17px] font-semibold tracking-[-0.015em] text-ink">
+          Trades
+          {linked.length > 0 && <span className="ml-2 text-[14px] font-medium tabular text-faint">{linked.length}</span>}
+        </h2>
+        <button
+          type="button" onClick={() => setPicking(true)}
+          className="-mr-2 flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 active:scale-95 focus-visible:ring-2 focus-visible:ring-gold-strong/50"
+        >
+          <Sym name="link" className="h-4 w-4" />{linked.length ? "Edit" : "Link a trade"}
+        </button>
+      </div>
+
+      {linked.length === 0 ? (
+        <p className="px-1 pb-1 text-[14.5px] leading-relaxed text-muted">Link the trades that put this lesson to the test. They’ll show up here, and the lesson will show up on each trade in your Journal.</p>
+      ) : (
+        <>
+          <ul className="overflow-hidden rounded-[16px] bg-ink/[0.035] ring-1 ring-inset ring-ink/[0.05]">
+            <AnimatePresence initial={false}>
+              {linked.slice(0, 6).map((e) => (
+                <motion.li key={e.id} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ type: "spring", stiffness: 420, damping: 36 }} className="relative after:absolute after:bottom-0 after:left-[60px] after:right-0 after:h-px after:bg-line-soft last:after:hidden">
+                  <Link href={`/journal?trade=${encodeURIComponent(e.id)}`} className="group flex min-h-[56px] items-center gap-3 px-3 py-2 outline-none transition-colors hover:bg-ink/[0.04] active:bg-ink/[0.07] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold-strong/50">
+                    <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-ink/[0.05]", tone(e.pnl))}>
+                      <Sym name={e.direction === "short" ? "arrowDownRight" : "arrowUpRight"} className="h-[18px] w-[18px]" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">{tradeTitle(e)}</span>
+                      <span className="block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup].filter(Boolean).join(" · ")}</span>
+                    </span>
+                    <span className={cn("kpi text-[14.5px] tabular-nums", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
+                    <Sym name="chevronRight" className="h-4 w-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
+                  </Link>
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ul>
+          <div className="mt-3 flex items-center justify-between gap-3 px-1 text-[13px] text-muted">
+            <span>Net <span className={cn("font-semibold tabular-nums", tone(net))}>{formatSignedMoney(net, currency)}</span> across {plural(linked.length, "trade")}</span>
+            {linked.length > 6 && (
+              <Link href={`/journal?lesson=${encodeURIComponent(lessonId)}`} className="font-medium text-gold transition-opacity hover:opacity-75">
+                View all in Journal
+              </Link>
+            )}
+          </div>
+        </>
+      )}
+      <TradePicker open={picking} lessonId={lessonId} lessonTitle={title} onClose={() => setPicking(false)} />
+    </section>
   );
 }
 
