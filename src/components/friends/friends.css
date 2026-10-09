@@ -1,0 +1,295 @@
+/* ============================================================
+   Friends — Apple HIG surface language, on EdgeBook's tokens.
+
+   Scoped to .fr-root (also applied to the portaled sheet), so nothing
+   here can leak into other screens. Colours come from the app's own
+   theme variables, so light / dark follow the existing toggle.
+
+   Font: the platform system font. On Apple devices that IS SF Pro
+   (no font file is shipped or licensed by us); elsewhere it falls
+   back to the Inter the rest of the app already loads.
+   ============================================================ */
+
+.fr-root {
+  --fr-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter Variable", system-ui, sans-serif;
+
+  /* Grouped-list surface: rows sit one step above the page, like iOS inset grouped. */
+  --fr-group: var(--raised);
+  --fr-hairline: color-mix(in srgb, var(--ink) 6%, transparent);
+  --fr-sep: color-mix(in srgb, var(--ink) 9%, transparent);
+
+  /* Fills (iOS "quaternary / tertiary fill") */
+  --fr-fill: color-mix(in srgb, var(--ink) 6%, transparent);
+  --fr-fill-strong: color-mix(in srgb, var(--ink) 11%, transparent);
+
+  /* Tint — EdgeBook gold plays the role of the iOS accent colour. */
+  --fr-tint: var(--gold-strong);
+  --fr-tint-text: var(--gold-deep);
+
+  font-family: var(--fr-font);
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-theme="dark"] .fr-root {
+  --fr-group: var(--surface);
+  --fr-hairline: color-mix(in srgb, var(--ink) 8%, transparent);
+  --fr-sep: color-mix(in srgb, var(--ink) 12%, transparent);
+  --fr-fill: color-mix(in srgb, var(--ink) 9%, transparent);
+  --fr-fill-strong: color-mix(in srgb, var(--ink) 15%, transparent);
+  --fr-tint-text: var(--gold);
+}
+
+/* ---------- Type scale (HIG text styles, web sizes) ---------- */
+.fr-large-title { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: -0.024em; }
+.fr-title2 { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.fr-headline { font-size: 16px; line-height: 21px; font-weight: 600; letter-spacing: -0.012em; }
+.fr-body { font-size: 16px; line-height: 21px; font-weight: 400; }
+.fr-subhead { font-size: 14px; line-height: 19px; font-weight: 400; letter-spacing: -0.006em; }
+.fr-footnote { font-size: 13px; line-height: 18px; font-weight: 400; letter-spacing: -0.004em; }
+.fr-caption { font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0; }
+.fr-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+@media (max-width: 420px) {
+  .fr-large-title { font-size: 31px; line-height: 38px; }
+}
+
+/* ---------- Continuous corners where the browser supports them ---------- */
+@supports (corner-shape: squircle) {
+  .fr-squircle { corner-shape: squircle; }
+}
+
+/* ---------- Inset grouped list ---------- */
+.fr-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding: 0 16px 6px;
+}
+.fr-section-title { color: var(--muted); font-weight: 500; }
+.fr-section-foot { color: var(--muted); padding: 8px 16px 0; }
+
+.fr-group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--fr-group);
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--fr-hairline), var(--shadow-rest);
+}
+
+.fr-li { position: relative; }
+.fr-li + .fr-li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--fr-sep-inset, 72px);
+  height: 1px;
+  background: var(--fr-sep);
+  pointer-events: none;
+}
+
+.fr-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 16px;
+  text-align: left;
+  background: transparent;
+}
+
+/* Rows that open something */
+button.fr-row, a.fr-row { cursor: pointer; transition: background-color 0.18s ease; }
+@media (hover: hover) {
+  button.fr-row:hover, a.fr-row:hover { background: color-mix(in srgb, var(--ink) 3.5%, transparent); }
+}
+button.fr-row:active, a.fr-row:active { background: color-mix(in srgb, var(--ink) 8%, transparent); transition-duration: 0s; }
+
+/* Collapsible sections. The animated element carries no vertical padding (it must reach height 0);
+   horizontal padding keeps shadows and focus rings from being clipped. */
+.fr-collapse { overflow: hidden; margin: 0 -6px; padding: 0 6px; }
+.fr-collapse-inner { padding-bottom: 28px; }
+
+/* ---------- Controls ---------- */
+.fr-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border-radius: 11px;
+  background: var(--fr-fill);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.fr-search:focus-within {
+  background: var(--fr-group);
+  box-shadow: 0 0 0 1px var(--fr-hairline), 0 0 0 4px color-mix(in srgb, var(--gold) 22%, transparent);
+}
+.fr-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 36px 0 38px;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-size: 16px; /* 16px stops iOS Safari zooming the page on focus */
+  letter-spacing: -0.011em;
+  color: var(--ink);
+}
+.fr-search input::placeholder { color: var(--faint); }
+.fr-search input:focus-visible { outline: none; }
+
+.fr-capsule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fr-fill);
+  color: var(--fr-tint-text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+.fr-capsule:disabled { cursor: default; }
+.fr-capsule--filled { background: var(--fr-tint); color: var(--on-gold); }
+.fr-capsule--quiet { color: var(--muted); }
+.fr-capsule--round { padding: 0; width: 30px; }
+@media (hover: hover) {
+  .fr-capsule:not(:disabled):hover { background: var(--fr-fill-strong); }
+  .fr-capsule--filled:not(:disabled):hover { background: var(--gold-strong-hover); }
+}
+
+/* Segmented control */
+.fr-segmented {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fr-fill);
+}
+.fr-segmented button {
+  position: relative;
+  z-index: 1;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+.fr-segmented button[aria-checked="true"] { color: var(--ink); font-weight: 600; }
+.fr-segmented-thumb {
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  background: var(--fr-group);
+  box-shadow: 0 0 0 0.5px var(--fr-hairline), 0 1px 3px rgb(0 0 0 / 0.14);
+}
+[data-theme="dark"] .fr-segmented-thumb { background: color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+
+/* Tiny circular icon button (close, clear) */
+.fr-glyph-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fr-fill-strong);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+@media (hover: hover) {
+  .fr-glyph-btn:hover { color: var(--ink); }
+}
+
+/* Avatar */
+.fr-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: rgb(255 255 255 / 0.96);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.18);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16), inset 0 -8px 14px rgb(0 0 0 / 0.08);
+  user-select: none;
+}
+
+/* Icon tile (the little rounded squares from Settings) */
+.fr-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
+}
+
+/* ---------- Materials ---------- */
+.fr-material {
+  background: color-mix(in srgb, var(--overlay) 80%, transparent);
+  -webkit-backdrop-filter: blur(34px) saturate(1.8);
+  backdrop-filter: blur(34px) saturate(1.8);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .fr-material { background: var(--overlay); }
+}
+
+.fr-sheet {
+  border-radius: 28px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent),
+    0 40px 90px -30px rgb(0 0 0 / 0.55),
+    0 12px 28px -12px rgb(0 0 0 / 0.25);
+}
+@media (max-width: 639px) {
+  .fr-sheet { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+}
+
+/* ---------- Loading ---------- */
+.fr-skel {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--fr-fill) 0%, var(--fr-fill-strong) 50%, var(--fr-fill) 100%);
+  background-size: 220% 100%;
+  animation: fr-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes fr-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* Keep keyboard focus clearly visible on tinted / filled controls */
+.fr-root button:focus-visible,
+.fr-root a:focus-visible,
+.fr-root [tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--gold) 80%, transparent);
+  outline-offset: 2px;
+}
+.fr-root button.fr-row:focus-visible, .fr-root a.fr-row:focus-visible { outline-offset: -3px; border-radius: 14px; }
+
+/* Indeterminate score ring while a new friend's stats sync */
+.fr-ring-spin { transform-origin: 50px 50px; animation: fr-rot 1.1s linear infinite; }
+@keyframes fr-rot { to { transform: rotate(360deg); } }
