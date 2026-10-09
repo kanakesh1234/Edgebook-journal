@@ -15,6 +15,7 @@ import { seededRng, type Rng } from "./math/rng";
 import { breakevenWinRate, lossStreakProbability } from "./math/formulas";
 import { buildTradeQuestions, MATH_TAGS } from "./chart-questions";
 import { hashText } from "./history";
+import type { QuestionVisual } from "./ict";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -56,13 +57,15 @@ export interface PracticeQuestion {
   evidence?: string;
   tradeId?: string;
   /** Which part of the game this question belongs to (drives the Matrix / Boss mix). */
-  group?: "tm" | "math" | "duel" | "boss";
+  group?: "tm" | "math" | "duel" | "boss" | "ict";
   /** Trades whose saved screenshots are shown above the question. Defaults to [tradeId]. */
   chartTradeIds?: string[];
   /** The question is easier with the second chart — nudges the trader to open Compare. */
   compareHint?: boolean;
   /** Missed before — it is back because the trader answered it wrong last time. */
   retry?: boolean;
+  /** A small drawn scene (candles, levels, zones) shown above the question — used by ICT Lab. */
+  visual?: QuestionVisual;
 }
 
 export type Bucket = "best" | "breakeven" | "worst";

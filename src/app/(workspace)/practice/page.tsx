@@ -7,19 +7,29 @@ import { computeStats } from "@/lib/stats";
 import { todayKey } from "@/lib/format";
 import Link from "next/link";
 import { ModeCard, MODE_META } from "@/components/practice/mode-card";
-import { AcademyStrip, PreparingScreen, SessionHero } from "@/components/practice/home";
-import { Eyebrow } from "@/components/practice/ui";
-import { RoundRunner, type RoundResult } from "@/components/practice/round-runner";
+import { PreparingScreen, SessionHero } from "@/components/practice/home";
+import { Eyebrow, surface } from "@/components/practice/ui";
+import { PlayerHero, type WeekDay } from "@/components/practice/player-hero";
+import { DailyQuests } from "@/components/practice/quests";
+import { AchievementGrid, nextUp } from "@/components/practice/trophies";
+import { calendarGrid, WEEKDAY_LETTERS } from "@/lib/practice/consistency";
+import { applyRoundToLog, claim, chestClaimed as chestClaimedOn, markAllDone, questStates, allDone } from "@/lib/practice/quests";
+import { recordsOf, updateRecords } from "@/lib/practice/records";
+import { achievementStates, newlyEarned, stamp } from "@/lib/practice/achievements";
+import { isIctTag } from "@/lib/practice/ict";
+import { NO_EXTRAS, type RoundExtras } from "@/lib/practice/rewards";
+import { cn } from "@/lib/utils";
+import { RoundRunner, type RoundResult, type RoundReport } from "@/components/practice/round-runner";
 import { displayStreak, isUsable, nextStreak, rankOf, weekTrades } from "@/lib/practice/engine";
 import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
 import { updateLedger } from "@/lib/practice/ledger";
 import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
-import { xpLevel } from "@/lib/practice/xp";
+import { DAILY_XP_GOAL, xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
 import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
 import { overallAccuracy, recommendMode } from "@/lib/practice/coach";
-import type { PracticeProgress } from "@/lib/types";
+import type { GameProgress as PracticeProgress } from "@/lib/practice/progress-ext";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
 
@@ -31,6 +41,7 @@ function modeFromUrl(): ArenaMode | null {
   if (raw === "time-machine" || raw === "timemachine") return "time-machine";
   if (raw === "math-duel" || raw === "math" || raw === "duel") return "math-duel";
   if (raw === "boss" || raw === "weekend-boss") return "boss";
+  if (raw === "ict" || raw === "ict-lab" || raw === "smc") return "ict";
   return null;
 }
 
@@ -62,12 +73,12 @@ export default function PracticePage() {
 
   const levels = arenaLevels(progress);
   const usable = useMemo(() => entries.filter(isUsable), [entries]);
-  const week = useMemo(() => weekTrades(entries), [entries]);
+  const weekInfo = useMemo(() => weekTrades(entries), [entries]);
 
   const lock = (mode: ArenaMode): string | null => {
-    if (mode === "math-duel") return null;
+    if (mode === "math-duel" || mode === "ict") return null; // these need no journal data
     if (usable.length === 0) return "Add a trade to unlock this mode.";
-    if (mode === "boss" && week.trades.length < 2) return "Needs two trades in the same week.";
+    if (mode === "boss" && weekInfo.trades.length < 2) return "Needs two trades in the same week.";
     return null;
   };
 
@@ -95,18 +106,18 @@ export default function PracticePage() {
   useEffect(() => {
     const mode = deepLink.current;
     if (!mode || phase.kind !== "idle") return;
-    if (mode !== "math-duel" && entries.length === 0) return; // wait for the journal to load
+    if (mode !== "math-duel" && mode !== "ict" && entries.length === 0) return; // wait for the journal to load
     deepLink.current = null;
     void start(mode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries.length]);
 
   /** Saves a finished round and returns the level change for the summary. */
-  const finish = (mode: ArenaMode, level: number, result: RoundResult): RoundOutcome => {
+  const finish = (mode: ArenaMode, level: number, result: RoundResult): RoundReport => {
     const snap = snapshot();
     const live = snap.progress;
     const outcome = evaluateRound({ mode, level, fails: failsOf(live, mode), correct: result.correct, answered: result.total, completed: result.completed });
-    if (result.total === 0) return outcome;
+    if (result.total === 0) return { outcome, extras: NO_EXTRAS };
 
     const mastery = { ...(live.masteryByTag ?? {}) };
     result.correctTags.forEach((tag) => { mastery[tag] = (mastery[tag] ?? 0) + 1; });
@@ -122,7 +133,7 @@ export default function PracticePage() {
     const duelSigns = result.answers.filter((a) => a.question.id.startsWith("duel:")).map((a) => a.question.id.slice(5));
     rememberPrompts(result.answers.map((a) => a.prompt));
 
-    const next: PracticeProgress = {
+    const draft: PracticeProgress = {
       ...live,
       xp: live.xp + result.xp,
       streak, freezeDays, lastMissionDate: today,
@@ -137,10 +148,43 @@ export default function PracticePage() {
       arena: applyOutcome(live, mode, outcome, result.correct),
       mathDuel: duelSigns.length ? { ...(live.mathDuel ?? {}), recentSignatures: [...(live.mathDuel?.recentSignatures ?? []), ...duelSigns].slice(-3000) } : live.mathDuel,
     };
+
+    // Game layer: quests, records, achievements — all derived from this round and the progress above.
+    const before = questStates(live, today);
+    const { records, broken } = updateRecords(live, { correct: result.correct, total: result.total, xp: result.xp, maxCombo: result.maxCombo, streak });
+    const ictCorrect = result.answers.filter((a) => a.correct && isIctTag(a.tag)).length;
+    draft.questLog = applyRoundToLog(live, today, { mode, passed: outcome.passed, maxCombo: result.maxCombo, correct: result.correct, total: result.total, ictCorrect });
+    draft.records = records;
+    const finished = markAllDone(draft, today);
+    draft.questLog = finished.questLog;
+    if (finished.first) draft.records = { ...records, questDays: records.questDays + 1 };
+    const earned = newlyEarned(draft);
+    draft.achievements = stamp(draft, earned, today);
+    const next = draft;
+    const after = questStates(next, today);
+    const extras: RoundExtras = {
+      newRecords: broken,
+      unlocked: earned,
+      questsDone: after.filter((q) => q.done && !before.find((b) => b.id === q.id)?.done).map((q) => q.id),
+      streak,
+      streakGrew: live.lastMissionDate !== today,
+      allQuestsDone: allDone(after),
+    };
     void snap.updateSettings({ practiceProgress: next });
     // Write the next round's AI questions in the background so it starts instantly.
     void warmBank({ mode, level: outcome.nextLevel, entries: snap.entries, progress: next, drawdownLeft: snap.drawdownLeft }).catch(() => undefined);
-    return outcome;
+    return { outcome, extras };
+  };
+
+  /** Claim a finished quest (or the daily chest) for bonus XP. */
+  const claimQuest = (id: string) => {
+    const snap = snapshot();
+    const live = snap.progress;
+    const { xp, questLog } = claim(live, today, id);
+    if (!xp) return;
+    const draft: PracticeProgress = { ...live, xp: live.xp + xp, questLog };
+    draft.achievements = stamp(draft, newlyEarned(draft), today);
+    void snap.updateSettings({ practiceProgress: draft });
   };
 
   const meterFor = (mode: ArenaMode) => {
@@ -151,10 +195,20 @@ export default function PracticePage() {
   const locks = useMemo(
     () => Object.fromEntries(ARENA_MODES.map((mode) => [mode, lock(mode)])) as Record<ArenaMode, string | null>,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [usable.length, week.trades.length],
+    [usable.length, weekInfo.trades.length],
   );
   const recommended = useMemo(() => recommendMode({ progress, locked: locks }), [progress, locks]);
   const busyMode = phase.kind === "preparing" ? phase.mode : null;
+
+  const quests = useMemo(() => questStates(progress, today), [progress, today]);
+  const chestDone = chestClaimedOn(progress, today);
+  const trophies = useMemo(() => achievementStates(progress), [progress]);
+  const records = recordsOf(progress);
+  const week: WeekDay[] = useMemo(() => {
+    const trained = new Set(progress.completedMissionDates ?? []);
+    return calendarGrid(today, 1).map((cell, i) => ({ key: cell.key, letter: WEEKDAY_LETTERS[i]!, trained: (progress.dailyStats?.[cell.key]?.total ?? 0) > 0 || trained.has(cell.key), today: cell.key === today, future: cell.future }));
+  }, [progress.dailyStats, progress.completedMissionDates, today]);
+  const unlockedCount = trophies.filter((t) => t.unlocked).length;
 
   return (
     <div className="mx-auto max-w-5xl pb-24">
@@ -170,13 +224,32 @@ export default function PracticePage() {
       </header>
 
       <div className="mt-9 space-y-4">
-        <AcademyStrip rank={rankOf(progress.xp)} level={xpLevel(progress.xp)} streak={displayStreak(progress, today)} accuracy={overallAccuracy(progress)} />
+        <PlayerHero rank={rankOf(progress.xp)} level={xpLevel(progress.xp)} streak={displayStreak(progress, today)} freezeDays={progress.freezeDays ?? 1} accuracy={overallAccuracy(progress)} todayXp={progress.dailyStats?.[today]?.xp ?? 0} goal={DAILY_XP_GOAL} week={week} />
 
         {notice && <p role="status" className="rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
 
         {recommended && (
           <SessionHero mode={recommended.mode} level={levels[recommended.mode]} reason={recommended.reason} meter={meterFor(recommended.mode)} busy={busyMode === recommended.mode} onStart={() => void start(recommended.mode)} />
         )}
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <DailyQuests quests={quests} chestClaimed={chestDone} onClaim={claimQuest} />
+        <section className={cn(surface.material, "flex flex-col rounded-[28px] p-6 sm:p-7")} aria-labelledby="next-heading">
+          <div className="flex items-baseline justify-between gap-3">
+            <Eyebrow><span id="next-heading">Achievements</span></Eyebrow>
+            <p className="num text-[12px] text-faint">{unlockedCount} of {trophies.length} unlocked</p>
+          </div>
+          {nextUp(trophies, 3).length > 0 ? (
+            <div className="mt-4"><AchievementGrid states={nextUp(trophies, 3)} /></div>
+          ) : (
+            <p className="mt-4 text-[14px] text-muted">Every achievement unlocked. Remarkable.</p>
+          )}
+          <div className="mt-auto flex items-center justify-between gap-4 pt-5 text-[12.5px] text-muted">
+            <span className="num">{records.rounds} {records.rounds === 1 ? "round" : "rounds"} played{records.bestCombo > 0 ? ` · best flow ×${records.bestCombo}` : ""}</span>
+            <Link href="/practice/progress" className="font-semibold text-gold hover:underline">All achievements & records →</Link>
+          </div>
+        </section>
       </div>
 
       <div className="mt-12 flex items-baseline justify-between"><Eyebrow>All modes</Eyebrow></div>
@@ -190,7 +263,8 @@ export default function PracticePage() {
             disabled={!!locks[mode]}
             busy={busyMode === mode}
             meter={locks[mode] ? undefined : meterFor(mode)}
-            meta={mode === "boss" && !locks[mode] ? week.label : undefined}
+            meta={mode === "boss" && !locks[mode] ? weekInfo.label : undefined}
+            className={mode === "ict" ? "sm:col-span-2" : undefined}
             onStart={() => void start(mode)}
           />
         ))}

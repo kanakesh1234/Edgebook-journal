@@ -21,6 +21,7 @@ import { recentPrompts } from "./history";
 import { readAiBank, readMissed, stashUnused, writeAiBank } from "./bank";
 import { tierOf, type ArenaMode } from "./arena";
 import type { FamilyRating } from "./math/difficulty";
+import { ictQuestions } from "./ict";
 
 const FAMILIES = ["breakeven", "expectancy", "sizing", "fees", "streak", "at-least-one", "buffer", "net-positive"] as const;
 const ratingsFor = (tier: 1 | 2 | 3 | 4): FamilyRating => Object.fromEntries(FAMILIES.map((f) => [f, { level: tier, weakRounds: 0 }])) as FamilyRating;
@@ -58,13 +59,15 @@ const WEIGHTS: Record<ArenaMode, Partial<Record<Group, number>>> = {
   boss: { boss: 5, tm: 2, math: 3 },
   matrix: { tm: 5, math: 2, duel: 3 },
   "math-duel": { duel: 5, math: 3 },
+  ict: { ict: 1 },
 };
 
 const fitsMode = (mode: ArenaMode, q: PracticeQuestion): boolean => {
   const g = groupOf(q);
-  if (mode === "matrix") return true;
+  if (mode === "matrix") return g !== "ict";
   if (mode === "time-machine") return g === "tm";
-  if (mode === "boss") return g !== "duel";
+  if (mode === "boss") return g !== "duel" && g !== "ict";
+  if (mode === "ict") return g === "ict";
   return g === "duel" || g === "math";
 };
 
@@ -84,6 +87,7 @@ function tradesFor(mode: ArenaMode, entries: JournalEntry[]): JournalEntry[] {
 }
 
 function localQuestions(ctx: RoundContext, seed: number, ledger: LedgerView): PracticeQuestion[] {
+  if (ctx.mode === "ict") return ictQuestions({ seed, retired: (fp) => ledger.done.has(fpKey(fp)) });
   const trades = tradesFor(ctx.mode, ctx.entries);
   const base = { trades, all: ctx.entries, seed, drawdownLeft: ctx.drawdownLeft };
   const ratings = ratingsFor(tierOf(ctx.level));
@@ -114,7 +118,7 @@ async function fetchBatch(ctx: RoundContext, evidence: JournalEntry[], avoid: st
 
 export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
   const trades = tradesFor(ctx.mode, ctx.entries);
-  if (ctx.mode !== "math-duel" && trades.length === 0) return { empty: "Add a trade with a P&L and your first round is ready." };
+  if (ctx.mode !== "math-duel" && ctx.mode !== "ict" && trades.length === 0) return { empty: "Add a trade with a P&L and your first round is ready." };
   if (ctx.mode === "boss" && trades.length < 2) return { empty: "The boss needs two trades in the same week." };
 
   const seed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
@@ -143,7 +147,7 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
   const banked = usableAi(readAiBank(ctx.mode), ids, ledger);
   writeAiBank(ctx.mode, []); // taken for this round; unplayed ones are stashed back at the end
   let aiNow = banked;
-  if (evidence.length && banked.length < MIN_BANK_TO_SKIP_WAIT) {
+  if (ctx.mode !== "ict" && evidence.length && banked.length < MIN_BANK_TO_SKIP_WAIT) {
     aiCalls++;
     const request = fetchBatch(ctx, evidence, []);
     const first = await Promise.race([request, delay(AI_START_WAIT_MS)]);
@@ -180,6 +184,7 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
       if (closed || refilling) return;
       refilling = true;
       // Local top-up is instant: the duel generator never runs dry.
+      if (ctx.mode === "ict") { nextSeed = (nextSeed + 7919) >>> 0; arrive(ictQuestions({ seed: nextSeed, retired: (fp) => ledger.done.has(fpKey(fp)), scenes: 6 })); refilling = false; return; }
       if (ctx.mode === "matrix" || ctx.mode === "math-duel") {
         nextSeed = (nextSeed + 7919) >>> 0;
         arrive(duelQuestions(12, ratingsFor(tierOf(ctx.level)), ledger, nextSeed));
@@ -196,7 +201,7 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
 
 /** Refill the on-device bank in the background so the next round starts instantly. */
 export async function warmBank(ctx: RoundContext): Promise<void> {
-  if (readAiBank(ctx.mode).length >= 10) return;
+  if (ctx.mode === "ict" || readAiBank(ctx.mode).length >= 10) return;
   const trades = tradesFor(ctx.mode, ctx.entries);
   if (!trades.length) return;
   const evidence = pickEvidence(trades, ctx.progress.modePerformance ?? {}, 8, seededRng((Date.now() ^ 0x5bd1e995) >>> 0));

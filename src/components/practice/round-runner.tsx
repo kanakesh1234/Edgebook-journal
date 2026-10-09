@@ -17,6 +17,10 @@ import { earnedXp } from "@/lib/practice/xp";
 import type { Round } from "@/lib/practice/round";
 import { stashUnused } from "@/lib/practice/bank";
 import { DuelSound } from "@/lib/practice/math/sound";
+import type { RoundExtras } from "@/lib/practice/rewards";
+import { haptic } from "@/lib/haptics";
+import { CandleVisual } from "@/components/practice/candle-visual";
+import { FlameIcon } from "@/components/practice/icons";
 
 export interface AnswerLog {
   fp: string;
@@ -43,6 +47,9 @@ export interface RoundResult {
   maxCombo: number;
 }
 
+/** What the page hands back when a round ends: the level change plus everything else the round earned. */
+export interface RoundReport { outcome: RoundOutcome; extras: RoundExtras }
+
 interface Props {
   title: string;
   mode: ArenaMode;
@@ -51,7 +58,7 @@ interface Props {
   /** Every journal trade, so each question can show its saved screenshots. */
   entries: JournalEntry[];
   /** Called once when the round ends. Returns the level change so the summary can show it. */
-  onFinish: (result: RoundResult) => RoundOutcome;
+  onFinish: (result: RoundResult) => RoundReport;
   onNext: () => void;
   onClose: () => void;
 }
@@ -112,7 +119,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const [response, setResponse] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const [tally, setTally] = useState({ correct: 0, total: 0 });
-  const [summary, setSummary] = useState<{ result: RoundResult; outcome: RoundOutcome } | null>(null);
+  const [summary, setSummary] = useState<{ result: RoundResult; outcome: RoundOutcome; extras: RoundExtras } | null>(null);
 
   const reduce = useReducedMotion();
   const answered = response !== null;
@@ -133,9 +140,10 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     // Unplayed AI questions are kept for the next round (nothing is lost, nothing repeats).
     round.close();
     stashUnused(mode, pool.current.filter((q) => !used.current.has(q.id)));
-    const outcome = onFinish(result);
+    const { outcome, extras } = onFinish(result);
     if (completed) sound().cue("end");
-    setSummary({ result, outcome });
+    if (outcome.outcome === "up" || extras.unlocked.length) haptic.success();
+    setSummary({ result, outcome, extras });
   };
   const endRef = useRef(end);
   endRef.current = end;
@@ -186,10 +194,12 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
       combo.current.now += 1;
       combo.current.best = Math.max(combo.current.best, combo.current.now);
       sound().cue(combo.current.now >= 3 ? "combo" : "correct");
+      haptic.selection();
       streak.current = { right: streak.current.right + 1, wrong: 0 };
     } else {
       combo.current.now = 0;
       sound().cue("wrong");
+      haptic.error();
       streak.current = { right: 0, wrong: streak.current.wrong + 1 };
     }
     const moved = nudge(target.current, streak.current);
@@ -275,6 +285,8 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
 
           {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} large={mode === "time-machine"} /></div>}
 
+          {question.visual && <div className="mt-4"><CandleVisual visual={question.visual} revealed={answered} /></div>}
+
           <h2 className={cn("mt-6 font-semibold tracking-[-0.022em]", mode === "math-duel" ? "text-[28px] leading-[1.18] sm:text-[34px]" : "text-[26px] leading-[1.2] sm:text-[32px]")}>{question.prompt}</h2>
 
           {question.kind === "choice" && (
@@ -350,7 +362,11 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
         <div className={cn("mx-auto flex items-center gap-5", stageWidth)}>
           <GateMeter value={tally.correct} goal={gate.correct} accent={meta.accent} variant={mode === "boss" ? "boss" : "fill"} accuracy={accuracy} needAccuracy={gate.accuracy} nextLevel={level + 1} />
           <div className="flex shrink-0 items-center gap-2.5 text-[12px]">
-            {comboNow >= 2 && <span className="num rounded-full px-2.5 py-1 font-semibold" style={{ background: tint(meta.accent, 14), color: tint(meta.accent, 75, "var(--ink)") }}>×{comboNow}</span>}
+            {comboNow >= 2 && (
+              <motion.span key={comboNow} initial={reduce ? false : { scale: 1.35 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 520, damping: 16 }} className="num inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-semibold" style={{ background: tint(meta.accent, 14), color: tint(meta.accent, 75, "var(--ink)") }}>
+                {comboNow >= 5 && <FlameIcon className="h-3.5 w-3.5" />}×{comboNow}
+              </motion.span>
+            )}
             <span className="num text-muted">{xp.current} XP</span>
           </div>
         </div>

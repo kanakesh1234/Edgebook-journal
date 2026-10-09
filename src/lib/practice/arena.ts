@@ -15,14 +15,14 @@
  */
 import type { PracticeProgress } from "@/lib/types";
 
-export type ArenaMode = "matrix" | "time-machine" | "math-duel" | "boss";
-export const ARENA_MODES: ArenaMode[] = ["matrix", "time-machine", "math-duel", "boss"];
+export type ArenaMode = "matrix" | "time-machine" | "math-duel" | "boss" | "ict";
+export const ARENA_MODES: ArenaMode[] = ["matrix", "time-machine", "math-duel", "boss", "ict"];
 export const ROUND_SECONDS = 60;
 
 /** Math Duel questions are quicker to answer, so its gate is higher. */
-const PACE: Record<ArenaMode, number> = { matrix: 1, "time-machine": 1, "math-duel": 1.5, boss: 1 };
+const PACE: Record<ArenaMode, number> = { matrix: 1, "time-machine": 1, "math-duel": 1.5, boss: 1, ict: 1 };
 /** Chart questions can't be answered faster than a human can read, so their gate tops out. */
-const CAP: Record<ArenaMode, number> = { matrix: 14, "time-machine": 14, "math-duel": 30, boss: 14 };
+const CAP: Record<ArenaMode, number> = { matrix: 14, "time-machine": 14, "math-duel": 30, boss: 14, ict: 14 };
 
 export interface Gate { correct: number; accuracy: number }
 
@@ -111,5 +111,5 @@ export function applyOutcome(progress: PracticeProgress | undefined, mode: Arena
 }
 
 export function arenaLevels(progress: PracticeProgress | undefined): Record<ArenaMode, number> {
-  return { matrix: levelOf(progress, "matrix"), "time-machine": levelOf(progress, "time-machine"), "math-duel": levelOf(progress, "math-duel"), boss: levelOf(progress, "boss") };
+  return { matrix: levelOf(progress, "matrix"), "time-machine": levelOf(progress, "time-machine"), "math-duel": levelOf(progress, "math-duel"), boss: levelOf(progress, "boss"), ict: levelOf(progress, "ict") };
 }

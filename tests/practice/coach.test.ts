@@ -19,24 +19,24 @@ assert.match(recommendMode({ progress: undefined, locked: {} })!.reason, /mixed 
 
 // ---- locked modes are never recommended
 assert.equal(recommendMode({ progress: undefined, locked: { matrix: "Add a trade", "time-machine": "Add a trade", boss: "Needs two trades" } })?.mode, "math-duel");
-assert.equal(recommendMode({ progress: undefined, locked: { matrix: "x", "time-machine": "x", "math-duel": "x", boss: "x" } }), null);
+assert.equal(recommendMode({ progress: undefined, locked: { matrix: "x", "time-machine": "x", "math-duel": "x", boss: "x", ict: "x" } }), null);
 // when only one mode is open, don't pretend it is the "weakest"
-const only = recommendMode({ progress: perf({ "math-duel": [8, 10] }), locked: { matrix: "x", "time-machine": "x", boss: "x" } })!;
+const only = recommendMode({ progress: perf({ "math-duel": [8, 10] }), locked: { matrix: "x", "time-machine": "x", boss: "x", ict: "x" } })!;
 assert.equal(only.mode, "math-duel");
 assert.doesNotMatch(only.reason, /weakest/i);
 
 // ---- an unplayed mode comes before specialising
-const partial = recommendMode({ progress: perf({ matrix: [9, 10], "time-machine": [9, 10], "math-duel": [9, 10] }), locked: {} })!;
+const partial = recommendMode({ progress: perf({ matrix: [9, 10], "time-machine": [9, 10], "math-duel": [9, 10], ict: [9, 10] }), locked: {} })!;
 assert.equal(partial.mode, "boss");
 assert.match(partial.reason, /haven't played/i);
 
 // ---- once everything is played, the weakest mode wins
-const weak = recommendMode({ progress: perf({ matrix: [9, 10], "time-machine": [5, 10], "math-duel": [8, 10], boss: [9, 10] }), locked: {} })!;
+const weak = recommendMode({ progress: perf({ matrix: [9, 10], "time-machine": [5, 10], "math-duel": [8, 10], boss: [9, 10], ict: [9, 10] }), locked: {} })!;
 assert.equal(weak.mode, "time-machine");
 assert.match(weak.reason, /50%/);
 
 // ---- near-ties rotate to whichever has had fewer rounds
-const tie = recommendMode({ progress: perf({ matrix: [16, 20], "time-machine": [8, 10], "math-duel": [9, 10], boss: [9, 10] }), locked: {} })!;
+const tie = recommendMode({ progress: perf({ matrix: [16, 20], "time-machine": [8, 10], "math-duel": [9, 10], boss: [9, 10], ict: [9, 10] }), locked: {} })!;
 assert.equal(tie.mode, "time-machine");
 assert.match(tie.reason, /evenly matched/i);
 

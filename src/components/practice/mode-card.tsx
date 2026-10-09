@@ -18,6 +18,7 @@ interface Props {
   onStart?: () => void;
   href?: string;
   compact?: boolean;
+  className?: string;
   /** Progress toward the next level; drawn as the mode's own meter. */
   meter?: { value: number; goal: number; accuracy: number; nextLevel: number };
   /** A small line above the title, e.g. "5 trades this week". */
@@ -58,7 +59,7 @@ function CompactTile({ mode, level, status, disabled, busy, onStart, href }: Omi
   return <button type="button" disabled={disabled || busy} onClick={onStart} title={disabled ? status : undefined} className={cls}>{inner}</button>;
 }
 
-export function ModeCard({ mode, level, status, disabled, busy, onStart, href, compact, meter, meta: metaLine }: Props) {
+export function ModeCard({ mode, level, status, disabled, busy, onStart, href, compact, meter, meta: metaLine, className }: Props) {
   if (compact) return <CompactTile mode={mode} level={level} status={status} disabled={disabled} busy={busy} onStart={onStart} href={href} />;
   const meta = MODE_META[mode];
   const boss = mode === "boss";
@@ -93,7 +94,7 @@ export function ModeCard({ mode, level, status, disabled, busy, onStart, href, c
     </>
   );
 
-  const base = cn("group relative block w-full overflow-hidden rounded-[28px] text-left transition-all duration-300", surface.material, focus);
+  const base = cn("group relative block w-full overflow-hidden rounded-[28px] text-left transition-all duration-300 active:scale-[0.99]", surface.material, focus, className);
   if (href && !disabled) return <Link href={href} className={cn(base, surface.lift)}>{body}</Link>;
   return (
     <button type="button" disabled={disabled || busy} onClick={onStart} className={cn(base, !disabled && surface.lift, disabled && "cursor-not-allowed")}>

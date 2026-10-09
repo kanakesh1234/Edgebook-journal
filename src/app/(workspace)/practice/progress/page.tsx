@@ -13,6 +13,10 @@ import { calendarGrid, dateLabel, dayLevel, rangeLabel, summarise, WEEKDAY_LETTE
 import { AcademyStrip } from "@/components/practice/home";
 import { MODE_META, ModeBadge, tint } from "@/components/practice/modes";
 import { Bar, Eyebrow, surface } from "@/components/practice/ui";
+import { AchievementGrid, RecordsGrid } from "@/components/practice/trophies";
+import { achievementStates } from "@/lib/practice/achievements";
+import { recordsOf } from "@/lib/practice/records";
+import { ICT_TOPICS } from "@/lib/practice/ict";
 
 /**
  * One hue, five steps — the more you practised, the deeper the gold. The date number sits inside
@@ -47,6 +51,10 @@ export default function PracticeProgressPage() {
   const cells = useMemo(() => calendarGrid(today), [today]);
   const completed = useMemo(() => new Set(progress.completedMissionDates ?? []), [progress.completedMissionDates]);
   const summary = useMemo(() => summarise(cells, progress.dailyStats, completed), [cells, progress.dailyStats, completed]);
+  const trophies = useMemo(() => achievementStates(progress), [progress]);
+  const records = recordsOf(progress);
+  const unlocked = trophies.filter((t) => t.unlocked).length;
+  const ictTotal = ICT_TOPICS.reduce((sum, t) => sum + (progress.masteryByTag?.[t.tag] ?? 0), 0);
   const earlierTests = Object.values(matrix?.tradeStates ?? {}).flatMap((state) => state.attempts ?? []).length;
 
   return (
@@ -84,6 +92,39 @@ export default function PracticeProgressPage() {
           })}
         </ul>
         <p className="mt-3 px-1 text-[12px] leading-snug text-faint">Accuracy counts every answer in that mode. Levels rise on their own as you clear each gate.</p>
+      </section>
+
+      <section aria-labelledby="records-heading">
+        <Eyebrow><span id="records-heading">Personal records</span></Eyebrow>
+        <div className="mt-4"><RecordsGrid records={records} /></div>
+      </section>
+
+      <section aria-labelledby="ach-heading">
+        <div className="flex items-baseline justify-between gap-4">
+          <Eyebrow><span id="ach-heading">Achievements</span></Eyebrow>
+          <p className="num text-[12px] text-faint">{unlocked} of {trophies.length} unlocked</p>
+        </div>
+        <div className="mt-4"><AchievementGrid states={[...trophies].sort((a, b) => Number(b.unlocked) - Number(a.unlocked) || b.current / b.target - a.current / a.target)} /></div>
+      </section>
+
+      <section aria-labelledby="ict-heading">
+        <div className="flex items-baseline justify-between gap-4">
+          <Eyebrow><span id="ict-heading">ICT Lab mastery</span></Eyebrow>
+          <p className="num text-[12px] text-faint">{ictTotal} correct in total</p>
+        </div>
+        <ul className={cn(surface.editorial, "mt-4 divide-y divide-line overflow-hidden")}>
+          {ICT_TOPICS.map((topic) => {
+            const n = progress.masteryByTag?.[topic.tag] ?? 0;
+            return (
+              <li key={topic.tag} className="flex items-center gap-4 px-5 py-3.5">
+                <p className="w-40 shrink-0 text-[14.5px] font-medium tracking-[-0.01em] text-ink">{topic.label}</p>
+                <Bar value={Math.min(100, (n / 20) * 100)} accent={MODE_META.ict.accent} className="flex-1" />
+                <p className="num w-20 shrink-0 text-right text-[12px] text-muted">{n} correct</p>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-3 px-1 text-[12px] leading-snug text-faint">Each bar fills at 20 correct answers in that topic. Play ICT Lab to grow them.</p>
       </section>
 
       <section aria-labelledby="consistency-heading">

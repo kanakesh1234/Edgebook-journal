@@ -62,7 +62,7 @@ assert.equal(levelOf(progress, "boss"), 4);
 assert.equal(levelOf(progress, "matrix"), 1);
 assert.equal(failsOf(progress, "boss"), 1);
 assert.equal(levelOf(undefined, "matrix"), 1);
-assert.deepEqual(arenaLevels(progress), { matrix: 1, "time-machine": 1, "math-duel": 1, boss: 4 });
+assert.deepEqual(arenaLevels(progress), { matrix: 1, "time-machine": 1, "math-duel": 1, boss: 4, ict: 1 });
 const updated = applyOutcome(progress, "boss", evaluateRound({ mode: "boss", level: 4, fails: 1, correct: 12, answered: 13, completed: true }), 12);
 assert.equal(updated.levels?.boss, 5);
 assert.equal(updated.fails?.boss, 0);

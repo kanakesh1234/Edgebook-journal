@@ -12,12 +12,14 @@ export const tint = (accent: string, pct: number, base = "transparent") => `colo
  *   Time Machine  chart revision   — profit green, candlesticks
  *   Math Duel     risk maths       — gold, ruler ticks
  *   Weekend Boss  your week        — loss red, a boss health bar
+ *   ICT Lab       smart-money ideas — info blue blended into loss red (a theme-aware violet), candles and a gap
  */
 export const MODE_META: Record<ArenaMode, { title: string; eyebrow: string; blurb: string; accent: string; /** short label for the stage header */ stage: string }> = {
   matrix: { title: "Matrix", eyebrow: "Charts · maths · duels", blurb: "Your charts, your trades and quick risk maths in one run.", accent: "var(--info)", stage: "Mixed run" },
   "time-machine": { title: "Time Machine", eyebrow: "Revise your charts", blurb: "Re-read saved screenshots and answer on what you actually did.", accent: "var(--profit)", stage: "Chart revision" },
   "math-duel": { title: "Math Duel", eyebrow: "Risk maths", blurb: "Fast calculations from your own numbers. Harder every level.", accent: "var(--gold-strong)", stage: "Risk maths" },
   boss: { title: "Weekend Boss", eyebrow: "Your week", blurb: "Cross-trade questions on patterns, repeated mistakes and what they cost.", accent: "var(--loss)", stage: "This week" },
+  ict: { title: "ICT Lab", eyebrow: "Smart money concepts", blurb: "Liquidity, fair value gaps, structure and premium/discount — on drawn charts.", accent: "color-mix(in srgb, var(--info) 58%, var(--loss))", stage: "Concept drills" },
 };
 
 /* -------------------------------- glyphs -------------------------------- */
@@ -65,7 +67,18 @@ function BossGlyph() {
   );
 }
 
-export const MODE_GLYPH: Record<ArenaMode, () => React.JSX.Element> = { matrix: MatrixGlyph, "time-machine": TimeMachineGlyph, "math-duel": MathDuelGlyph, boss: BossGlyph };
+function IctGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-full w-full" aria-hidden {...g}>
+      <path d="M7 5v14M17 3.5v14" />
+      <rect x="4.75" y="8.5" width="4.5" height="6" rx="1.2" />
+      <rect x="14.75" y="6.5" width="4.5" height="6" rx="1.2" />
+      <path d="M3 21h18" opacity={0.4} strokeDasharray="2 2.5" />
+    </svg>
+  );
+}
+
+export const MODE_GLYPH: Record<ArenaMode, () => React.JSX.Element> = { matrix: MatrixGlyph, "time-machine": TimeMachineGlyph, "math-duel": MathDuelGlyph, boss: BossGlyph, ict: IctGlyph };
 
 /** The mode's glyph in a softly tinted tile. `sm` for headers, `md` for cards, `lg` for hero moments. */
 export function ModeBadge({ mode, size = "md", className }: { mode: ArenaMode; size?: "sm" | "md" | "lg"; className?: string }) {
@@ -104,6 +117,17 @@ export function ModeMotif({ mode }: { mode: ArenaMode }) {
   }
   if (mode === "boss") {
     return <span aria-hidden className="pointer-events-none absolute inset-0" style={{ ...base, opacity: 0.6, backgroundImage: `repeating-conic-gradient(from 200deg at 100% 0%, ${tint(accent, 22)} 0deg 4deg, transparent 4deg 14deg)` }} />;
+  }
+  if (mode === "ict") {
+    return (
+      <svg aria-hidden viewBox="0 0 112 56" className="pointer-events-none absolute right-5 top-4 h-14 w-28 opacity-80" style={{ color: tint(accent, 62) }}>
+        <rect x="6" y="26" width="64" height="12" rx="2" fill="currentColor" opacity="0.14" />
+        <path d="M0 32h112" stroke="currentColor" strokeWidth="1" strokeDasharray="3 4" opacity="0.5" />
+        {[[10, 30, 44, 14], [38, 28, 38, 16], [66, 8, 28, 30], [94, 6, 22, 24]].map(([x, y, h, w], i) => (
+          <g key={i}><path d={`M${x + 3} ${y - 4}v${h + 8}`} stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.6" /><rect x={x} y={y} width="6" height={Math.min(h, w) * 0.7} rx="1.4" fill="currentColor" opacity={i % 2 ? 0.4 : 0.85} /></g>
+        ))}
+      </svg>
+    );
   }
   const bars = [14, 22, 10, 28, 18, 32, 24];
   return (

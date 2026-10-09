@@ -10,8 +10,16 @@ import { cn } from "@/lib/utils";
 import type { JournalEntry } from "@/lib/types";
 import type { ArenaMode, RoundOutcome } from "@/lib/practice/arena";
 import type { RoundResult } from "@/components/practice/round-runner";
+import type { RoundExtras } from "@/lib/practice/rewards";
+import { questsFor } from "@/lib/practice/quests";
+import { achievementStates } from "@/lib/practice/achievements";
+import { RECORD_LABELS } from "@/lib/practice/records";
+import { todayKey } from "@/lib/format";
+import { Burst, CountUp } from "./celebrate";
+import { ACHIEVEMENT_ICON, CheckIcon, FlameIcon, GiftIcon, TrophyIcon } from "./icons";
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+const tintColor = (c: string) => c;
 
 /** One requirement of the gate: what was needed, what you got, and whether it counted. */
 function GateRow({ label, got, need, display, accent }: { label: string; got: number; need: number; display: string; accent: string }) {
@@ -30,8 +38,8 @@ function GateRow({ label, got, need, display, accent }: { label: string; got: nu
   );
 }
 
-export function RoundSummary({ title, mode, summary, entries, onNext, onClose }: { title: string; mode: ArenaMode; summary: { result: RoundResult; outcome: RoundOutcome }; entries: JournalEntry[]; onNext: () => void; onClose: () => void }) {
-  const { result, outcome } = summary;
+export function RoundSummary({ title, mode, summary, entries, onNext, onClose }: { title: string; mode: ArenaMode; summary: { result: RoundResult; outcome: RoundOutcome; extras: RoundExtras }; entries: JournalEntry[]; onNext: () => void; onClose: () => void }) {
+  const { result, outcome, extras } = summary;
   const reduce = useReducedMotion();
   const meta = MODE_META[mode];
   const [open, setOpen] = useState<string | null>(null);
@@ -45,13 +53,17 @@ export function RoundSummary({ title, mode, summary, entries, onNext, onClose }:
   }[outcome.outcome];
 
   const shownLevel = outcome.outcome === "early" ? outcome.level : outcome.nextLevel;
-  const celebrate = outcome.outcome === "up";
+  const celebrate = outcome.outcome === "up" || extras.unlocked.length > 0;
+  const questTitles = new Map(questsFor(todayKey()).map((q) => [q.id, q.title]));
+  const badges = achievementStates({ xp: 0, streak: 0 }).filter((a) => extras.unlocked.includes(a.id));
+  const confetti = [tintColor(meta.accent), "var(--gold-strong)", "var(--profit)", "var(--info)"];
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-canvas text-ink">
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[44vh]" style={{ background: `radial-gradient(70% 100% at 50% 0%, ${tint(meta.accent, celebrate ? 16 : 9)}, transparent)` }} />
 
       <div className="relative mx-auto max-w-2xl px-6 pb-36 pt-14 sm:pt-20">
+        {celebrate && <Burst colors={confetti} />}
         <div className="flex items-center gap-5">
           <motion.div
             initial={reduce ? false : { scale: 0.7, opacity: 0 }}
@@ -73,8 +85,31 @@ export function RoundSummary({ title, mode, summary, entries, onNext, onClose }:
         <div className="mt-9 grid grid-cols-3 gap-3">
           <StatTile label="Correct" value={`${result.correct}/${result.total}`} />
           <StatTile label="Accuracy" value={pct(result.accuracy)} />
-          <StatTile label="XP" value={`+${result.xp}`} note={result.maxCombo >= 3 ? `Best flow ×${result.maxCombo}` : undefined} />
+          <StatTile label="XP" value={<CountUp value={result.xp} prefix="+" delay={250} />} note={result.maxCombo >= 3 ? `Best flow ×${result.maxCombo}` : undefined} />
         </div>
+
+        {(badges.length > 0 || extras.newRecords.length > 0 || extras.questsDone.length > 0 || extras.streakGrew) && (
+          <motion.section initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35, duration: 0.4, ease: FLOW_EASE }} className={cn(surface.material, "mt-3 space-y-3 rounded-[22px] p-5")} aria-label="Rewards">
+            <Eyebrow>Rewards</Eyebrow>
+            <ul className="space-y-2.5">
+              {extras.streakGrew && extras.streak > 0 && (
+                <li className="flex items-center gap-3 text-[14.5px] text-ink"><span className="grid h-8 w-8 place-items-center rounded-[10px] text-on-gold" style={{ background: "linear-gradient(150deg, var(--gold-strong), var(--gold-deep))" }}><FlameIcon className="h-[18px] w-[18px]" /></span><span><b className="font-semibold">{extras.streak}-day streak</b> <span className="text-muted">— you showed up today.</span></span></li>
+              )}
+              {badges.map((b) => { const Icon = ACHIEVEMENT_ICON[b.icon]; return (
+                <li key={b.id} className="flex items-center gap-3 text-[14.5px] text-ink"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-gold-strong/20 text-gold"><Icon className="h-[18px] w-[18px]" /></span><span><b className="font-semibold">{b.title}</b> <span className="text-muted">— achievement unlocked.</span></span></li>
+              ); })}
+              {extras.newRecords.map((k) => (
+                <li key={k} className="flex items-center gap-3 text-[14.5px] text-ink"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-profit/15 text-profit"><TrophyIcon className="h-[18px] w-[18px]" /></span><span><b className="font-semibold">New record</b> <span className="text-muted">— {RECORD_LABELS[k].toLowerCase()}.</span></span></li>
+              ))}
+              {extras.questsDone.map((id) => (
+                <li key={id} className="flex items-center gap-3 text-[14.5px] text-ink"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-profit/15 text-profit"><CheckIcon className="h-[18px] w-[18px]" /></span><span><b className="font-semibold">Quest complete</b> <span className="text-muted">— {questTitles.get(id) ?? "daily quest"}.</span></span></li>
+              ))}
+              {extras.allQuestsDone && extras.questsDone.length > 0 && (
+                <li className="flex items-center gap-3 text-[14.5px] text-ink"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-gold-strong/20 text-gold"><GiftIcon className="h-[18px] w-[18px]" /></span><span><b className="font-semibold">All quests done</b> <span className="text-muted">— claim them on Practice to open the daily chest.</span></span></li>
+              )}
+            </ul>
+          </motion.section>
+        )}
 
         {outcome.outcome !== "early" && (
           <section className={cn(surface.editorial, "mt-3 p-6")}>
