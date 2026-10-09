@@ -122,3 +122,38 @@ export function groupMonthDay(list: JournalEntry[]): MonthGroup[] {
 export const tradeTitle = (e: JournalEntry) =>
   [e.instrument !== "—" ? e.instrument : null, e.direction].filter(Boolean).join(" ") || "Trade";
 export const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "—");
+
+/* ───────── Instrument helpers ───────── */
+
+const QUARTER_CODES: Record<number, string> = { 2: "H", 5: "M", 8: "U", 11: "Z" }; // Mar, Jun, Sep, Dec (0-indexed months)
+
+/** Third Friday of a month (CME quarterly expiry day). */
+function thirdFriday(year: number, month: number): Date {
+  const first = new Date(year, month, 1);
+  const offset = (5 - first.getDay() + 7) % 7; // days until first Friday
+  return new Date(year, month, 1 + offset + 14);
+}
+
+/**
+ * Front-month MNQ contract symbol for a trade date, e.g. "MNQZ6".
+ * Rolls to the next quarterly contract 8 days before expiry (third Friday),
+ * which is when volume typically migrates.
+ */
+export function defaultMnqSymbol(date: string): string {
+  const [y, m, d] = parts(date);
+  const day = new Date(y, m - 1, d);
+  for (let year = y; year <= y + 1; year++) {
+    for (const month of [2, 5, 8, 11]) {
+      const roll = thirdFriday(year, month);
+      roll.setDate(roll.getDate() - 8);
+      if (day < roll) return `MNQ${QUARTER_CODES[month]}${year % 10}`;
+    }
+  }
+  return `MNQZ${(y + 1) % 10}`;
+}
+
+/** Uppercased instrument as typed, or the default MNQ contract for that date when blank. */
+export function resolveInstrument(instrument: string, date: string): string {
+  const v = instrument.trim().toUpperCase();
+  return v && v !== "—" ? v : defaultMnqSymbol(date);
+}
