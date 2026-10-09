@@ -92,7 +92,6 @@ function LoginView() {
         toast.success("Welcome to Edgebook", "Your journal is ready — add your first trade.");
       } else {
         await useApp.getState().signIn(email, password);
-        toast.success("Welcome back", "Good to see you again.");
       }
       router.replace("/dashboard");
     } catch (err) {
