@@ -13,6 +13,7 @@ import { Modal } from "@/components/ui/modal";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { TradeReviewFlow } from "./trade-review-flow";
 import { cn } from "@/lib/utils";
+import { defaultMnqSymbol, resolveInstrument } from "./journal-model";
 import { AlertTriangleIcon, CheckIcon } from "@/components/ui/icons";
 import {
   BinaryChoice, ChoiceCard, Chip, Collapse, Disclosure, FLOW_EXPAND, GlyphArrowIn, GlyphArrowOut, GlyphTimer, Hint, IconCheck, IconTile, Label, PrimaryButton, Reveal, Segmented,
@@ -21,11 +22,6 @@ import {
 
 /** New trades start at the NY open; change it if the trade was at another time. */
 const DEFAULT_TIME = "09:30";
-
-const INSTRUMENT_SUGGESTIONS = [
-  "NQ", "ES", "MES", "MNQ", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD",
-  "XAUUSD", "CL", "SPY", "QQQ", "AAPL", "TSLA", "NVDA",
-];
 
 /** trade → timing → setup (only with a playbook) → challenge → chart. Each stage advances with Continue. */
 type StepId = "trade" | "timing" | "setup" | "challenge" | "chart";
@@ -96,7 +92,6 @@ export function EntryFormModal({
 } = {}) {
   const globalOpen = useUi((s) => s.newEntryOpen);
   const closeGlobal = useUi((s) => s.closeNewEntry);
-  const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const challenges = useMemo(() => settings.challenges ?? [], [settings]);
   const playbook = useMemo(() => settings.playbook ?? [], [settings]);
@@ -149,17 +144,6 @@ export function EntryFormModal({
   const [showPostLossGate, setShowPostLossGate] = useState<JournalEntry | null>(null);
 
   const imp = useTradeImport({ onImported: (first) => { onClose(); setReflecting(first); }, onClose });
-
-  // Optional suggestions for Instrument: MNQ first, then recently used ones (same as Plan Trade).
-  const suggestedInstruments = useMemo(() => {
-    const seen: string[] = ["MNQ"];
-    for (const e of [...entries].sort((a, b) => b.createdAt - a.createdAt)) {
-      const i = e.instrument?.trim().toUpperCase();
-      if (i && i !== "—" && !seen.includes(i)) seen.push(i);
-      if (seen.length === 4) break;
-    }
-    return seen;
-  }, [entries]);
 
   // A legacy/custom setup name stays selectable even when it isn't in the playbook.
   const legacySetup = editing?.setup && !playbook.some((p) => p.id === editing.setupId) ? editing.setup : "";
@@ -340,7 +324,7 @@ export function EntryFormModal({
     date,
     pnl: Math.round(pnlNumber * 100) / 100,
     rr: rrNumber,
-    instrument: instrument.trim() || "—",
+    instrument: resolveInstrument(instrument, date),
     direction,
     setup: setup.trim(),
     setupId: setupId || undefined,
@@ -500,11 +484,8 @@ export function EntryFormModal({
                       <Disclosure label="Add details">
                         <div className="space-y-2.5">
                           <Label hint="optional" htmlFor="add-instrument">Instrument</Label>
-                          <TextBox id="add-instrument" list="add-instrument-list" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
-                          <datalist id="add-instrument-list">{INSTRUMENT_SUGGESTIONS.map((s) => <option key={s} value={s} />)}</datalist>
-                          <Stagger className="flex flex-wrap gap-2" delay={0.05}>
-                            {suggestedInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
-                          </Stagger>
+                          <TextBox id="add-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder={defaultMnqSymbol(date)} className="max-w-[12rem] font-mono" />
+                          <p className="text-xs text-faint">Leave blank to use {defaultMnqSymbol(date)}.</p>
                         </div>
                         <div className="space-y-2.5">
                           <Label hint="what did the market teach you?" htmlFor="add-notes">Notes</Label>
@@ -876,7 +857,7 @@ function useTradeImport({ onImported, onClose }: { onImported: (firstCreated: Jo
         date: row.date,
         pnl: row.pnl,
         rr: row.rr,
-        instrument: row.instrument,
+        instrument: resolveInstrument(row.instrument, row.date),
         direction: row.direction,
         // Row-level setup text wins; otherwise the selected playbook setup applies to all.
         setup: row.setup || linkedSetup?.name || "",
