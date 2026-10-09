@@ -466,7 +466,10 @@ export function Progress({
   size = "md",
   label,
   delay = 0.1,
+  ticks,
 }: {
+  /** Fractions (0–1) to mark with a faint notch, e.g. milestones. */
+  ticks?: number[];
   value: number;
   tone?: "profit" | "loss";
   size?: "md" | "lg";
@@ -476,7 +479,7 @@ export function Progress({
   const reduce = useReducedMotion();
   const pct = Math.min(1, Math.max(0, value));
   return (
-    <div className="lb-track" data-size={size === "lg" ? "lg" : undefined} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)} aria-label={label}>
+    <div className="lb-track relative" data-size={size === "lg" ? "lg" : undefined} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)} aria-label={label}>
       <motion.div
         className="lb-fill"
         data-tone={tone}
@@ -484,6 +487,9 @@ export function Progress({
         animate={{ width: `${pct * 100}%` }}
         transition={{ duration: reduce ? 0 : 0.9, delay: reduce ? 0 : delay, ease: EASE }}
       />
+      {ticks?.map((t) => (
+        <span key={t} aria-hidden className="absolute inset-y-0 w-px bg-canvas/80" style={{ left: `${t * 100}%` }} />
+      ))}
     </div>
   );
 }

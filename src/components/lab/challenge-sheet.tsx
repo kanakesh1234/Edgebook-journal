@@ -1,14 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
 import { challengeReminder } from "@/lib/challenges";
 import { formatMoney, formatSignedMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { CheckIcon, PencilIcon, StarIcon, TrashIcon } from "@/components/ui/icons";
+import { PencilIcon, StarIcon, TrashIcon } from "@/components/ui/icons";
 import { pnlClass } from "@/components/ui/misc";
 import { CHALLENGE_STATUS, ddLabel, fmtDay, fmtPct0, signedPct, type ChallengeInfo } from "./lab-model";
-import { Chip, EASE, KebabMenu, Progress, SectionLabel, Sheet, StatusPill, btnText, plural, useRetained } from "./lab-ui";
+import { Chip, KebabMenu, Progress, SectionLabel, Sheet, StatusPill, btnText, plural, useRetained } from "./lab-ui";
 
 /**
  * Challenge detail — progress first, then risk, then performance.
@@ -67,6 +66,8 @@ function ChallengeBody({ info }: { info: ChallengeInfo }) {
   const tradingDays = new Set(p.tradesList.map((t) => t.date)).size;
   const reminder = challengeReminder(p);
   const money = (n: number) => formatMoney(n);
+  const ticks = p.milestones.filter((m) => m.fraction > 0 && m.fraction < 1).map((m) => m.fraction);
+  const nextMilestone = p.reachedTarget ? null : p.milestones.find((m) => !m.passed && m.fraction > 0) ?? null;
   const barTone = status === "completed" ? "profit" : status === "breached" ? "loss" : undefined;
   const limits: [string, string][] = [];
   if (c.dailyProfitTarget) limits.push(["Daily profit target", formatMoney(c.dailyProfitTarget)]);
@@ -99,13 +100,18 @@ function ChallengeBody({ info }: { info: ChallengeInfo }) {
           <p className="pb-1.5 text-[14px] tabular-nums text-muted">{p.progressPct}% to target</p>
         </div>
         <div className="mt-3">
-          <Progress value={p.progress} tone={barTone} size="lg" label={`${p.progressPct}% of challenge progress`} />
+          <Progress value={p.progress} tone={barTone} ticks={ticks} size="lg" label={`${p.progressPct}% of challenge progress`} />
         </div>
         <div className="mt-2 flex justify-between text-[12.5px] tabular-nums text-faint">
           <span>{money(p.startingBalance)}</span>
           <span>{money(p.targetBalance)}</span>
         </div>
-        {p.milestones.length > 0 && <Milestones info={info} />}
+        {nextMilestone && (
+          <p className="mt-4 text-[14px] text-muted">
+            <span className="text-ink">Next milestone · {Math.round(nextMilestone.fraction * 100)}%</span>
+            <span className="tabular-nums"> — {money(Math.max(0, nextMilestone.equity - p.currentEquity))} to go</span>
+          </p>
+        )}
         {reminder && <p className="mt-4 text-[14px] leading-relaxed text-muted">{reminder}</p>}
       </section>
 
@@ -176,46 +182,6 @@ function Line({ label, value, tone }: { label: string; value: string; tone?: str
     <div>
       <dt>{label}</dt>
       <dd className={tone}>{value}</dd>
-    </div>
-  );
-}
-
-/** START → TARGET path. Reached steps fill in one after another. */
-function Milestones({ info }: { info: ChallengeInfo }) {
-  const reduce = useReducedMotion();
-  const { milestones, reachedTarget, distanceToTarget } = info.progress;
-  return (
-    <div className="mt-5" aria-label="Milestone path">
-      <div className="flex items-center gap-1.5">
-        {milestones.map((m, i) => {
-          const next = milestones[i + 1];
-          const current = m.passed && (!next || !next.passed);
-          return (
-            <div key={m.fraction} className="flex flex-1 items-center gap-1.5 last:flex-none">
-              <motion.span
-                title={`${Math.round(m.fraction * 100)}% — ${formatSignedMoney(m.equity)}${m.passed ? " (reached)" : ""}`}
-                initial={reduce ? false : { scale: 0.7, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: reduce ? 0 : 0.15 + i * 0.05, duration: 0.35, ease: EASE }}
-                className={cn(
-                  "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[9.5px] font-bold tabular-nums transition-colors",
-                  current
-                    ? "border-gold bg-gold/[0.14] text-gold-deep dark:text-gold"
-                    : m.passed
-                      ? "border-profit/50 bg-profit/[0.12] text-profit"
-                      : "border-line bg-raised text-faint",
-                )}
-              >
-                {m.passed && !current ? <CheckIcon className="h-3 w-3" /> : Math.round(m.fraction * 100)}
-              </motion.span>
-              {next && <span className={cn("h-px flex-1", next.passed ? "bg-profit/50" : "bg-line-strong")} />}
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-2 text-[12.5px] tabular-nums text-faint">
-        {reachedTarget ? "Target reached" : `${formatMoney(distanceToTarget)} to go`}
-      </p>
     </div>
   );
 }
