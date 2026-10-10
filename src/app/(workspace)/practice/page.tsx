@@ -11,8 +11,13 @@ import { NO_EXTRAS, type RoundExtras } from "@/lib/practice/rewards";
 import { PreparingScreen } from "@/components/practice/home";
 import { MODE_META } from "@/components/practice/modes";
 import { SectionCard } from "@/components/practice/section-card";
+import { PlayerHero, weekStrip } from "@/components/practice/player-hero";
+import { Challenges, TrophyCase, UpNext } from "@/components/practice/shelf";
 import { FlameIcon } from "@/components/practice/icons";
-import { applyRoundToLog, markAllDone, questStates, allDone } from "@/lib/practice/quests";
+import "@/components/practice/practice.css";
+import { applyRoundToLog, chestClaimed, claim, markAllDone, questStates, allDone } from "@/lib/practice/quests";
+import { recommendMode, overallAccuracy } from "@/lib/practice/coach";
+import { achievementStates } from "@/lib/practice/achievements";
 import { updateRecords } from "@/lib/practice/records";
 import { newlyEarned, stamp } from "@/lib/practice/achievements";
 import { prepareIctRound } from "@/lib/practice/ict-round";
@@ -189,6 +194,17 @@ export default function PracticePage() {
     return { value: Math.min(levelBestOf(progress, mode), gate.correct), goal: gate.correct, label: `${Math.min(levelBestOf(progress, mode), gate.correct)} of ${gate.correct} to reach Level ${levels[mode] + 1}` };
   };
 
+  /** Claim a finished challenge (or the daily chest) for bonus XP. Read fresh from the store, like a round does. */
+  const claimQuest = (id: string) => {
+    const state = useApp.getState();
+    const live = (state.settings.practiceProgress ?? EMPTY) as PracticeProgress;
+    const { xp, questLog } = claim(live, today, id);
+    if (!xp) return;
+    const draft: PracticeProgress = { ...live, xp: live.xp + xp, questLog };
+    draft.achievements = stamp(draft, newlyEarned(draft), today);
+    void state.updateSettings({ practiceProgress: draft });
+  };
+
   const busyMode = phase.kind === "preparing" ? phase.mode : null;
   const tmLock = lock("time-machine");
   const tmCharts = useMemo(() => usable.filter((e) => (e.images?.length ?? 0) > 0).length, [usable]);
@@ -200,25 +216,53 @@ export default function PracticePage() {
   const level = xpLevel(progress.xp);
   const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
 
+  const week = useMemo(() => weekStrip(today, progress.completedMissionDates ?? []), [today, progress.completedMissionDates]);
+  const quests = useMemo(() => questStates(progress, today), [progress, today]);
+  const trophies = useMemo(() => achievementStates(progress), [progress]);
+  const todayXp = progress.dailyStats?.[today]?.xp ?? 0;
+
+  // The coach only recommends what this page can start: Time Machine and ICT Lab.
+  const recommended = useMemo(() => recommendMode({
+    progress,
+    locked: { matrix: "Not on this page", "math-duel": "Not on this page", boss: "Not on this page", "time-machine": tmLock, ict: cards.length > 0 ? null : "Add a question first" },
+  }), [progress, tmLock, cards.length]);
+
   return (
-    <div className="mx-auto max-w-5xl pb-24">
-      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 pt-2">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">Practice</p>
-          <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-[52px]">Sharpen your edge.</h1>
-          <p className="mt-3 max-w-md text-[17px] leading-snug text-muted">Replay your own trades, and drill the ideas you want to remember.</p>
+    <div className="mx-auto w-full max-w-[1080px] pb-28 sm:pb-16">
+      <header className="pr-rise flex items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl">Practice</h1>
+          <p className="mt-1.5 max-w-md text-[15px] leading-relaxed text-muted">Replay your own trades and drill the ideas you want to remember.</p>
         </div>
-        <Link href="/practice/progress" className="group inline-flex h-11 items-center gap-3 rounded-full border border-ink/10 bg-ink/[0.035] pl-2 pr-4 text-[13.5px] font-medium text-ink backdrop-blur transition-all hover:bg-ink/[0.07] active:scale-[0.97]" aria-label={`Level ${level.level}, ${streak} day streak. Open progress`}>
+        <Link href="/practice/progress" className="pr-chip shrink-0" aria-label={`Level ${level.level}, ${streak} day streak. Open progress`}>
           <span className="grid h-7 w-7 place-items-center rounded-full text-on-gold" style={{ background: streak > 0 ? "linear-gradient(150deg, var(--gold-strong), var(--gold-deep))" : "color-mix(in srgb, var(--ink) 12%, transparent)" }}><FlameIcon className="h-4 w-4" /></span>
-          <span className="num">{streak}</span><span className="text-faint">·</span><span>Level {level.level}</span><span aria-hidden className="text-muted transition-transform group-hover:translate-x-0.5">→</span>
+          <span>{streak}</span><span className="text-faint" aria-hidden>·</span><span>Level {level.level}</span>
         </Link>
       </header>
 
-      {notice && <p role="status" className="mt-8 rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
+      {notice && <p role="status" className="pr-surface mt-6 px-5 py-4 text-[14px] text-muted">{notice}</p>}
 
-      <div className="mt-9 grid gap-5 lg:grid-cols-2">
+      <div className="pr-rise mt-7" style={{ "--i": 1 } as React.CSSProperties}>
+        <PlayerHero rank={rankOf(progress.xp)} level={level} streak={streak} freezeDays={progress.freezeDays ?? 1} accuracy={overallAccuracy(progress)} todayXp={todayXp} goal={DAILY_XP_GOAL} week={week} />
+      </div>
+
+      {recommended && (
+        <div className="pr-rise mt-4" style={{ "--i": 2 } as React.CSSProperties}>
+          <UpNext
+            mode={recommended.mode}
+            level={levels[recommended.mode]}
+            reason={recommended.reason}
+            meter={meterFor(recommended.mode)}
+            busy={busyMode === recommended.mode}
+            onStart={() => void start(recommended.mode)}
+          />
+        </div>
+      )}
+
+      <div className="pr-grid pr-rise mt-8" style={{ "--i": 3 } as React.CSSProperties}>
         <SectionCard
           mode="time-machine"
+          level={levels["time-machine"]}
           blocked={tmLock}
           busy={busyMode === "time-machine"}
           stats={[{ label: "Level", value: levels["time-machine"] }, { label: "Charts", value: tmCharts }, { label: "Accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) }]}
@@ -227,11 +271,17 @@ export default function PracticePage() {
         />
         <SectionCard
           mode="ict"
+          level={levels.ict}
           busy={busyMode === "ict"}
           stats={[{ label: "Questions", value: cards.length }, { label: "Asked", value: asked }, { label: "Accuracy", value: pct(right, asked) }]}
           primary={cards.length > 0 ? { label: "Play", onClick: () => void start("ict") } : { label: "Add your first question", href: "/practice/ict" }}
           secondary={{ label: cards.length > 0 ? "Manage questions" : "How it works", href: "/practice/ict" }}
         />
+      </div>
+
+      <div className="pr-rise mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start" style={{ "--i": 4 } as React.CSSProperties}>
+        <Challenges quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
+        <TrophyCase states={trophies} today={today} />
       </div>
 
       {phase.kind === "preparing" && <PreparingScreen mode={phase.mode} onCancel={cancel} />}

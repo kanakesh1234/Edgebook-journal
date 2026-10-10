@@ -63,12 +63,15 @@ export function PreparingScreen({ mode, onCancel }: { mode: ArenaMode; onCancel:
   const meta = MODE_META[mode];
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-canvas/95 backdrop-blur-sm" role="status" aria-live="polite">
-      <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(50% 40% at 50% 42%, ${tint(meta.accent, 12)}, transparent)` }} />
-      <div className="relative text-center">
-        <motion.div animate={reduce ? undefined : { scale: [1, 1.06, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }} className="mx-auto w-fit"><ModeBadge mode={mode} size="lg" /></motion.div>
-        <p className="mt-6 text-[22px] font-semibold tracking-[-0.02em] text-ink">Writing your {meta.title} round</p>
-        <p className="mt-1.5 text-[14px] text-muted">From your trades and saved charts.</p>
-        <div className="mt-5"><QuietButton onClick={onCancel}>Cancel</QuietButton></div>
+      <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(46% 38% at 50% 42%, ${tint(meta.accent, 14)}, transparent)` }} />
+      <div className="relative px-6 text-center">
+        <div className="relative mx-auto grid h-24 w-24 place-items-center">
+          {!reduce && <motion.span aria-hidden className="absolute inset-0 rounded-[28px]" style={{ border: `1px solid ${tint(meta.accent, 45)}` }} animate={{ scale: [1, 1.5], opacity: [0.7, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }} />}
+          <motion.div animate={reduce ? undefined : { scale: [1, 1.05, 1] }} transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}><ModeBadge mode={mode} size="lg" /></motion.div>
+        </div>
+        <p className="mt-7 text-[22px] font-semibold tracking-[-0.025em] text-ink">Writing your {meta.title} round</p>
+        <p className="mt-1.5 text-[14.5px] text-muted">Built from your trades and saved charts.</p>
+        <div className="mt-6"><QuietButton onClick={onCancel}>Cancel</QuietButton></div>
       </div>
     </div>
   );
