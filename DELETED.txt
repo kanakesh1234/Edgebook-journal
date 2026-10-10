@@ -1,18 +1,3 @@
-Delete these files after copying the rest (replaced by the unified Practice system; /practice/matrix/* now redirects to /practice):
+Delete this file after copying the rest (the Your progress page is removed):
 
-src/app/(workspace)/practice/matrix/[tradeId]/charts/page.tsx
-src/app/(workspace)/practice/matrix/[tradeId]/page.tsx
-src/app/(workspace)/practice/matrix/[tradeId]/summary/page.tsx
-src/app/(workspace)/practice/matrix/[tradeId]/test/page.tsx
-src/app/(workspace)/practice/matrix/modes/page.tsx
-src/app/(workspace)/practice/matrix/page.tsx
-src/app/(workspace)/practice/matrix/rewards/page.tsx
-src/app/(workspace)/practice/matrix/weekend-boss/page.tsx
-src/components/matrix/chart-study.tsx
-src/components/matrix/game-modes.tsx
-src/components/matrix/matrix-hub.tsx
-src/components/matrix/reward-vault.tsx
-src/components/matrix/test-flow.tsx
-src/components/matrix/test-summary.tsx
-src/components/matrix/trade-detail.tsx
-src/components/matrix/weekend-boss.tsx
+src/app/(workspace)/practice/progress/page.tsx

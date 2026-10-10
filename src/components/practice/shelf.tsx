@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { btnPrimary } from "@/components/lessons/buttons";
@@ -10,7 +9,7 @@ import { CHEST_REWARD, type QuestState } from "@/lib/practice/quests";
 import type { AchievementState } from "@/lib/practice/achievements";
 import type { ArenaMode } from "@/lib/practice/arena";
 import { Spinner } from "@/components/ui/button";
-import { ACHIEVEMENT_ICON, CheckIcon, ChevronIcon, GiftIcon, LockIcon } from "./icons";
+import { ACHIEVEMENT_ICON, CheckIcon, GiftIcon, LockIcon } from "./icons";
 import { Burst } from "./celebrate";
 import { MODE_META, ModeBadge } from "./modes";
 import "./practice.css";
@@ -119,7 +118,7 @@ export function TrophyCase({ states, today, limit = 4 }: { states: AchievementSt
     <section className="pr-surface p-5 sm:p-6" aria-labelledby="pr-trophies">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="pr-trophies" className="pr-heading">Trophies</h2>
-        <Link href="/practice/progress" className="pr-link inline-flex items-center gap-0.5">{earned.length} of {states.length}<ChevronIcon className="h-3.5 w-3.5" /></Link>
+        <p className="pr-sub">{earned.length} of {states.length}</p>
       </div>
 
       <ul className="pr-trophies mt-4">

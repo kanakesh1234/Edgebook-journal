@@ -13,7 +13,6 @@ import { MODE_META } from "@/components/practice/modes";
 import { SectionCard } from "@/components/practice/section-card";
 import { PlayerHero, weekStrip } from "@/components/practice/player-hero";
 import { Challenges, TrophyCase, UpNext } from "@/components/practice/shelf";
-import { FlameIcon } from "@/components/practice/icons";
 import "@/components/practice/practice.css";
 import { applyRoundToLog, chestClaimed, claim, markAllDone, questStates, allDone } from "@/lib/practice/quests";
 import { recommendMode, overallAccuracy } from "@/lib/practice/coach";
@@ -234,10 +233,6 @@ export default function PracticePage() {
           <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl">Practice</h1>
           <p className="mt-1.5 max-w-md text-[15px] leading-relaxed text-muted">Replay your own trades and drill the ideas you want to remember.</p>
         </div>
-        <Link href="/practice/progress" className="pr-chip shrink-0" aria-label={`Level ${level.level}, ${streak} day streak. Open progress`}>
-          <span className="grid h-7 w-7 place-items-center rounded-full text-on-gold" style={{ background: streak > 0 ? "linear-gradient(150deg, var(--gold-strong), var(--gold-deep))" : "color-mix(in srgb, var(--ink) 12%, transparent)" }}><FlameIcon className="h-4 w-4" /></span>
-          <span>{streak}</span><span className="text-faint" aria-hidden>·</span><span>Level {level.level}</span>
-        </Link>
       </header>
 
       {notice && <p role="status" className="pr-surface mt-6 px-5 py-4 text-[14px] text-muted">{notice}</p>}

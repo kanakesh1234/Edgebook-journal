@@ -25,3 +25,13 @@ export const SnowIcon = ({ className }: P) => (<svg {...base} className={classNa
 export const ACHIEVEMENT_ICON: Record<AchievementIcon, (p: P) => React.JSX.Element> = {
   flame: FlameIcon, bolt: BoltIcon, target: TargetIcon, trophy: TrophyIcon, medal: MedalIcon, star: StarIcon, brain: BrainIcon, crown: CrownIcon, calendar: CalendarIcon, compass: CompassIcon,
 };
+
+/* SF-Symbols-style additions for the question composer and ICT Lab. */
+export const PhotoIcon = ({ className }: P) => (<svg {...base} className={className}><rect x="3.5" y="5" width="17" height="14" rx="3.6" /><circle cx="9" cy="10.4" r="1.6" /><path d="m4.5 17.2 4.9-4.6 3.5 3.2 2.5-2.1 4.1 3.6" /></svg>);
+export const SparkleIcon = ({ className }: P) => (<svg {...base} className={className}><path d="M10 4.5 11.4 8.6l4.1 1.4-4.1 1.4L10 15.5l-1.4-4.1L4.5 10l4.1-1.4L10 4.5Z" /><path d="m17.5 14 .7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2Z" strokeWidth={1.5} /></svg>);
+export const PlusIcon = ({ className }: P) => (<svg {...base} strokeWidth={2} className={className}><path d="M12 5.5v13M5.5 12h13" /></svg>);
+export const PencilIcon = ({ className }: P) => (<svg {...base} className={className}><path d="m4.5 19.5.9-4 9.6-9.6a2 2 0 0 1 2.8 0l.3.3a2 2 0 0 1 0 2.8l-9.6 9.6-4 .9Z" /><path d="m13.5 7.5 3 3" /></svg>);
+export const TrashIcon = ({ className }: P) => (<svg {...base} className={className}><path d="M5 7h14M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7M6.8 7l.8 11.2A2 2 0 0 0 9.6 20h4.8a2 2 0 0 0 2-1.8L17.2 7M10 11v5M14 11v5" /></svg>);
+export const ChevronLeftIcon = ({ className }: P) => (<svg {...base} strokeWidth={2} className={className}><path d="m14.5 6-6 6 6 6" /></svg>);
+/** xmark.circle.fill — the remove badge on an attachment. */
+export const CloseBadgeIcon = ({ className }: P) => (<svg viewBox="0 0 24 24" className={className} aria-hidden><circle cx="12" cy="12" r="10" fill="currentColor" /><path d="m8.8 8.8 6.4 6.4M15.2 8.8l-6.4 6.4" stroke="var(--surface)" strokeWidth="2" strokeLinecap="round" /></svg>);

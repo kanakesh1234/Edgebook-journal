@@ -11,6 +11,7 @@ import { toast, useToasts } from "@/components/ui/toast";
 import { EyeIcon, ImageIcon, PlusIcon, XIcon } from "@/components/ui/icons";
 import { Spinner } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
+import { CloseBadgeIcon, PhotoIcon } from "@/components/practice/icons";
 import { cn, uid } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
@@ -79,10 +80,13 @@ export function ImageUploader({
   items,
   onChange,
   max = MAX_IMAGES_PER_ENTRY,
+  variant = "default",
 }: {
   items: UploadItem[];
   onChange: (items: UploadItem[]) => void;
   max?: number;
+  /** "apple": a quiet row of square attachments with a single add tile (used by the Practice question composer). */
+  variant?: "default" | "apple";
 }) {
   const uploaderId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -256,7 +260,9 @@ export function ImageUploader({
   };
 
   const used = items.length + pending.length;
-  const slots = Array.from({ length: max }, (_, i) => i);
+  const apple = variant === "apple";
+  // The apple variant shows what you have plus one add tile, not every empty slot.
+  const slots = Array.from({ length: apple ? Math.min(max, used + (used < max ? 1 : 0)) : max }, (_, i) => i);
   const pasteKey = isMac ? "⌘V" : "Ctrl+V";
 
   return (
@@ -281,7 +287,7 @@ export function ImageUploader({
           e.target.value = "";
         }}
       />
-      <div className="grid grid-cols-2 gap-3">
+      <div className={apple ? "grid grid-cols-3 gap-2.5 sm:grid-cols-4" : "grid grid-cols-2 gap-3"}>
         {slots.map((idx) => {
           const item = items[idx] ?? null;
           const pend = !item ? pending[idx - items.length] : undefined;
@@ -294,7 +300,7 @@ export function ImageUploader({
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                className="relative aspect-[16/10] overflow-hidden rounded-xl border border-gold/40 bg-canvas"
+                className={cn("relative overflow-hidden border border-gold/40 bg-canvas", apple ? "aspect-square rounded-[14px]" : "aspect-[16/10] rounded-xl")}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={pend.preview} alt="" className="h-full w-full object-cover opacity-80" draggable={false} />
@@ -324,18 +330,27 @@ export function ImageUploader({
                   void accept(e.dataTransfer.files);
                 }}
                 className={cn(
-                  "group relative flex aspect-[16/10] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50",
-                  dragging
-                    ? "border-gold/60 bg-gold/[0.05]"
-                    : "border-line-strong bg-raised/40 hover:border-faint hover:bg-raised",
+                  "group relative flex flex-col items-center justify-center gap-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50",
+                  apple
+                    ? cn("aspect-square gap-1.5 rounded-[14px]", dragging ? "bg-gold/15" : "bg-ink/[0.05] hover:bg-ink/[0.08]")
+                    : cn("aspect-[16/10] rounded-xl border border-dashed", dragging ? "border-gold/60 bg-gold/[0.05]" : "border-line-strong bg-raised/40 hover:border-faint hover:bg-raised"),
                   blocked && "opacity-60",
                 )}
               >
-                <ImageIcon className="h-5 w-5 text-faint transition-colors group-hover:text-gold" />
-                <span className="text-xs font-medium text-muted">Add screenshot</span>
-                <span className="text-[10px] text-faint">
-                  Click to browse · or paste <kbd className="rounded border border-line-strong bg-canvas/60 px-1 py-px font-mono text-[9px] text-muted">{pasteKey}</kbd>
-                </span>
+                {apple ? (
+                  <>
+                    <PhotoIcon className="h-6 w-6 text-gold-deep dark:text-gold" />
+                    <span className="text-[12.5px] font-medium text-muted">Add photo</span>
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="h-5 w-5 text-faint transition-colors group-hover:text-gold" />
+                    <span className="text-xs font-medium text-muted">Add screenshot</span>
+                    <span className="text-[10px] text-faint">
+                      Click to browse · or paste <kbd className="rounded border border-line-strong bg-canvas/60 px-1 py-px font-mono text-[9px] text-muted">{pasteKey}</kbd>
+                    </span>
+                  </>
+                )}
               </button>
             );
           }
@@ -356,7 +371,7 @@ export function ImageUploader({
               initial={previewByIdRef.current[item.meta.id] ? false : { opacity: 0, scale: 0.94 }}
               animate={leaving ? { opacity: 0, scale: 0.88 } : { opacity: 1, scale: 1 }}
               transition={{ duration: leaving ? 0.17 : 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="group relative aspect-[16/10] overflow-hidden rounded-xl border border-line-strong bg-canvas outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
+              className={cn("group relative overflow-hidden bg-canvas outline-none focus-visible:ring-2 focus-visible:ring-gold/50", apple ? "aspect-square rounded-[14px] shadow-[0_0_0_1px_color-mix(in_srgb,var(--ink)_8%,transparent)]" : "aspect-[16/10] rounded-xl border border-line-strong")}
             >
               {url ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -366,6 +381,16 @@ export function ImageUploader({
                   <Spinner className="h-4 w-4 text-faint" />
                 </div>
               )}
+              {apple ? (
+                <button
+                  type="button"
+                  onClick={() => removeAt(item.meta.id)}
+                  aria-label={`Remove photo ${idx + 1}`}
+                  className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full text-black/55 drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)] transition-transform duration-150 hover:scale-110 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+                >
+                  <CloseBadgeIcon className="h-6 w-6" />
+                </button>
+              ) : (
               <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2">
                 <span className="rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white/85 backdrop-blur-sm">
                   {idx + 1}/{max}
@@ -380,8 +405,9 @@ export function ImageUploader({
                   <XIcon className="h-3 w-3" />
                 </button>
               </div>
+              )}
               <AnimatePresence>
-                {url && (
+                {url && !apple && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}

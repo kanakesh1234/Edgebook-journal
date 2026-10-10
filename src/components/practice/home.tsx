@@ -4,34 +4,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { PrimaryButton, QuietButton } from "@/components/journal/flow-ui";
 import type { ArenaMode } from "@/lib/practice/arena";
-import type { XpLevel } from "@/lib/practice/xp";
 import { MODE_META, ModeBadge, tint } from "./modes";
-import { Bar, Eyebrow, GateMeter, surface } from "./ui";
-
-/** Who you are in the academy: rank, level, streak and accuracy — read at a glance, never a dashboard. */
-export function AcademyStrip({ rank, level, streak, accuracy }: { rank: string; level: XpLevel; streak: number; accuracy: number | null }) {
-  return (
-    <section className={cn(surface.editorial, "grid gap-6 px-6 py-5 sm:grid-cols-[1.4fr_1fr] sm:items-center sm:px-7")} aria-label="Your training status">
-      <div className="min-w-0">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-[17px] font-semibold tracking-[-0.015em] text-ink">{rank} <span className="font-normal text-muted">· Level {level.level}</span></p>
-          <p className="num text-[12px] text-faint">{level.into} / {level.need} XP</p>
-        </div>
-        <Bar value={level.pct} className="mt-3" />
-      </div>
-      <dl className="grid grid-cols-2 gap-4 sm:border-l sm:border-line sm:pl-7">
-        <div>
-          <dt><Eyebrow>Streak</Eyebrow></dt>
-          <dd className="kpi mt-1 text-[22px] tabular-nums text-ink">{streak}<span className="ml-1 text-[13px] font-normal text-muted">{streak === 1 ? "day" : "days"}</span></dd>
-        </div>
-        <div>
-          <dt><Eyebrow>Accuracy</Eyebrow></dt>
-          <dd className="kpi mt-1 text-[22px] tabular-nums text-ink">{accuracy == null ? "—" : `${Math.round(accuracy * 100)}%`}</dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
+import { Eyebrow, GateMeter, surface } from "./ui";
 
 /** The one-tap answer to "what should I train?" — chosen by the coach, never a setting. */
 export function SessionHero({ mode, level, reason, meter, busy, onStart }: { mode: ArenaMode; level: number; reason: string; meter: { value: number; goal: number; accuracy: number; nextLevel: number }; busy: boolean; onStart: () => void }) {
