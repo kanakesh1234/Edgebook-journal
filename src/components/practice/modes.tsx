@@ -19,7 +19,7 @@ export const MODE_META: Record<ArenaMode, { title: string; eyebrow: string; blur
   "time-machine": { title: "Time Machine", eyebrow: "Revise your charts", blurb: "Re-read saved screenshots and answer on what you actually did.", accent: "var(--profit)", stage: "Chart revision" },
   "math-duel": { title: "Math Duel", eyebrow: "Risk maths", blurb: "Fast calculations from your own numbers. Harder every level.", accent: "var(--gold-strong)", stage: "Risk maths" },
   boss: { title: "Weekend Boss", eyebrow: "Your week", blurb: "Cross-trade questions on patterns, repeated mistakes and what they cost.", accent: "var(--loss)", stage: "This week" },
-  ict: { title: "ICT Lab", eyebrow: "Smart money concepts", blurb: "Liquidity, fair value gaps, structure and premium/discount — on drawn charts.", accent: "color-mix(in srgb, var(--info) 58%, var(--loss))", stage: "Concept drills" },
+  ict: { title: "ICT Lab", eyebrow: "Your questions", blurb: "Write ICT questions with your own charts. They come back in new styles, with trade maths in the middle.", accent: "color-mix(in srgb, var(--info) 58%, var(--loss))", stage: "Your deck" },
 };
 
 /* -------------------------------- glyphs -------------------------------- */

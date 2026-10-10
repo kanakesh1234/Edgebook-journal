@@ -6,19 +6,18 @@ import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { todayKey } from "@/lib/format";
 import Link from "next/link";
-import { ModeCard, MODE_META } from "@/components/practice/mode-card";
-import { PreparingScreen, SessionHero } from "@/components/practice/home";
-import { Eyebrow, surface } from "@/components/practice/ui";
-import { PlayerHero, type WeekDay } from "@/components/practice/player-hero";
-import { DailyQuests } from "@/components/practice/quests";
-import { AchievementGrid, nextUp } from "@/components/practice/trophies";
-import { calendarGrid, WEEKDAY_LETTERS } from "@/lib/practice/consistency";
-import { applyRoundToLog, claim, chestClaimed as chestClaimedOn, markAllDone, questStates, allDone } from "@/lib/practice/quests";
-import { recordsOf, updateRecords } from "@/lib/practice/records";
-import { achievementStates, newlyEarned, stamp } from "@/lib/practice/achievements";
 import { isIctTag } from "@/lib/practice/ict";
 import { NO_EXTRAS, type RoundExtras } from "@/lib/practice/rewards";
-import { cn } from "@/lib/utils";
+import { PreparingScreen } from "@/components/practice/home";
+import { MODE_META } from "@/components/practice/modes";
+import { SectionCard } from "@/components/practice/section-card";
+import { FlameIcon } from "@/components/practice/icons";
+import { applyRoundToLog, markAllDone, questStates, allDone } from "@/lib/practice/quests";
+import { updateRecords } from "@/lib/practice/records";
+import { newlyEarned, stamp } from "@/lib/practice/achievements";
+import { prepareIctRound } from "@/lib/practice/ict-round";
+import { applyCardResults, cardHash } from "@/lib/practice/ict-cards";
+import { updateCards } from "@/lib/practice/ict-store";
 import { RoundRunner, type RoundResult, type RoundReport } from "@/components/practice/round-runner";
 import { displayStreak, isUsable, nextStreak, rankOf, weekTrades } from "@/lib/practice/engine";
 import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
@@ -27,8 +26,7 @@ import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
 import { DAILY_XP_GOAL, xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
-import { applyOutcome, arenaLevels, ARENA_MODES, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
-import { overallAccuracy, recommendMode } from "@/lib/practice/coach";
+import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
 import type { GameProgress as PracticeProgress } from "@/lib/practice/progress-ext";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
@@ -56,14 +54,14 @@ function snapshot() {
     const limit = challenge?.maxDrawdown ?? state.settings.maxDrawdown;
     drawdownLeft = limit > 0 ? Math.max(0, limit - stats.drawdown) : null;
   }
-  return { entries, drawdownLeft, progress: state.settings.practiceProgress ?? EMPTY, updateSettings: state.updateSettings };
+  return { entries, drawdownLeft, progress: (state.settings.practiceProgress ?? EMPTY) as PracticeProgress, updateSettings: state.updateSettings };
 }
 
 export default function PracticePage() {
   const allEntries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
   const { entries } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
-  const progress = settings.practiceProgress ?? EMPTY;
+  const progress = (settings.practiceProgress ?? EMPTY) as PracticeProgress;
   const today = todayKey();
 
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -88,6 +86,15 @@ export default function PracticePage() {
     setPhase({ kind: "preparing", mode });
     const snap = snapshot();
     const level = levelOf(snap.progress, mode);
+    if (mode === "ict") {
+      const ict = await prepareIctRound({ cards: snap.progress.ictCards ?? [], entries: snap.entries, progress: snap.progress, today, level });
+      if (id !== token.current) return;
+      if ("empty" in ict) { setPhase({ kind: "idle" }); setNotice(ict.empty); return; }
+      // Keep the AI question styles on the cards so the next round starts instantly (and works offline).
+      if (ict.freshVariants.size) void updateCards((cards) => cards.map((c) => { const f = ict.freshVariants.get(c.id); return f && cardHash(c) === f.hash ? { ...c, variants: f.variants, variantsFor: f.hash } : c; }));
+      setPhase({ kind: "playing", mode, level, round: ict.round });
+      return;
+    }
     const prepared = await prepareRound({ mode, level, entries: snap.entries, progress: snap.progress, drawdownLeft: snap.drawdownLeft });
     if (id !== token.current) { if ("round" in prepared) prepared.round.close(); return; }
     if ("empty" in prepared) { setPhase({ kind: "idle" }); setNotice(prepared.empty); return; }
@@ -158,6 +165,7 @@ export default function PracticePage() {
     const finished = markAllDone(draft, today);
     draft.questLog = finished.questLog;
     if (finished.first) draft.records = { ...records, questDays: records.questDays + 1 };
+    draft.ictCards = applyCardResults(live.ictCards ?? [], result.answers.map((a) => ({ cardId: a.question.cardId, correct: a.correct })), today);
     const earned = newlyEarned(draft);
     draft.achievements = stamp(draft, earned, today);
     const next = draft;
@@ -176,98 +184,54 @@ export default function PracticePage() {
     return { outcome, extras };
   };
 
-  /** Claim a finished quest (or the daily chest) for bonus XP. */
-  const claimQuest = (id: string) => {
-    const snap = snapshot();
-    const live = snap.progress;
-    const { xp, questLog } = claim(live, today, id);
-    if (!xp) return;
-    const draft: PracticeProgress = { ...live, xp: live.xp + xp, questLog };
-    draft.achievements = stamp(draft, newlyEarned(draft), today);
-    void snap.updateSettings({ practiceProgress: draft });
-  };
-
   const meterFor = (mode: ArenaMode) => {
     const gate = gateFor(mode, levels[mode]);
-    return { value: Math.min(levelBestOf(progress, mode), gate.correct), goal: gate.correct, accuracy: gate.accuracy, nextLevel: levels[mode] + 1 };
+    return { value: Math.min(levelBestOf(progress, mode), gate.correct), goal: gate.correct, label: `${Math.min(levelBestOf(progress, mode), gate.correct)} of ${gate.correct} to reach Level ${levels[mode] + 1}` };
   };
 
-  const locks = useMemo(
-    () => Object.fromEntries(ARENA_MODES.map((mode) => [mode, lock(mode)])) as Record<ArenaMode, string | null>,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [usable.length, weekInfo.trades.length],
-  );
-  const recommended = useMemo(() => recommendMode({ progress, locked: locks }), [progress, locks]);
   const busyMode = phase.kind === "preparing" ? phase.mode : null;
-
-  const quests = useMemo(() => questStates(progress, today), [progress, today]);
-  const chestDone = chestClaimedOn(progress, today);
-  const trophies = useMemo(() => achievementStates(progress), [progress]);
-  const records = recordsOf(progress);
-  const week: WeekDay[] = useMemo(() => {
-    const trained = new Set(progress.completedMissionDates ?? []);
-    return calendarGrid(today, 1).map((cell, i) => ({ key: cell.key, letter: WEEKDAY_LETTERS[i]!, trained: (progress.dailyStats?.[cell.key]?.total ?? 0) > 0 || trained.has(cell.key), today: cell.key === today, future: cell.future }));
-  }, [progress.dailyStats, progress.completedMissionDates, today]);
-  const unlockedCount = trophies.filter((t) => t.unlocked).length;
+  const tmLock = lock("time-machine");
+  const tmCharts = useMemo(() => usable.filter((e) => (e.images?.length ?? 0) > 0).length, [usable]);
+  const tmPerf = progress.modePerformance?.["time-machine"];
+  const cards = progress.ictCards ?? [];
+  const asked = cards.reduce((n, c) => n + (c.seen ?? 0), 0);
+  const right = cards.reduce((n, c) => n + (c.correct ?? 0), 0);
+  const streak = displayStreak(progress, today);
+  const level = xpLevel(progress.xp);
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
 
   return (
     <div className="mx-auto max-w-5xl pb-24">
       <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 pt-2">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-gold">Practice</p>
-          <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.03em] text-ink sm:text-[52px]">Train on your own trades.</h1>
-          <p className="mt-4 max-w-xl text-[17px] leading-snug text-muted">Sixty-second rounds, written fresh from your journal. Difficulty finds you.</p>
+          <h1 className="mt-3 text-[40px] font-semibold leading-[1.05] tracking-[-0.035em] text-ink sm:text-[52px]">Sharpen your edge.</h1>
+          <p className="mt-3 max-w-md text-[17px] leading-snug text-muted">Replay your own trades, and drill the ideas you want to remember.</p>
         </div>
-        <Link href="/practice/progress" className="inline-flex h-10 items-center gap-1.5 rounded-full border border-line-strong bg-raised px-4 text-[13.5px] font-medium text-ink transition-colors hover:border-gold-strong">
-          Your progress <span aria-hidden className="text-muted">→</span>
+        <Link href="/practice/progress" className="group inline-flex h-11 items-center gap-3 rounded-full border border-ink/10 bg-ink/[0.035] pl-2 pr-4 text-[13.5px] font-medium text-ink backdrop-blur transition-all hover:bg-ink/[0.07] active:scale-[0.97]" aria-label={`Level ${level.level}, ${streak} day streak. Open progress`}>
+          <span className="grid h-7 w-7 place-items-center rounded-full text-on-gold" style={{ background: streak > 0 ? "linear-gradient(150deg, var(--gold-strong), var(--gold-deep))" : "color-mix(in srgb, var(--ink) 12%, transparent)" }}><FlameIcon className="h-4 w-4" /></span>
+          <span className="num">{streak}</span><span className="text-faint">·</span><span>Level {level.level}</span><span aria-hidden className="text-muted transition-transform group-hover:translate-x-0.5">→</span>
         </Link>
       </header>
 
-      <div className="mt-9 space-y-4">
-        <PlayerHero rank={rankOf(progress.xp)} level={xpLevel(progress.xp)} streak={displayStreak(progress, today)} freezeDays={progress.freezeDays ?? 1} accuracy={overallAccuracy(progress)} todayXp={progress.dailyStats?.[today]?.xp ?? 0} goal={DAILY_XP_GOAL} week={week} />
+      {notice && <p role="status" className="mt-8 rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
 
-        {notice && <p role="status" className="rounded-[18px] border border-line bg-surface px-5 py-4 text-[14px] text-muted">{notice}</p>}
-
-        {recommended && (
-          <SessionHero mode={recommended.mode} level={levels[recommended.mode]} reason={recommended.reason} meter={meterFor(recommended.mode)} busy={busyMode === recommended.mode} onStart={() => void start(recommended.mode)} />
-        )}
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <DailyQuests quests={quests} chestClaimed={chestDone} onClaim={claimQuest} />
-        <section className={cn(surface.material, "flex flex-col rounded-[28px] p-6 sm:p-7")} aria-labelledby="next-heading">
-          <div className="flex items-baseline justify-between gap-3">
-            <Eyebrow><span id="next-heading">Achievements</span></Eyebrow>
-            <p className="num text-[12px] text-faint">{unlockedCount} of {trophies.length} unlocked</p>
-          </div>
-          {nextUp(trophies, 3).length > 0 ? (
-            <div className="mt-4"><AchievementGrid states={nextUp(trophies, 3)} /></div>
-          ) : (
-            <p className="mt-4 text-[14px] text-muted">Every achievement unlocked. Remarkable.</p>
-          )}
-          <div className="mt-auto flex items-center justify-between gap-4 pt-5 text-[12.5px] text-muted">
-            <span className="num">{records.rounds} {records.rounds === 1 ? "round" : "rounds"} played{records.bestCombo > 0 ? ` · best flow ×${records.bestCombo}` : ""}</span>
-            <Link href="/practice/progress" className="font-semibold text-gold hover:underline">All achievements & records →</Link>
-          </div>
-        </section>
-      </div>
-
-      <div className="mt-12 flex items-baseline justify-between"><Eyebrow>All modes</Eyebrow></div>
-      <div className="mt-4 grid gap-5 sm:grid-cols-2">
-        {ARENA_MODES.map((mode) => (
-          <ModeCard
-            key={mode}
-            mode={mode}
-            level={levels[mode]}
-            status={locks[mode] ?? ""}
-            disabled={!!locks[mode]}
-            busy={busyMode === mode}
-            meter={locks[mode] ? undefined : meterFor(mode)}
-            meta={mode === "boss" && !locks[mode] ? weekInfo.label : undefined}
-            className={mode === "ict" ? "sm:col-span-2" : undefined}
-            onStart={() => void start(mode)}
-          />
-        ))}
+      <div className="mt-9 grid gap-5 lg:grid-cols-2">
+        <SectionCard
+          mode="time-machine"
+          blocked={tmLock}
+          busy={busyMode === "time-machine"}
+          stats={[{ label: "Level", value: levels["time-machine"] }, { label: "Charts", value: tmCharts }, { label: "Accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) }]}
+          meter={tmLock ? undefined : meterFor("time-machine")}
+          primary={{ label: "Start", onClick: () => void start("time-machine") }}
+        />
+        <SectionCard
+          mode="ict"
+          busy={busyMode === "ict"}
+          stats={[{ label: "Questions", value: cards.length }, { label: "Asked", value: asked }, { label: "Accuracy", value: pct(right, asked) }]}
+          primary={cards.length > 0 ? { label: "Play", onClick: () => void start("ict") } : { label: "Add your first question", href: "/practice/ict" }}
+          secondary={{ label: cards.length > 0 ? "Manage questions" : "How it works", href: "/practice/ict" }}
+        />
       </div>
 
       {phase.kind === "preparing" && <PreparingScreen mode={phase.mode} onCancel={cancel} />}

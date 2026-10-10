@@ -11,8 +11,9 @@ export interface AchievementDef { id: string; title: string; blurb: string; icon
 export interface AchievementState extends AchievementDef { current: number; unlocked: boolean; on?: string }
 
 const ALL_MODES = ["matrix", "time-machine", "math-duel", "boss", "ict"];
+const SECTIONS = ["time-machine", "ict"];
 const ictCorrect = (p: PracticeProgress) => Object.entries(p.masteryByTag ?? {}).filter(([tag]) => isIctTag(tag)).reduce((s, [, n]) => s + n, 0);
-const modesPlayed = (p: PracticeProgress) => ALL_MODES.filter((m) => (p.modePerformance?.[m]?.attempts ?? 0) > 0).length;
+const sectionsPlayed = (p: PracticeProgress) => SECTIONS.filter((m) => (p.modePerformance?.[m]?.attempts ?? 0) > 0).length;
 const topLevel = (p: PracticeProgress) => Math.max(1, ...ALL_MODES.map((m) => p.arena?.levels?.[m] ?? 1));
 
 const A = (id: string, title: string, blurb: string, icon: AchievementIcon, tier: 1 | 2 | 3, target: number, value: (p: PracticeProgress) => number): AchievementDef => ({ id, title, blurb, icon, tier, target, value });
@@ -33,7 +34,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   A("level-10", "Summit", "Reach level 10 in any mode.", "medal", 3, 10, topLevel),
   A("ict-25", "Smart money student", "Get 25 ICT answers right.", "brain", 1, 25, ictCorrect),
   A("ict-100", "Price delivery", "Get 100 ICT answers right.", "brain", 3, 100, ictCorrect),
-  A("explorer", "Explorer", "Play all five modes.", "compass", 2, 5, modesPlayed),
+  A("explorer", "Explorer", "Play Time Machine and ICT Lab.", "compass", 2, 2, sectionsPlayed),
   A("quests-3", "Quest runner", "Finish all daily quests on 3 days.", "calendar", 2, 3, (p) => recordsOf(p).questDays),
   A("xp-500", "Rising", "Earn 500 XP.", "trophy", 1, 500, (p) => p.xp),
   A("xp-2500", "Veteran", "Earn 2,500 XP.", "crown", 3, 2500, (p) => p.xp),

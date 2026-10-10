@@ -9,7 +9,7 @@
  *  - Difficulty is a 1–4 level that decides WHICH questions are allowed and
  *    how close the wrong answers are.
  */
-import type { JournalEntry, PracticeProgress } from "@/lib/types";
+import type { EntryImage, JournalEntry, PracticeProgress } from "@/lib/types";
 import { addDays, formatDateMedium, weekdayLong } from "@/lib/format";
 import { seededRng, type Rng } from "./math/rng";
 import { breakevenWinRate, lossStreakProbability } from "./math/formulas";
@@ -66,6 +66,10 @@ export interface PracticeQuestion {
   retry?: boolean;
   /** A small drawn scene (candles, levels, zones) shown above the question — used by ICT Lab. */
   visual?: QuestionVisual;
+  /** Pictures the trader attached to their own question (ICT Lab). Stored in the image store. */
+  images?: EntryImage[];
+  /** The ICT Lab card this question was made from. */
+  cardId?: string;
 }
 
 export type Bucket = "best" | "breakeven" | "worst";

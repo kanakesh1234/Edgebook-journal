@@ -18,6 +18,8 @@ import type { PracticeProgress } from "@/lib/types";
 export type ArenaMode = "matrix" | "time-machine" | "math-duel" | "boss" | "ict";
 export const ARENA_MODES: ArenaMode[] = ["matrix", "time-machine", "math-duel", "boss", "ict"];
 export const ROUND_SECONDS = 60;
+/** ICT Lab is revision: you read your own pictures and notes, so the clock is more generous. */
+export const roundSecondsFor = (mode: ArenaMode) => (mode === "ict" ? 150 : ROUND_SECONDS);
 
 /** Math Duel questions are quicker to answer, so its gate is higher. */
 const PACE: Record<ArenaMode, number> = { matrix: 1, "time-machine": 1, "math-duel": 1.5, boss: 1, ict: 1 };

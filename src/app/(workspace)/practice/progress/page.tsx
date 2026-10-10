@@ -7,7 +7,7 @@ import { todayKey } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { displayStreak, rankOf } from "@/lib/practice/engine";
 import { xpLevel } from "@/lib/practice/xp";
-import { ARENA_MODES, arenaLevels } from "@/lib/practice/arena";
+import { arenaLevels, type ArenaMode } from "@/lib/practice/arena";
 import { modeStats, overallAccuracy } from "@/lib/practice/coach";
 import { calendarGrid, dateLabel, dayLevel, rangeLabel, summarise, WEEKDAY_LETTERS, type DayLevel } from "@/lib/practice/consistency";
 import { AcademyStrip } from "@/components/practice/home";
@@ -16,7 +16,13 @@ import { Bar, Eyebrow, surface } from "@/components/practice/ui";
 import { AchievementGrid, RecordsGrid } from "@/components/practice/trophies";
 import { achievementStates } from "@/lib/practice/achievements";
 import { recordsOf } from "@/lib/practice/records";
-import { ICT_TOPICS } from "@/lib/practice/ict";
+import { DailyQuests } from "@/components/practice/quests";
+import { claim, chestClaimed, questStates } from "@/lib/practice/quests";
+import { newlyEarned, stamp } from "@/lib/practice/achievements";
+import type { GameProgress } from "@/lib/practice/progress-ext";
+
+/** Practice has two sections now; the ladder only lists those. */
+const SECTIONS: ArenaMode[] = ["time-machine", "ict"];
 
 /**
  * One hue, five steps — the more you practised, the deeper the gold. The date number sits inside
@@ -43,7 +49,7 @@ function Stat({ value, label }: { value: React.ReactNode; label: string }) {
 
 export default function PracticeProgressPage() {
   const settings = useApp((state) => state.settings);
-  const progress = settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 };
+  const progress = (settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 }) as GameProgress;
   const matrix = settings.matrixProgress;
   const today = todayKey();
   const levels = arenaLevels(progress);
@@ -54,7 +60,18 @@ export default function PracticeProgressPage() {
   const trophies = useMemo(() => achievementStates(progress), [progress]);
   const records = recordsOf(progress);
   const unlocked = trophies.filter((t) => t.unlocked).length;
-  const ictTotal = ICT_TOPICS.reduce((sum, t) => sum + (progress.masteryByTag?.[t.tag] ?? 0), 0);
+  const quests = useMemo(() => questStates(progress, today), [progress, today]);
+  const cards = progress.ictCards ?? [];
+  const tricky = useMemo(() => cards.filter((c) => (c.seen ?? 0) >= 2).map((c) => ({ c, acc: (c.correct ?? 0) / (c.seen ?? 1) })).sort((a, b) => a.acc - b.acc).slice(0, 5), [cards]);
+  const claimQuest = (id: string) => {
+    const state = useApp.getState();
+    const live = (state.settings.practiceProgress ?? { xp: 0, streak: 0, freezeDays: 1 }) as GameProgress;
+    const { xp, questLog } = claim(live, today, id);
+    if (!xp) return;
+    const draft: GameProgress = { ...live, xp: live.xp + xp, questLog };
+    draft.achievements = stamp(draft, newlyEarned(draft), today);
+    void state.updateSettings({ practiceProgress: draft });
+  };
   const earlierTests = Object.values(matrix?.tradeStates ?? {}).flatMap((state) => state.attempts ?? []).length;
 
   return (
@@ -70,7 +87,7 @@ export default function PracticeProgressPage() {
       <section aria-labelledby="ladder-heading">
         <Eyebrow><span id="ladder-heading">Training ladder</span></Eyebrow>
         <ul className={cn(surface.editorial, "mt-4 divide-y divide-line overflow-hidden")}>
-          {ARENA_MODES.map((mode) => {
+          {SECTIONS.map((mode) => {
             const stats = modeStats(progress, mode);
             const best = progress.arena?.best?.[mode] ?? 0;
             return (
@@ -94,6 +111,8 @@ export default function PracticeProgressPage() {
         <p className="mt-3 px-1 text-[12px] leading-snug text-faint">Accuracy counts every answer in that mode. Levels rise on their own as you clear each gate.</p>
       </section>
 
+      <DailyQuests quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
+
       <section aria-labelledby="records-heading">
         <Eyebrow><span id="records-heading">Personal records</span></Eyebrow>
         <div className="mt-4"><RecordsGrid records={records} /></div>
@@ -109,22 +128,22 @@ export default function PracticeProgressPage() {
 
       <section aria-labelledby="ict-heading">
         <div className="flex items-baseline justify-between gap-4">
-          <Eyebrow><span id="ict-heading">ICT Lab mastery</span></Eyebrow>
-          <p className="num text-[12px] text-faint">{ictTotal} correct in total</p>
+          <Eyebrow><span id="ict-heading">ICT Lab — questions to revisit</span></Eyebrow>
+          <Link href="/practice/ict" className="text-[12.5px] font-semibold text-gold hover:underline">Manage questions →</Link>
         </div>
-        <ul className={cn(surface.editorial, "mt-4 divide-y divide-line overflow-hidden")}>
-          {ICT_TOPICS.map((topic) => {
-            const n = progress.masteryByTag?.[topic.tag] ?? 0;
-            return (
-              <li key={topic.tag} className="flex items-center gap-4 px-5 py-3.5">
-                <p className="w-40 shrink-0 text-[14.5px] font-medium tracking-[-0.01em] text-ink">{topic.label}</p>
-                <Bar value={Math.min(100, (n / 20) * 100)} accent={MODE_META.ict.accent} className="flex-1" />
-                <p className="num w-20 shrink-0 text-right text-[12px] text-muted">{n} correct</p>
+        {tricky.length === 0 ? (
+          <p className={cn(surface.editorial, "mt-4 px-5 py-5 text-[14px] text-muted")}>{cards.length === 0 ? "Add questions in ICT Lab and the ones you miss most show up here." : "Play a few rounds — the questions you miss most will show up here."}</p>
+        ) : (
+          <ul className={cn(surface.editorial, "mt-4 divide-y divide-line overflow-hidden")}>
+            {tricky.map(({ c, acc }) => (
+              <li key={c.id} className="flex items-center gap-4 px-5 py-3.5">
+                <p className="min-w-0 flex-1 truncate text-[14.5px] font-medium tracking-[-0.01em] text-ink">{c.question}</p>
+                <Bar value={acc * 100} accent={MODE_META.ict.accent} className="w-24 shrink-0" />
+                <p className="num w-24 shrink-0 text-right text-[12px] text-muted">{Math.round(acc * 100)}% · {c.seen}×</p>
               </li>
-            );
-          })}
-        </ul>
-        <p className="mt-3 px-1 text-[12px] leading-snug text-faint">Each bar fills at 20 correct answers in that topic. Play ICT Lab to grow them.</p>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section aria-labelledby="consistency-heading">

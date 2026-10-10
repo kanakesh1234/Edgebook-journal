@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { JournalEntry } from "@/lib/types";
 import type { PracticeQuestion } from "@/lib/practice/engine";
 import { groupOf } from "@/lib/practice/session";
-import { gateFor, nudge, ROUND_SECONDS, targetDifficulty, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { gateFor, nudge, roundSecondsFor, targetDifficulty, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
 import { brief, feedbackDwellMs } from "@/lib/practice/pacing";
 import { earnedXp } from "@/lib/practice/xp";
 import type { Round } from "@/lib/practice/round";
@@ -20,6 +20,7 @@ import { DuelSound } from "@/lib/practice/math/sound";
 import type { RoundExtras } from "@/lib/practice/rewards";
 import { haptic } from "@/lib/haptics";
 import { CandleVisual } from "@/components/practice/candle-visual";
+import { QuestionImages } from "@/components/practice/question-images";
 import { FlameIcon } from "@/components/practice/icons";
 
 export interface AnswerLog {
@@ -63,7 +64,6 @@ interface Props {
   onClose: () => void;
 }
 
-const TOTAL_MS = ROUND_SECONDS * 1000;
 const VOLUME = 0.35;
 const LOW_WATER = 6;
 
@@ -78,7 +78,9 @@ function isRight(question: PracticeQuestion, response: string): boolean {
 const answerText = (q: PracticeQuestion) => (q.kind === "number" ? `${q.answer}${q.unit ? ` ${q.unit}` : ""}` : q.answer);
 
 /** The unused question nearest the live difficulty; missed-before questions get a small head start. */
-function pick(pool: PracticeQuestion[], used: Set<string>, target: number, last: PracticeQuestion | null): PracticeQuestion | null {
+function pick(pool: PracticeQuestion[], used: Set<string>, target: number, last: PracticeQuestion | null, ordered = false): PracticeQuestion | null {
+  // ICT Lab plays in the order it was built: cards, trade maths in the middle, cards.
+  if (ordered) return pool.find((q) => !used.has(q.id)) ?? null;
   let best: PracticeQuestion | null = null;
   let bestScore = Infinity;
   pool.forEach((q, index) => {
@@ -93,6 +95,7 @@ let sharedSound: DuelSound | null = null;
 const sound = () => (sharedSound ??= new DuelSound());
 
 export function RoundRunner({ title, mode, level, round, entries, onFinish, onNext, onClose }: Props) {
+  const TOTAL_MS = roundSecondsFor(mode) * 1000;
   const pool = useRef<PracticeQuestion[]>([...round.initial]);
   const used = useRef(new Set<string>());
   const log = useRef<AnswerLog[]>([]);
@@ -111,7 +114,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const [left, setLeft] = useState(TOTAL_MS);
   const [isPaused, setIsPaused] = useState(false);
   const [question, setQuestion] = useState<PracticeQuestion | null>(() => {
-    const first = pick(pool.current, used.current, target.current, null);
+    const first = pick(pool.current, used.current, target.current, null, mode === "ict");
     if (first) used.current.add(first.id);
     current.current = first;
     return first;
@@ -173,7 +176,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     if (advanceTimer.current) { window.clearTimeout(advanceTimer.current); advanceTimer.current = null; }
     const more = round.drain();
     if (more.length) pool.current.push(...more.filter((q) => !pool.current.some((p) => p.id === q.id || p.fp === q.fp)));
-    const next = pick(pool.current, used.current, target.current, current.current);
+    const next = pick(pool.current, used.current, target.current, current.current, mode === "ict");
     if (!next) { end(true); return; }
     used.current.add(next.id);
     current.current = next;
@@ -286,6 +289,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
           {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} large={mode === "time-machine"} /></div>}
 
           {question.visual && <div className="mt-4"><CandleVisual visual={question.visual} revealed={answered} /></div>}
+          {question.images && question.images.length > 0 && <div className="mt-4"><QuestionImages key={question.id} images={question.images} onOverlay={onOverlay} /></div>}
 
           <h2 className={cn("mt-6 font-semibold tracking-[-0.022em]", mode === "math-duel" ? "text-[28px] leading-[1.18] sm:text-[34px]" : "text-[26px] leading-[1.2] sm:text-[32px]")}>{question.prompt}</h2>
 
