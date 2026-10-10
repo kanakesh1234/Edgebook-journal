@@ -59,7 +59,7 @@ export default function IctLabPage() {
   const [composer, setComposer] = useState(false);
   const [doomed, setDoomed] = useState<IctCard | null>(null);
   const [busy, setBusy] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
 
   // The navigator docks beside the content only when the page itself is wide enough (measured, not viewport-based);
