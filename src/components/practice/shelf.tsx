@@ -3,42 +3,12 @@
 import { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { btnPrimary } from "@/components/lessons/buttons";
 import { haptic } from "@/lib/haptics";
 import { CHEST_REWARD, type QuestState } from "@/lib/practice/quests";
 import type { AchievementState } from "@/lib/practice/achievements";
-import type { ArenaMode } from "@/lib/practice/arena";
-import { Spinner } from "@/components/ui/button";
 import { ACHIEVEMENT_ICON, CheckIcon, GiftIcon, LockIcon } from "./icons";
 import { Burst } from "./celebrate";
-import { MODE_META, ModeBadge } from "./modes";
 import "./practice.css";
-
-/* ------------------------------ Up next ------------------------------ */
-
-/** The one-tap answer to "what should I train?" — picked by the coach, never a setting. Same shape as Lessons' "Continue reading". */
-export function UpNext({ mode, level, reason, meter, busy, onStart }: { mode: ArenaMode; level: number; reason: string; meter: { value: number; goal: number }; busy: boolean; onStart: () => void }) {
-  const meta = MODE_META[mode];
-  const pct = Math.min(100, Math.round((meter.value / Math.max(1, meter.goal)) * 100));
-  return (
-    <section className="pr-next" aria-label="Recommended session">
-      <ModeBadge mode={mode} size="md" />
-      <div className="min-w-0 flex-1">
-        <span className="pr-next-kicker">Up next for you</span>
-        <p className="mt-0.5 truncate text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink">{meta.title} <span className="font-normal text-muted">· Level {level}</span></p>
-        <p className="mt-0.5 line-clamp-2 text-[13.5px] leading-snug text-muted">{reason}</p>
-        <span className="mt-2.5 flex items-center gap-3">
-          <span className="pr-track flex-1" style={{ "--pr-fill": meta.accent } as React.CSSProperties} aria-hidden="true"><i style={{ width: `${pct}%` }} /></span>
-          <span className="shrink-0 text-[12px] tabular-nums text-muted">{meter.value} of {meter.goal}</span>
-        </span>
-      </div>
-      <button type="button" className={cn(btnPrimary, "shrink-0")} onClick={onStart} disabled={busy}>
-        {busy ? <Spinner className="h-4 w-4" /> : null}
-        <span>{busy ? "Preparing…" : "Start"}</span>
-      </button>
-    </section>
-  );
-}
 
 /* ----------------------------- Challenges ----------------------------- */
 
@@ -51,14 +21,14 @@ export function Challenges({ quests, chestClaimed, onClaim }: { quests: QuestSta
   const chestReady = allClaimed && !chestClaimed;
 
   return (
-    <section className="pr-surface relative p-5 sm:p-6" aria-labelledby="pr-challenges">
+    <section className="pr-surface relative p-6 sm:p-7" aria-labelledby="pr-challenges">
       {burst > 0 && <Burst key={burst} colors={["var(--gold-strong)", "var(--gold-deep)", "var(--profit)", "var(--info)"]} count={44} />}
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="pr-challenges" className="pr-heading">Today’s challenges</h2>
         <p className="pr-sub">{done} of {quests.length} done</p>
       </div>
 
-      <ul className="mt-2">
+      <ul className="mt-3">
         {quests.map((q) => {
           const pct = Math.min(100, Math.round((q.value / q.target) * 100));
           return (
@@ -74,7 +44,7 @@ export function Challenges({ quests, chestClaimed, onClaim }: { quests: QuestSta
                 </div>
               </div>
               {q.done && !q.claimed ? (
-                <button type="button" className="pr-claim" data-ready="true" onClick={() => { haptic.success(); onClaim(q.id); }}>Claim +{q.reward}</button>
+                <button type="button" className="pr-claim" onClick={() => { haptic.success(); onClaim(q.id); }}>Claim +{q.reward}</button>
               ) : (
                 <span className={cn("w-[62px] shrink-0 text-right text-[12.5px] tabular-nums", q.claimed ? "font-medium text-profit" : "text-faint")}>{q.claimed ? "Claimed" : `+${q.reward} XP`}</span>
               )}
@@ -90,7 +60,7 @@ export function Challenges({ quests, chestClaimed, onClaim }: { quests: QuestSta
           <p className="text-[12.5px] leading-snug text-muted">{chestClaimed ? "Opened today. See you tomorrow." : allClaimed ? "All claimed. Open it." : "Claim all three to open it."}</p>
         </div>
         {chestReady ? (
-          <button type="button" className="pr-claim" data-ready="true" onClick={() => { haptic.success(); setBurst((n) => n + 1); onClaim("chest"); }}>Open +{CHEST_REWARD}</button>
+          <button type="button" className="pr-claim" onClick={() => { haptic.success(); setBurst((n) => n + 1); onClaim("chest"); }}>Open +{CHEST_REWARD}</button>
         ) : (
           <span className="text-[12.5px] tabular-nums text-faint">{chestClaimed ? "Done" : `+${CHEST_REWARD} XP`}</span>
         )}
@@ -104,8 +74,8 @@ export function Challenges({ quests, chestClaimed, onClaim }: { quests: QuestSta
 const TIER = ["", "Bronze", "Silver", "Gold"] as const;
 
 /**
- * A short case, not the whole wall: rare (gold) trophies you've earned first, then whatever is closest to
- * unlocking. Anything earned today gets a gold edge. The full list lives on the progress page.
+ * Just the medals. Gold (rare) ones you've earned come first, then whatever is closest to unlocking.
+ * A small gold dot marks anything earned today.
  */
 export function TrophyCase({ states, today, limit = 4 }: { states: AchievementState[]; today: string; limit?: number }) {
   const earned = states.filter((s) => s.unlocked);
@@ -115,29 +85,29 @@ export function TrophyCase({ states, today, limit = 4 }: { states: AchievementSt
   const shown = [...rare.slice(0, 2), ...recent.slice(0, 1), ...near].slice(0, limit);
 
   return (
-    <section className="pr-surface p-5 sm:p-6" aria-labelledby="pr-trophies">
+    <section className="pr-surface p-6 sm:p-7" aria-labelledby="pr-trophies">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="pr-trophies" className="pr-heading">Trophies</h2>
-        <p className="pr-sub">{earned.length} of {states.length}</p>
+        <p className="pr-sub">{earned.length} of {states.length} earned</p>
       </div>
 
-      <ul className="pr-trophies mt-4">
+      <ul className="pr-trophies mt-7">
         {shown.map((s) => {
           const Icon = ACHIEVEMENT_ICON[s.icon];
           const fresh = s.unlocked && s.on === today;
           return (
-            <li key={s.id} className="pr-trophy" data-rare={s.unlocked && s.tier === 3 ? "true" : undefined} data-fresh={fresh ? "true" : undefined}>
-              <span className="pr-medal" data-tier={s.unlocked ? s.tier : undefined}>{s.unlocked ? <Icon className="h-full w-full" /> : <LockIcon className="h-full w-full" />}</span>
-              <div className="min-w-0">
-                <p className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink">{s.title}</p>
-                <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-muted">{s.blurb}</p>
-              </div>
+            <li key={s.id} className="pr-trophy">
+              <span className="relative">
+                <span className="pr-medal" data-tier={s.unlocked ? s.tier : undefined}>{s.unlocked ? <Icon className="h-full w-full" /> : <LockIcon className="h-full w-full" />}</span>
+                {fresh && <span className="pr-new" role="img" aria-label="Unlocked today" style={{ right: -3 }} />}
+              </span>
+              <p className="mt-3 w-full truncate text-[14px] font-semibold tracking-[-0.01em] text-ink">{s.title}</p>
               {s.unlocked ? (
-                <p className="mt-auto text-[12px] font-medium text-gold-deep dark:text-gold">{fresh ? "Unlocked today" : TIER[s.tier]}</p>
+                <p className="mt-0.5 text-[12.5px] text-muted">{TIER[s.tier]}</p>
               ) : (
-                <div className="mt-auto flex items-center gap-2.5">
-                  <div className="pr-track flex-1" aria-hidden="true"><i style={{ width: `${Math.round((s.current / s.target) * 100)}%` }} /></div>
-                  <span className="text-[11.5px] tabular-nums text-faint">{s.current.toLocaleString()}/{s.target.toLocaleString()}</span>
+                <div className="mt-2 w-full max-w-[84px]">
+                  <div className="pr-track" aria-hidden="true"><i style={{ width: `${Math.round((s.current / s.target) * 100)}%` }} /></div>
+                  <p className="mt-1.5 text-[11.5px] tabular-nums text-faint">{s.current.toLocaleString()} / {s.target.toLocaleString()}</p>
                 </div>
               )}
             </li>

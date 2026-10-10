@@ -12,7 +12,7 @@ import { PreparingScreen } from "@/components/practice/home";
 import { MODE_META } from "@/components/practice/modes";
 import { SectionCard } from "@/components/practice/section-card";
 import { PlayerHero, weekStrip } from "@/components/practice/player-hero";
-import { Challenges, TrophyCase, UpNext } from "@/components/practice/shelf";
+import { Challenges, TrophyCase } from "@/components/practice/shelf";
 import "@/components/practice/practice.css";
 import { applyRoundToLog, chestClaimed, claim, markAllDone, questStates, allDone } from "@/lib/practice/quests";
 import { recommendMode, overallAccuracy } from "@/lib/practice/coach";
@@ -230,51 +230,42 @@ export default function PracticePage() {
     <div className="mx-auto w-full max-w-[1080px] pb-28 sm:pb-16">
       <header className="pr-rise flex items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="font-display text-[26px] font-semibold tracking-[-0.02em] text-ink sm:text-3xl">Practice</h1>
-          <p className="mt-1.5 max-w-md text-[15px] leading-relaxed text-muted">Replay your own trades and drill the ideas you want to remember.</p>
+          <h1 className="font-display text-[34px] font-semibold leading-none tracking-[-0.04em] text-ink sm:text-[44px]">Practice</h1>
+          <p className="mt-3 max-w-md text-[16px] leading-snug text-muted">Replay your own trades and drill the ideas you want to remember.</p>
         </div>
       </header>
 
       {notice && <p role="status" className="pr-surface mt-6 px-5 py-4 text-[14px] text-muted">{notice}</p>}
 
-      <div className="pr-rise mt-7" style={{ "--i": 1 } as React.CSSProperties}>
+      <div className="pr-rise mt-9" style={{ "--i": 1 } as React.CSSProperties}>
         <PlayerHero rank={rankOf(progress.xp)} level={level} streak={streak} freezeDays={progress.freezeDays ?? 1} accuracy={overallAccuracy(progress)} todayXp={todayXp} goal={DAILY_XP_GOAL} week={week} />
       </div>
 
-      {recommended && (
-        <div className="pr-rise mt-4" style={{ "--i": 2 } as React.CSSProperties}>
-          <UpNext
-            mode={recommended.mode}
-            level={levels[recommended.mode]}
-            reason={recommended.reason}
-            meter={meterFor(recommended.mode)}
-            busy={busyMode === recommended.mode}
-            onStart={() => void start(recommended.mode)}
-          />
-        </div>
-      )}
-
-      <div className="pr-grid pr-rise mt-8" style={{ "--i": 3 } as React.CSSProperties}>
+      <h2 className="pr-section-title pr-rise mt-14" style={{ "--i": 2 } as React.CSSProperties}>Train</h2>
+      <div className="pr-grid pr-rise mt-5" style={{ "--i": 3 } as React.CSSProperties}>
         <SectionCard
           mode="time-machine"
           level={levels["time-machine"]}
+          recommended={recommended?.mode === "time-machine"}
           blocked={tmLock}
           busy={busyMode === "time-machine"}
-          stats={[{ label: "Level", value: levels["time-machine"] }, { label: "Charts", value: tmCharts }, { label: "Accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) }]}
+          stats={[{ label: tmCharts === 1 ? "chart" : "charts", value: tmCharts }, { label: "accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) }]}
           meter={tmLock ? undefined : meterFor("time-machine")}
           primary={{ label: "Start", onClick: () => void start("time-machine") }}
         />
         <SectionCard
           mode="ict"
           level={levels.ict}
+          recommended={recommended?.mode === "ict"}
           busy={busyMode === "ict"}
-          stats={[{ label: "Questions", value: cards.length }, { label: "Asked", value: asked }, { label: "Accuracy", value: pct(right, asked) }]}
+          stats={[{ label: cards.length === 1 ? "question" : "questions", value: cards.length }, { label: "asked", value: asked }, { label: "accuracy", value: pct(right, asked) }]}
           primary={cards.length > 0 ? { label: "Play", onClick: () => void start("ict") } : { label: "Add your first question", href: "/practice/ict" }}
           secondary={{ label: cards.length > 0 ? "Manage questions" : "How it works", href: "/practice/ict" }}
         />
       </div>
 
-      <div className="pr-rise mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start" style={{ "--i": 4 } as React.CSSProperties}>
+      <h2 className="pr-section-title pr-rise mt-14" style={{ "--i": 4 } as React.CSSProperties}>Today</h2>
+      <div className="pr-rise mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start" style={{ "--i": 5 } as React.CSSProperties}>
         <Challenges quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
         <TrophyCase states={trophies} today={today} />
       </div>
