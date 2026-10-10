@@ -214,7 +214,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     if (more.length) pool.current.push(...more.filter((p) => !pool.current.some((x) => x.id === p.id || x.fp === p.fp)));
     if (pool.current.filter((p) => !used.current.has(p.id)).length < LOW_WATER) round.topUp();
 
-    advanceTimer.current = window.setTimeout(advance, feedbackDwellMs({ correct: ok, combo: combo.current.now, explanation: q.explanation }));
+    advanceTimer.current = window.setTimeout(advance, feedbackDwellMs({ correct: ok, combo: combo.current.now, explanation: q.explanation, note: q.note }));
   };
 
   const handlers = useRef({ submit, advance });
@@ -255,7 +255,8 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const valid = typed.trim() !== "" && !Number.isNaN(numeric(typed));
   const accuracy = tally.total >= 3 ? tally.correct / tally.total : null;
   const comboNow = combo.current.now;
-  const stageWidth = mode === "time-machine" ? "max-w-3xl" : mode === "math-duel" ? "max-w-xl" : "max-w-2xl";
+  // Time Machine is the benchmark; ICT Lab shares its stage so the trader's own pictures get the same room.
+  const stageWidth = mode === "time-machine" || mode === "ict" ? "max-w-3xl" : mode === "math-duel" ? "max-w-xl" : "max-w-2xl";
   const twoUp = mode === "math-duel" && question.kind === "choice" && (question.choices ?? []).every((c) => c.length <= 16);
   const enter = reduce ? { opacity: 0 } : mode === "time-machine" ? { opacity: 0, x: -14 } : { opacity: 0, y: 10 };
   const settled = reduce ? { opacity: 1 } : { opacity: 1, x: 0, y: 0 };
@@ -286,10 +287,10 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
             {question.source === "ai" && <span className="rounded-full px-2.5 py-1 text-[11.5px]" style={{ background: tint(meta.accent, 12), color: tint(meta.accent, 75, "var(--ink)") }}>From your notes</span>}
           </div>
 
-          {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} large={mode === "time-machine"} /></div>}
+          {chartEntries.length > 0 && <div className="mt-4"><ChartPanel key={question.id} entries={chartEntries} onOverlay={onOverlay} large={mode === "time-machine" || mode === "ict"} /></div>}
 
           {question.visual && <div className="mt-4"><CandleVisual visual={question.visual} revealed={answered} /></div>}
-          {question.images && question.images.length > 0 && <div className="mt-4"><QuestionImages key={question.id} images={question.images} onOverlay={onOverlay} /></div>}
+          {question.images && question.images.length > 0 && <div className="mt-4"><QuestionImages key={question.id} images={question.images} onOverlay={onOverlay} large label={question.cardId ? "Your chart" : "Chart"} /></div>}
 
           <h2 className={cn("mt-6 font-semibold tracking-[-0.022em]", mode === "math-duel" ? "text-[28px] leading-[1.18] sm:text-[34px]" : "text-[26px] leading-[1.2] sm:text-[32px]")}>{question.prompt}</h2>
 
@@ -355,6 +356,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
                   {!right && <span className="text-[14px] text-ink">Answer: <b className="font-semibold">{answerText(question)}</b></span>}
                 </span>
                 {!right && question.explanation && <span className="mt-1 block text-[13.5px] leading-snug text-muted">{brief(question.explanation)}</span>}
+                {right && question.note && <span className="mt-1 block text-[13.5px] leading-snug text-muted"><span className="font-medium text-ink/80">Your note · </span>{brief(question.note, 170)}</span>}
               </span>
               <span className="hidden shrink-0 self-center text-[12px] font-medium text-faint sm:block">Continue ↵</span>
             </motion.button>

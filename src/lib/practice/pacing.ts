@@ -17,7 +17,8 @@ const WRONG_MAX_MS = 2600;
 const MS_PER_WORD = 110;
 
 /** Milliseconds to hold the feedback before advancing. */
-export function feedbackDwellMs(args: { correct: boolean; combo: number; explanation?: string }): number {
+export function feedbackDwellMs(args: { correct: boolean; combo: number; explanation?: string; /** The trader's own reminder: it holds a right answer long enough to be read. */ note?: string }): number {
+  if (args.correct && args.note) return Math.min(WRONG_MAX_MS, Math.max(WRONG_MIN_MS, 900 + brief(args.note).split(/\s+/).filter(Boolean).length * MS_PER_WORD));
   if (args.correct) return args.combo >= FLOW_AT ? RIGHT_FLOW_MS : RIGHT_MS;
   const words = args.explanation ? brief(args.explanation).split(/\s+/).filter(Boolean).length : 0;
   return Math.min(WRONG_MAX_MS, Math.max(WRONG_MIN_MS, 900 + words * MS_PER_WORD));

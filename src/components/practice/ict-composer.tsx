@@ -1,43 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import { Modal } from "@/components/ui/modal";
-import { Spinner } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { ImageUploader, type UploadItem } from "@/components/journal/image-uploader";
+import { Hint, IconTile, Label, PrimaryButton, QuietButton, Reveal, SheetFrame, StepTitle, useIsDesktop } from "@/components/journal/flow-ui";
 import { SparkleIcon } from "./icons";
-import "./practice.css";
+import { AutoField } from "./auto-field";
 import { MAX_ANSWER, MAX_NOTES, MAX_QUESTION } from "@/lib/practice/ict-cards";
 import { saveCard } from "@/lib/practice/ict-store";
 import type { IctCard } from "@/lib/practice/progress-ext";
 
 const MAX_PICTURES = 4;
+const STYLES = ["Multiple choice", "True / false", "Fill in the blank"];
 
-/** Write a question, attach pictures, type the answer. AI turns it into other question styles when you play. */
+/**
+ * Write a question, attach pictures, type the answer. Built on the Plan Trade sheet:
+ * a glass top bar and action bar, one calm column, and each step unfolds once the one before it has been answered.
+ * AI turns it into other question styles when you play.
+ */
 export function IctComposer({ open, card, onClose }: { open: boolean; card: IctCard | null; onClose: () => void }) {
+  const desktop = useIsDesktop();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<UploadItem[]>([]);
   const [busy, setBusy] = useState(false);
-  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setQuestion(card?.question ?? ""); setAnswer(card?.answer ?? ""); setNotes(card?.notes ?? "");
-    setImages((card?.images ?? []).map((meta) => ({ meta, blob: null }))); setTouched(false); setBusy(false);
+    setImages((card?.images ?? []).map((meta) => ({ meta, blob: null }))); setBusy(false);
   }, [open, card]);
 
-  const q = question.trim(); const a = answer.trim();
-  const errors = { question: q.length < 4 ? "Write the question." : undefined, answer: !a ? "Type the answer." : undefined };
+  const q = question.trim();
+  const a = answer.trim();
+  const qOk = q.length >= 4;
+  const aOk = a.length > 0;
+  const ready = qOk && aOk;
+  const editing = !!card;
 
   const save = async () => {
-    setTouched(true);
-    if (errors.question || errors.answer) return;
+    if (!ready || busy) return;
     setBusy(true);
     try {
       await saveCard({ question: q, answer: a, notes: notes.trim(), images }, card ?? undefined);
-      toast.success(card ? "Question updated" : "Question added");
+      toast.success(editing ? "Question updated" : "Question added");
       onClose();
     } catch {
       toast.error("Couldn't save that question. Try again.");
@@ -45,55 +54,81 @@ export function IctComposer({ open, card, onClose }: { open: boolean; card: IctC
     }
   };
 
-  const chars = (n: number, max: number) => (n > max * 0.85 ? `${n}/${max}` : "");
+  // ⌘/Ctrl + Enter saves from anywhere, including inside a field (same as Plan & Record).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void save(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, ready, busy, q, a, notes, images]);
+
+  const hint = !qOk ? "Write the question to continue" : !aOk ? "Now type the answer" : null;
 
   return (
-    <Modal open={open} onClose={busy ? () => {} : onClose} size="md" label={card ? "Edit question" : "New question"} bodyClassName="flex flex-col">
-      {/* Sheet bar: Cancel · title · primary action, like an iOS sheet. */}
-      <div className="ict-bar">
-        <button type="button" className="ict-bar-btn" onClick={onClose} disabled={busy}>Cancel</button>
-        <h2 className="ict-bar-title">{card ? "Edit question" : "New question"}</h2>
-        <button type="button" className="ict-bar-btn ict-bar-primary" onClick={() => void save()} disabled={busy}>
-          {busy ? <Spinner className="h-4 w-4" /> : card ? "Save" : "Add"}
-        </button>
-      </div>
+    <Modal open={open} onClose={busy ? () => {} : onClose} size={desktop ? "lg" : "md"} label={editing ? "Edit question" : "New question"}>
+      <SheetFrame
+        onClose={busy ? () => {} : onClose}
+        hint={<Hint text={hint} />}
+        actions={
+          <>
+            <QuietButton onClick={onClose} disabled={busy}>Cancel</QuietButton>
+            <PrimaryButton shortcut disabled={!ready} loading={busy} onClick={() => void save()}>{editing ? "Save" : "Add question"}</PrimaryButton>
+          </>
+        }
+      >
+        <div className="mx-auto w-full max-w-[34rem] pb-2 pt-3 sm:pt-5">
+          <StepTitle title={editing ? "Edit question" : "New question"} subtitle="Written in your words, played back in different styles." />
 
-      <div className="ict-scroll">
-        <p className="ict-lede">Written in your words, played back in different styles.</p>
-
-        <section className="ict-group">
-          <label htmlFor="ict-q" className="ict-label">Question</label>
-          <div className="ict-card" data-invalid={touched && errors.question ? "true" : undefined}>
-            <textarea id="ict-q" className="ict-input" rows={4} value={question} maxLength={MAX_QUESTION} onChange={(e) => setQuestion(e.target.value)} placeholder="Price sweeps the Asian low, then displaces up through an FVG. Where do I look to enter?" aria-invalid={touched && !!errors.question || undefined} />
-            <span className="ict-count" aria-hidden="true">{chars(question.length, MAX_QUESTION)}</span>
+          <div className="pt-8">
+            <div className="space-y-2.5">
+              <Label done={qOk} htmlFor="ict-q">Your question</Label>
+              <AutoField id="ict-q" autoFocus={!editing} minRows={3} value={question} maxLength={MAX_QUESTION} count={{ n: question.length, max: MAX_QUESTION }} onChange={(e) => setQuestion(e.target.value)} placeholder="Price sweeps the Asian low, then displaces up through an FVG. Where do I look to enter?" />
+            </div>
           </div>
-          {touched && errors.question && <p role="alert" className="ict-error">{errors.question}</p>}
-        </section>
 
-        <section className="ict-group">
-          <div className="ict-label-row"><span className="ict-label">Photos</span><span className="ict-hint">Up to {MAX_PICTURES}. Paste, drop or browse.</span></div>
-          <ImageUploader items={images} onChange={setImages} max={MAX_PICTURES} variant="apple" />
-        </section>
-
-        <section className="ict-group">
-          <label htmlFor="ict-a" className="ict-label">Answer</label>
-          <div className="ict-card" data-invalid={touched && errors.answer ? "true" : undefined}>
-            <textarea id="ict-a" className="ict-input" rows={3} value={answer} maxLength={MAX_ANSWER} onChange={(e) => setAnswer(e.target.value)} placeholder="In your own words. This is what the game treats as correct." aria-invalid={touched && !!errors.answer || undefined} />
-            <span className="ict-count" aria-hidden="true">{chars(answer.length, MAX_ANSWER)}</span>
-          </div>
-          {touched && errors.answer && <p role="alert" className="ict-error">{errors.answer}</p>}
-        </section>
-
-        <section className="ict-group">
-          <div className="ict-label-row"><label htmlFor="ict-n" className="ict-label">Why it’s right</label><span className="ict-hint">Optional</span></div>
-          <div className="ict-card">
-            <textarea id="ict-n" className="ict-input" rows={2} value={notes} maxLength={MAX_NOTES} onChange={(e) => setNotes(e.target.value)} placeholder="A reminder shown after you answer." />
-            <span className="ict-count" aria-hidden="true">{chars(notes.length, MAX_NOTES)}</span>
-          </div>
-        </section>
-
-        <p className="ict-foot"><SparkleIcon className="h-4 w-4 shrink-0" /><span>When you play, AI rewrites this as multiple choice, true/false and fill-in-the-blank. Your answer is the truth. It never adds facts of its own.</span></p>
-      </div>
+          <AnimatePresence initial={false}>
+            {qOk && (
+              <Reveal key="photos">
+                <div className="space-y-2.5">
+                  <Label hint={`optional · up to ${MAX_PICTURES}`} done={images.length > 0}>Photos</Label>
+                  <ImageUploader items={images} onChange={setImages} max={MAX_PICTURES} variant="apple" />
+                </div>
+              </Reveal>
+            )}
+            {qOk && (
+              <Reveal key="answer" delay={0.08}>
+                <div className="space-y-2.5">
+                  <Label done={aOk} htmlFor="ict-a" hint="what the game treats as correct">Answer</Label>
+                  <AutoField id="ict-a" minRows={2} value={answer} maxLength={MAX_ANSWER} count={{ n: answer.length, max: MAX_ANSWER }} onChange={(e) => setAnswer(e.target.value)} placeholder="In your own words." />
+                </div>
+              </Reveal>
+            )}
+            {qOk && aOk && (
+              <Reveal key="why" delay={0.04}>
+                <div className="space-y-2.5">
+                  <Label done={notes.trim().length > 0} htmlFor="ict-n" hint="optional">Why it’s right</Label>
+                  <AutoField id="ict-n" minRows={2} value={notes} maxLength={MAX_NOTES} count={{ n: notes.length, max: MAX_NOTES }} onChange={(e) => setNotes(e.target.value)} placeholder="A reminder shown after you answer." />
+                </div>
+              </Reveal>
+            )}
+            {qOk && aOk && (
+              <Reveal key="how" delay={0.12}>
+                <div className="flex gap-3.5 rounded-[22px] border border-line bg-ink/[0.025] p-4 sm:p-5">
+                  <IconTile tile="bg-gradient-to-b from-[#9b8cf5] to-[#6f5be0]"><SparkleIcon className="h-[17px] w-[17px]" /></IconTile>
+                  <div className="min-w-0">
+                    <p className="text-[14.5px] font-semibold tracking-[-0.012em] text-ink">How it plays</p>
+                    <p className="mt-1 text-[13.5px] leading-snug text-muted">AI rewrites it in a few styles. Your answer is the truth, and it never adds facts of its own.</p>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {STYLES.map((s) => <span key={s} className="rounded-full border border-line bg-raised px-2.5 py-1 text-[12px] font-medium text-muted">{s}</span>)}
+                    </div>
+                  </div>
+                </div>
+              </Reveal>
+            )}
+          </AnimatePresence>
+        </div>
+      </SheetFrame>
     </Modal>
   );
 }

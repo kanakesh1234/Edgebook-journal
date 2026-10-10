@@ -70,6 +70,8 @@ export interface PracticeQuestion {
   images?: EntryImage[];
   /** The ICT Lab card this question was made from. */
   cardId?: string;
+  /** The trader's own "why it's right" note for that card, shown after answering. */
+  note?: string;
 }
 
 export type Bucket = "best" | "breakeven" | "worst";

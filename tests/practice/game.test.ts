@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { ictQuestions, CONCEPTS } from "../../src/lib/practice/ict.ts";
 import { applyRoundToLog, claim, markAllDone, questsFor, questStates, allDone, CHEST_REWARD } from "../../src/lib/practice/quests.ts";
 import { updateRecords, recordsOf } from "../../src/lib/practice/records.ts";
-import { achievementStates, newlyEarned, stamp } from "../../src/lib/practice/achievements.ts";
+import { achievementStates, newlyEarned, spanDays, stamp } from "../../src/lib/practice/achievements.ts";
 import type { GameProgress as PracticeProgress } from "../../src/lib/practice/progress-ext.ts";
 
 const base: PracticeProgress = { xp: 0, streak: 0 };
@@ -70,12 +70,26 @@ assert.equal(r2.records.bestRoundXp, 30, "records never go down");
 assert.equal(updateRecords(base, { correct: 5, total: 5, xp: 5, maxCombo: 1, streak: 1 }).records.bestAccuracy, 0, "accuracy needs 8+ answers");
 assert.equal(recordsOf({ ...base, streak: 9 }).bestStreak, 9);
 
-// ---- achievements: derived, stamped once
+// ---- achievements: derived, stamped once, slow to earn
 assert.equal(achievementStates(undefined).filter((a) => a.unlocked).length, 0);
-const strong: PracticeProgress = { ...base, xp: 600, streak: 3, perfectSets: 1, masteryByTag: { "ict-fvg": 20, "ict-pd": 6, "trade-x": 100 }, records: { rounds: 30, bestStreak: 3, bestCombo: 5, bestAccuracy: 0.9, bestRoundXp: 40, bestCorrect: 12, questDays: 0 } };
-const earned = new Set(newlyEarned(strong));
-for (const id of ["first-round", "rounds-25", "streak-3", "flow-5", "perfect-1", "sharp-90", "ict-25", "xp-500"]) assert.ok(earned.has(id), id);
-assert.ok(!earned.has("ict-100") && !earned.has("streak-7"));
-assert.equal(newlyEarned({ ...strong, achievements: stamp(strong, [...earned], "2026-10-10") }).length, 0);
+const dk = (n: number) => `2026-09-${String(n).padStart(2, "0")}`;
+const strongBase: PracticeProgress = { ...base, xp: 3200, streak: 4, perfectSets: 2, masteryByTag: { "ict-fvg": 50, "ict-pd": 20, "trade-x": 100 }, modePerformance: { matrix: { correct: 300, attempts: 340 } }, records: { rounds: 45, bestStreak: 4, bestCombo: 13, bestAccuracy: 0.9, bestRoundXp: 40, bestCorrect: 12, questDays: 0 } };
+// One long session never earns anything: the calendar gate is closed.
+const sameDay: PracticeProgress = { ...strongBase, completedMissionDates: [dk(1)] };
+assert.equal(achievementStates(sameDay).filter((a) => a.unlocked).length, 0, "nothing unlocks on day one");
+assert.ok(achievementStates(sameDay).some((a) => a.waiting), "reached numbers wait for the gate");
+assert.equal(newlyEarned(sameDay).length, 0);
+// A week later the same numbers open the bronze tier, but not silver or gold.
+const weekLater: PracticeProgress = { ...strongBase, completedMissionDates: [dk(1), dk(8)] };
+const earned = new Set(newlyEarned(weekLater));
+for (const id of ["rounds-40", "right-250", "xp-3000", "flow-12", "ict-60"]) assert.ok(earned.has(id), id);
+assert.ok(!earned.has("ict-300") && !earned.has("streak-7") && !earned.has("days-21"));
+assert.equal(newlyEarned({ ...weekLater, achievements: stamp(weekLater, [...earned], dk(8)) }).length, 0);
+// Silver-tier trophies need three weeks of calendar time.
+const silver: PracticeProgress = { ...strongBase, perfectSets: 9, completedMissionDates: [dk(1), dk(22)] };
+assert.ok(new Set(newlyEarned(silver)).has("perfect-8"));
+assert.ok(!new Set(newlyEarned(weekLater)).has("perfect-8"));
+assert.equal(spanDays(weekLater), 7);
+assert.equal(spanDays({ ...base, completedMissionDates: [dk(3)] }), 0);
 
 console.log("game.test.ts ok");

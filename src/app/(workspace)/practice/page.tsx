@@ -16,9 +16,8 @@ import { Challenges, TrophyCase } from "@/components/practice/shelf";
 import "@/components/practice/practice.css";
 import { applyRoundToLog, chestClaimed, claim, markAllDone, questStates, allDone } from "@/lib/practice/quests";
 import { recommendMode, overallAccuracy } from "@/lib/practice/coach";
-import { achievementStates } from "@/lib/practice/achievements";
+import { achievementStates, newlyEarned, spanDays, stamp } from "@/lib/practice/achievements";
 import { updateRecords } from "@/lib/practice/records";
-import { newlyEarned, stamp } from "@/lib/practice/achievements";
 import { prepareIctRound } from "@/lib/practice/ict-round";
 import { applyCardResults, cardHash } from "@/lib/practice/ict-cards";
 import { updateCards } from "@/lib/practice/ict-store";
@@ -218,6 +217,7 @@ export default function PracticePage() {
   const week = useMemo(() => weekStrip(today, progress.completedMissionDates ?? []), [today, progress.completedMissionDates]);
   const quests = useMemo(() => questStates(progress, today), [progress, today]);
   const trophies = useMemo(() => achievementStates(progress), [progress]);
+  const trophySpan = useMemo(() => spanDays(progress), [progress]);
   const todayXp = progress.dailyStats?.[today]?.xp ?? 0;
 
   // The coach only recommends what this page can start: Time Machine and ICT Lab.
@@ -267,7 +267,7 @@ export default function PracticePage() {
       <h2 className="pr-section-title pr-rise mt-14" style={{ "--i": 4 } as React.CSSProperties}>Today</h2>
       <div className="pr-rise mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start" style={{ "--i": 5 } as React.CSSProperties}>
         <Challenges quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
-        <TrophyCase states={trophies} today={today} />
+        <TrophyCase states={trophies} today={today} span={trophySpan} hasStarted={(progress.completedMissionDates?.length ?? 0) > 0} />
       </div>
 
       {phase.kind === "preparing" && <PreparingScreen mode={phase.mode} onCancel={cancel} />}

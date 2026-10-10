@@ -79,7 +79,7 @@ export function cardQuestion(card: IctCard, variant: IctVariant, nonce: string, 
   return {
     id, fp: id, source: "local", kind: "choice", tag: "ict-card", level: 2, group: "ict",
     pin: "ICT Lab · your question", prompt: variant.prompt, choices: variant.choices, answer: variant.answer,
-    explanation, xp: 12, images: card.images, cardId: card.id,
+    explanation, xp: 12, images: card.images, cardId: card.id, note: card.notes ? clean(card.notes) : undefined,
   };
 }
 

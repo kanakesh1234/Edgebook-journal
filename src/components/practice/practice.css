@@ -158,7 +158,7 @@
 /* ------------------------------------------------------------------ */
 /*  Trophies: just the medals, no boxes                                 */
 /* ------------------------------------------------------------------ */
-.pr-trophies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
+.pr-trophies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 14px; }
 @media (min-width: 560px) { .pr-trophies { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (min-width: 1024px) { .pr-trophies { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 18px; } }
 .pr-trophy { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
@@ -166,14 +166,19 @@
   position: relative; display: grid; place-items: center; width: 64px; height: 64px; padding: 17px; overflow: hidden; border-radius: 20px;
   background: color-mix(in srgb, var(--ink) 5%, transparent); color: var(--faint); transition: transform .5s cubic-bezier(.16, 1, .3, 1);
 }
+.pr-medal svg { filter: drop-shadow(0 1px 1px rgb(0 0 0 / .22)); }
+.pr-medal:not([data-tier]) svg { filter: none; }
 @media (hover: hover) { .pr-trophy:hover .pr-medal { transform: translateY(-2px) scale(1.04); } }
-.pr-medal[data-tier="1"] { color: var(--gold-deep); background: color-mix(in srgb, var(--gold-strong) 24%, var(--raised)); }
-.pr-medal[data-tier="2"] { color: var(--gold-deep); background: color-mix(in srgb, var(--gold-strong) 44%, var(--raised)); }
+/* Real metals: copper, steel, gold. Each is lit from the top like an app icon. */
+.pr-medal[data-tier="1"] { color: #fff; background: linear-gradient(155deg, #dba273, #9a5f36); box-shadow: 0 12px 22px -12px #9a5f36, inset 0 1px 0 rgb(255 255 255 / .42); }
+.pr-medal[data-tier="2"] { color: #fff; background: linear-gradient(155deg, #cfd4de, #7d8493); box-shadow: 0 12px 22px -12px #6b7280, inset 0 1px 0 rgb(255 255 255 / .55); }
 .pr-medal[data-tier="3"] { color: var(--on-gold); background: linear-gradient(160deg, var(--gold-strong), var(--gold-deep)); box-shadow: 0 12px 24px -12px var(--gold-strong), inset 0 1px 0 rgb(255 255 255 / .35); }
-[data-theme="dark"] .pr-medal[data-tier="1"], [data-theme="dark"] .pr-medal[data-tier="2"] { color: var(--gold); }
-/* Rare (gold) medals catch the light once in a while. */
-.pr-medal[data-tier="3"]::after { content: ""; position: absolute; inset: 0; transform: translateX(-130%); background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / .5) 50%, transparent 62%); animation: pr-sheen 6s cubic-bezier(.16, 1, .3, 1) 1.2s infinite; }
-.pr-new { position: absolute; top: -3px; right: calc(50% - 40px); width: 11px; height: 11px; border-radius: 999px; background: var(--gold-strong); box-shadow: 0 0 0 3px var(--surface); }
+.pr-medal[data-tier="3"] svg { filter: none; }
+/* Earned medals catch the light once in a while; gold most of all. */
+.pr-medal[data-tier]::after { content: ""; position: absolute; inset: 0; transform: translateX(-130%); background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / .5) 50%, transparent 62%); animation: pr-sheen 7s cubic-bezier(.16, 1, .3, 1) 1.2s infinite; }
+.pr-medal[data-tier="1"]::after { animation-delay: 3.2s; }
+.pr-medal[data-tier="2"]::after { animation-delay: 2.2s; }
+.pr-new { z-index: 2; position: absolute; top: -3px; right: calc(50% - 40px); width: 11px; height: 11px; border-radius: 999px; background: var(--gold-strong); box-shadow: 0 0 0 3px var(--surface); }
 
 .pr-skel { background: color-mix(in srgb, var(--ink) 6%, transparent); border-radius: 8px; }
 
@@ -185,54 +190,8 @@
 @media (prefers-reduced-motion: reduce) {
   .pr-card, .pr-card:hover { transform: none; }
   .pr-card:hover .pr-stage-mark, .pr-trophy:hover .pr-medal { transform: none; }
-  .pr-rise, .pr-medal[data-tier="3"]::after { animation: none; }
+  .pr-rise, .pr-medal[data-tier]::after, .pr-chest-card[data-ready="true"]::after { animation: none; }
 }
-
-/* ------------------------------------------------------------------ */
-/*  Question composer (ICT Lab) — an iOS-style sheet with inset groups  */
-/* ------------------------------------------------------------------ */
-.ict-bar {
-  position: relative; z-index: 1; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; flex: none; gap: 8px;
-  height: 56px; padding: 0 8px; border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
-}
-.ict-bar-title { font-size: 16px; font-weight: 620; letter-spacing: -.015em; color: var(--ink); text-align: center; }
-.ict-bar-btn {
-  display: inline-flex; align-items: center; justify-content: center; height: 40px; min-width: 64px; padding: 0 12px; border-radius: 999px;
-  font-size: 16px; font-weight: 450; color: var(--gold-deep); transition: background-color .2s ease, opacity .2s ease, transform .15s ease;
-}
-[data-theme="dark"] .ict-bar-btn { color: var(--gold); }
-.ict-bar-btn:first-child { justify-self: start; }
-.ict-bar-primary { justify-self: end; font-weight: 640; }
-@media (hover: hover) { .ict-bar-btn:hover { background: color-mix(in srgb, var(--gold) 10%, transparent); } }
-.ict-bar-btn:active { transform: scale(.95); }
-.ict-bar-btn:disabled { opacity: .45; pointer-events: none; }
-
-.ict-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px 26px; background: color-mix(in srgb, var(--canvas) 60%, var(--surface)); }
-@media (min-width: 640px) { .ict-scroll { padding: 20px 26px 28px; } }
-.ict-lede { margin: 0 0 20px 4px; font-size: 14px; line-height: 1.45; color: var(--muted); }
-.ict-group + .ict-group { margin-top: 22px; }
-.ict-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 4px 8px; }
-.ict-label { display: block; margin: 0 0 8px 4px; font-size: 13px; font-weight: 550; color: var(--muted); }
-.ict-label-row .ict-label { margin: 0; }
-.ict-hint { font-size: 12.5px; color: var(--faint); }
-
-.ict-card {
-  position: relative; border: 1px solid var(--line); border-radius: 16px; background: var(--raised);
-  box-shadow: 0 1px 2px rgb(48 40 24 / .04);
-  transition: border-color .2s ease, box-shadow .25s ease;
-}
-[data-theme="dark"] .ict-card { box-shadow: none; }
-.ict-card:focus-within { border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 12%, transparent); }
-.ict-card[data-invalid="true"] { border-color: color-mix(in srgb, var(--loss) 55%, var(--line)); }
-.ict-input { display: block; width: 100%; resize: none; padding: 14px 16px 24px; border: 0; background: transparent; font: inherit; font-size: 16px; line-height: 1.5; letter-spacing: -.011em; color: var(--ink); outline: none; }
-.ict-input::placeholder { color: var(--faint); }
-.ict-count { position: absolute; right: 14px; bottom: 7px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--faint); pointer-events: none; }
-.ict-error { margin: 7px 0 0 4px; font-size: 12.5px; color: var(--loss); }
-.ict-foot { display: flex; gap: 10px; margin: 24px 4px 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
-.ict-foot svg { margin-top: 2px; color: var(--gold-deep); }
-[data-theme="dark"] .ict-foot svg { color: var(--gold); }
 
 /* ------------------------------------------------------------------ */
 /*  ICT Lab list                                                        */
@@ -247,3 +206,8 @@
 @media (pointer: coarse) { .ict-icon-btn { width: 44px; height: 44px; } }
 @media (hover: hover) { .ict-icon-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); } .ict-icon-btn[data-danger="true"]:hover { background: color-mix(in srgb, var(--loss) 10%, transparent); color: var(--loss); } }
 .ict-icon-btn:active { transform: scale(.92); }
+
+/* Inset grouped list (iOS Settings): hairlines start after the leading icon, never at the edge. */
+.pr-group { --pr-inset: 80px; }
+.pr-group > li + li::before { content: ""; position: absolute; top: 0; left: var(--pr-inset); right: 0; height: 1px; background: var(--line); }
+.pr-chest-card[data-ready="true"]::after { content: ""; position: absolute; inset: 0; pointer-events: none; transform: translateX(-130%); background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / .35) 50%, transparent 62%); animation: pr-sheen 3.4s cubic-bezier(.16, 1, .3, 1) .6s infinite; }
