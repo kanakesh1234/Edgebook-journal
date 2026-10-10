@@ -24,6 +24,8 @@ import type { PracticeQuestion } from "./engine";
 import {
   cap, choiceQ, clockMinutes, fmtMoney, hasShots, hourOf, isNum, nearMoney, numberQ, round, shuffle, sideOf, windowLabel,
 } from "./qbuild";
+import { framedQuestions } from "./framing";
+import { focusOf } from "./focus";
 
 /* ------------------------------------------------------------------ */
 /*  Field catalogues                                                   */
@@ -57,7 +59,9 @@ const TEXT_FIELDS: TextField[] = [
   { key: "target", label: "your target", kind: "neutral", get: (e) => e.review?.setup?.targetDescription },
   { key: "manip", label: "the manipulation you identified", kind: "neutral", get: (e) => e.review?.setup?.manipulationIdentified },
   { key: "strong", label: "your strongest evidence", kind: "good", get: (e) => e.review?.followUp?.strongestEvidence },
-  { key: "mistake", label: "your biggest mistake", kind: "mistake", get: (e) => e.review?.followUp?.biggestMistake },
+  // The Autopsy stores its one-line lesson here and the older review flow stored the biggest mistake, so name it for both.
+  { key: "mistake", label: "your mistake or lesson note", kind: "mistake", get: (e) => e.review?.followUp?.biggestMistake },
+  { key: "mistakeNote", label: "what went wrong", kind: "mistake", get: (e) => e.review?.followUp?.mistakeNote },
   { key: "applied", label: "the concept you applied", kind: "good", get: (e) => e.review?.followUp?.conceptApplied },
   { key: "misunderstood", label: "the concept you misunderstood", kind: "mistake", get: (e) => e.review?.followUp?.conceptMisunderstood },
   { key: "watch", label: "what you wanted to watch next time", kind: "neutral", get: (e) => e.review?.followUp?.watchNext },
@@ -334,10 +338,15 @@ export function buildTradeQuestions(entry: JournalEntry, all: JournalEntry[], rn
     ));
   }
 
+  // Adaptive framing: extra questions that depend on how this trade went (mistakes, their cost, repeats, typed answers).
+  out.push(...framedQuestions(entry, all, rng, pin));
+
   const ready = out.filter((q): q is PracticeQuestion => q != null);
+  const kind = focusOf(entry, all).kind;
   for (const q of ready) {
     if (!q.group) q.group = MATH_TAGS.has(q.tag) ? "math" : "tm";
     if (!q.chartTradeIds) q.chartTradeIds = [entry.id];
+    q.focus = kind;
   }
   return ready;
 }

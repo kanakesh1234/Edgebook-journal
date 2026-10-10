@@ -12,6 +12,7 @@ import type { ArenaMode, RoundOutcome } from "@/lib/practice/arena";
 import type { RoundResult } from "@/components/practice/round-runner";
 import type { RoundExtras } from "@/lib/practice/rewards";
 import { questsFor } from "@/lib/practice/quests";
+import { levelUpNote } from "@/lib/practice/curriculum";
 import { achievementStates } from "@/lib/practice/achievements";
 import { RECORD_LABELS } from "@/lib/practice/records";
 import { todayKey } from "@/lib/format";
@@ -46,10 +47,12 @@ export function RoundSummary({ title, mode, summary, entries, onNext, onClose }:
   const missed = result.answers.filter((a) => !a.correct);
 
   const head = {
-    up: { eyebrow: "Level up", title: `Level ${outcome.nextLevel}`, sub: `You cleared ${outcome.gate.correct} correct at ${pct(outcome.gate.accuracy)}.`, next: "Questions get a little harder from here." },
+    up: { eyebrow: "Level up", title: `Level ${outcome.nextLevel}`, sub: `You cleared ${outcome.gate.correct} correct at ${pct(outcome.gate.accuracy)}.`, next: levelUpNote(outcome.nextLevel).title + " — " + levelUpNote(outcome.nextLevel).body },
     hold: { eyebrow: "Round complete", title: `Level ${outcome.level} holds`, sub: `One more strong round gets you to Level ${outcome.level + 1}.${outcome.nextFails >= 1 && outcome.level > 1 ? " Miss again and you drop a level." : ""}`, next: "Same level next — the questions you missed come back so you can lock them in." },
     down: { eyebrow: "Round complete", title: `Back to level ${outcome.nextLevel}`, sub: "A step back to rebuild momentum. You will climb again.", next: "Questions ease off a little while you rebuild." },
-    early: { eyebrow: "Round ended", title: "Level unchanged", sub: "Leaving early never costs a level.", next: "" },
+    early: outcome.reason === "ran-out"
+      ? { eyebrow: "Round complete", title: "Level unchanged", sub: "You ran out of new questions before the clock did — that never costs a level.", next: "Add reviews or notes to your trades to unlock more, or come back when revisions are due." }
+      : { eyebrow: "Round ended", title: "Level unchanged", sub: "Leaving early never costs a level.", next: "" },
   }[outcome.outcome];
 
   const shownLevel = outcome.outcome === "early" ? outcome.level : outcome.nextLevel;

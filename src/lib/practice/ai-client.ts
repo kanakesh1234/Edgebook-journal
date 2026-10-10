@@ -2,6 +2,7 @@ import type { JournalEntry } from "@/lib/types";
 import type { Level, PracticeQuestion } from "./engine";
 import { tradeLabel } from "./engine";
 import type { EvidenceTrade } from "./ai-validate";
+import type { TradeFocus } from "./focus";
 
 /** Trade notes plus the trader's own review answers, capped (the server keeps 700 chars). */
 function richNotes(entry: JournalEntry): string | undefined {
@@ -18,7 +19,7 @@ function richNotes(entry: JournalEntry): string | undefined {
   return parts.length ? parts.join(" . ").slice(0, 700) : undefined;
 }
 
-export function toEvidence(entry: JournalEntry): EvidenceTrade {
+export function toEvidence(entry: JournalEntry, focus?: TradeFocus): EvidenceTrade {
   const mistake = entry.review?.followUp?.biggestMistake;
   const followed = typeof entry.review?.outcome?.followedPlan === "boolean" ? entry.review.outcome.followedPlan : entry.reflection?.followedSetup;
   return {
@@ -28,13 +29,15 @@ export function toEvidence(entry: JournalEntry): EvidenceTrade {
     stopLoss: entry.stopLoss, takeProfit: entry.takeProfit, quantity: entry.quantity,
     notes: richNotes(entry), lesson: entry.reflection?.lesson, mistake,
     followedPlan: typeof followed === "boolean" ? followed : null,
+    focus: focus?.kind, severity: focus?.severity || undefined, mistakeType: focus?.mistakeLabel ?? undefined,
+    mistakeNote: entry.review?.followUp?.mistakeNote,
   };
 }
 
 export interface AiResult { questions: PracticeQuestion[]; note: string | null }
 
 /** Asks the server for AI-written, evidence-checked questions. Never throws: on any problem returns no questions. */
-export async function fetchAiQuestions(args: { mode: string; level: Level; arena?: number; count: number; trades: JournalEntry[]; avoid: string[]; weakTags: string[] }, timeoutMs = 50_000): Promise<AiResult> {
+export async function fetchAiQuestions(args: { mode: string; level: Level; arena?: number; count: number; trades: JournalEntry[]; avoid: string[]; weakTags: string[]; focus?: Map<string, TradeFocus> }, timeoutMs = 50_000): Promise<AiResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -42,7 +45,7 @@ export async function fetchAiQuestions(args: { mode: string; level: Level; arena
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
-      body: JSON.stringify({ mode: args.mode, level: args.level, arena: args.arena, count: args.count, avoid: args.avoid, weakTags: args.weakTags, trades: args.trades.slice(0, 12).map(toEvidence) }),
+      body: JSON.stringify({ mode: args.mode, level: args.level, arena: args.arena, count: args.count, avoid: args.avoid, weakTags: args.weakTags, trades: args.trades.slice(0, 12).map((t) => toEvidence(t, args.focus?.get(t.id))) }),
     });
     const data = (await res.json().catch(() => null)) as { questions?: PracticeQuestion[]; reason?: string } | null;
     const questions = Array.isArray(data?.questions) ? data.questions : [];

@@ -10,10 +10,14 @@
  *   miss it once             → stay
  *   miss it twice in a row   → level − 1
  *   leave the round early    → nothing changes
+ *   run out of questions     → nothing changes (that is the journal's limit, not the player's)
  *
  * Pure functions only (no React, no storage) so the rules are easy to test.
  */
 import type { PracticeProgress } from "@/lib/types";
+import { targetDifficulty } from "./curriculum.ts";
+
+export { targetDifficulty };
 
 export type ArenaMode = "matrix" | "time-machine" | "math-duel" | "boss" | "ict";
 export const ARENA_MODES: ArenaMode[] = ["matrix", "time-machine", "math-duel", "boss", "ict"];
@@ -23,8 +27,12 @@ export const roundSecondsFor = (mode: ArenaMode) => (mode === "ict" ? 150 : ROUN
 
 /** Math Duel questions are quicker to answer, so its gate is higher. */
 const PACE: Record<ArenaMode, number> = { matrix: 1, "time-machine": 1, "math-duel": 1.5, boss: 1, ict: 1 };
-/** Chart questions can't be answered faster than a human can read, so their gate tops out. */
-const CAP: Record<ArenaMode, number> = { matrix: 14, "time-machine": 14, "math-duel": 30, boss: 14, ict: 14 };
+/**
+ * The most correct answers a gate can ask for in one round. It has to be reachable: a chart question takes
+ * a human 5–7 seconds to read and answer, so 14 in 60 seconds (the old ceiling) could never be cleared and
+ * the player was stuck for good. Past the cap the ladder keeps climbing through ACCURACY instead.
+ */
+const CAP: Record<ArenaMode, number> = { matrix: 11, "time-machine": 9, "math-duel": 30, boss: 9, ict: 14 };
 
 export interface Gate { correct: number; accuracy: number }
 
@@ -48,18 +56,8 @@ export function failsOf(progress: PracticeProgress | undefined, mode: ArenaMode)
 export function gateFor(mode: ArenaMode, level: number): Gate {
   const lv = Math.max(1, Math.floor(level));
   const correct = Math.min(CAP[mode], Math.round((3 + lv * 0.7) * PACE[mode]));
-  const accuracy = Math.min(0.8, 0.7 + lv * 0.005);
+  const accuracy = Math.min(0.85, Math.round((0.7 + lv * 0.008) * 1000) / 1000);
   return { correct, accuracy };
-}
-
-/**
- * Question difficulty (1–4, fractional) for a level. Level 1 mixes recognition with
- * recall; the hardest tier is reached around level 10. Beyond that the gate and the
- * AI prompt (which receives the raw level) carry the progression.
- */
-export function targetDifficulty(level: number): number {
-  const lv = Math.max(1, Math.floor(level));
-  return Math.min(4, 1.4 + (lv - 1) * 0.3);
 }
 
 /** The whole-number tier (1–4) used by the question builders and the AI. */
@@ -82,18 +80,22 @@ export interface RoundOutcome {
   nextFails: number;
   gate: Gate;
   accuracy: number;
+  /** Why an "early" round counted for nothing: the player left, or the journal had no more questions to give. */
+  reason?: "left" | "ran-out";
 }
 
 /** Level change for one finished round. */
-export function evaluateRound(args: { mode: ArenaMode; level: number; fails: number; correct: number; answered: number; completed: boolean }): RoundOutcome {
-  const { mode, level, fails, correct, answered, completed } = args;
+export function evaluateRound(args: { mode: ArenaMode; level: number; fails: number; correct: number; answered: number; completed: boolean; /** The question supply ran dry before the clock did. */ exhausted?: boolean }): RoundOutcome {
+  const { mode, level, fails, correct, answered, completed, exhausted } = args;
   const gate = gateFor(mode, level);
   const accuracy = answered > 0 ? correct / answered : 0;
   const base = { level, gate, accuracy };
   // Walking away from a round (or barely starting one) never costs a level.
-  if (!completed || answered < 3) return { ...base, outcome: "early", passed: false, nextLevel: level, nextFails: fails };
+  if (!completed || answered < 3) return { ...base, outcome: "early", passed: false, nextLevel: level, nextFails: fails, reason: "left" };
   const passed = correct >= gate.correct && accuracy >= gate.accuracy;
   if (passed) return { ...base, outcome: "up", passed: true, nextLevel: level + 1, nextFails: 0 };
+  // Running out of questions is not a failed round: a small or well-revised journal must never push the player down.
+  if (exhausted) return { ...base, outcome: "early", passed: false, nextLevel: level, nextFails: fails, reason: "ran-out" };
   if (fails + 1 >= 2 && level > 1) return { ...base, outcome: "down", passed: false, nextLevel: level - 1, nextFails: 0 };
   return { ...base, outcome: "hold", passed: false, nextLevel: level, nextFails: level > 1 ? fails + 1 : 0 };
 }

@@ -13,8 +13,9 @@ import type { EntryImage, JournalEntry, PracticeProgress } from "@/lib/types";
 import { addDays, formatDateMedium, weekdayLong } from "@/lib/format";
 import { seededRng, type Rng } from "./math/rng";
 import { breakevenWinRate, lossStreakProbability } from "./math/formulas";
-import { buildTradeQuestions, MATH_TAGS } from "./chart-questions";
-import { hashText } from "./history";
+import { buildTradeQuestions } from "./chart-questions";
+import { hashText } from "./hash.ts";
+import { focusOf } from "./focus.ts";
 import type { QuestionVisual } from "./ict";
 
 /* ------------------------------------------------------------------ */
@@ -22,13 +23,6 @@ import type { QuestionVisual } from "./ict";
 /* ------------------------------------------------------------------ */
 
 export type Level = 1 | 2 | 3 | 4;
-
-export const LEVELS: { level: Level; name: string; blurb: string }[] = [
-  { level: 1, name: "Recognition", blurb: "Spot the facts you recorded" },
-  { level: 2, name: "Recall", blurb: "Remember times, setups and lessons" },
-  { level: 3, name: "Application", blurb: "Do the R, risk and expectancy math" },
-  { level: 4, name: "Prediction", blurb: "Forecast your own stats and streak odds" },
-];
 
 export type QuestionKind = "choice" | "number";
 
@@ -68,14 +62,15 @@ export interface PracticeQuestion {
   visual?: QuestionVisual;
   /** Pictures the trader attached to their own question (ICT Lab). Stored in the image store. */
   images?: EntryImage[];
+  /** How the trade this question is about went: blunder / slip (a mistake trade) · mixed · clean (done well). Drives the framing, the weight and the revision schedule. */
+  focus?: "blunder" | "slip" | "mixed" | "clean";
+  /** A mistake-trade question that is back because its revision date has arrived (not because it was missed). */
+  revise?: boolean;
   /** The ICT Lab card this question was made from. */
   cardId?: string;
   /** The trader's own "why it's right" note for that card, shown after answering. */
   note?: string;
 }
-
-export type Bucket = "best" | "breakeven" | "worst";
-export type SessionMode = "revision" | "mixed";
 
 /* ------------------------------------------------------------------ */
 /*  Small helpers                                                      */
@@ -108,74 +103,12 @@ export function tradeLabel(entry: JournalEntry): string {
   return parts.join(" · ");
 }
 
-const tradeLabelNoSide = (entry: JournalEntry) => `${formatDateMedium(entry.date)} ${entry.instrument || "trade"}`;
-
-function lessonOf(entry: JournalEntry): string | null {
-  const candidates = [
-    entry.review?.followUp?.biggestMistake,
-    entry.reflection?.lesson,
-    entry.review?.followUp?.watchNext,
-  ];
-  for (const value of candidates) if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  return null;
-}
-
-function followedPlanOf(entry: JournalEntry): boolean | null {
-  const fromReview = entry.review?.outcome?.followedPlan;
-  if (typeof fromReview === "boolean") return fromReview;
-  const fromReflection = entry.reflection?.followedSetup;
-  return typeof fromReflection === "boolean" ? fromReflection : null;
-}
-
-function hourOf(entry: JournalEntry): number | null {
-  const match = /^(\d{1,2}):(\d{2})/.exec(entry.entryTime ?? "");
-  if (!match) return null;
-  const hour = Number(match[1]);
-  return hour >= 0 && hour <= 23 ? hour : null;
-}
-
-function clockMinutes(value: string | undefined): number | null {
-  const match = /^(\d{1,2}):(\d{2})/.exec(value ?? "");
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-}
-
-const windowLabel = (hour: number) => `${String(hour).padStart(2, "0")}:00–${String(hour).padStart(2, "0")}:59 NY`;
-
 /* ------------------------------------------------------------------ */
 /*  Which trades are usable, and what is missing                       */
 /* ------------------------------------------------------------------ */
 
 /** A trade is usable as soon as it has a real P&L number. */
 export const isUsable = (entry: JournalEntry) => isNum(entry.pnl);
-
-/** Plain-language hints for fields that would unlock more question types. */
-export function unlockHints(entries: JournalEntry[]): string[] {
-  const usable = entries.filter(isUsable);
-  if (!usable.length) return [];
-  const hints: string[] = [];
-  if (!usable.some((e) => isNum(e.entryPrice) && isNum(e.stopLoss) && isNum(e.takeProfit))) hints.push("Add entry, stop and target prices to unlock planned reward-to-risk questions.");
-  if (!usable.some((e) => hourOf(e) != null)) hints.push("Add entry times to unlock time-window questions.");
-  if (!usable.some((e) => lessonOf(e))) hints.push("Write a lesson in a trade review to unlock fill-in-the-blank questions.");
-  if (!usable.some((e) => isNum(e.rr) && e.rr !== 0)) hints.push("Record the R multiple on trades to unlock 1R-in-dollars questions.");
-  if (!usable.some((e) => e.setup && e.setup.trim())) hints.push("Name the setup on trades to unlock setup questions.");
-  return hints;
-}
-
-/** Best / break-even / worst trades by P&L. Each can be empty. */
-export function classify(entries: JournalEntry[]): Record<Bucket, JournalEntry | null> {
-  const usable = entries.filter(isUsable);
-  if (!usable.length) return { best: null, breakeven: null, worst: null };
-  const sorted = [...usable].sort((a, b) => b.pnl - a.pnl);
-  const best = sorted[0]!;
-  const worst = sorted.length > 1 ? sorted[sorted.length - 1]! : null;
-  const middle = sorted.slice(1, -1);
-  const meanAbs = usable.reduce((sum, e) => sum + Math.abs(e.pnl), 0) / usable.length;
-  const flatLimit = meanAbs * 0.1;
-  let breakeven: JournalEntry | null = null;
-  const pool = middle.length ? middle : usable.filter((e) => Math.abs(e.pnl) <= flatLimit);
-  for (const entry of pool) if (!breakeven || Math.abs(entry.pnl) < Math.abs(breakeven.pnl)) breakeven = entry;
-  return { best, breakeven, worst };
-}
 
 /* ------------------------------------------------------------------ */
 /*  Question constructors                                              */
@@ -191,18 +124,16 @@ function numberQ(id: string, tag: string, level: Level, pin: string, prompt: str
   return { id, fp: id, source: "local", kind: "number", tag, level, pin, prompt, answer: String(round(answer, 4)), tolerance, unit, explanation, xp: 12 * level };
 }
 
-/** Wrong dollar amounts. `spread` shrinks as the level rises. */
-function nearMoney(value: number, level: Level, rng: Rng): string[] {
-  const factors = level <= 1 ? [-1, 2, 0.5, 3] : level === 2 ? [0.7, 1.3, -1, 1.6] : [0.85, 1.15, 0.9, 1.1];
-  return shuffle(factors, rng).map((f) => fmtMoney(round(value * f, 2)));
-}
-
 /* ------------------------------------------------------------------ */
 /*  Per-trade questions                                                */
 /* ------------------------------------------------------------------ */
 
 function tradeQuestions(entry: JournalEntry, all: JournalEntry[], rng: Rng): PracticeQuestion[] {
-  return buildTradeQuestions(entry, all, rng, tradeLabel(entry));
+  // The label above each question says why this trade is here: a mistake to replay, or something done well.
+  const kind = focusOf(entry, all).kind;
+  const label = tradeLabel(entry);
+  const pin = kind === "blunder" || kind === "slip" ? `Mistake replay · ${label}` : kind === "clean" ? `Done well · ${label}` : label;
+  return buildTradeQuestions(entry, all, rng, pin);
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,106 +175,30 @@ export function portfolioQuestions(all: JournalEntry[], rng: Rng, drawdownLeft: 
 }
 
 /* ------------------------------------------------------------------ */
-/*  Session builder                                                    */
-/* ------------------------------------------------------------------ */
-
-/** Highest-allowed level first, ties random, one question per tag. */
-function rank(pool: PracticeQuestion[], level: Level, rng: Rng): PracticeQuestion[] {
-  const allowed = shuffle(pool.filter((q) => q.level <= level), rng).sort((a, b) => b.level - a.level);
-  const seenTags = new Set<string>();
-  const unique: PracticeQuestion[] = [];
-  for (const q of allowed) {
-    if (seenTags.has(q.tag)) continue;
-    seenTags.add(q.tag);
-    unique.push(q);
-  }
-  return unique;
-}
-
-export interface SessionOptions {
-  mode: SessionMode;
-  /** Trades to revise. */
-  trades: JournalEntry[];
-  /** Every trade — used for distractors and portfolio math. */
-  all: JournalEntry[];
-  level: Level;
-  count: number;
-  seed: number;
-  drawdownLeft: number | null;
-}
-
-export function buildSession(options: SessionOptions): PracticeQuestion[] {
-  const rng = seededRng(options.seed);
-  const trades = options.trades.filter(isUsable);
-  const perTrade = trades.map((trade) => rank(tradeQuestions(trade, options.all, rng), options.level, rng));
-  const portfolio = rank(portfolioQuestions(options.all, rng, options.drawdownLeft), options.level, rng);
-  const questions: PracticeQuestion[] = [];
-
-  if (options.mode === "revision") {
-    for (let round = 0; questions.length < options.count; round++) {
-      let added = false;
-      for (const pool of perTrade) {
-        const next = pool[round];
-        if (next) { questions.push(next); added = true; }
-        if (questions.length >= options.count) break;
-      }
-      if (!added) break;
-    }
-    return questions.slice(0, options.count);
-  }
-
-  // "Math + revision": recall a fact about each trade, then do math on it.
-  for (const pool of perTrade) {
-    const recall = pool.find((q) => !MATH_TAGS.has(q.tag) && q.kind === "choice");
-    const math = pool.find((q) => MATH_TAGS.has(q.tag));
-    if (recall) questions.push(recall);
-    if (math) questions.push(math);
-  }
-  for (const q of portfolio) {
-    if (questions.length >= options.count) break;
-    questions.push(q);
-  }
-  // Last resort: top up with more per-trade questions so short journals still get a full run.
-  for (let round = 0; questions.length < options.count && round < 8; round++) {
-    for (const pool of perTrade) {
-      const next = pool.find((q) => !questions.some((existing) => existing.id === q.id));
-      if (next && questions.length < options.count) questions.push(next);
-    }
-  }
-  return questions.slice(0, options.count);
-}
-
-/* ------------------------------------------------------------------ */
 /*  Progress helpers (level, rank, streak)                             */
 /* ------------------------------------------------------------------ */
-
-const LEVEL_KEY = "level:practice";
-
-export function levelFromProgress(progress: PracticeProgress): Level {
-  const stored = progress.masteryByTag?.[LEVEL_KEY];
-  return stored && stored >= 1 && stored <= 4 ? (Math.round(stored) as Level) : 1;
-}
-
-export function levelAfter(level: Level, accuracy: number): Level {
-  if (accuracy >= 0.8) return Math.min(4, level + 1) as Level;
-  if (accuracy < 0.5) return Math.max(1, level - 1) as Level;
-  return level;
-}
-
-export const LEVEL_MASTERY_KEY = LEVEL_KEY;
 
 export function rankOf(xp: number): string {
   return xp >= 2500 ? "Jonin" : xp >= 1200 ? "Chunin" : "Genin";
 }
 
-/** Streak after practising today. Misses reset it; one missed day can be covered by a freeze. */
+/** A streak freeze is earned back for every 7 days of unbroken practice, up to two in the bank. */
+export const MAX_FREEZES = 2;
+export const FREEZE_EVERY = 7;
+const earnFreeze = (streak: number, freeze: number) => (streak > 0 && streak % FREEZE_EVERY === 0 ? Math.min(MAX_FREEZES, freeze + 1) : freeze);
+
+/**
+ * Streak after practising today. Misses reset it; one missed day can be covered by a freeze.
+ * Freezes used to be a one-time gift (1, never refilled), so after the first missed day a player could
+ * never be protected again. They are now earned back: every 7th day of streak adds one (max 2).
+ */
 export function nextStreak(progress: PracticeProgress, today: string): { streak: number; freezeDays: number } {
   const freeze = progress.freezeDays ?? 1;
   const last = progress.lastMissionDate;
   if (!last) return { streak: 1, freezeDays: freeze };
   if (last === today) return { streak: Math.max(1, progress.streak), freezeDays: freeze };
-  if (last === addDays(today, -1)) return { streak: progress.streak + 1, freezeDays: freeze };
-  if (last === addDays(today, -2) && freeze > 0) return { streak: progress.streak + 1, freezeDays: freeze - 1 };
+  if (last === addDays(today, -1)) { const streak = progress.streak + 1; return { streak, freezeDays: earnFreeze(streak, freeze) }; }
+  if (last === addDays(today, -2) && freeze > 0) { const streak = progress.streak + 1; return { streak, freezeDays: earnFreeze(streak, freeze - 1) }; }
   return { streak: 1, freezeDays: freeze };
 }
 

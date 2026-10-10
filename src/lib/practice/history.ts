@@ -17,6 +17,7 @@
 import type { PracticeProgress } from "@/lib/types";
 import { addDays } from "@/lib/format";
 import type { PracticeQuestion } from "./engine";
+import { hashText } from "./hash.ts";
 
 const REPEAT_DAYS = 14;
 const MAX_SEEN = 800;
@@ -24,11 +25,7 @@ const PROMPT_KEY = "edgebook.practice.recent-prompts";
 
 type Seen = NonNullable<PracticeProgress["seenQuestions"]>[number];
 
-export function hashText(text: string): string {
-  let h = 5381;
-  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
+export { hashText };
 
 export interface AnswerRecord {
   fp: string;

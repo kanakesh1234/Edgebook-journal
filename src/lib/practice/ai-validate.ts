@@ -33,6 +33,11 @@ export interface EvidenceTrade {
   lesson?: string;
   mistake?: string;
   followedPlan?: boolean | null;
+  /** How the trader's own review rates the trade: blunder / slip (mistake trades), mixed, clean. */
+  focus?: "blunder" | "slip" | "mixed" | "clean";
+  severity?: number;
+  mistakeType?: string;
+  mistakeNote?: string;
 }
 
 /* ------------------------- safe arithmetic ------------------------- */
@@ -186,12 +191,12 @@ export function validateAiBatch(parsed: unknown, trades: EvidenceTrade[], avoid:
       if (choices.length !== 4 || choices.some((c) => !c || c.length > 150) || new Set(choices.map(norm)).size !== 4) continue;
       if (!Number.isInteger(index) || index < 0 || index > 3 || !evidence || evidence.length < 12) continue;
       // The excerpt must really exist in the trader's own words.
-      const source = trades.filter((t) => !trade || t.id === trade.id).map((t) => norm([t.notes, t.lesson, t.mistake, t.setup].filter(Boolean).join(" . "))).join(" . ");
+      const source = trades.filter((t) => !trade || t.id === trade.id).map((t) => norm([t.notes, t.lesson, t.mistake, t.mistakeNote, t.setup].filter(Boolean).join(" . "))).join(" . ");
       if (!source.includes(norm(evidence).replace(/[“”"']/g, ""))  && !source.includes(norm(evidence))) continue;
       const answer = choices[index]!;
       const rng = seededRng(parseInt(id.slice(3), 36) || 7);
       const shuffled = [...choices].sort(() => rng.next() - 0.5);
-      kept.push({ id, fp: id, source: "ai", tradeId: trade?.id, kind: "choice", tag, level, pin, prompt, choices: shuffled, answer, explanation, evidence, xp: 10 * level });
+      kept.push({ id, fp: id, source: "ai", tradeId: trade?.id, kind: "choice", tag, level, pin, prompt, choices: shuffled, answer, explanation, evidence, xp: 10 * level, focus: trade?.focus });
       asked.push(prompt);
       continue;
     }
@@ -211,7 +216,7 @@ export function validateAiBatch(parsed: unknown, trades: EvidenceTrade[], avoid:
       const choices = mathChoices(answer, unit, parseInt(id.slice(3), 36) || 11);
       if (!choices) continue;
       const steps = `${expression.replace(/\*/g, "×").replace(/\//g, "÷")} = ${formatAnswer(answer, unit)}`;
-      kept.push({ id, fp: id, source: "ai", tradeId: trade?.id, kind: "choice", tag, level, pin, prompt, choices, answer: formatAnswer(answer, unit), explanation: `${explanation} (${steps})`, xp: 12 * level });
+      kept.push({ id, fp: id, source: "ai", tradeId: trade?.id, kind: "choice", tag, level, pin, prompt, choices, answer: formatAnswer(answer, unit), explanation: `${explanation} (${steps})`, xp: 12 * level, focus: trade?.focus });
       asked.push(prompt);
     }
   }
@@ -236,6 +241,7 @@ export function buildAiPrompt(args: { mode: string; level: number; arena?: numbe
     "- For math give an arithmetic EXPRESSION only (digits, + - * / and brackets); never give the answer. Every number in the expression must also appear in the prompt. If uses is \"trade\", the numbers must come from the evidence.",
     "- Vary the style: why-questions, rule checks, what-if changes, mistake spotting, scenario application. Do not ask the same thing twice.",
     "- NEVER ask calendar trivia (what weekday a date was) and NEVER ask for a number that is already written in the question.",
+    "- Each trade has a focus. 'blunder'/'slip' trades are mistakes the trader rated themselves (mistakeType, severity 1-3, mistakeNote): at least 60% of questions must be about THESE trades — what went wrong, which rule would have prevented it, what it cost, how often the mistake repeats. 'clean' trades get at most one short reinforcing question each.",
     "- Prefer questions about the trader's own reasoning and repeated mistakes: compare trades in EVIDENCE, ask which mistake keeps repeating, what likely causes it, and what the trader's own rule says to do instead.",
     "- Do NOT repeat or paraphrase anything in AVOID.",
     "- If a trade has no notes/lesson text, write math questions for it instead of concept questions.",
@@ -250,7 +256,7 @@ export function buildAiPrompt(args: { mode: string; level: number; arena?: numbe
     difficulty: levelGuide,
     weakTopics: args.weakTags.slice(0, 5),
     AVOID: args.avoid.slice(-60),
-    EVIDENCE: args.trades.map((t) => ({ ...t, notes: t.notes?.slice(0, 600), lesson: t.lesson?.slice(0, 300), mistake: t.mistake?.slice(0, 300) })),
+    EVIDENCE: args.trades.map((t) => ({ ...t, mistakeNote: t.mistakeNote?.slice(0, 300), notes: t.notes?.slice(0, 600), lesson: t.lesson?.slice(0, 300), mistake: t.mistake?.slice(0, 300) })),
   });
   return { system, user };
 }

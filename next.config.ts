@@ -8,7 +8,7 @@ import type { NextConfig } from "next";
  * On Vercel the project already sits at the top level, so applying this
  * there double-joins the path (path0/path0) and breaks the build.
  */
-const root = process.env.VERCEL ? undefined : path.dirname(__dirname);
+const root = process.env.VERCEL ? undefined : __dirname;
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,

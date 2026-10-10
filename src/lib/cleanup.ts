@@ -28,6 +28,10 @@ export function purgeTradeTraces(
     next.practiceProgress = { ...practice, modePerformance };
   }
 
+  if (practice?.revision) {
+    next.practiceProgress = { ...(next.practiceProgress ?? practice), revision: Object.fromEntries(Object.entries(practice.revision).filter(([, v]) => !v.trade || !ids.has(v.trade))) };
+  }
+
   const nextPlans = plans.map((p) =>
     p.linkedTradeId && ids.has(p.linkedTradeId) ? { ...p, linkedTradeId: undefined, status: "planned" as const } : p,
   );

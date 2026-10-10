@@ -3,13 +3,13 @@ import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelOf, nu
 import { nextQuestionBank, readMissed } from "../../src/lib/practice/bank.ts";
 
 // ---- gates rise with level and cap per mode
-assert.deepEqual(gateFor("time-machine", 1), { correct: 4, accuracy: 0.705 });
+assert.deepEqual(gateFor("time-machine", 1), { correct: 4, accuracy: 0.708 });
 assert.equal(gateFor("time-machine", 5).correct, 7);
 assert.equal(gateFor("math-duel", 1).correct, 6);
 assert.ok(gateFor("math-duel", 10).correct > gateFor("time-machine", 10).correct);
-assert.equal(gateFor("time-machine", 500).correct, 14);
+assert.equal(gateFor("time-machine", 500).correct, 9);
 assert.equal(gateFor("math-duel", 500).correct, 30);
-assert.equal(gateFor("boss", 500).accuracy, 0.8);
+assert.equal(gateFor("boss", 500).accuracy, 0.85);
 for (let lv = 1; lv < 60; lv++) assert.ok(gateFor("matrix", lv + 1).correct >= gateFor("matrix", lv).correct);
 
 // ---- question difficulty climbs, then tops out at 4

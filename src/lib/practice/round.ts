@@ -22,6 +22,7 @@ import { readAiBank, readMissed, stashUnused, writeAiBank } from "./bank";
 import { tierOf, type ArenaMode } from "./arena";
 import type { FamilyRating } from "./math/difficulty";
 import { ictQuestions } from "./ict";
+import { assessAll, weightsOf } from "./focus";
 
 const FAMILIES = ["breakeven", "expectancy", "sizing", "fees", "streak", "at-least-one", "buffer", "net-positive"] as const;
 const ratingsFor = (tier: 1 | 2 | 3 | 4): FamilyRating => Object.fromEntries(FAMILIES.map((f) => [f, { level: tier, weakRounds: 0 }])) as FamilyRating;
@@ -50,6 +51,8 @@ export interface Round {
   topUp(): void;
   /** The round is over: anything that arrives later is banked for next time instead. */
   close(): void;
+  /** The round was cancelled before it started: hand every unplayed AI question back to the bank. */
+  discard(): void;
 }
 
 export type Prepared = { round: Round } | { empty: string };
@@ -73,10 +76,14 @@ const fitsMode = (mode: ArenaMode, q: PracticeQuestion): boolean => {
 
 const hasText = (e: JournalEntry) => !!(e.notes?.trim() || e.reflection?.lesson || e.review?.followUp?.biggestMistake || e.review?.execution?.whyEntered);
 
-/** Trades the AI writes from: ones with notes and screenshots, and the ones practised least. */
-export function pickEvidence(trades: JournalEntry[], perf: NonNullable<PracticeProgress["modePerformance"]>, n: number, rng: Rng): JournalEntry[] {
+/**
+ * Trades the AI writes from. Mistake trades come first (their focus weight dominates the score), then trades with
+ * notes and screenshots, then the ones practised least. A trade done well is only picked when there is room.
+ */
+export function pickEvidence(trades: JournalEntry[], perf: NonNullable<PracticeProgress["modePerformance"]>, n: number, rng: Rng, all: JournalEntry[] = trades): JournalEntry[] {
+  const focus = assessAll(all);
   return trades
-    .map((e) => ({ e, score: (hasText(e) ? 2 : 0) + ((e.images?.length ?? 0) > 0 ? 2 : 0) - Math.min(4, perf[`matrix:${e.id}`]?.attempts ?? 0) * 0.3 + rng.next() * 1.5 }))
+    .map((e) => ({ e, score: (hasText(e) ? 2 : 0) + ((e.images?.length ?? 0) > 0 ? 2 : 0) - Math.min(4, perf[`matrix:${e.id}`]?.attempts ?? 0) * 0.3 + (focus.get(e.id)?.weight ?? 1) * 2 + rng.next() * 1.5 }))
     .sort((a, b) => b.score - a.score)
     .slice(0, n)
     .map((item) => item.e);
@@ -112,7 +119,7 @@ function usableAi(questions: PracticeQuestion[], ids: Set<string>, ledger: Ledge
 async function fetchBatch(ctx: RoundContext, evidence: JournalEntry[], avoid: string[]) {
   return fetchAiQuestions({
     mode: ctx.mode, level: tierOf(ctx.level), arena: ctx.level, count: AI_BATCH, trades: evidence,
-    avoid: [...recentPrompts(), ...avoid].slice(-120), weakTags: weakTagsOf(ctx.progress),
+    avoid: [...recentPrompts(), ...avoid].slice(-120), weakTags: weakTagsOf(ctx.progress), focus: assessAll(ctx.entries),
   });
 }
 
@@ -125,7 +132,7 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
   const rng = seededRng(seed);
   const ledger = readLedger(ctx.progress);
   const ids = new Set(ctx.entries.map((e) => e.id));
-  const evidence = pickEvidence(trades, ctx.progress.modePerformance ?? {}, 8, rng);
+  const evidence = pickEvidence(trades, ctx.progress.modePerformance ?? {}, 8, rng, ctx.entries);
   const hasChart = new Set(ctx.entries.filter((e) => (e.images?.length ?? 0) > 0).map((e) => e.id));
 
   const known = new Set<string>();
@@ -165,10 +172,14 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
     progress: ctx.progress,
     count: ctx.mode === "math-duel" ? 24 : 20,
     startLevel: tierOf(ctx.level),
+    level: ctx.level,
     weights: WEIGHTS[ctx.mode],
     hasChart,
+    tradeWeights: weightsOf(ctx.entries),
+    seed,
   });
   if (assembled.pool.length < 3) {
+    stashUnused(ctx.mode, aiNow); // the banked questions were taken for this round; give them back
     return { empty: assembled.retired > 0 ? "You've answered everything available correctly. New trades or review notes unlock more." : "Not enough recorded data for this mode yet." };
   }
   for (const q of assembled.pool) known.add(q.fp);
@@ -180,6 +191,7 @@ export async function prepareRound(ctx: RoundContext): Promise<Prepared> {
     note,
     drain() { return arrived.splice(0, arrived.length); },
     close() { closed = true; stashUnused(ctx.mode, arrived.splice(0, arrived.length)); },
+    discard() { closed = true; stashUnused(ctx.mode, [...arrived.splice(0, arrived.length), ...assembled.pool]); },
     topUp() {
       if (closed || refilling) return;
       refilling = true;
@@ -204,7 +216,7 @@ export async function warmBank(ctx: RoundContext): Promise<void> {
   if (ctx.mode === "ict" || readAiBank(ctx.mode).length >= 10) return;
   const trades = tradesFor(ctx.mode, ctx.entries);
   if (!trades.length) return;
-  const evidence = pickEvidence(trades, ctx.progress.modePerformance ?? {}, 8, seededRng((Date.now() ^ 0x5bd1e995) >>> 0));
+  const evidence = pickEvidence(trades, ctx.progress.modePerformance ?? {}, 8, seededRng((Date.now() ^ 0x5bd1e995) >>> 0), ctx.entries);
   const ledger = readLedger(ctx.progress);
   const ids = new Set(ctx.entries.map((e) => e.id));
   const result = await fetchBatch(ctx, evidence, []);

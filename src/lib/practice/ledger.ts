@@ -1,34 +1,46 @@
 /**
  * No-repeat ledger.
  *
- *  - A question answered CORRECTLY is retired for good: it is never asked again.
- *  - A question answered WRONG goes on the `missed` list and may come back in a
- *    later round, until it is answered correctly (then it is retired).
+ *  - A question answered CORRECTLY is retired for good: it is never asked again — EXCEPT questions about
+ *    mistake trades. Those are revised on a schedule (see focus.ts): a right answer moves them up a box and
+ *    they come back later, and only the last box retires them.
+ *  - A question answered WRONG goes on the `missed` list and may come back in a later round, until it is
+ *    answered correctly (then it is retired, or — for a mistake trade — scheduled).
  *  - Nothing repeats inside a single round (the runner also enforces this).
  *
- * Hashes keep the stored list small. Older progress that only has
- * `seenQuestions` is migrated on read, so past correct answers retire too.
+ * Hashes keep the stored list small. Older progress that only has `seenQuestions` is migrated on read,
+ * so past correct answers retire too.
  */
 import type { PracticeProgress } from "@/lib/types";
-import { hashText } from "./history";
+import { hashText } from "./hash.ts";
 
 const MAX_DONE = 6000;
 const MAX_MISSED = 600;
 
 export const fpKey = (fp: string): string => hashText(fp);
 
-export interface LedgerView { done: Set<string>; missed: Set<string> }
+export interface LedgerView {
+  done: Set<string>;
+  missed: Set<string>;
+  /** Scheduled revision of mistake-trade questions: key → { box, due }. */
+  revision: Map<string, { box: number; due: string }>;
+}
 
 export function readLedger(progress: PracticeProgress): LedgerView {
-  if (progress.ledger) return { done: new Set(progress.ledger.done), missed: new Set(progress.ledger.missed) };
+  const revision = new Map(Object.entries(progress.revision ?? {}).map(([key, value]) => [key, { box: value.box, due: value.due }] as const));
+  if (progress.ledger) return { done: new Set(progress.ledger.done), missed: new Set(progress.ledger.missed), revision };
   // Migration: derive from the old history (variant 1 = last answer wrong).
   const done = new Set<string>();
   const missed = new Set<string>();
   for (const item of progress.seenQuestions ?? []) (item.variant === 1 ? missed : done).add(fpKey(item.factId));
-  return { done, missed };
+  return { done, missed, revision };
 }
 
-export function updateLedger(progress: PracticeProgress, answers: Array<{ fp: string; correct: boolean }>): NonNullable<PracticeProgress["ledger"]> {
+/**
+ * `retire` says whether a RIGHT answer closes the question for good. Callers pass false for mistake-trade
+ * questions that are still on the revision schedule; it defaults to true (the original behaviour).
+ */
+export function updateLedger(progress: PracticeProgress, answers: Array<{ fp: string; correct: boolean; retire?: boolean }>): NonNullable<PracticeProgress["ledger"]> {
   const base = readLedger(progress);
   const done = [...base.done];
   const missed = [...base.missed];
@@ -37,7 +49,7 @@ export function updateLedger(progress: PracticeProgress, answers: Array<{ fp: st
   for (const answer of answers) {
     const key = fpKey(answer.fp);
     if (answer.correct) {
-      if (!doneSet.has(key)) { doneSet.add(key); done.push(key); }
+      if (answer.retire !== false && !doneSet.has(key)) { doneSet.add(key); done.push(key); }
       missedSet.delete(key);
     } else if (!doneSet.has(key) && !missedSet.has(key)) {
       missedSet.add(key);

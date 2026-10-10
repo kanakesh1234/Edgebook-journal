@@ -54,6 +54,6 @@ export async function prepareIctRound(args: { cards: IctCard[]; entries: Journal
   if (cardQs.length === 0) return { empty: "Add at least one more question — a round needs a few different answers to build choices from." };
   const mathQs = tradeMathQuestions(entries, rng, cardQs.length >= 6 ? 3 : cardQs.length >= 3 ? 2 : 1);
 
-  const round: Round = { mode: "ict", level, initial: assembleIctRound(cardQs, mathQs), note, drain: () => [], topUp: () => {}, close: () => {} };
+  const round: Round = { mode: "ict", level, initial: assembleIctRound(cardQs, mathQs), note, drain: () => [], topUp: () => {}, close: () => {}, discard: () => {} };
   return { round, freshVariants: fresh };
 }

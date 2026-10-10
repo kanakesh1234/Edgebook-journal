@@ -5,7 +5,6 @@ import { useApp } from "@/lib/store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { todayKey } from "@/lib/format";
-import Link from "next/link";
 import { isIctTag } from "@/lib/practice/ict";
 import { NO_EXTRAS, type RoundExtras } from "@/lib/practice/rewards";
 import { PreparingScreen } from "@/components/practice/home";
@@ -24,12 +23,13 @@ import { updateCards } from "@/lib/practice/ict-store";
 import { RoundRunner, type RoundResult, type RoundReport } from "@/components/practice/round-runner";
 import { displayStreak, isUsable, nextStreak, rankOf, weekTrades } from "@/lib/practice/engine";
 import { recordAnswers, rememberPrompts } from "@/lib/practice/history";
-import { updateLedger } from "@/lib/practice/ledger";
+import { fpKey, updateLedger } from "@/lib/practice/ledger";
+import { pruneRevision, revisitIds, updateRevision } from "@/lib/practice/focus";
 import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
 import { DAILY_XP_GOAL, xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
-import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode, type RoundOutcome } from "@/lib/practice/arena";
+import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode } from "@/lib/practice/arena";
 import type { GameProgress as PracticeProgress } from "@/lib/practice/progress-ext";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
@@ -99,7 +99,7 @@ export default function PracticePage() {
       return;
     }
     const prepared = await prepareRound({ mode, level, entries: snap.entries, progress: snap.progress, drawdownLeft: snap.drawdownLeft });
-    if (id !== token.current) { if ("round" in prepared) prepared.round.close(); return; }
+    if (id !== token.current) { if ("round" in prepared) prepared.round.discard(); return; }
     if ("empty" in prepared) { setPhase({ kind: "idle" }); setNotice(prepared.empty); return; }
     setPhase({ kind: "playing", mode, level, round: prepared.round });
   };
@@ -126,7 +126,7 @@ export default function PracticePage() {
   const finish = (mode: ArenaMode, level: number, result: RoundResult): RoundReport => {
     const snap = snapshot();
     const live = snap.progress;
-    const outcome = evaluateRound({ mode, level, fails: failsOf(live, mode), correct: result.correct, answered: result.total, completed: result.completed });
+    const outcome = evaluateRound({ mode, level, fails: failsOf(live, mode), correct: result.correct, answered: result.total, completed: result.completed, exhausted: result.exhausted });
     if (result.total === 0) return { outcome, extras: NO_EXTRAS };
 
     const mastery = { ...(live.masteryByTag ?? {}) };
@@ -143,6 +143,11 @@ export default function PracticePage() {
     const duelSigns = result.answers.filter((a) => a.question.id.startsWith("duel:")).map((a) => a.question.id.slice(5));
     rememberPrompts(result.answers.map((a) => a.prompt));
 
+    // Mistake trades are revised on a schedule: a right answer moves the question up a box instead of retiring it.
+    const revisit = revisitIds(snap.entries);
+    const { revision, mastered } = updateRevision(live, result.answers.map((a) => ({ key: fpKey(a.fp), correct: a.correct, tradeId: a.question.tradeId })), today, revisit);
+    const retire = (a: { fp: string; question: { tradeId?: string } }) => !(a.question.tradeId && revisit.has(a.question.tradeId)) || mastered.has(fpKey(a.fp));
+
     const draft: PracticeProgress = {
       ...live,
       xp: live.xp + result.xp,
@@ -151,7 +156,8 @@ export default function PracticePage() {
       masteryByTag: mastery,
       modePerformance: perf,
       seenQuestions: recordAnswers(live, result.answers.map((a) => ({ fp: a.fp, tag: a.tag, correct: a.correct })), today),
-      ledger: updateLedger(live, result.answers.map((a) => ({ fp: a.fp, correct: a.correct }))),
+      ledger: updateLedger(live, result.answers.map((a) => ({ fp: a.fp, correct: a.correct, retire: retire(a) }))),
+      revision: pruneRevision(revision, new Set(snap.entries.map((e) => e.id))),
       questionBank: nextQuestionBank(live, result.answers.map((a) => ({ question: a.question, correct: a.correct }))),
       perfectSets: (live.perfectSets ?? 0) + (result.total >= 3 && result.correct === result.total ? 1 : 0),
       dailyStats: addDailyStats(live, today, { xp: result.xp, correct: result.correct, total: result.total }),

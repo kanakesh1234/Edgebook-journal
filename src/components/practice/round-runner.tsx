@@ -46,6 +46,8 @@ export interface RoundResult {
   correctTags: string[];
   answers: AnswerLog[];
   maxCombo: number;
+  /** The round stopped because there were no more questions, not because the clock ran out or the player left. */
+  exhausted: boolean;
 }
 
 /** What the page hands back when a round ends: the level change plus everything else the round earned. */
@@ -77,15 +79,22 @@ function isRight(question: PracticeQuestion, response: string): boolean {
 
 const answerText = (q: PracticeQuestion) => (q.kind === "number" ? `${q.answer}${q.unit ? ` ${q.unit}` : ""}` : q.answer);
 
-/** The unused question nearest the live difficulty; missed-before questions get a small head start. */
-function pick(pool: PracticeQuestion[], used: Set<string>, target: number, last: PracticeQuestion | null, ordered = false): PracticeQuestion | null {
+/**
+ * The unused question that suits the player now: nearest the live difficulty, with
+ *  - questions they missed before and revisions that fell due ahead,
+ *  - questions about mistake trades ahead of ones about trades done well,
+ *  - and, right after a miss, more questions about the SAME trade or tag, so a mistake is drilled while it is fresh.
+ */
+function pick(pool: PracticeQuestion[], used: Set<string>, target: number, last: PracticeQuestion | null, hot: { trades: Set<string>; tags: Set<string> }, ordered = false): PracticeQuestion | null {
   // ICT Lab plays in the order it was built: cards, trade maths in the middle, cards.
   if (ordered) return pool.find((q) => !used.has(q.id)) ?? null;
   let best: PracticeQuestion | null = null;
   let bestScore = Infinity;
   pool.forEach((q, index) => {
     if (used.has(q.id)) return;
-    const score = Math.abs(q.level - target) * 100 + index + (q.retry ? -30 : 0) + (last && q.tag === last.tag ? 40 : 0) + (last && groupOf(q) === groupOf(last) ? 25 : 0);
+    const focusBonus = q.focus === "blunder" ? -35 : q.focus === "slip" ? -18 : q.focus === "clean" ? 10 : 0;
+    const drill = (q.tradeId && hot.trades.has(q.tradeId) ? -45 : 0) + (hot.tags.has(q.tag) ? -20 : 0);
+    const score = Math.abs(q.level - target) * 100 + index + (q.retry || q.revise ? -30 : 0) + focusBonus + drill + (last && q.tag === last.tag ? 40 : 0) + (last && groupOf(q) === groupOf(last) ? 25 : 0);
     if (score < bestScore) { best = q; bestScore = score; }
   });
   return best;
@@ -110,11 +119,13 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const advanceTimer = useRef<number | null>(null);
   const current = useRef<PracticeQuestion | null>(null);
   const startedAt = useRef(Date.now());
+  /** Trades and tags just missed: their other questions are served sooner (cleared once answered right). */
+  const hot = useRef({ trades: new Set<string>(), tags: new Set<string>() });
 
   const [left, setLeft] = useState(TOTAL_MS);
   const [isPaused, setIsPaused] = useState(false);
   const [question, setQuestion] = useState<PracticeQuestion | null>(() => {
-    const first = pick(pool.current, used.current, target.current, null, mode === "ict");
+    const first = pick(pool.current, used.current, target.current, null, hot.current, mode === "ict");
     if (first) used.current.add(first.id);
     current.current = first;
     return first;
@@ -129,7 +140,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
   const right = answered && question ? isRight(question, response) : false;
 
   /* ---------- finishing ---------- */
-  const end = (completed: boolean) => {
+  const end = (completed: boolean, exhausted = false) => {
     if (finished.current) return;
     finished.current = true;
     if (advanceTimer.current) window.clearTimeout(advanceTimer.current);
@@ -137,7 +148,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     const correct = answers.filter((a) => a.correct).length;
     const result: RoundResult = {
       correct, total: answers.length, xp: xp.current, accuracy: answers.length ? correct / answers.length : 0,
-      seconds: Math.round((Date.now() - startedAt.current) / 1000), completed,
+      seconds: Math.round((Date.now() - startedAt.current) / 1000), completed, exhausted,
       correctTags: answers.filter((a) => a.correct).map((a) => a.tag), answers, maxCombo: combo.current.best,
     };
     // Unplayed AI questions are kept for the next round (nothing is lost, nothing repeats).
@@ -176,8 +187,8 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
     if (advanceTimer.current) { window.clearTimeout(advanceTimer.current); advanceTimer.current = null; }
     const more = round.drain();
     if (more.length) pool.current.push(...more.filter((q) => !pool.current.some((p) => p.id === q.id || p.fp === q.fp)));
-    const next = pick(pool.current, used.current, target.current, current.current, mode === "ict");
-    if (!next) { end(true); return; }
+    const next = pick(pool.current, used.current, target.current, current.current, hot.current, mode === "ict");
+    if (!next) { end(true, true); return; }
     used.current.add(next.id);
     current.current = next;
     setQuestion(next);
@@ -199,7 +210,11 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
       sound().cue(combo.current.now >= 3 ? "combo" : "correct");
       haptic.selection();
       streak.current = { right: streak.current.right + 1, wrong: 0 };
+      if (q.tradeId) hot.current.trades.delete(q.tradeId);
+      hot.current.tags.delete(q.tag);
     } else {
+      if (q.tradeId) hot.current.trades.add(q.tradeId);
+      hot.current.tags.add(q.tag);
       combo.current.now = 0;
       sound().cue("wrong");
       haptic.error();
@@ -284,6 +299,9 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
           <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-muted">
             <span className="rounded-full border border-line bg-raised px-3 py-1 text-ink/80">{question.pin}</span>
             {question.retry && <span className="rounded-full bg-loss/10 px-2.5 py-1 text-[11.5px] text-loss">Missed before</span>}
+            {question.revise && !question.retry && <span className="rounded-full bg-gold-strong/15 px-2.5 py-1 text-[11.5px] text-gold">Revision due</span>}
+            {(question.focus === "blunder" || question.focus === "slip") && !question.retry && !question.revise && <span className="rounded-full bg-loss/10 px-2.5 py-1 text-[11.5px] text-loss">Mistake replay</span>}
+            {question.focus === "clean" && <span className="rounded-full bg-profit/10 px-2.5 py-1 text-[11.5px] text-profit">Done well</span>}
             {question.source === "ai" && <span className="rounded-full px-2.5 py-1 text-[11.5px]" style={{ background: tint(meta.accent, 12), color: tint(meta.accent, 75, "var(--ink)") }}>From your notes</span>}
           </div>
 
@@ -319,7 +337,7 @@ export function RoundRunner({ title, mode, level, round, entries, onFinish, onNe
                 disabled={answered}
                 value={answered ? response ?? "" : typed}
                 onChange={(e) => setTyped(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && valid) submit(typed); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && valid) { e.stopPropagation(); submit(typed); } }}
                 placeholder="Answer"
                 className={cn("num min-w-0 flex-1 bg-transparent text-[38px] leading-tight outline-none placeholder:text-faint/70 sm:text-[44px]", answered && (right ? "text-profit" : "text-loss"))}
               />

@@ -34,6 +34,8 @@ function cleanTrade(value: unknown): EvidenceTrade | null {
     entryPrice: num(t.entryPrice), exitPrice: num(t.exitPrice), stopLoss: num(t.stopLoss), takeProfit: num(t.takeProfit), quantity: num(t.quantity),
     notes: text(t.notes, 700), lesson: text(t.lesson, 350), mistake: text(t.mistake, 350),
     followedPlan: typeof t.followedPlan === "boolean" ? t.followedPlan : null,
+    focus: t.focus === "blunder" || t.focus === "slip" || t.focus === "mixed" || t.focus === "clean" ? t.focus : undefined,
+    severity: num(t.severity) ?? undefined, mistakeType: text(t.mistakeType, 60), mistakeNote: text(t.mistakeNote, 350),
   };
 }
 

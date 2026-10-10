@@ -1,0 +1,9 @@
+import "./matrix/progression.test.ts";
+import "./practice/coach.test.ts";
+import "./practice/consistency.test.ts";
+import "./practice/game.test.ts";
+import "./practice/ict-lab.test.ts";
+import "./practice/pacing.test.ts";
+import "./practice/xp.test.ts";
+import "./practice/focus.test.ts";
+import "./friends/state.test.ts";

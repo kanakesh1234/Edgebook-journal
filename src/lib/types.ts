@@ -480,6 +480,10 @@ export interface PracticeProgress {
   /** No-repeat ledger. `done` = hashes of questions answered correctly (never asked again);
    * `missed` = hashes of questions last answered wrong (allowed to come back until answered right). */
   ledger?: { done: string[]; missed: string[] };
+  /** Spaced revision for questions about MISTAKE trades. Keyed by question hash (see ledger.fpKey).
+   * A right answer on a blunder trade is not retired for good: it moves up a box and comes back on `due`.
+   * `box` 0 = just missed (due now), 1–4 = growing gaps, 5 = mastered (retired). `trade` lets a deleted trade's entries be purged. */
+  revision?: Record<string, { box: number; due: string; trade?: string }>;
   /** Auto-scaling arena ladder (Solo-Leveling style): one open-ended level per mode.
    * `fails` counts consecutive failed rounds (two in a row drops a level). */
   arena?: {
