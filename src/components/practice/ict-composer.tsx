@@ -5,12 +5,15 @@ import { AnimatePresence } from "motion/react";
 import { Modal } from "@/components/ui/modal";
 import { toast } from "@/components/ui/toast";
 import { ImageUploader, type UploadItem } from "@/components/journal/image-uploader";
-import { Hint, IconTile, Label, PrimaryButton, QuietButton, Reveal, SheetFrame, StepTitle, useIsDesktop } from "@/components/journal/flow-ui";
+import { Chip, Hint, IconTile, Label, PrimaryButton, QuietButton, Reveal, SheetFrame, StepTitle, TextBox, useIsDesktop } from "@/components/journal/flow-ui";
 import { SparkleIcon } from "./icons";
 import { AutoField } from "./auto-field";
+import { TagField } from "./tag-field";
+import { useApp } from "@/lib/store";
 import { MAX_ANSWER, MAX_NOTES, MAX_QUESTION } from "@/lib/practice/ict-cards";
+import { canonConcept, cleanConcept, conceptSuggestions, MAX_CONCEPT, normTags, tagSuggestions } from "@/lib/practice/ict-library";
 import { saveCard } from "@/lib/practice/ict-store";
-import type { IctCard } from "@/lib/practice/progress-ext";
+import type { GameProgress, IctCard } from "@/lib/practice/progress-ext";
 
 const MAX_PICTURES = 4;
 const STYLES = ["Multiple choice", "True / false", "Fill in the blank"];
@@ -25,27 +28,37 @@ export function IctComposer({ open, card, onClose }: { open: boolean; card: IctC
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [notes, setNotes] = useState("");
+  const [concept, setConcept] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [images, setImages] = useState<UploadItem[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setQuestion(card?.question ?? ""); setAnswer(card?.answer ?? ""); setNotes(card?.notes ?? "");
+    setQuestion(card?.question ?? ""); setAnswer(card?.answer ?? ""); setNotes(card?.notes ?? ""); setConcept(card?.concept ?? ""); setTags(card?.tags ?? []);
     setImages((card?.images ?? []).map((meta) => ({ meta, blob: null }))); setBusy(false);
   }, [open, card]);
+
+  // The rest of the deck: concepts and tags to offer, so the same idea is always spelled the same way.
+  const deck = useApp((st) => (st.settings.practiceProgress as GameProgress | undefined)?.ictCards) ?? [];
+  const others = card ? deck.filter((c) => c.id !== card.id) : deck;
+  const conceptChoices = conceptSuggestions(others);
+  const tagChoices = tagSuggestions(others, tags);
 
   const q = question.trim();
   const a = answer.trim();
   const qOk = q.length >= 4;
   const aOk = a.length > 0;
-  const ready = qOk && aOk;
+  const c = cleanConcept(concept);
+  const cOk = c.length > 0;
+  const ready = qOk && aOk && cOk;
   const editing = !!card;
 
   const save = async () => {
     if (!ready || busy) return;
     setBusy(true);
     try {
-      await saveCard({ question: q, answer: a, notes: notes.trim(), images }, card ?? undefined);
+      await saveCard({ question: q, answer: a, notes: notes.trim(), concept: canonConcept(c, others), tags: normTags(tags), images }, card ?? undefined);
       toast.success(editing ? "Question updated" : "Question added");
       onClose();
     } catch {
@@ -61,9 +74,9 @@ export function IctComposer({ open, card, onClose }: { open: boolean; card: IctC
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, ready, busy, q, a, notes, images]);
+  }, [open, ready, busy, q, a, c, tags, notes, images]);
 
-  const hint = !qOk ? "Write the question to continue" : !aOk ? "Now type the answer" : null;
+  const hint = !qOk ? "Write the question to continue" : !aOk ? "Now type the answer" : !cOk ? "Name the concept to file it under" : null;
 
   return (
     <Modal open={open} onClose={busy ? () => {} : onClose} size={desktop ? "lg" : "md"} label={editing ? "Edit question" : "New question"}>
@@ -101,6 +114,27 @@ export function IctComposer({ open, card, onClose }: { open: boolean; card: IctC
                 <div className="space-y-2.5">
                   <Label done={aOk} htmlFor="ict-a" hint="what the game treats as correct">Answer</Label>
                   <AutoField id="ict-a" minRows={2} value={answer} maxLength={MAX_ANSWER} count={{ n: answer.length, max: MAX_ANSWER }} onChange={(e) => setAnswer(e.target.value)} placeholder="In your own words." />
+                </div>
+              </Reveal>
+            )}
+            {qOk && aOk && (
+              <Reveal key="concept" delay={0.04}>
+                <div className="space-y-2.5">
+                  <Label done={cOk} htmlFor="ict-c" hint="the idea this tests">Concept</Label>
+                  <TextBox id="ict-c" value={concept} maxLength={MAX_CONCEPT} autoComplete="off" onChange={(e) => setConcept(e.target.value)} placeholder="Fair value gap" />
+                  {conceptChoices.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-0.5" role="group" aria-label="Concepts">
+                      {conceptChoices.map((name) => <Chip key={name} selected={c.toLowerCase() === name.toLowerCase()} onClick={() => setConcept(name)}>{name}</Chip>)}
+                    </div>
+                  )}
+                </div>
+              </Reveal>
+            )}
+            {qOk && aOk && cOk && (
+              <Reveal key="tags" delay={0.04}>
+                <div className="space-y-2.5">
+                  <Label done={tags.length > 0} htmlFor="ict-t" hint="optional · to filter and search">Tags</Label>
+                  <TagField id="ict-t" value={tags} onChange={setTags} suggestions={tagChoices} />
                 </div>
               </Reveal>
             )}

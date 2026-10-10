@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export type SymName =
   | "list" | "grid" | "folder" | "calendar" | "search" | "filter" | "sort" | "sidebar"
   | "chevronRight" | "chevronLeft" | "chevronDown" | "check" | "xmark" | "trash" | "pencil"
-  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis" | "expand" | "note" | "target" | "heart" | "shield" | "bulb" | "checklist" | "chart" | "link" | "plus" | "unlink";
+  | "sparkles" | "photo" | "tray" | "book" | "circleHalf" | "arrowUpRight" | "arrowDownRight" | "ellipsis" | "expand" | "note" | "target" | "heart" | "shield" | "bulb" | "checklist" | "chart" | "link" | "plus" | "unlink" | "tag" | "play";
 
 const D: Record<SymName, ReactNode> = {
   list: (<><path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20" /><circle cx="4.4" cy="6.5" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="12" r=".9" fill="currentColor" stroke="none" /><circle cx="4.4" cy="17.5" r=".9" fill="currentColor" stroke="none" /></>),
@@ -45,6 +45,8 @@ const D: Record<SymName, ReactNode> = {
   link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
   unlink: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1M4 4l16 16" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  tag: (<><path d="M3.5 6.5a3 3 0 0 1 3-3h5.2a2 2 0 0 1 1.4.6l7.3 7.3a2 2 0 0 1 0 2.8l-5.9 5.9a2 2 0 0 1-2.8 0L4.1 13.1a2 2 0 0 1-.6-1.4z" /><circle cx="8.2" cy="8.2" r="1.15" fill="currentColor" stroke="none" /></>),
+  play: <path d="M8.5 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2a.8.8 0 0 0-1.2.7z" />,
   ellipsis: (<><circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" /></>),
 };
 

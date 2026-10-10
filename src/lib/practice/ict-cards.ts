@@ -11,6 +11,7 @@ import type { IctCard, IctVariant } from "./progress-ext.ts";
 import type { PracticeQuestion } from "./engine.ts";
 import type { Rng } from "./math/rng.ts";
 import { CONCEPTS } from "./ict.ts";
+import { conceptOf, UNSORTED } from "./ict-library.ts";
 
 export const MAX_QUESTION = 600;
 export const MAX_ANSWER = 400;
@@ -78,7 +79,7 @@ export function cardQuestion(card: IctCard, variant: IctVariant, nonce: string, 
   const id = `ictc:${card.id}:${nonce}:${slot}`;
   return {
     id, fp: id, source: "local", kind: "choice", tag: "ict-card", level: 2, group: "ict",
-    pin: "ICT Lab · your question", prompt: variant.prompt, choices: variant.choices, answer: variant.answer,
+    pin: conceptOf(card) === UNSORTED ? "ICT Lab · your question" : `ICT Lab · ${conceptOf(card)}`, prompt: variant.prompt, choices: variant.choices, answer: variant.answer,
     explanation, xp: 12, images: card.images, cardId: card.id, note: card.notes ? clean(card.notes) : undefined,
   };
 }

@@ -14,6 +14,10 @@ export interface IctCard {
   answer: string;
   /** Optional "why" shown after answering. */
   notes?: string;
+  /** The ICT idea this question tests, e.g. "Fair value gap". Cards with no concept sit under "Unsorted". */
+  concept?: string;
+  /** Free labels, lowercase and hyphenated, e.g. "ny-open". Used to filter and search. */
+  tags?: string[];
   images: EntryImage[];
   createdAt: number;
   updatedAt: number;

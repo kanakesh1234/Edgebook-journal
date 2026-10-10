@@ -211,3 +211,13 @@
 .pr-group { --pr-inset: 80px; }
 .pr-group > li + li::before { content: ""; position: absolute; top: 0; left: var(--pr-inset); right: 0; height: 1px; background: var(--line); }
 .pr-chest-card[data-ready="true"]::after { content: ""; position: absolute; inset: 0; pointer-events: none; transform: translateX(-130%); background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / .35) 50%, transparent 62%); animation: pr-sheen 3.4s cubic-bezier(.16, 1, .3, 1) .6s infinite; }
+
+/* ICT Lab quick actions: on hover devices they appear on row hover or keyboard focus; on touch they are always there. */
+.ict-reveal { transition: opacity .15s ease; }
+@media (hover: hover) {
+  .ict-reveal { opacity: 0; }
+  .group:hover .ict-reveal, .group:focus-within .ict-reveal { opacity: 1; }
+}
+
+/* The tag field draws its own focus ring on the wrapper; suppress the global one on the inner input. */
+.ict-tag-input:focus-visible { outline: none; }

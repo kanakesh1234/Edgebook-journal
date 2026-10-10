@@ -17,7 +17,7 @@ export async function updateCards(change: (cards: IctCard[]) => IctCard[]): Prom
   await app.updateSettings({ practiceProgress: next });
 }
 
-export interface CardDraft { question: string; answer: string; notes: string; images: Array<{ meta: EntryImage; blob: Blob | null }> }
+export interface CardDraft { question: string; answer: string; notes: string; concept: string; tags: string[]; images: Array<{ meta: EntryImage; blob: Blob | null }> }
 
 /** Saves a new or edited card: picture binaries first, then the card itself; pictures removed while editing are deleted. */
 export async function saveCard(draft: CardDraft, existing?: IctCard): Promise<IctCard> {
@@ -29,6 +29,7 @@ export async function saveCard(draft: CardDraft, existing?: IctCard): Promise<Ic
   const card: IctCard = {
     ...(existing ?? { id: uid("ict"), createdAt: now }),
     question: draft.question, answer: draft.answer, notes: draft.notes || undefined, images: draft.images.map((i) => i.meta), updatedAt: now,
+    concept: draft.concept || undefined, tags: draft.tags.length ? draft.tags : undefined,
     // New wording means the AI question styles written for the old wording are no longer valid.
     ...(changed ? { variants: undefined, variantsFor: undefined } : {}),
   };

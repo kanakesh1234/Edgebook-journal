@@ -100,3 +100,48 @@ assert.ok(p.system.includes("ONLY the trader's ANSWER".replace("ONLY the trader'
 assert.ok(p.user.includes("buy-side"));
 
 console.log("ict-lab.test.ts ok");
+
+// ---- organising: concepts, tags, lenses (ICT Lab library)
+import { canonConcept, conceptFacets, conceptSuggestions, filterCards, groupByConcept, inLens, normTag, normTags, sortCards, summarize, tagFacets, tagSuggestions, UNSORTED } from "../../src/lib/practice/ict-library.ts";
+const lib = [
+  card("p", "Where is the FVG midpoint?", "Consequent encroachment", { concept: "Fair value gap", tags: ["ny-open", "a-plus"], createdAt: 3, seen: 4, correct: 4 }),
+  card("q", "What fills an FVG?", "Price returning into the gap", { concept: "fair value gap", tags: ["ny-open"], createdAt: 2, seen: 2, correct: 0 }),
+  card("r", "Where does sell-side liquidity rest?", "Below equal lows", { concept: "Liquidity", createdAt: 1 }),
+  card("s", "No concept yet", "Unsorted answer", { createdAt: 0, images: [img("z")] }),
+];
+assert.equal(normTag("#NY Open!"), "ny-open");
+assert.equal(normTag("  --A+ Setup--  "), "a-setup");
+assert.deepEqual(normTags(["#Ny-Open", "ny open", "", "x"]), ["ny-open", "x"], "tags are cleaned and de-duplicated");
+assert.equal(normTags(Array.from({ length: 12 }, (_, i) => `t${i}`)).length, 6, "at most six tags");
+assert.equal(canonConcept("  fair   VALUE gap ", lib), "Fair value gap", "an existing concept keeps its spelling, so folders never split");
+assert.equal(canonConcept("Order block", lib), "Order block");
+assert.equal(canonConcept("   ", lib), "");
+
+// facets: case-insensitive, biggest first, Unsorted last
+const cf = conceptFacets(lib);
+assert.deepEqual(cf.map((f) => [f.key, f.count]), [["Fair value gap", 2], ["Liquidity", 1], [UNSORTED, 1]]);
+assert.deepEqual(tagFacets(lib).map((f) => [f.key, f.count]), [["ny-open", 2], ["a-plus", 1]]);
+assert.deepEqual(tagSuggestions(lib, ["ny-open"]), ["a-plus"], "tags already on the question are not offered again");
+assert.ok(conceptSuggestions(lib).slice(0, 2).join() === "Fair value gap,Liquidity" && conceptSuggestions(lib).includes("Order blocks"), "own concepts first, then the built-in topics");
+
+// lenses, filters, sort, grouping
+assert.deepEqual(inLens(lib, { kind: "concept", name: "FAIR VALUE GAP" }).map((c) => c.id), ["p", "q"]);
+assert.deepEqual(inLens(lib, { kind: "tag", name: "a-plus" }).map((c) => c.id), ["p"]);
+assert.deepEqual(inLens(lib, { kind: "practice" }).map((c) => c.id), ["q", "r", "s"], "unplayed or under 70% needs practice");
+assert.deepEqual(filterCards(lib, { status: "any", photo: false, query: "#ny-open" }).map((c) => c.id), ["p", "q"], "search finds tags, with or without #");
+assert.deepEqual(filterCards(lib, { status: "any", photo: false, query: "liquidity" }).map((c) => c.id), ["r"], "search reads concept and question text");
+assert.deepEqual(filterCards(lib, { status: "any", photo: false, query: "fair gap" }).map((c) => c.id), ["p", "q"], "every word must match, in any order");
+assert.deepEqual(filterCards(lib, { status: "strong", photo: false, query: "" }).map((c) => c.id), ["p"]);
+assert.deepEqual(filterCards(lib, { status: "new", photo: true, query: "" }).map((c) => c.id), ["s"]);
+assert.deepEqual(sortCards(lib, "weakest").map((c) => c.id), ["q", "p", "r", "s"], "weakest first, unplayed last (newest first among them)");
+assert.deepEqual(sortCards(lib, "oldest").map((c) => c.id), ["s", "r", "q", "p"]);
+const groups = groupByConcept(sortCards(lib, "newest"));
+assert.deepEqual(groups.map((g) => [g.concept, g.items.map((c) => c.id)]), [["Fair value gap", ["p", "q"]], ["Liquidity", ["r"]], [UNSORTED, ["s"]]]);
+assert.deepEqual([summarize(lib).count, summarize(lib).acc, summarize(lib).needs], [4, 67, 3]);
+
+// a round names the concept above the question
+const rq = buildCardQuestions([lib[0]!, lib[3]!], seededRng(3), today, "n9");
+assert.equal(rq.find((q) => q.cardId === "p")!.pin, "ICT Lab · Fair value gap");
+assert.equal(rq.find((q) => q.cardId === "s")!.pin, "ICT Lab · your question");
+console.log("ict-lab organising ok");
+assert.ok(!conceptSuggestions(lib).includes("Fair value gaps"), "built-in 'Fair value gaps' is hidden when 'Fair value gap' exists");

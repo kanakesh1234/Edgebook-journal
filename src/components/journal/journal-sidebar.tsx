@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 export type SidebarSetup = { id: string; name: string; count: number };
 export type SidebarLesson = { id: string; title: string; count: number };
 
-function Row({ icon, label, count, selected, onClick, indent = 0, lead }: {
+export function Row({ icon, label, count, selected, onClick, indent = 0, lead }: {
   icon?: SymName; label: string; count?: number; selected?: boolean; onClick: () => void; indent?: number; lead?: React.ReactNode;
 }) {
   return (
@@ -31,7 +31,7 @@ function Row({ icon, label, count, selected, onClick, indent = 0, lead }: {
   );
 }
 
-const Heading = ({ children }: { children: React.ReactNode }) => (
+export const Heading = ({ children }: { children: React.ReactNode }) => (
   <p className="px-2.5 pb-1 pt-5 text-[12px] font-semibold text-faint">{children}</p>
 );
 
