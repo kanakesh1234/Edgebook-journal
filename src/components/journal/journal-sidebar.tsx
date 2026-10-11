@@ -50,6 +50,11 @@ export function SidebarContent({
 
   return (
     <nav aria-label="Journal navigator" className="px-2 pb-6 pt-1">
+      <Heading>Reviews</Heading>
+      <Row icon="calendar" label="Weekly review" selected={lens.kind === "weekly"} onClick={() => { onLens({ kind: "weekly" }); onPath(""); }} />
+      <Row icon="chart" label="Monthly review" selected={lens.kind === "monthly"} onClick={() => { onLens({ kind: "monthly" }); onPath(""); }} />
+      <Heading>Trades</Heading>
+      {lens.kind === "ids" && <Row icon="filter" label={lens.label} count={lens.ids.length} selected onClick={() => undefined} />}
       <Row icon="tray" label="All trades" count={total} selected={lens.kind === "all" && !path} onClick={() => { onLens({ kind: "all" }); onPath(""); }} />
       <Row icon="circleHalf" label="Needs review" count={review} selected={lens.kind === "review" && !path} onClick={() => { onLens({ kind: "review" }); onPath(""); }} />
 
@@ -89,13 +94,9 @@ export function SidebarContent({
       ))}
 
       {mistakes.length > 0 && <Heading>Mistakes</Heading>}
-      <AnimatePresence initial={false}>
-        {mistakes.map((m) => (
-          <motion.div key={m.key} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING}>
-            <Row icon="tag" label={m.label} count={m.count} selected={lens.kind === "mistake" && lens.id === m.key} onClick={() => { onLens({ kind: "mistake", id: m.key }); onPath(""); }} />
-          </motion.div>
-        ))}
-      </AnimatePresence>
+      {mistakes.map((m) => (
+        <Row key={m.key} icon="repeat" label={m.label} count={m.count} selected={lens.kind === "mistake" && lens.key === m.key} onClick={() => { onLens({ kind: "mistake", key: m.key }); onPath(""); }} />
+      ))}
 
       {lessons.length > 0 && <Heading>Lessons</Heading>}
       <AnimatePresence initial={false}>

@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useApp, persistFailedSince } from "@/lib/store";
 import type { JournalEntry } from "@/lib/types";
 import { tradesForSetup } from "@/lib/setup-stats";
-import { formatSignedMoney } from "@/lib/format";
+import { formatSignedMoney, todayKey } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -18,15 +18,17 @@ import { LessonPicker } from "@/components/journal/lesson-links";
 import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import { Sym } from "@/components/journal/symbols";
 import Link from "next/link";
-import { ContextMenu, EASE, MenuDivider, MenuItem, SPRING } from "@/components/journal/journal-ui";
+import { ContextMenu, EASE, IconButton, MenuDivider, MenuItem, SPRING } from "@/components/journal/journal-ui";
+import { ReviewsPanel } from "@/components/review/reviews-panel";
+import { classifyMistakes, hasMistake, MISTAKE_BY_KEY } from "@/lib/review/mistakes";
+import { monthOf, mondayOf } from "@/lib/review/period";
 import { JournalToolbar, type Crumb } from "@/components/journal/journal-toolbar";
 import { SidebarContent } from "@/components/journal/journal-sidebar";
 import { FolderList, Timeline, type Money, type RowProps } from "@/components/journal/journal-views";
 import {
-  buildTree, childrenOf, filterEntries, needsReview, parentPath, pathLabel, pct, sortEntries, summarize, tradesForLesson,
-  type Lens, type MistakeFilter, type Outcome, type SortKey, type ViewMode,
+  buildTree, childrenOf, filterEntries, isReviewLens, needsReview, parentPath, pathLabel, pct, sortEntries, summarize, tradesForLesson,
+  type Lens, type Outcome, type SortKey, type ViewMode,
 } from "@/components/journal/journal-model";
-import { mistakeIndex } from "@/lib/mistakes";
 import { cn } from "@/lib/utils";
 
 const VIEW_KEY = "edgebook.journal.view";
@@ -53,8 +55,11 @@ export default function JournalPage() {
   const [outcome, setOutcome] = useState<Outcome>("all");
   const [instrument, setInstrument] = useState("all");
   const [sort, setSort] = useState<SortKey>("newest");
-  const [mistakeFilter, setMistakeFilter] = useState<MistakeFilter>("all");
   const dirRef = useRef(1);
+  // Weekly / Monthly review periods, and where "back" returns to after drilling into trades from a review.
+  const [reviewWeek, setReviewWeek] = useState(() => mondayOf(todayKey()));
+  const [reviewMonth, setReviewMonth] = useState(() => monthOf(todayKey()));
+  const [returnTo, setReturnTo] = useState<"weekly" | "monthly" | null>(null);
 
   useEffect(() => {
     try { const v = localStorage.getItem(VIEW_KEY); if (v === "list" || v === "grid" || v === "folders") setViewState(v); } catch { /* ignore */ }
@@ -62,9 +67,11 @@ export default function JournalPage() {
   // Deep links from Lessons: /journal?trade=ID opens that trade, /journal?lesson=ID shows the trades linked to a lesson.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    const trade = q.get("trade"), lesson = q.get("lesson"), mistake = q.get("mistake");
-    if (!trade && !lesson && !mistake) return;
-    if (mistake) setLens({ kind: "mistake", id: mistake });
+    const trade = q.get("trade"), lesson = q.get("lesson"), review = q.get("review"), mistake = q.get("mistake"), period = q.get("period");
+    if (!trade && !lesson && !review && !mistake) return;
+    if (review === "weekly") { setLens({ kind: "weekly" }); if (period && /^\d{4}-\d{2}-\d{2}$/.test(period)) setReviewWeek(mondayOf(period)); }
+    if (review === "monthly") { setLens({ kind: "monthly" }); if (period && /^\d{4}-\d{2}$/.test(period)) setReviewMonth(period); }
+    if (mistake) setLens({ kind: "mistake", key: mistake });
     if (lesson) setLens({ kind: "lesson", id: lesson });
     if (trade) setViewingId(trade);
     window.history.replaceState(null, "", window.location.pathname);
@@ -114,23 +121,24 @@ export default function JournalPage() {
     for (const e of entries) for (const id of e.lessonIds ?? []) counts.set(id, (counts.get(id) ?? 0) + 1);
     return { counts, list: [...counts].flatMap(([id, count]) => { const l = lessonById.get(id); return l ? [{ id, title: l.title, count }] : []; }).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title)) };
   }, [entries, lessonById]);
+  const mistakeGroups = useMemo(() => classifyMistakes(entries), [entries]);
+  const activeMistake = lens.kind === "mistake" ? mistakeGroups.find((g) => g.key === lens.key) ?? null : null;
   const activeLessonId = lens.kind === "lesson" && (lessonInfos.counts.get(lens.id) ?? 0) > 0 ? lens.id : null;
-  // Mistakes: every bucket that has trades, most common first (the sidebar list and the "Mistake" filter).
-  const mistakes = useMemo(() => mistakeIndex(entries), [entries]);
-  const activeMistake = lens.kind === "mistake" ? mistakes.find((m) => m.key === lens.id) ?? null : null;
   const effLens: Lens = (lens.kind === "setup" && !activeSetup) || (lens.kind === "lesson" && !activeLessonId) || (lens.kind === "mistake" && !activeMistake) ? { kind: "all" } : lens;
+  const inReview = isReviewLens(effLens);
 
   const base = useMemo(() => {
     if (effLens.kind === "review") return entries.filter(needsReview);
-    if (effLens.kind === "mistake" && activeMistake) return entries.filter((e) => activeMistake.ids.has(e.id));
+    if (effLens.kind === "mistake") { const key = effLens.key; return entries.filter((e) => hasMistake(e, key)); }
+    if (effLens.kind === "ids") { const ids = new Set(effLens.ids); return entries.filter((e) => ids.has(e.id)); }
     if (effLens.kind === "lesson" && activeLessonId) return tradesForLesson(activeLessonId, entries);
     if (effLens.kind === "setup" && activeSetup) { const ids = new Set(activeSetup.trades.map((t) => t.id)); return entries.filter((e) => ids.has(e.id)); }
     return entries;
-  }, [entries, effLens.kind, activeSetup, activeLessonId, activeMistake]);
+  }, [entries, effLens, activeSetup, activeLessonId]);
 
   const tree = useMemo(() => buildTree(base), [base]);
   const scoped = useMemo(() => (path ? base.filter((e) => e.date.startsWith(path)) : base), [base, path]);
-  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query, mistake: mistakeFilter }), sort), [scoped, outcome, instrument, query, sort, mistakeFilter]);
+  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query }), sort), [scoped, outcome, instrument, query, sort]);
   const folderNodes = useMemo(() => childrenOf(buildTree(filtered, sort === "oldest"), path), [filtered, sort, path]);
   const summary = useMemo(() => summarize(filtered), [filtered]);
   const instruments = useMemo(() => [...new Set(entries.map((e) => e.instrument))].filter((i) => i !== "—").sort(), [entries]);
@@ -141,9 +149,9 @@ export default function JournalPage() {
 
   const searching = query.trim().length > 0;
   const chronological = sort === "newest" || sort === "oldest";
-  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : effLens.kind === "mistake" ? activeMistake?.label ?? "Mistakes" : "Journal";
+  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : effLens.kind === "mistake" ? activeMistake?.label ?? MISTAKE_BY_KEY.get(effLens.key)?.label ?? "Mistake" : effLens.kind === "ids" ? effLens.label : "Journal";
   const title = path ? pathLabel(path) : rootTitle;
-  const filtersActive = outcome !== "all" || instrument !== "all" || mistakeFilter !== "all" || searching;
+  const filtersActive = outcome !== "all" || instrument !== "all" || searching;
 
   const crumbs: Crumb[] = useMemo(() => {
     const out: Crumb[] = [{ label: rootTitle, onClick: () => setPath("") }];
@@ -195,7 +203,7 @@ export default function JournalPage() {
 
   // ── navigation actions ────────────────────────────────────────
   const goUp = () => { haptic.selection(); setPath(parentPath(path)); };
-  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); setMistakeFilter("all"); };
+  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); };
   const jumpToDate = (date: string) => {
     if (!date || entries.length === 0) return;
     const all = [...new Set(entries.map((e) => e.date))].sort();
@@ -252,13 +260,21 @@ export default function JournalPage() {
   };
 
   const rowProps: RowProps = { money, selectMode, selectedIds, onOpen, onToggle, onContext };
+  const reviewActions = useMemo(() => ({
+    openTrade: (id: string) => setViewingId(id),
+    openMistake: (key: string) => { setReturnTo(effLensKindRef.current === "monthly" ? "monthly" : "weekly"); setLens({ kind: "mistake", key }); setPath(""); },
+    openIds: (ids: string[], label: string) => { setReturnTo(effLensKindRef.current === "monthly" ? "monthly" : "weekly"); setLens({ kind: "ids", ids, label }); setPath(""); },
+    openWeek: (monday: string) => { setReviewWeek(monday); setLens({ kind: "weekly" }); setPath(""); },
+  }), [setPath]);
+  const effLensKindRef = useRef<string>("all");
+  effLensKindRef.current = effLens.kind;
   const sidebar = (
     <SidebarContent
       total={entries.length} review={reviewCount} tree={tree} path={path} lens={effLens}
       setups={setupInfos.map((i) => ({ id: i.setup.id, name: i.setup.name, count: i.trades.length }))}
       lessons={lessonInfos.list}
-      mistakes={mistakes.map((m) => ({ key: m.key, label: m.label, count: m.count }))}
-      onLens={(l) => { setLens(l); }} onPath={setPath}
+      mistakes={mistakeGroups.map((g) => ({ key: g.key, label: g.label, count: g.count }))}
+      onLens={(l) => { setReturnTo(null); setLens(l); }} onPath={setPath}
     />
   );
 
@@ -307,25 +323,40 @@ export default function JournalPage() {
       <main className="min-w-0 flex-1 pb-28">
         <div ref={sentinelRef} className="h-px" aria-hidden />
         <div ref={tbRef} className={cn("sticky top-0 z-30 border-b bg-canvas/80 backdrop-blur-xl transition-colors duration-200", scrolled ? "border-line-soft" : "border-transparent")}>
-          <JournalToolbar
+          {inReview ? (
+            <div className="flex items-center gap-0.5 py-2"><IconButton label="Toggle sidebar" icon="sidebar" onClick={toggleSidebar} /><span className="ml-2 text-[14px] font-semibold text-ink">{effLens.kind === "weekly" ? "Weekly review" : "Monthly review"}</span></div>
+          ) : <JournalToolbar
             view={view} onView={setView} crumbs={crumbs} onUp={path ? goUp : undefined} onSidebar={toggleSidebar}
             query={query} onQuery={setQuery} searchRef={searchRef}
             outcome={outcome} onOutcome={setOutcome} instrument={instrument} instruments={instruments} onInstrument={setInstrument}
-            mistake={mistakeFilter} mistakes={mistakes.map((m) => ({ key: m.key, label: m.label, count: m.count }))} onMistake={setMistakeFilter}
             sort={sort} onSort={setSort} onJump={jumpToDate}
             selectMode={selectMode} onSelectMode={() => (selectMode ? exitSelect() : setSelectMode(true))} canSelect={!empty && !showFolders}
-          />
+          />}
         </div>
 
-        {!empty && (
+        {inReview && (
+          <ReviewsPanel
+            kind={effLens.kind === "monthly" ? "monthly" : "weekly"} onKind={(k) => setLens({ kind: k })}
+            week={reviewWeek} onWeek={setReviewWeek} month={reviewMonth} onMonth={setReviewMonth} actions={reviewActions}
+          />
+        )}
+        {!inReview && (
           <header className="pb-5 pt-5 sm:pt-7">
+            {returnTo && (
+              <button type="button" onClick={() => { setLens({ kind: returnTo }); setReturnTo(null); }} className="mb-2 -ml-1.5 inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[14px] font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-95">
+                <Sym name="chevronLeft" className="h-4 w-4" strokeWidth={2} />Back to {returnTo === "weekly" ? "weekly" : "monthly"} review
+              </button>
+            )}
             <div className="flex items-start justify-between gap-4">
               <h1 className="font-display text-[32px] font-semibold tracking-[-0.03em] text-ink sm:text-[36px]">{searching ? "Search" : title}</h1>
+              {!returnTo && !activeSetup && !activeLessonId && !path && (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button variant="outline" size="sm" onClick={() => setLens({ kind: "weekly" })}><Sym name="calendar" className="mr-1.5 h-4 w-4" />Weekly review</Button>
+                  <Button variant="outline" size="sm" onClick={() => setLens({ kind: "monthly" })}><Sym name="chart" className="mr-1.5 h-4 w-4" />Monthly review</Button>
+                </div>
+              )}
               {activeSetup && !path && (
                 <Button variant="outline" size="sm" onClick={() => setOpenSetupId(activeSetup.setup.id)}>Setup details</Button>
-              )}
-              {activeMistake && !path && activeMistake.cost > 0 && (
-                <span className="mt-1 shrink-0 rounded-full bg-loss/[0.09] px-3 py-1 text-[13px] font-medium text-loss">Cost {money(-activeMistake.cost)}</span>
               )}
               {activeLessonId && !path && (
                 <Link href={`/lessons/${activeLessonId}`} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-line bg-raised px-3 text-[13.5px] font-medium text-ink transition-[border-color,transform] hover:border-line-strong active:scale-[0.97]">
@@ -348,7 +379,7 @@ export default function JournalPage() {
           </header>
         )}
 
-        <AnimatePresence mode="wait" initial={false} custom={dirRef.current}>
+        {!inReview && <AnimatePresence mode="wait" initial={false} custom={dirRef.current}>
           <motion.div
             key={`${view}:${showFolders ? path : "flat"}:${effLens.kind}`}
             custom={dirRef.current}
@@ -358,7 +389,7 @@ export default function JournalPage() {
           >
             {content}
           </motion.div>
-        </AnimatePresence>
+        </AnimatePresence>}
       </main>
 
       {/* Selection bar */}
