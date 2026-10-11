@@ -1,40 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useBacktest } from "@/lib/backtesting/store";
 import { loadSymbolCandles, resolveClock } from "@/lib/backtesting/data/loader";
 import { instrumentBySymbol } from "@/lib/backtesting/instruments";
-import { CandlestickIcon } from "@/components/ui/icons";
-import { Button } from "@/components/ui/button";
+import { useTheme } from "@/lib/theme";
 import BacktestChart from "@/components/backtesting/chart";
 import TopToolbar from "@/components/backtesting/top-toolbar";
 import LeftToolbar from "@/components/backtesting/left-toolbar";
-import BottomBar from "@/components/backtesting/bottom-bar";
-import TradingPanel from "@/components/backtesting/trading-panel";
+import ReplayToolbar from "@/components/backtesting/replay-toolbar";
+import RangeBar from "@/components/backtesting/range-bar";
+import PaperPanel from "@/components/backtesting/paper-panel";
+import OrderTicket from "@/components/backtesting/order-ticket";
+import SettingsDialog from "@/components/backtesting/settings-dialog";
 import SessionResults from "@/components/backtesting/session-results";
+import { emitChartCommand } from "@/components/backtesting/chart-bus";
+import "@/components/backtesting/tv.css";
+
+const ALT_TOOLS: Record<string, "trend-line" | "horizontal-line" | "horizontal-ray" | "vertical-line" | "cross-line" | "fib-retracement"> = {
+  KeyT: "trend-line", KeyH: "horizontal-line", KeyJ: "horizontal-ray", KeyV: "vertical-line", KeyC: "cross-line", KeyF: "fib-retracement",
+};
 
 function BacktestWorkspaceInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("id");
+  const { resolved: theme } = useTheme();
 
   const config = useBacktest((s) => s.config);
   const status = useBacktest((s) => s.status);
-  const instruments = useBacktest((s) => s.instruments);
   const activeInstrument = useBacktest((s) => s.activeInstrument);
+  const allCandles = useBacktest((s) => s.allCandles);
   const candleData = useBacktest((s) => s.candleData);
+  const historyCandles = useBacktest((s) => s.historyCandles);
   const dataLoading = useBacktest((s) => s.dataLoading);
   const dataError = useBacktest((s) => s.dataError);
   const dataWarning = useBacktest((s) => s.dataWarning);
   const playing = useBacktest((s) => s.playing);
-  const currentTime = useBacktest((s) => s.currentTime);
-  const openPositions = useBacktest((s) => s.openPositions);
-  const pendingOrders = useBacktest((s) => s.pendingOrders);
-  const closedTrades = useBacktest((s) => s.closedTrades);
-  const drawings = useBacktest((s) => s.drawings);
-  const activeDrawingTool = useBacktest((s) => s.activeDrawingTool);
   const showResults = useBacktest((s) => s.showResults);
+  const selectedDrawingId = useBacktest((s) => s.selectedDrawingId);
+  const alertNotice = useBacktest((s) => s.alertNotice);
 
   const loadSession = useBacktest((s) => s.loadSession);
   const setCandleData = useBacktest((s) => s.setCandleData);
@@ -42,19 +48,19 @@ function BacktestWorkspaceInner() {
   const setDataError = useBacktest((s) => s.setDataError);
   const setDataWarning = useBacktest((s) => s.setDataWarning);
   const setCurrentTime = useBacktest((s) => s.setCurrentTime);
-  const setPlaying = useBacktest((s) => s.setPlaying);
   const advanceClock = useBacktest((s) => s.advanceClock);
   const updateVisibleCandles = useBacktest((s) => s.updateVisibleCandles);
   const saveSession = useBacktest((s) => s.saveSession);
   const setStatus = useBacktest((s) => s.setStatus);
-  const addDrawing = useBacktest((s) => s.addDrawing);
-  const stepBack = useBacktest((s) => s.stepBack);
   const updatePositionRisk = useBacktest((s) => s.updatePositionRisk);
   const updatePendingOrder = useBacktest((s) => s.updatePendingOrder);
+  const speed = useBacktest((s) => s.speed);
 
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const speed = useBacktest((s) => s.speed);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [replayOpen, setReplayOpen] = useState(true);
+  const [ticketOpen, setTicketOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Load session from IndexedDB if we have an ID
   useEffect(() => {
@@ -120,6 +126,8 @@ function BacktestWorkspaceInner() {
       setCurrentTime(resolveClock(anchor.candles, st.currentTime));
       updateVisibleCandles();
       if (st.status === "ready") setStatus("paused");
+      // Left-hand context bars (best effort, never blocks the replay).
+      void useBacktest.getState().loadHistory();
     }
 
     fetchData();
@@ -145,40 +153,57 @@ function BacktestWorkspaceInner() {
     };
   }, [playing, speed, advanceClock]);
 
-  // Keyboard controls
+  // Playback timer
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        useBacktest.getState().prevInstrument();
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        useBacktest.getState().nextInstrument();
-      } else if (e.key === " ") {
-        e.preventDefault();
-        const s = useBacktest.getState();
-        if (s.status !== 'completed' && s.status !== 'breached') {
-          s.setPlaying(!s.playing);
-        }
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        if (!useBacktest.getState().playing) {
-          useBacktest.getState().advanceClock();
-        }
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        if (!useBacktest.getState().playing) {
-          useBacktest.getState().stepBack();
-        }
-      } else if (e.key === "Escape") {
-        // Clear drawing tool
-        useBacktest.getState().setActiveDrawingTool(null);
-      }
+    if (playing) {
+      const intervalMs = 1000 / speed;
+      playIntervalRef.current = setInterval(() => { advanceClock(); }, intervalMs);
+    } else if (playIntervalRef.current) {
+      clearInterval(playIntervalRef.current);
+      playIntervalRef.current = null;
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => { if (playIntervalRef.current) clearInterval(playIntervalRef.current); };
+  }, [playing, speed, advanceClock]);
+
+  // Keyboard: TradingView shortcuts + the app's replay keys
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const st = useBacktest.getState();
+      const canTrade = st.status === "paused" || st.status === "running";
+
+      if (e.ctrlKey && e.altKey && e.code === "KeyH") { e.preventDefault(); st.setDrawingsHidden(!st.drawingsHidden); return; }
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (ALT_TOOLS[e.code]) { e.preventDefault(); st.setActiveDrawingTool(ALT_TOOLS[e.code]); return; }
+        if (e.code === "KeyS") { e.preventDefault(); emitChartCommand({ type: "screenshot", mode: "download" }); return; }
+        if (e.code === "KeyI") { e.preventDefault(); st.setScale({ invert: !st.scale.invert }); return; }
+        if (e.code === "KeyP") { e.preventDefault(); st.setScale({ mode: st.scale.mode === "percent" ? "normal" : "percent" }); return; }
+        if (e.code === "KeyL") { e.preventDefault(); st.setScale({ mode: st.scale.mode === "log" ? "normal" : "log" }); return; }
+        if (e.code === "KeyR") { e.preventDefault(); emitChartCommand({ type: "reset" }); return; }
+      }
+      if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.code === "KeyB" && canTrade) { e.preventDefault(); st.placeOrder("buy", st.orderQty); return; }
+        if (e.code === "KeyS" && canTrade) { e.preventDefault(); st.placeOrder("sell", st.orderQty); return; }
+        if (e.code === "KeyF") {
+          e.preventDefault();
+          if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.();
+          return;
+        }
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === "ArrowUp") { e.preventDefault(); st.prevInstrument(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); st.nextInstrument(); }
+      else if (e.key === " ") {
+        e.preventDefault();
+        if (st.status !== "completed" && st.status !== "breached") st.setPlaying(!st.playing);
+      } else if (e.key === "ArrowRight") { e.preventDefault(); if (!st.playing) st.advanceClock(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); if (!st.playing) st.stepBack(); }
+      else if (e.key === "Escape") { st.setActiveDrawingTool("cursor"); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Auto-save periodically
@@ -189,137 +214,121 @@ function BacktestWorkspaceInner() {
     return () => clearInterval(timer);
   }, [config, saveSession]);
 
-  const visibleCandles = candleData[activeInstrument] || [];
-  const currentDrawings = drawings[activeInstrument] || [];
+  // Alert toast fades on its own.
+  useEffect(() => {
+    if (!alertNotice) return;
+    const id = setTimeout(() => useBacktest.getState().clearAlertNotice(), 7000);
+    return () => clearTimeout(id);
+  }, [alertNotice]);
+
+  /* Chart input: context bars + replayed bars, and the time axis incl. unrevealed bars. */
+  const all = allCandles[activeInstrument];
+  const visible = candleData[activeInstrument];
+  const history = historyCandles[activeInstrument];
+  const anchorTime = all?.[0]?.time ?? 0;
+  const chartCandles = useMemo(() => {
+    const v = visible ?? [];
+    const first = v[0]?.time ?? Infinity;
+    const h = (history ?? []).filter((c) => c.time < first);
+    return h.length ? h.concat(v) : v;
+  }, [visible, history]);
+  const allTimes = useMemo(() => {
+    const a = all ?? [];
+    const first = a[0]?.time ?? Infinity;
+    const h = (history ?? []).filter((c) => c.time < first).map((c) => c.time);
+    return h.concat(a.map((c) => c.time));
+  }, [all, history]);
 
   if (!config) {
     return (
-      <div className="grid min-h-dvh place-items-center bg-[#131722]">
-        <div className="space-y-4 text-center">
-          <CandlestickIcon className="mx-auto h-8 w-8 text-white/30" />
-          <p className="text-sm text-white/50">No backtesting session configured.</p>
-          <Button variant="outline" size="sm" onClick={() => router.push("/lab#backtesting")}>
-            Back to sessions
-          </Button>
+      <div className="tv-root" data-tv-theme={theme} style={{ placeItems: "center", display: "grid" }}>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ color: "var(--tv-muted)", marginBottom: 12 }}>No backtesting session configured.</p>
+          <button type="button" className="tv-btn" onClick={() => router.push("/lab#backtesting")}>Back to sessions</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-[#131722] text-white">
-      {/* Top toolbar */}
+    <div className="tv-root" data-tv-theme={theme}>
       <TopToolbar
-        onBack={() => {
-          saveSession();
-          router.push("/lab#backtesting");
-        }}
+        onBack={() => { saveSession(); router.push("/lab#backtesting"); }}
+        replayOpen={replayOpen}
+        onToggleReplay={() => setReplayOpen((o) => !o)}
+        ticketOpen={ticketOpen}
+        onToggleTicket={() => setTicketOpen((o) => !o)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left drawing toolbar */}
-        <LeftToolbar />
+      <div className="tv-body">
+        <LeftToolbar symbol={activeInstrument} />
 
-        {/* Chart area */}
-        <div className="relative flex-1">
-          {dataLoading && (
-            <div className="absolute inset-0 z-20 grid place-items-center bg-[#131722]/80">
-              <div className="space-y-3 text-center">
-                <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-gold/30 border-t-gold" />
-                <p className="text-sm text-white/50">Loading market data from London Strategic Edge…</p>
+        <div className="tv-main">
+          <div className="tv-stage">
+            <BacktestChart
+              candles={chartCandles}
+              allTimes={allTimes}
+              symbol={activeInstrument}
+              anchorTime={anchorTime}
+              tickSize={instrumentBySymbol(activeInstrument)?.tickSize}
+              onUpdatePositionRisk={(id, updates) => updatePositionRisk(activeInstrument, id, updates)}
+              onUpdatePendingOrderPrice={(id, price) => updatePendingOrder(activeInstrument, id, { price })}
+            />
+
+            {replayOpen && <ReplayToolbar shifted={!!selectedDrawingId} onClose={() => setReplayOpen(false)} />}
+            {ticketOpen && <OrderTicket onClose={() => setTicketOpen(false)} />}
+
+            {dataLoading && (
+              <div className="tv-cover">
+                <div><div className="tv-spinner" /><p style={{ color: "var(--tv-muted)" }}>Loading market data…</p></div>
               </div>
-            </div>
-          )}
+            )}
 
-          {dataError && !dataLoading && (
-            <div className="absolute inset-0 z-20 grid place-items-center bg-[#131722]/90">
-              <div className="max-w-md space-y-3 text-center">
-                <p className="text-sm font-semibold text-loss">No data to replay</p>
-                <p className="text-[13px] leading-relaxed text-white/60">{dataError}</p>
-                <div className="flex justify-center gap-2 pt-1">
-                  <Button variant="outline" size="sm" onClick={() => setRetryNonce((n) => n + 1)}>
-                    Retry
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => router.push("/backtesting/create")}>
-                    Change session
-                  </Button>
+            {dataError && !dataLoading && (
+              <div className="tv-cover">
+                <div style={{ maxWidth: 420 }}>
+                  <p style={{ color: "var(--tv-down)", fontWeight: 600, marginBottom: 6 }}>No data to replay</p>
+                  <p style={{ color: "var(--tv-muted)", lineHeight: 1.5, marginBottom: 14 }}>{dataError}</p>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button type="button" className="tv-btn primary" onClick={() => setRetryNonce((n) => n + 1)}>Retry</button>
+                    <button type="button" className="tv-btn" onClick={() => router.push("/backtesting/create")}>Change session</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {dataWarning && !dataError && (
-            <div className="absolute left-1/2 top-3 z-20 flex max-w-[80%] -translate-x-1/2 items-start gap-3 rounded-lg border border-gold/30 bg-[#1e222d]/95 px-3 py-2">
-              <p className="text-[12px] leading-snug text-white/70">{dataWarning}</p>
-              <button
-                onClick={() => setDataWarning(null)}
-                className="shrink-0 text-[12px] text-white/40 hover:text-white/80"
-                aria-label="Dismiss"
-              >
-                ✕
-              </button>
-            </div>
-          )}
+            {dataWarning && !dataError && (
+              <div className="tv-banner">
+                <span>{dataWarning}</span>
+                <button type="button" onClick={() => setDataWarning(null)} aria-label="Dismiss">✕</button>
+              </div>
+            )}
 
-          {status === "completed" && !showResults && (
-            <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-profit/30 bg-profit/10 px-4 py-2">
-              <p className="text-sm font-semibold text-profit">Session Complete</p>
-              <button
-                onClick={() => useBacktest.getState().setShowResults(true)}
-                className="rounded bg-profit/20 px-2 py-0.5 text-[11px] font-medium text-profit hover:bg-profit/30"
-              >
-                View Results
-              </button>
-            </div>
-          )}
+            {(status === "completed" || status === "breached") && !showResults && (
+              <div className={`tv-banner ${status === "completed" ? "ok" : "bad"}`}>
+                <b>{status === "completed" ? "Session complete" : "Account breached"}</b>
+                <button type="button" className="tv-linkbtn" onClick={() => useBacktest.getState().setShowResults(true)}>View results</button>
+              </div>
+            )}
+          </div>
 
-          {status === "breached" && !showResults && (
-            <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-loss/30 bg-loss/10 px-4 py-2">
-              <p className="text-sm font-semibold text-loss">Account Breached</p>
-              <button
-                onClick={() => useBacktest.getState().setShowResults(true)}
-                className="rounded bg-loss/20 px-2 py-0.5 text-[11px] font-medium text-loss hover:bg-loss/30"
-              >
-                View Results
-              </button>
-            </div>
-          )}
-
-          <BacktestChart
-            candles={visibleCandles}
-            symbol={activeInstrument}
-            openPositions={openPositions}
-            pendingOrders={pendingOrders}
-            closedTrades={closedTrades}
-            drawings={currentDrawings}
-            activeDrawingTool={activeDrawingTool}
-            onDrawingAdded={(drawing) => addDrawing(activeInstrument, drawing)}
-            tickSize={instrumentBySymbol(activeInstrument)?.tickSize}
-            onUpdatePositionRisk={(positionOrderId, updates) =>
-              updatePositionRisk(activeInstrument, positionOrderId, updates)
-            }
-            onUpdatePendingOrderPrice={(orderId, price) =>
-              updatePendingOrder(activeInstrument, orderId, { price })
-            }
-          />
+          <RangeBar />
+          <PaperPanel />
         </div>
-
-        {/* Right trading panel */}
-        <TradingPanel />
       </div>
 
-      {/* Bottom status bar */}
-      <BottomBar />
+      {alertNotice && (
+        <div className="tv-toast" role="status">
+          <b style={{ color: "#ff9800" }}>Alert</b><span>{alertNotice.text}</span>
+          <button type="button" onClick={() => useBacktest.getState().clearAlertNotice()} aria-label="Dismiss">✕</button>
+        </div>
+      )}
 
-      {/* Session results overlay */}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+
       {showResults && (
-        <SessionResults
-          onReturnToSessions={() => {
-            saveSession();
-            router.push("/lab#backtesting");
-          }}
-        />
+        <SessionResults onReturnToSessions={() => { saveSession(); router.push("/lab#backtesting"); }} />
       )}
     </div>
   );
@@ -327,11 +336,7 @@ function BacktestWorkspaceInner() {
 
 export default function BacktestSessionPage() {
   return (
-    <Suspense fallback={
-      <div className="grid min-h-dvh place-items-center bg-[#131722]">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gold/30 border-t-gold" />
-      </div>
-    }>
+    <Suspense fallback={<div className="tv-root" style={{ placeItems: "center", display: "grid" }}><div className="tv-spinner" /></div>}>
       <BacktestWorkspaceInner />
     </Suspense>
   );

@@ -7,7 +7,7 @@
 /*  prevents performance issues in the journal store.                  */
 /* ------------------------------------------------------------------ */
 
-import type { BacktestSessionSummary, BacktestConfig, BacktestStatus, ChartSettings, DrawingObject } from './types';
+import type { BacktestSessionSummary, BacktestConfig, BacktestStatus, ChartSettings, DrawingObject, PriceAlert } from './types';
 import type { SimTrade } from './engine/order-engine';
 import type { AccountState } from './engine/account-tracker';
 
@@ -22,6 +22,8 @@ export interface PersistedSession {
   accountState: AccountState;
   chartSettings: ChartSettings;
   drawings: Record<string, DrawingObject[]>; // per instrument
+  /** Price alerts (optional — older sessions don't have them). */
+  alerts?: PriceAlert[];
   timeframe: string;
   playbackSpeed: number;
   createdAt: number;

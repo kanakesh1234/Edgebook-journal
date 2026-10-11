@@ -209,7 +209,7 @@ export interface BacktestSessionSummary {
   createdAt: number;
 }
 
-export type ChartType = 'candlestick' | 'bar' | 'line';
+export type ChartType = 'candlestick' | 'hollow-candles' | 'bar' | 'line' | 'area' | 'baseline';
 
 export interface ChartColors {
   bullBody: string;
@@ -258,7 +258,17 @@ export const DEFAULT_CHART_COLORS_LIGHT: ChartColors = {
   text: '#131722',
 };
 
-export type DrawingToolType = 'horizontal-line' | 'trend-line' | 'ray' | 'rectangle' | 'price-range';
+export type DrawingToolType =
+  // original tools (persisted sessions may contain these)
+  | 'horizontal-line' | 'trend-line' | 'ray' | 'rectangle' | 'price-range'
+  // lines
+  | 'info-line' | 'extended-line' | 'horizontal-ray' | 'vertical-line' | 'cross-line' | 'parallel-channel' | 'arrow'
+  // fib / forecasting / measure
+  | 'fib-retracement' | 'long-position' | 'short-position' | 'date-range' | 'date-price-range' | 'measure'
+  // shapes & annotation
+  | 'brush' | 'ellipse' | 'triangle' | 'text' | 'emoji';
+
+export type DrawingLineStyle = 'solid' | 'dashed' | 'dotted';
 
 export interface DrawingObject {
   id: string;
@@ -268,4 +278,27 @@ export interface DrawingObject {
   color: string;
   lineWidth: number;
   label?: string;
+  /** Stroke style. Absent on older sessions → solid. */
+  lineStyle?: DrawingLineStyle;
+  /** 0..1 opacity of the filled area (shapes, ranges, positions). */
+  fillOpacity?: number;
+  /** Text for text drawings. */
+  text?: string;
+  fontSize?: number;
+  /** Glyph for emoji drawings. */
+  emoji?: string;
+  locked?: boolean;
+  hidden?: boolean;
+  /** Removed automatically on the next click (Measure tool). */
+  temp?: boolean;
+}
+
+export interface PriceAlert {
+  id: string;
+  symbol: string;
+  price: number;
+  /** Direction the price has to cross: "up" = rises to price, "down" = falls to price. */
+  direction: 'up' | 'down';
+  triggered: boolean;
+  triggeredAt?: number;
 }

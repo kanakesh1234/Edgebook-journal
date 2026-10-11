@@ -1,124 +1,207 @@
 "use client";
 
-import React from "react";
-import { cn } from "@/lib/utils";
-import { useBacktest } from "@/lib/backtesting/store";
+import { useCallback, useRef, useState } from "react";
+import { useBacktest, type ActiveTool } from "@/lib/backtesting/store";
+import { EMOJI_CHOICES, TOOLS } from "@/lib/backtesting/drawings/tools";
 import type { DrawingToolType } from "@/lib/backtesting/types";
+import { I } from "./tv-icons";
+import { useOutside } from "./tv-ui";
 
-export default function LeftToolbar() {
-  const { activeDrawingTool, setActiveDrawingTool, clearDrawings, activeInstrument } = useBacktest();
+interface Item { tool: ActiveTool & string; label: string; icon: string; hint?: string }
+interface Group { id: string; title: string; items: Item[] }
+
+const t = (tool: DrawingToolType, icon: string): Item => ({
+  tool, icon, label: TOOLS[tool].label, hint: TOOLS[tool].shortcut ? `Alt+${TOOLS[tool].shortcut.toUpperCase()}` : undefined,
+});
+
+const GROUPS: Group[] = [
+  {
+    id: "cursors", title: "Cursors",
+    items: [
+      { tool: "crosshair", label: "Cross", icon: "cross" },
+      { tool: "dot", label: "Dot", icon: "dot" },
+      { tool: "pointer", label: "Arrow", icon: "arrow" },
+      { tool: "eraser", label: "Eraser", icon: "eraser" },
+    ],
+  },
+  {
+    id: "lines", title: "Trend line tools",
+    items: [
+      t("trend-line", "trendLine"), t("ray", "ray"), t("info-line", "infoLine"), t("extended-line", "extendedLine"),
+      t("horizontal-line", "hLine"), t("horizontal-ray", "hRay"), t("vertical-line", "vLine"), t("cross-line", "crossLine"),
+      t("parallel-channel", "channel"), t("arrow", "arrowMarker"),
+    ],
+  },
+  { id: "fib", title: "Fibonacci tools", items: [t("fib-retracement", "fib")] },
+  {
+    id: "shapes", title: "Brushes & shapes",
+    items: [t("brush", "brush"), t("rectangle", "rect"), t("ellipse", "ellipse"), t("triangle", "triangle")],
+  },
+  { id: "text", title: "Text", items: [t("text", "text")] },
+  { id: "emoji", title: "Icons", items: [t("emoji", "emoji")] },
+  {
+    id: "measure", title: "Forecasting & measurement",
+    items: [
+      t("long-position", "longPos"), t("short-position", "shortPos"), t("price-range", "priceRange"),
+      t("date-range", "dateRange"), t("date-price-range", "datePriceRange"), t("measure", "ruler"),
+    ],
+  },
+  { id: "zoom", title: "Zoom", items: [{ tool: "zoom", label: "Zoom in", icon: "zoomIn" }] },
+];
+
+const CURSOR_TOOLS = new Set<string>(["cursor", "crosshair", "dot", "pointer"]);
+
+export default function LeftToolbar({ symbol }: { symbol: string }) {
+  const tool = useBacktest((s) => s.activeDrawingTool);
+  const setTool = useBacktest((s) => s.setActiveDrawingTool);
+  const magnet = useBacktest((s) => s.magnetMode);
+  const setMagnet = useBacktest((s) => s.setMagnetMode);
+  const stay = useBacktest((s) => s.stayInDrawing);
+  const setStay = useBacktest((s) => s.setStayInDrawing);
+  const locked = useBacktest((s) => s.drawingsLocked);
+  const setLocked = useBacktest((s) => s.setDrawingsLocked);
+  const hidden = useBacktest((s) => s.drawingsHidden);
+  const setHidden = useBacktest((s) => s.setDrawingsHidden);
+  const clearDrawings = useBacktest((s) => s.clearDrawings);
+  const activeEmoji = useBacktest((s) => s.activeEmoji);
+  const setEmoji = useBacktest((s) => s.setActiveEmoji);
+  const count = useBacktest((s) => (s.drawings[symbol] || []).length);
+
+  const [last, setLast] = useState<Record<string, number>>({});
+  const [open, setOpen] = useState<{ id: string; top: number; left: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const flyRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(null), []);
+  useOutside(flyRef, !!open, close);
+
+  const openFly = (id: string, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    setOpen((o) => (o?.id === id ? null : { id, top: r.top, left: r.right + 8 }));
+  };
+
+  const groupActive = (g: Group): boolean =>
+    g.id === "cursors" ? CURSOR_TOOLS.has(tool ?? "cursor") || tool === "eraser" : g.items.some((i) => i.tool === tool);
+
+  const pickItem = (g: Group, idx: number) => {
+    const it = g.items[idx];
+    setLast((l) => ({ ...l, [g.id]: idx }));
+    setTool(it.tool);
+    setOpen(null);
+  };
 
   return (
-    <div className="flex flex-col items-center gap-1 py-2 w-10 bg-[#131722] border-r border-white/10 h-full">
-      <button
-        title="Cursor"
-        onClick={() => setActiveDrawingTool("cursor")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "cursor" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-          <path d="M13 13l6 6" />
-        </svg>
-      </button>
+    <div className="tv-left" ref={rootRef}>
+      {GROUPS.map((g) => {
+        const idx = Math.min(last[g.id] ?? 0, g.items.length - 1);
+        let cur = g.items[idx];
+        // Cursor group icon mirrors the active cursor flavour.
+        if (g.id === "cursors" && tool && g.items.some((i) => i.tool === tool)) cur = g.items.find((i) => i.tool === tool)!;
+        const active = groupActive(g);
+        const multi = g.items.length > 1 || g.id === "emoji";
+        const label = `${cur.label}${cur.hint ? ` (${cur.hint})` : ""}`;
+        return (
+          <div className="tv-lgroup" key={g.id}>
+            <button
+              type="button" title={label} aria-label={label}
+              className={`tv-lbtn${active ? " is-on" : ""}${multi ? "" : " solo"}`}
+              onClick={(e) => {
+                if (g.id === "emoji") { openFly(g.id, e.currentTarget.parentElement as HTMLElement); return; }
+                if (g.id === "cursors") { setTool(cur.tool === "crosshair" ? "crosshair" : cur.tool); return; }
+                // Clicking the active tool again drops back to the cursor, like TradingView.
+                setTool(active && g.id !== "cursors" && tool === cur.tool ? "cursor" : cur.tool);
+              }}
+            >
+              {g.id === "emoji" && tool === "emoji" ? <span style={{ fontSize: 20 }}>{activeEmoji}</span> : <I name={cur.icon} />}
+            </button>
+            {multi && (
+              <button
+                type="button" aria-label={`${g.title} menu`} className={`tv-lcaret${open?.id === g.id ? " is-open" : ""}`}
+                onClick={(e) => openFly(g.id, e.currentTarget.parentElement as HTMLElement)}
+              >
+                <I name="chevronRight" size={14} />
+              </button>
+            )}
+          </div>
+        );
+      })}
 
-      <button
-        title="Crosshair"
-        onClick={() => setActiveDrawingTool("crosshair")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "crosshair" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-      </button>
+      <div className="tv-lsep" />
 
-      <div className="w-6 h-px bg-white/10 my-1" />
+      <div className="tv-lgroup">
+        <button
+          type="button" title={`Magnet mode: ${magnet}`} className={`tv-lbtn${magnet !== "off" ? " is-on" : ""}`}
+          onClick={(e) => openFly("magnet", e.currentTarget.parentElement as HTMLElement)}
+        >
+          <I name="magnet" />
+        </button>
+      </div>
+      <div className="tv-lgroup">
+        <button type="button" title="Stay in drawing mode" className={`tv-lbtn solo${stay ? " is-on" : ""}`} onClick={() => setStay(!stay)}>
+          <I name="stayDraw" />
+        </button>
+      </div>
+      <div className="tv-lgroup">
+        <button type="button" title="Lock all drawings" className={`tv-lbtn solo${locked ? " is-on" : ""}`} onClick={() => setLocked(!locked)}>
+          <I name={locked ? "lock" : "unlock"} />
+        </button>
+      </div>
+      <div className="tv-lgroup">
+        <button type="button" title={hidden ? "Show all drawings" : "Hide all drawings (Ctrl+Alt+H)"} className={`tv-lbtn solo${hidden ? " is-on" : ""}`} onClick={() => setHidden(!hidden)}>
+          <I name={hidden ? "eyeOff" : "eye"} />
+        </button>
+      </div>
 
-      <button
-        title="Horizontal Line"
-        onClick={() => setActiveDrawingTool("horizontal-line")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "horizontal-line" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 12h16" />
-        </svg>
-      </button>
+      <div className="tv-lsep" />
 
-      <button
-        title="Trend Line"
-        onClick={() => setActiveDrawingTool("trend-line")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "trend-line" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M5 19L19 5" />
-        </svg>
-      </button>
+      <div className="tv-lgroup">
+        <button
+          type="button" title="Remove drawings" disabled={count === 0} className="tv-lbtn solo"
+          onClick={() => clearDrawings(symbol)}
+        >
+          <I name="trash" />
+        </button>
+      </div>
 
-      <button
-        title="Ray"
-        onClick={() => setActiveDrawingTool("ray")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "ray" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M4 12h16" />
-          <path d="M14 6l6 6-6 6" />
-        </svg>
-      </button>
-
-      <button
-        title="Rectangle"
-        onClick={() => setActiveDrawingTool("rectangle")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "rectangle" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
-        </svg>
-      </button>
-
-      <button
-        title="Price Range"
-        onClick={() => setActiveDrawingTool("price-range")}
-        className={cn(
-          "flex items-center justify-center w-8 h-8 rounded hover:bg-white/10 text-white/70",
-          activeDrawingTool === "price-range" && "bg-gold/20 text-gold border border-gold/50"
-        )}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 8L3 8" />
-          <path d="M21 16L3 16" />
-          <path d="M12 4v16" />
-        </svg>
-      </button>
-
-      <div className="w-6 h-px bg-white/10 my-1" />
-
-      <button
-        title="Delete All Drawings"
-        onClick={() => activeInstrument && clearDrawings(activeInstrument)}
-        className="flex items-center justify-center w-8 h-8 rounded hover:bg-red-500/20 text-white/70 hover:text-red-500"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 6h18" />
-          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-        </svg>
-      </button>
+      {open && (
+        <div ref={flyRef} className="tv-fly" style={{ top: Math.max(8, open.top - 4), left: open.left }}>
+          {open.id === "emoji" ? (
+            <div className="tv-emoji-grid">
+              {EMOJI_CHOICES.map((e) => (
+                <button key={e} type="button" onClick={() => { setEmoji(e); setTool("emoji"); setOpen(null); }}>{e}</button>
+              ))}
+            </div>
+          ) : open.id === "magnet" ? (
+            <>
+              {(["off", "weak", "strong"] as const).map((m) => (
+                <button key={m} type="button" className={`tv-menu-item${magnet === m ? " is-active" : ""}`} onClick={() => { setMagnet(m); setOpen(null); }}>
+                  <span><I name="magnet" size={22} />{m === "off" ? "Magnet off" : m === "weak" ? "Weak magnet" : "Strong magnet"}</span>
+                  {magnet === m && <I name="check" size={18} />}
+                </button>
+              ))}
+            </>
+          ) : (
+            (() => {
+              const g = GROUPS.find((x) => x.id === open.id);
+              if (!g) return null;
+              return (
+                <>
+                  <div className="tv-menu-head">{g.title.toUpperCase()}</div>
+                  {g.items.map((it, i) => (
+                    <button
+                      key={it.tool + it.icon} type="button"
+                      className={`tv-menu-item${tool === it.tool ? " is-active" : ""}`}
+                      onClick={() => pickItem(g, i)}
+                    >
+                      <span><I name={it.icon} size={24} />{it.label}</span>
+                      {it.hint && <kbd>{it.hint}</kbd>}
+                    </button>
+                  ))}
+                </>
+              );
+            })()
+          )}
+        </div>
+      )}
     </div>
   );
 }

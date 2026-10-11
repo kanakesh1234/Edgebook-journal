@@ -18,6 +18,7 @@ import type {
   DrawingObject,
   DrawingToolType,
   BacktestSessionSummary,
+  PriceAlert,
 } from './types';
 import type { CandleData } from './data/types';
 import { OrderEngine, type SimTrade, type SimOrder, type SimPosition } from './engine/order-engine';
@@ -110,7 +111,28 @@ export interface BacktestStoreState {
 
   /* --- Drawings --- */
   drawings: Record<string, DrawingObject[]>; // per instrument
-  activeDrawingTool: DrawingToolType | 'cursor' | 'crosshair' | null;
+  activeDrawingTool: ActiveTool;
+  selectedDrawingId: string | null;
+  drawingsLocked: boolean;
+  drawingsHidden: boolean;
+  magnetMode: 'off' | 'weak' | 'strong';
+  stayInDrawing: boolean;
+  activeEmoji: string;
+  /** Last style used per tool — new drawings start with it (TradingView does the same). */
+  toolStyles: Partial<Record<DrawingToolType, Partial<DrawingObject>>>;
+  /** Undo/redo stacks of drawing snapshots, per instrument. */
+  drawHistory: { past: Record<string, DrawingObject[][]>; future: Record<string, DrawingObject[][]> };
+
+  /* --- Chart extras --- */
+  orderQty: number;
+  alerts: PriceAlert[];
+  alertNotice: { id: string; text: string } | null;
+  scale: { mode: 'normal' | 'log' | 'percent'; auto: boolean; invert: boolean };
+  /** Bars before the replay window, shown so there is context to the left (never traded). */
+  historyCandles: Record<string, CandleData[]>;
+  /** Replay "Jump to" is waiting for a bar click. */
+  selectingBar: boolean;
+  tradePanelOpen: boolean;
 
   /* --- Results --- */
   showResults: boolean;
@@ -190,8 +212,36 @@ export interface BacktestStoreState {
   /** Drawings. */
   addDrawing: (symbol: string, drawing: DrawingObject) => void;
   removeDrawing: (symbol: string, drawingId: string) => void;
-  setActiveDrawingTool: (tool: DrawingToolType | 'cursor' | 'crosshair' | null) => void;
+  setActiveDrawingTool: (tool: ActiveTool) => void;
   clearDrawings: (symbol: string) => void;
+  selectDrawing: (id: string | null) => void;
+  /** Patch a drawing. `record` pushes an undo snapshot first (false while dragging). */
+  updateDrawing: (symbol: string, id: string, patch: Partial<DrawingObject>, record?: boolean) => void;
+  /** Push one undo snapshot (call once at the start of a drag). */
+  beginDrawingEdit: (symbol: string) => void;
+  cloneDrawing: (symbol: string, id: string) => string | null;
+  removeTempDrawings: (symbol: string) => void;
+  undoDrawing: (symbol: string) => void;
+  redoDrawing: (symbol: string) => void;
+  setToolStyle: (tool: DrawingToolType, patch: Partial<DrawingObject>) => void;
+  setDrawingsLocked: (v: boolean) => void;
+  setDrawingsHidden: (v: boolean) => void;
+  setMagnetMode: (m: 'off' | 'weak' | 'strong') => void;
+  setStayInDrawing: (v: boolean) => void;
+  setActiveEmoji: (e: string) => void;
+
+  /** Chart extras. */
+  setOrderQty: (q: number) => void;
+  addAlert: (symbol: string, price: number, direction: 'up' | 'down') => void;
+  removeAlert: (id: string) => void;
+  clearAlertNotice: () => void;
+  setScale: (patch: Partial<{ mode: 'normal' | 'log' | 'percent'; auto: boolean; invert: boolean }>) => void;
+  setSelectingBar: (v: boolean) => void;
+  setTradePanelOpen: (v: boolean) => void;
+  /** Fast-forward the replay (through the order engine, bar by bar) to a bar time. Forward only. */
+  advanceTo: (time: number) => void;
+  /** Fetch bars before the replay window for left-hand context. Never throws. */
+  loadHistory: () => Promise<void>;
 
   /** Session navigation. */
   navigateNextDay: () => Promise<void>;
@@ -207,6 +257,26 @@ export interface BacktestStoreState {
 
   /** Reset everything. */
   reset: () => void;
+}
+
+/** Everything the left toolbar can arm: a drawing, a cursor flavour, the eraser or box-zoom. */
+export type ActiveTool = DrawingToolType | 'cursor' | 'crosshair' | 'dot' | 'pointer' | 'eraser' | 'zoom' | null;
+
+const HISTORY_CAP = 60;
+
+/** How far back (calendar days) the left-hand context reaches, by timeframe. */
+function lookbackDays(tf: string): number {
+  const m = /^(\d+)(s|m|h|d|w)$/i.exec(tf.trim());
+  if (!m) return 3;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  const secs = unit === 's' ? n : unit === 'm' ? n * 60 : unit === 'h' ? n * 3600 : unit === 'd' ? n * 86400 : n * 604800;
+  if (secs <= 60) return 2;
+  if (secs <= 300) return 3;
+  if (secs <= 900) return 5;
+  if (secs <= 3600) return 10;
+  if (secs <= 14400) return 30;
+  return 180;
 }
 
 const DEFAULT_CHART_SETTINGS: ChartSettings = {
@@ -252,6 +322,19 @@ const INITIAL_ACCOUNT_STATE: AccountState = {
   breachInfo: null,
 };
 
+type SetFn = (partial: Partial<BacktestStoreState> | ((s: BacktestStoreState) => Partial<BacktestStoreState>)) => void;
+
+/** Snapshot one instrument's drawings onto its undo stack (and drop its redo stack). */
+function pushDrawHistory(set: SetFn, get: () => BacktestStoreState, symbol: string) {
+  const snap = get().drawings[symbol] || [];
+  set(s => ({
+    drawHistory: {
+      past: { ...s.drawHistory.past, [symbol]: [...(s.drawHistory.past[symbol] || []), snap].slice(-HISTORY_CAP) },
+      future: { ...s.drawHistory.future, [symbol]: [] },
+    },
+  }));
+}
+
 export const useBacktest = create<BacktestStoreState>((set, get) => ({
   // Session
   sessionId: null,
@@ -291,7 +374,24 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
 
   // Drawings
   drawings: {},
-  activeDrawingTool: null,
+  activeDrawingTool: 'cursor',
+  selectedDrawingId: null,
+  drawingsLocked: false,
+  drawingsHidden: false,
+  magnetMode: 'off',
+  stayInDrawing: false,
+  activeEmoji: '⭐',
+  toolStyles: {},
+  drawHistory: { past: {}, future: {} },
+
+  // Chart extras
+  orderQty: 1,
+  alerts: [],
+  alertNotice: null,
+  scale: { mode: 'normal', auto: true, invert: false },
+  historyCandles: {},
+  selectingBar: false,
+  tradePanelOpen: true,
 
   // Results
   showResults: false,
@@ -325,6 +425,11 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       openPositions: [],
       closedTrades: [],
       drawings: Object.fromEntries(instruments.map(s => [s, []])),
+      selectedDrawingId: null,
+      drawHistory: { past: {}, future: {} },
+      alerts: [],
+      alertNotice: null,
+      historyCandles: {},
       accountState: {
         ...INITIAL_ACCOUNT_STATE,
         startingBalance: config.startingBalance,
@@ -362,6 +467,10 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       accountState: engineRegistry.accountTracker?.state ?? session.accountState,
       chartSettings: session.chartSettings || DEFAULT_CHART_SETTINGS,
       drawings: session.drawings || {},
+      selectedDrawingId: null,
+      drawHistory: { past: {}, future: {} },
+      alerts: session.alerts || [],
+      historyCandles: {},
       timeframe: (session.timeframe || session.config.timeframe) as any,
       speed: (session.playbackSpeed || 1) as PlaybackSpeed,
       playing: false,
@@ -382,6 +491,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       accountState: state.accountState || INITIAL_ACCOUNT_STATE,
       chartSettings: state.chartSettings,
       drawings: state.drawings,
+      alerts: state.alerts,
       timeframe: state.timeframe,
       playbackSpeed: state.speed,
       createdAt: Date.now(), // will be overwritten if already exists
@@ -477,6 +587,29 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       set({ currentTime: nextCandle.time });
       get().updateVisibleCandles();
       get().syncEngineState();
+
+      // Price alerts: fire when this bar's range reaches the level, then pause (like TradingView).
+      const pendingAlerts = get().alerts.filter((a) => !a.triggered);
+      if (pendingAlerts.length) {
+        let fired: PriceAlert | null = null;
+        const nextAlerts = get().alerts.map((a) => {
+          if (a.triggered) return a;
+          const bar = (allCandles[a.symbol] || []).find((c) => c.time === nextCandle.time);
+          if (!bar) return a;
+          const hit = a.direction === 'up' ? bar.high >= a.price : bar.low <= a.price;
+          if (!hit) return a;
+          fired = fired ?? a;
+          return { ...a, triggered: true, triggeredAt: nextCandle.time };
+        });
+        if (fired) {
+          const f = fired as PriceAlert;
+          set({
+            alerts: nextAlerts,
+            playing: false,
+            alertNotice: { id: uid('alert'), text: `${f.symbol} crossed ${f.price.toFixed(2)}` },
+          });
+        }
+      }
 
       const acct = engineRegistry.accountTracker?.state;
       if (acct?.breached) {
@@ -590,25 +723,159 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     });
   },
 
-  addDrawing: (symbol, drawing) => set(s => ({
-    drawings: {
-      ...s.drawings,
-      [symbol]: [...(s.drawings[symbol] || []), drawing],
-    },
-  })),
+  addDrawing: (symbol, drawing) => {
+    pushDrawHistory(set, get, symbol);
+    set(s => ({
+      drawings: { ...s.drawings, [symbol]: [...(s.drawings[symbol] || []), drawing] },
+    }));
+  },
 
-  removeDrawing: (symbol, drawingId) => set(s => ({
-    drawings: {
-      ...s.drawings,
-      [symbol]: (s.drawings[symbol] || []).filter(d => d.id !== drawingId),
-    },
-  })),
+  removeDrawing: (symbol, drawingId) => {
+    pushDrawHistory(set, get, symbol);
+    set(s => ({
+      drawings: { ...s.drawings, [symbol]: (s.drawings[symbol] || []).filter(d => d.id !== drawingId) },
+      selectedDrawingId: s.selectedDrawingId === drawingId ? null : s.selectedDrawingId,
+    }));
+  },
 
-  setActiveDrawingTool: (tool) => set({ activeDrawingTool: tool }),
+  setActiveDrawingTool: (tool) => {
+    // Leaving a tool abandons any half-finished measure and clears the selection ring.
+    set({ activeDrawingTool: tool, selectedDrawingId: tool && tool !== 'cursor' ? null : get().selectedDrawingId });
+  },
 
-  clearDrawings: (symbol) => set(s => ({
-    drawings: { ...s.drawings, [symbol]: [] },
+  clearDrawings: (symbol) => {
+    pushDrawHistory(set, get, symbol);
+    set(s => ({ drawings: { ...s.drawings, [symbol]: [] }, selectedDrawingId: null }));
+  },
+
+  selectDrawing: (id) => set({ selectedDrawingId: id }),
+
+  updateDrawing: (symbol, id, patch, record = true) => {
+    if (record) pushDrawHistory(set, get, symbol);
+    set(s => ({
+      drawings: {
+        ...s.drawings,
+        [symbol]: (s.drawings[symbol] || []).map(d => (d.id === id ? { ...d, ...patch } : d)),
+      },
+    }));
+  },
+
+  beginDrawingEdit: (symbol) => pushDrawHistory(set, get, symbol),
+
+  cloneDrawing: (symbol, id) => {
+    const src = (get().drawings[symbol] || []).find(d => d.id === id);
+    if (!src) return null;
+    const copy: DrawingObject = {
+      ...src,
+      id: uid('drw'),
+      locked: false,
+      points: src.points.map(p => ({ time: p.time + 300, price: p.price })),
+    };
+    pushDrawHistory(set, get, symbol);
+    set(s => ({
+      drawings: { ...s.drawings, [symbol]: [...(s.drawings[symbol] || []), copy] },
+      selectedDrawingId: copy.id,
+    }));
+    return copy.id;
+  },
+
+  removeTempDrawings: (symbol) => {
+    const list = get().drawings[symbol] || [];
+    if (!list.some(d => d.temp)) return;
+    set(s => ({ drawings: { ...s.drawings, [symbol]: list.filter(d => !d.temp) } }));
+  },
+
+  undoDrawing: (symbol) => {
+    const { drawHistory, drawings } = get();
+    const past = drawHistory.past[symbol] || [];
+    if (past.length === 0) return;
+    const prev = past[past.length - 1];
+    set(s => ({
+      drawings: { ...s.drawings, [symbol]: prev },
+      selectedDrawingId: null,
+      drawHistory: {
+        past: { ...s.drawHistory.past, [symbol]: past.slice(0, -1) },
+        future: { ...s.drawHistory.future, [symbol]: [...(s.drawHistory.future[symbol] || []), drawings[symbol] || []] },
+      },
+    }));
+  },
+
+  redoDrawing: (symbol) => {
+    const { drawHistory, drawings } = get();
+    const future = drawHistory.future[symbol] || [];
+    if (future.length === 0) return;
+    const next = future[future.length - 1];
+    set(s => ({
+      drawings: { ...s.drawings, [symbol]: next },
+      selectedDrawingId: null,
+      drawHistory: {
+        past: { ...s.drawHistory.past, [symbol]: [...(s.drawHistory.past[symbol] || []), drawings[symbol] || []] },
+        future: { ...s.drawHistory.future, [symbol]: future.slice(0, -1) },
+      },
+    }));
+  },
+
+  setToolStyle: (tool, patch) => set(s => ({ toolStyles: { ...s.toolStyles, [tool]: { ...s.toolStyles[tool], ...patch } } })),
+  setDrawingsLocked: (v) => set({ drawingsLocked: v }),
+  setDrawingsHidden: (v) => set(s => ({
+    drawingsHidden: v,
+    selectedDrawingId: v ? null : s.selectedDrawingId,
+    // Showing again also revives anything hidden one-by-one, so nothing can stay invisible forever.
+    drawings: v ? s.drawings : Object.fromEntries(Object.entries(s.drawings).map(([k, list]) => [k, list.map(d => (d.hidden ? { ...d, hidden: false } : d))])),
   })),
+  setMagnetMode: (m) => set({ magnetMode: m }),
+  setStayInDrawing: (v) => set({ stayInDrawing: v }),
+  setActiveEmoji: (e) => set({ activeEmoji: e }),
+
+  setOrderQty: (q) => set({ orderQty: Math.max(1, Math.floor(q) || 1) }),
+
+  addAlert: (symbol, price, direction) => set(s => ({
+    alerts: [...s.alerts, { id: uid('alert'), symbol, price, direction, triggered: false }],
+  })),
+  removeAlert: (id) => set(s => ({ alerts: s.alerts.filter(a => a.id !== id) })),
+  clearAlertNotice: () => set({ alertNotice: null }),
+
+  setScale: (patch) => set(s => ({ scale: { ...s.scale, ...patch } })),
+  setSelectingBar: (v) => set({ selectingBar: v }),
+  setTradePanelOpen: (v) => set({ tradePanelOpen: v }),
+
+  advanceTo: (time) => {
+    const noticeAtStart = get().alertNotice?.id;
+    let guard = 0;
+    set({ playing: false });
+    while (guard++ < 100000) {
+      const st = get();
+      if (st.currentTime >= time || st.status === 'completed' || st.status === 'breached') break;
+      const before = st.currentTime;
+      st.advanceClock();
+      const after = get();
+      if (after.currentTime === before) break;
+      if (after.alertNotice?.id !== noticeAtStart) break;
+    }
+  },
+
+  loadHistory: async () => {
+    try {
+      const { config, instruments, timeframe, allCandles } = get();
+      if (!config) return;
+      const { loadSymbolCandles } = await import('./data/loader');
+      const days = lookbackDays(timeframe);
+      for (const symbol of instruments) {
+        const first = (allCandles[symbol] || [])[0]?.time;
+        if (!first) continue;
+        const startIso = new Date((first - days * 86400) * 1000).toISOString();
+        const endIso = new Date(first * 1000).toISOString();
+        const r = await loadSymbolCandles(symbol, timeframe, startIso, endIso);
+        // Session may have moved on (day navigation / timeframe change) while we waited.
+        if ((get().allCandles[symbol] || [])[0]?.time !== first || get().timeframe !== timeframe) continue;
+        set(s => ({
+          historyCandles: { ...s.historyCandles, [symbol]: r.candles.filter(c => c.time < first) },
+        }));
+      }
+    } catch {
+      /* context bars are optional — a failed fetch must never break the replay */
+    }
+  },
 
   navigateNextDay: async () => {
     const state = get();
@@ -629,7 +896,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     if (nextSession.startUtc > periodEndSec) return;
 
     // Fetch data for the new day
-    set({ dataLoading: true, playing: false });
+    set({ dataLoading: true, playing: false, historyCandles: {} });
     const syms = state.instruments;
     const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(nextSession.startUtc * 1000).toISOString();
@@ -656,6 +923,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     }
     get().updateVisibleCandles();
     get().saveSession();
+    void get().loadHistory();
   },
 
   navigatePrevDay: async () => {
@@ -675,7 +943,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       : 0;
     if (prevSession.endUtc < periodStartSec) return;
 
-    set({ dataLoading: true, playing: false });
+    set({ dataLoading: true, playing: false, historyCandles: {} });
     const syms = state.instruments;
     const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(prevSession.startUtc * 1000).toISOString();
@@ -700,6 +968,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     }
     get().updateVisibleCandles();
     get().saveSession();
+    void get().loadHistory();
   },
 
   changeTimeframe: (tf) => {
@@ -752,7 +1021,13 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       closedTrades: [],
       accountState: null,
       drawings: {},
-      activeDrawingTool: null,
+      activeDrawingTool: 'cursor',
+      selectedDrawingId: null,
+      drawHistory: { past: {}, future: {} },
+      alerts: [],
+      alertNotice: null,
+      historyCandles: {},
+      selectingBar: false,
       showResults: false,
     });
   },

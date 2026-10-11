@@ -1,181 +1,246 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { cn } from "@/lib/utils"
-import { useBacktest } from "@/lib/backtesting/store"
-import { useTheme, setThemeChoice } from "@/lib/theme"
-import { formatMoney } from "@/lib/format"
-import { pnlClass } from "@/components/ui/misc"
-import PlaybackControls from "@/components/backtesting/playback-controls"
-import type { Timeframe } from "@/lib/backtesting/types"
-import type { PlaybackSpeed } from "@/lib/backtesting/engine/clock"
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useBacktest } from "@/lib/backtesting/store";
+import { instrumentBySymbol } from "@/lib/backtesting/instruments";
+import { setThemeChoice, useTheme } from "@/lib/theme";
+import { formatMoney } from "@/lib/format";
+import type { ChartType, Timeframe } from "@/lib/backtesting/types";
+import { emitChartCommand } from "./chart-bus";
+import { fmtPrice } from "./drawings/render";
+import { I } from "./tv-icons";
+import { useOutside } from "./tv-ui";
 
-interface TopToolbarProps {
-  onBack: () => void;
+const QUICK_TF: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1h", "4h"];
+const TF_GROUPS: Array<{ title: string; items: Timeframe[] }> = [
+  { title: "SECONDS", items: ["1s", "5s", "10s", "15s", "30s"] },
+  { title: "MINUTES", items: ["1m", "2m", "3m", "5m", "10m", "15m", "30m"] },
+  { title: "HOURS", items: ["1h", "2h", "4h"] },
+  { title: "DAYS", items: ["1D"] },
+];
+const tfName = (tf: string) => ({ "1h": "1 hour", "2h": "2 hours", "4h": "4 hours", "1D": "1 day" } as Record<string, string>)[tf]
+  ?? tf.replace(/^(\d+)s$/, "$1 second").replace(/^(\d+)m$/, "$1 minute");
+
+const CHART_TYPES: Array<{ id: ChartType; label: string; icon: string }> = [
+  { id: "bar", label: "Bars", icon: "bars" },
+  { id: "candlestick", label: "Candles", icon: "candles" },
+  { id: "hollow-candles", label: "Hollow candles", icon: "hollow" },
+  { id: "line", label: "Line", icon: "line" },
+  { id: "area", label: "Area", icon: "area" },
+  { id: "baseline", label: "Baseline", icon: "baseline" },
+];
+
+function Dropdown({
+  button, children, align = "left", title,
+}: { button: React.ReactNode; children: (close: () => void) => React.ReactNode; align?: "left" | "right"; title?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useOutside(ref, open, close);
+  return (
+    <div className="tv-dd" ref={ref}>
+      <button type="button" title={title} className={`tv-tbtn${open ? " is-on" : ""}`} onClick={() => setOpen((o) => !o)}>{button}</button>
+      {open && (
+        <div className="tv-menu" style={align === "right" ? { left: "auto", right: 0 } : undefined}>
+          {children(close)}
+        </div>
+      )}
+    </div>
+  );
 }
 
-const TIMEFRAME_BUTTONS: Timeframe[] = ['1m','3m','5m','15m','30m','1h','4h','1D']
+interface Props {
+  onBack: () => void;
+  replayOpen: boolean;
+  onToggleReplay: () => void;
+  ticketOpen: boolean;
+  onToggleTicket: () => void;
+  onOpenSettings: () => void;
+}
 
-export default function TopToolbar({ onBack }: TopToolbarProps) {
-  const {
-    config,
-    instruments,
-    activeInstrument,
-    switchInstrument,
-    timeframe,
-    changeTimeframe,
-    currentTime,
-    playing,
-    status,
-    accountState,
-    navigateNextDay,
-    navigatePrevDay,
-    endSession,
-    setShowResults,
-    saveSession
-  } = useBacktest()
+export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketOpen, onToggleTicket, onOpenSettings }: Props) {
+  const config = useBacktest((s) => s.config);
+  const instruments = useBacktest((s) => s.instruments);
+  const active = useBacktest((s) => s.activeInstrument);
+  const switchInstrument = useBacktest((s) => s.switchInstrument);
+  const timeframe = useBacktest((s) => s.timeframe);
+  const changeTimeframe = useBacktest((s) => s.changeTimeframe);
+  const chartType = useBacktest((s) => s.chartType);
+  const setChartType = useBacktest((s) => s.setChartType);
+  const account = useBacktest((s) => s.accountState);
+  const alerts = useBacktest((s) => s.alerts);
+  const addAlert = useBacktest((s) => s.addAlert);
+  const removeAlert = useBacktest((s) => s.removeAlert);
+  const candleData = useBacktest((s) => s.candleData);
+  const undo = useBacktest((s) => s.undoDrawing);
+  const redo = useBacktest((s) => s.redoDrawing);
+  const canUndo = useBacktest((s) => (s.drawHistory.past[s.activeInstrument] || []).length > 0);
+  const canRedo = useBacktest((s) => (s.drawHistory.future[s.activeInstrument] || []).length > 0);
+  const endSession = useBacktest((s) => s.endSession);
+  const saveSession = useBacktest((s) => s.saveSession);
+  const setShowResults = useBacktest((s) => s.setShowResults);
+  const { resolved: theme } = useTheme();
 
-  const { resolved: theme, setChoice } = useTheme()
+  const [fs, setFs] = useState(false);
+  useEffect(() => {
+    const on = () => setFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", on);
+    return () => document.removeEventListener("fullscreenchange", on);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen?.();
+  };
 
-  const dateObj = new Date(currentTime * 1000)
-  const timeStr = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  }).format(dateObj)
-  
-  const dateStr = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "short",
-    day: "numeric"
-  }).format(dateObj)
+  const lastClose = (candleData[active] || []).at(-1)?.close ?? null;
+  const [alertPrice, setAlertPrice] = useState("");
+  const spec = instrumentBySymbol(active);
+  const myAlerts = alerts.filter((a) => a.symbol === active && !a.triggered);
+  const curType = CHART_TYPES.find((c) => c.id === chartType) ?? CHART_TYPES[1];
 
-  const handleEndSession = async () => {
-    endSession()
-    await saveSession()
-    setShowResults(true)
-  }
+  const handleEnd = async () => {
+    endSession();
+    await saveSession();
+    setShowResults(true);
+  };
 
   return (
-    <div className="flex items-center justify-between px-3 h-10 bg-[#131722] border-b border-white/10 text-white/90 select-none text-[12px]">
-      {/* LEFT */}
-      <div className="flex items-center space-x-4 h-full">
-        <button onClick={onBack} className="hover:text-white text-white/70 transition-colors flex items-center">
-          <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
-          <span className="font-semibold">{config?.sessionName || 'Session'}</span>
+    <div className="tv-top">
+      <button type="button" className="tv-tbtn" onClick={onBack} title="Back to sessions"><I name="back" size={22} /></button>
+      <i className="tv-sep" />
+
+      {/* Symbol */}
+      <Dropdown title="Symbol" button={<span className="tv-symbol">{active || "—"}</span>}>
+        {(close) => (
+          <>
+            <div className="tv-menu-head">SESSION INSTRUMENTS</div>
+            {instruments.map((sym) => {
+              const sp = instrumentBySymbol(sym);
+              return (
+                <button key={sym} type="button" className={`tv-menu-item${sym === active ? " is-active" : ""}`} onClick={() => { switchInstrument(sym); close(); }}>
+                  <span><b>{sym}</b> <span style={{ opacity: 0.6, fontWeight: 400 }}>{sp?.name}</span></span>
+                  <kbd>{sp?.exchange}</kbd>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </Dropdown>
+      <i className="tv-sep" />
+
+      {/* Timeframes */}
+      {QUICK_TF.map((tf) => (
+        <button key={tf} type="button" title={tfName(tf)} className={`tv-tbtn${timeframe === tf ? " tv-tf-active" : ""}`} onClick={() => changeTimeframe(tf)}>
+          {tf.replace("1D", "D")}
         </button>
-        
-        {instruments && instruments.length > 0 && (
-          <div className="flex h-full items-center border-l border-white/10 pl-4 space-x-1">
-            {instruments.map((sym) => (
-              <button
-                key={sym}
-                onClick={() => switchInstrument(sym)}
-                className={cn(
-                  "px-2 py-1 rounded text-[11px] font-medium transition-colors",
-                  activeInstrument === sym ? "text-[#E6B981] bg-white/5" : "text-white/60 hover:text-white hover:bg-white/5"
-                )}
-              >
-                {sym}
+      ))}
+      {!QUICK_TF.includes(timeframe) && (
+        <button type="button" className="tv-tbtn tv-tf-active">{timeframe.replace("1D", "D")}</button>
+      )}
+      <Dropdown title="Time interval" button={<I name="chevronDown" size={18} />}>
+        {(close) => (
+          <>
+            {TF_GROUPS.map((g) => (
+              <div key={g.title}>
+                <div className="tv-menu-head">{g.title}</div>
+                {g.items.map((tf) => (
+                  <button key={tf} type="button" className={`tv-menu-item${tf === timeframe ? " is-active" : ""}`} onClick={() => { changeTimeframe(tf); close(); }}>
+                    <span>{tfName(tf)}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </>
+        )}
+      </Dropdown>
+      <i className="tv-sep" />
+
+      {/* Chart type */}
+      <Dropdown title="Candles" button={<I name={curType.icon} size={24} />}>
+        {(close) => (
+          <>
+            {CHART_TYPES.map((c) => (
+              <button key={c.id} type="button" className={`tv-menu-item${c.id === chartType ? " is-active" : ""}`} onClick={() => { setChartType(c.id); close(); }}>
+                <span><I name={c.icon} size={24} />{c.label}</span>
               </button>
+            ))}
+          </>
+        )}
+      </Dropdown>
+      <i className="tv-sep" />
+
+      {/* Alert */}
+      <Dropdown title="Create alert" button={<><I name="alert" size={22} /><span>Alert{myAlerts.length ? ` ${myAlerts.length}` : ""}</span></>}>
+        {(close) => (
+          <div style={{ padding: "6px 14px 10px", minWidth: 270 }}>
+            <div className="tv-menu-head" style={{ padding: "4px 0" }}>{active} CROSSING</div>
+            <div className="tv-row" style={{ marginBottom: 10 }}>
+              <input
+                className="tv-pill-qty" style={{ flex: 1, height: 32, border: "1px solid var(--tv-border)", borderRadius: 4, textAlign: "left", padding: "0 8px", userSelect: "text" }}
+                type="number" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
+                value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)}
+              />
+              <button
+                type="button" className="tv-btn primary" style={{ flex: "none" }}
+                disabled={lastClose === null || !(parseFloat(alertPrice) > 0)}
+                onClick={() => {
+                  const p = parseFloat(alertPrice);
+                  if (lastClose === null || !(p > 0)) return;
+                  addAlert(active, p, p >= lastClose ? "up" : "down");
+                  setAlertPrice(""); close();
+                }}
+              >
+                Create
+              </button>
+            </div>
+            {myAlerts.length === 0 ? (
+              <div style={{ color: "var(--tv-muted)", fontSize: 12 }}>No active alerts. Replay pauses when one is hit.</div>
+            ) : myAlerts.map((a) => (
+              <div key={a.id} className="tv-setrow">
+                <span>{a.direction === "up" ? "▲" : "▼"} {fmtPrice(a.price)}</span>
+                <button type="button" className="tv-linkbtn" onClick={() => removeAlert(a.id)}>Remove</button>
+              </div>
             ))}
           </div>
         )}
-      </div>
+      </Dropdown>
 
-      {/* CENTER-LEFT */}
-      <div className="flex items-center space-x-1 border-l border-white/10 pl-4">
-        {TIMEFRAME_BUTTONS.map((tf) => (
-          <button
-            key={tf}
-            onClick={() => changeTimeframe(tf)}
-            className={cn(
-              "px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors",
-              timeframe === tf ? "text-[#E6B981] bg-white/5" : "text-white/60 hover:text-white hover:bg-white/5"
-            )}
-          >
-            {tf}
-          </button>
-        ))}
-      </div>
+      {/* Replay */}
+      <button type="button" className={`tv-tbtn${replayOpen ? " is-on" : ""}`} title="Bar replay controls" onClick={onToggleReplay}>
+        <I name="replay" size={22} /><span>Replay</span>
+      </button>
+      <i className="tv-sep" />
 
-      <div className="w-px h-5 bg-white/10 mx-4" />
+      <button type="button" className="tv-tbtn" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={() => undo(active)}><I name="undo" size={22} /></button>
+      <button type="button" className="tv-tbtn" title="Redo (Ctrl+Y)" disabled={!canRedo} onClick={() => redo(active)}><I name="redo" size={22} /></button>
 
-      {/* CENTER */}
-      <div className="flex items-center space-x-2">
-        <PlaybackControls />
-        
-        <div className="flex items-center space-x-1 ml-2 border-l border-white/10 pl-2">
-          <button onClick={navigatePrevDay} className="p-1 rounded text-white/60 hover:text-white hover:bg-white/5 transition-colors" title="Previous Day">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <button onClick={navigateNextDay} className="p-1 rounded text-white/60 hover:text-white hover:bg-white/5 transition-colors" title="Next Day">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
+      <span className="tv-grow" />
+
+      {account && (
+        <div className="tv-account">
+          <div><small>Balance</small><b>{formatMoney(account.balance)}</b></div>
+          <div><small>P&amp;L</small><b className={account.netPnl > 0 ? "tv-up" : account.netPnl < 0 ? "tv-down" : ""}>{account.netPnl > 0 ? "+" : ""}{formatMoney(account.netPnl)}</b></div>
+          <div><small>Trades</small><b>{account.totalTrades}</b></div>
         </div>
-      </div>
+      )}
+      <i className="tv-sep" />
+      <span className="tv-session-name" title={config?.sessionName}>{config?.sessionName ?? "Session"}</span>
 
-      <div className="w-px h-5 bg-white/10 mx-4" />
-
-      {/* CENTER-RIGHT */}
-      <div className="flex flex-col items-center justify-center min-w-[120px]">
-        <div className="font-mono text-[13px] font-medium leading-none mb-1">
-          {timeStr}
-        </div>
-        <div className="text-[10px] text-white/50 leading-none">
-          {dateStr} <span className={cn("ml-1 font-bold", playing ? "text-[#26a69a]" : "text-[#E6B981]")}>{playing ? "LIVE" : "PAUSED"}</span>
-        </div>
-      </div>
-
-      {/* RIGHT */}
-      <div className="flex items-center space-x-4 border-l border-white/10 pl-4">
-        {accountState && (
-          <div className="flex items-center space-x-3 text-[11px]">
-            <div className="flex flex-col">
-              <span className="text-white/50 leading-none mb-0.5">Balance</span>
-              <span className="font-mono font-medium">{formatMoney(accountState.balance)}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-white/50 leading-none mb-0.5">P&L</span>
-              <span className={cn("font-mono font-medium", pnlClass(accountState.netPnl))}>
-                {accountState.netPnl > 0 ? '+' : ''}{formatMoney(accountState.netPnl)}
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-white/50 leading-none mb-0.5">Trades</span>
-              <span className="font-mono font-medium">{accountState.totalTrades}</span>
-            </div>
-          </div>
+      <button type="button" className="tv-tbtn" title="Settings" onClick={onOpenSettings}><I name="settings" size={22} /></button>
+      <button type="button" className="tv-tbtn" title="Toggle light/dark" onClick={() => setThemeChoice(theme === "dark" ? "light" : "dark")}>
+        <I name={theme === "dark" ? "sun" : "moon"} size={22} />
+      </button>
+      <button type="button" className="tv-tbtn" title="Fullscreen (Shift+F)" onClick={toggleFullscreen}><I name={fs ? "fullscreenExit" : "fullscreen"} size={22} /></button>
+      <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={22} />}>
+        {(close) => (
+          <>
+            <button type="button" className="tv-menu-item" onClick={() => { emitChartCommand({ type: "screenshot", mode: "download" }); close(); }}><span>Download image</span><kbd>Alt+S</kbd></button>
+            <button type="button" className="tv-menu-item" onClick={() => { emitChartCommand({ type: "screenshot", mode: "copy" }); close(); }}><span>Copy image</span></button>
+          </>
         )}
-        
-        <button 
-          onClick={() => {
-            setThemeChoice(theme === 'dark' ? 'light' : 'dark');
-          }}
-          className="p-1.5 rounded-full text-white/60 hover:text-white hover:bg-white/5 transition-colors"
-          title="Toggle Theme"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-          </svg>
-        </button>
-
-        <button
-          onClick={handleEndSession}
-          className="px-3 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded text-[11px] font-medium transition-colors"
-        >
-          End Session
-        </button>
-      </div>
+      </Dropdown>
+      <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} title="Order ticket">Trade</button>
+      <button type="button" className="tv-end" onClick={handleEnd}>End Session</button>
     </div>
-  )
+  );
 }

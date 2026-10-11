@@ -1,30 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createChart,
+  AreaSeries,
+  BarSeries,
+  BaselineSeries,
   CandlestickSeries,
-  createSeriesMarkers,
-  type IChartApi,
-  type ISeriesApi,
-  type CandlestickData,
-  type UTCTimestamp,
-  type IPriceLine,
-  type SeriesMarker,
-  type Time,
   ColorType,
   CrosshairMode,
+  LineSeries,
   LineStyle,
+  PriceScaleMode,
   TickMarkType,
+  createChart,
+  createSeriesMarkers,
+  type IChartApi,
+  type IPriceLine,
+  type ISeriesApi,
+  type Logical,
+  type SeriesMarker,
+  type SeriesType,
+  type Time,
+  type UTCTimestamp,
 } from "lightweight-charts";
 import type { CandleData } from "@/lib/backtesting/data/types";
-import type { SimPosition, SimOrder, SimTrade } from "@/lib/backtesting/engine/order-engine";
-import type { DrawingObject } from "@/lib/backtesting/types";
+import type { ChartType, DrawingObject } from "@/lib/backtesting/types";
+import { useBacktest } from "@/lib/backtesting/store";
+import { instrumentBySymbol } from "@/lib/backtesting/instruments";
+import { paletteFor, useChartAppearance } from "@/lib/backtesting/appearance";
+import { formatMoney } from "@/lib/format";
 import { useTheme } from "@/lib/theme";
-import { uid } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { DrawingsPrimitive } from "./drawings/primitive";
+import { DrawingController } from "./drawings/controller";
+import { Projector, timeframeSeconds } from "./drawings/projector";
+import { fmtPrice, fmtSigned } from "./drawings/render";
+import { onChartCommand } from "./chart-bus";
+import ChartContextMenu, { type ContextTarget } from "./context-menu";
+import DrawingToolbar from "./drawing-toolbar";
 
-/* New York wall-clock formatting. lightweight-charts treats timestamps as UTC and
-   prints them that way unless told otherwise; the whole app speaks America/New_York. */
+/* New York wall-clock: lightweight-charts prints UTC unless told otherwise,
+   and the whole app speaks America/New_York. */
 const NY_TZ = "America/New_York";
 const nyFmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: NY_TZ, hour12: false, ...opts });
 const fmtTick = {
@@ -47,482 +63,715 @@ const nyTickMark = (time: Time, type: TickMarkType): string => {
   }
 };
 
+const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+const TV_BLUE = "#2962FF";
+
 interface ChartProps {
+  /** Bars drawn: context history + everything replayed so far. */
   candles: CandleData[];
+  /** Times of every bar incl. not-yet-revealed ones (position drawings in the future). */
+  allTimes: number[];
   symbol: string;
-  openPositions?: SimPosition[];
-  pendingOrders?: SimOrder[];
-  closedTrades?: SimTrade[];
-  drawings?: DrawingObject[];
-  activeDrawingTool?: string | null;
-  onDrawingAdded?: (drawing: DrawingObject) => void;
-  onCrosshairMove?: (data: { time: number; open: number; high: number; low: number; close: number; volume: number } | null) => void;
-  /** Tick size for the active instrument — dragged prices snap to this. */
+  /** First bar of the replay window — the chart re-frames when it changes. */
+  anchorTime: number;
   tickSize?: number;
-  /** Called (live, while dragging) and once more on release with the final price. */
-  onUpdatePositionRisk?: (
-    positionOrderId: string,
-    updates: { stopLoss?: number | null; takeProfit?: number | null },
-  ) => void;
+  onUpdatePositionRisk?: (positionOrderId: string, updates: { stopLoss?: number | null; takeProfit?: number | null }) => void;
   onUpdatePendingOrderPrice?: (orderId: string, price: number) => void;
 }
 
 type DraggableKind = "sl" | "tp" | "order";
+interface DraggableLine { id: string; kind: DraggableKind; price: number; line: IPriceLine }
 
-interface DraggableLine {
-  id: string; // positionOrderId or pending order id
-  kind: DraggableKind;
-  price: number;
-  line: IPriceLine;
+const isPriceType = (t: ChartType) => t === "line" || t === "area" || t === "baseline";
+
+function toPoint(type: ChartType, c: CandleData) {
+  const time = c.time as UTCTimestamp;
+  return isPriceType(type)
+    ? { time, value: c.close }
+    : { time, open: c.open, high: c.high, low: c.low, close: c.close };
 }
 
-const DARK_THEME = {
-  background: "#131722",
-  textColor: "#d1d4dc",
-  gridColor: "#1e222d",
-  borderColor: "#2a2e39",
-  crosshairColor: "#758696",
-  upColor: "#26a69a",
-  downColor: "#ef5350",
-};
-
-const LIGHT_THEME = {
-  background: "#ffffff",
-  textColor: "#131722",
-  gridColor: "#e1e3eb",
-  borderColor: "#d1d4dc",
-  crosshairColor: "#9598a1",
-  upColor: "#26a69a",
-  downColor: "#ef5350",
+const rgba = (hex: string, a: number) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
 export default function BacktestChart({
-  candles,
-  symbol,
-  openPositions = [],
-  pendingOrders = [],
-  closedTrades = [],
-  drawings = [],
-  activeDrawingTool,
-  onDrawingAdded,
-  onCrosshairMove,
-  tickSize = 0.25,
-  onUpdatePositionRisk,
-  onUpdatePendingOrderPrice,
+  candles, allTimes, symbol, anchorTime, tickSize = 0.25, onUpdatePositionRisk, onUpdatePendingOrderPrice,
 }: ChartProps) {
+  /* ---------------- store ---------------- */
+  const openPositions = useBacktest((s) => s.openPositions);
+  const pendingOrders = useBacktest((s) => s.pendingOrders);
+  const closedTrades = useBacktest((s) => s.closedTrades);
+  const drawingsAll = useBacktest((s) => s.drawings);
+  const alerts = useBacktest((s) => s.alerts);
+  const tool = useBacktest((s) => s.activeDrawingTool);
+  const selectedId = useBacktest((s) => s.selectedDrawingId);
+  const drawingsHidden = useBacktest((s) => s.drawingsHidden);
+  const scale = useBacktest((s) => s.scale);
+  const chartType = useBacktest((s) => s.chartType);
+  const timeframe = useBacktest((s) => s.timeframe);
+  const selectingBar = useBacktest((s) => s.selectingBar);
+  const status = useBacktest((s) => s.status);
+  const dataLoading = useBacktest((s) => s.dataLoading);
+  const orderQty = useBacktest((s) => s.orderQty);
+  const setOrderQty = useBacktest((s) => s.setOrderQty);
+  const placeOrder = useBacktest((s) => s.placeOrder);
+
+  const { resolved: theme } = useTheme();
+  const appearance = useChartAppearance();
+  const pal = useMemo(() => paletteFor(theme, appearance), [theme, appearance]);
+  const spec = instrumentBySymbol(symbol);
+  const drawings = useMemo(() => drawingsAll[symbol] || [], [drawingsAll, symbol]);
+
+  /* ---------------- refs ---------------- */
+  const wrapRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const seriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
+  const primitiveRef = useRef<DrawingsPrimitive | null>(null);
+  const projRef = useRef<Projector | null>(null);
+  const markersRef = useRef<{ setMarkers: (m: SeriesMarker<Time>[]) => void } | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
-  const draggableLinesRef = useRef<DraggableLine[]>([]);
-  const dragStateRef = useRef<{ id: string; kind: DraggableKind } | null>(null);
-  const markersPluginRef = useRef<{ setMarkers: (markers: SeriesMarker<Time>[]) => void } | null>(null);
-  const { resolved: theme } = useTheme();
-  const [legendData, setLegendData] = useState<{ o: number; h: number; l: number; c: number } | null>(null);
+  const draggableRef = useRef<DraggableLine[]>([]);
+  const dragRef = useRef<{ id: string; kind: DraggableKind } | null>(null);
+  const savedRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const dataKeyRef = useRef("");
+  const lastSetRef = useRef<{ len: number; first: number; last: number; type: ChartType } | null>(null);
+  const selectLineRef = useRef<HTMLDivElement>(null);
 
-  const onUpdatePositionRiskRef = useRef(onUpdatePositionRisk);
-  onUpdatePositionRiskRef.current = onUpdatePositionRisk;
-  const onUpdatePendingOrderPriceRef = useRef(onUpdatePendingOrderPrice);
-  onUpdatePendingOrderPriceRef.current = onUpdatePendingOrderPrice;
-  const tickSizeRef = useRef(tickSize);
-  tickSizeRef.current = tickSize;
+  const timesRef = useRef(allTimes); timesRef.current = allTimes;
+  const candlesRef = useRef(candles); candlesRef.current = candles;
+  const barSecRef = useRef(timeframeSeconds(timeframe)); barSecRef.current = timeframeSeconds(timeframe);
+  const tickRef = useRef(tickSize); tickRef.current = tickSize;
+  const pointValueRef = useRef(spec?.pointValue ?? 1); pointValueRef.current = spec?.pointValue ?? 1;
+  const darkRef = useRef(pal.darkBg); darkRef.current = pal.darkBg;
+  const symbolRef = useRef(symbol); symbolRef.current = symbol;
+  const riskCbRef = useRef(onUpdatePositionRisk); riskCbRef.current = onUpdatePositionRisk;
+  const orderCbRef = useRef(onUpdatePendingOrderPrice); orderCbRef.current = onUpdatePendingOrderPrice;
 
-  const snapToTick = useCallback((price: number) => {
-    const t = tickSizeRef.current || 0.01;
-    return Math.round(price / t) * t;
-  }, []);
+  const [epoch, setEpoch] = useState(0);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [menu, setMenu] = useState<(ContextTarget & { clientX: number; clientY: number }) | null>(null);
+  const [textEdit, setTextEdit] = useState<{ id: string; x: number; y: number; value: string } | null>(null);
 
-  const findNearbyLine = useCallback((y: number): DraggableLine | null => {
-    const series = seriesRef.current;
-    if (!series) return null;
-    const HIT_TOLERANCE_PX = 6;
-    for (const dl of draggableLinesRef.current) {
-      const coord = series.priceToCoordinate(dl.price);
-      if (coord !== null && Math.abs(coord - y) <= HIT_TOLERANCE_PX) return dl;
-    }
-    return null;
-  }, []);
+  const controllerRef = useRef<DrawingController | null>(null);
 
-  const colors = theme === "dark" ? DARK_THEME : LIGHT_THEME;
-
-  // Initialize chart
+  /* ---------------- init / re-init chart ---------------- */
   useEffect(() => {
-    if (!containerRef.current) return;
+    const el = containerRef.current;
+    if (!el) return;
 
-    const chart = createChart(containerRef.current, {
+    const chart = createChart(el, {
       layout: {
-        background: { type: ColorType.Solid, color: colors.background },
-        textColor: colors.textColor,
-        fontFamily: "'Inter', sans-serif",
+        background: { type: ColorType.Solid, color: pal.bg },
+        textColor: pal.text,
+        fontFamily: FONT,
         fontSize: 12,
+        attributionLogo: true,
       },
       grid: {
-        vertLines: { color: colors.gridColor },
-        horzLines: { color: colors.gridColor },
+        vertLines: { color: pal.grid, visible: appearance.gridVertical },
+        horzLines: { color: pal.grid, visible: appearance.gridHorizontal },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: colors.crosshairColor, width: 1, style: 3, labelBackgroundColor: colors.crosshairColor },
-        horzLine: { color: colors.crosshairColor, width: 1, style: 3, labelBackgroundColor: colors.crosshairColor },
+        vertLine: { color: pal.crosshair, width: 1, style: LineStyle.Dashed, labelBackgroundColor: pal.crosshairLabel },
+        horzLine: { color: pal.crosshair, width: 1, style: LineStyle.Dashed, labelBackgroundColor: pal.crosshairLabel },
       },
-      rightPriceScale: {
-        borderColor: colors.borderColor,
-        scaleMargins: { top: 0.08, bottom: 0.08 },
-      },
+      rightPriceScale: { borderColor: pal.border, scaleMargins: { top: 0.1, bottom: 0.1 }, minimumWidth: 72 },
       localization: { timeFormatter: (t: Time) => fmtTick.full.format(toDate(t)) },
       timeScale: {
         tickMarkFormatter: nyTickMark,
-        borderColor: colors.borderColor,
+        borderColor: pal.border,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 5,
+        rightOffset: 12,
         barSpacing: 8,
+        minBarSpacing: 0.4,
+        shiftVisibleRangeOnNewBar: true,
       },
-      handleScroll: { vertTouchDrag: false },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
     });
 
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: colors.upColor,
-      downColor: colors.downColor,
-      borderUpColor: colors.upColor,
-      borderDownColor: colors.downColor,
-      wickUpColor: colors.upColor,
-      wickDownColor: colors.downColor,
-    });
+    const first = candlesRef.current[0]?.close ?? 0;
+    const up = appearance.upColor, down = appearance.downColor;
+    let series: ISeriesApi<SeriesType>;
+    switch (chartType) {
+      case "bar":
+        series = chart.addSeries(BarSeries, { upColor: up, downColor: down, thinBars: false });
+        break;
+      case "line":
+        series = chart.addSeries(LineSeries, { color: TV_BLUE, lineWidth: 2 });
+        break;
+      case "area":
+        series = chart.addSeries(AreaSeries, { lineColor: TV_BLUE, topColor: "rgba(41,98,255,0.28)", bottomColor: "rgba(41,98,255,0.02)", lineWidth: 2 });
+        break;
+      case "baseline":
+        series = chart.addSeries(BaselineSeries, {
+          baseValue: { type: "price", price: first },
+          topLineColor: up, bottomLineColor: down,
+          topFillColor1: rgba(up, 0.28), topFillColor2: rgba(up, 0.05),
+          bottomFillColor1: rgba(down, 0.05), bottomFillColor2: rgba(down, 0.28),
+          lineWidth: 2,
+        });
+        break;
+      case "hollow-candles":
+        series = chart.addSeries(CandlestickSeries, {
+          upColor: "rgba(0,0,0,0)", downColor: down,
+          borderUpColor: appearance.borderUp, borderDownColor: appearance.borderDown,
+          wickUpColor: appearance.wickUp, wickDownColor: appearance.wickDown,
+        });
+        break;
+      default:
+        series = chart.addSeries(CandlestickSeries, {
+          upColor: up, downColor: down,
+          borderUpColor: appearance.borderUp, borderDownColor: appearance.borderDown,
+          wickUpColor: appearance.wickUp, wickDownColor: appearance.wickDown,
+        });
+    }
 
-    // Crosshair move handler
+    const proj = new Projector({
+      chart, series,
+      getTimes: () => timesRef.current,
+      getBarSec: () => barSecRef.current,
+      getCandles: () => candlesRef.current,
+    });
+    const primitive = new DrawingsPrimitive({
+      getProjector: () => proj,
+      getTick: () => tickRef.current,
+      getPointValue: () => pointValueRef.current,
+      isDark: () => darkRef.current,
+    });
+    series.attachPrimitive(primitive);
+
     chart.subscribeCrosshairMove((param) => {
-      if (!param.time || !param.seriesData.has(series)) {
-        setLegendData(null);
-        onCrosshairMove?.(null);
-        return;
-      }
-      const data = param.seriesData.get(series) as CandlestickData;
-      if (data) {
-        const legend = { o: data.open, h: data.high, l: data.low, c: data.close };
-        setLegendData(legend);
-        onCrosshairMove?.({
-          time: data.time as number,
-          open: data.open,
-          high: data.high,
-          low: data.low,
-          close: data.close,
-          volume: 0,
-        });
-      }
+      setHoverTime(param.time ? (param.time as number) : null);
     });
 
-    // Chart click handler for drawing tools
-    chart.subscribeClick((param) => {
-      if (!activeDrawingTool || activeDrawingTool === 'cursor' || activeDrawingTool === 'crosshair') return;
-      if (!param.point || !param.time) return;
-
-      const price = series.coordinateToPrice(param.point.y);
-      if (price === null) return;
-
-      if (activeDrawingTool === 'horizontal-line') {
-        onDrawingAdded?.({
-          id: uid('drw'),
-          type: 'horizontal-line',
-          points: [{ time: param.time as number, price }],
-          color: '#FFD700',
-          lineWidth: 1,
-          label: price.toFixed(2),
-        });
-      }
+    const controller = new DrawingController({
+      container: el, chart, series, proj, primitive,
+      getSymbol: () => symbolRef.current,
+      getTick: () => tickRef.current,
+      getEnv: () => {
+        const { w, h } = proj.paneSize();
+        return { proj, w, h, tick: tickRef.current, pointValue: pointValueRef.current, dark: darkRef.current };
+      },
+      editText: (id) => {
+        const d = (useBacktest.getState().drawings[symbolRef.current] || []).find((x) => x.id === id);
+        const p = d && proj.toPt(d.points[0].time, d.points[0].price);
+        if (d && p) setTextEdit({ id, x: p.x, y: p.y, value: d.text ?? "" });
+      },
+      pickBar: (time) => {
+        const st = useBacktest.getState();
+        st.setSelectingBar(false);
+        if (time > st.currentTime) st.advanceTo(time);
+      },
     });
+    const detachController = controller.attach();
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) chart.resize(entry.contentRect.width, entry.contentRect.height);
+    });
+    ro.observe(el);
 
     chartRef.current = chart;
     seriesRef.current = series;
-
-    // Resize observer
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        chart.resize(width, height);
-      }
-    });
-    ro.observe(containerRef.current);
+    primitiveRef.current = primitive;
+    projRef.current = proj;
+    controllerRef.current = controller;
+    markersRef.current = null;
+    priceLinesRef.current = [];
+    lastSetRef.current = null;
+    setEpoch((e) => e + 1);
 
     return () => {
+      try { savedRangeRef.current = chart.timeScale().getVisibleLogicalRange(); } catch { /* chart already gone */ }
+      detachController();
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      primitiveRef.current = null;
+      projRef.current = null;
+      controllerRef.current = null;
+      markersRef.current = null;
       priceLinesRef.current = [];
-      markersPluginRef.current = null;
+      draggableRef.current = [];
     };
+  // Rebuilt when the look or series type changes; data effects re-run via `epoch`.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [theme]);
+  }, [theme, chartType, appearance]);
 
-  // Update candle data
+  /* ---------------- candle data ---------------- */
   useEffect(() => {
-    if (!seriesRef.current) return;
-    // Empty input must CLEAR the series, otherwise the previous day's candles stay on screen.
-    if (candles.length === 0) { seriesRef.current.setData([]); return; }
-    const lwcData: CandlestickData[] = candles.map((c) => ({
-      time: c.time as UTCTimestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-    seriesRef.current.setData(lwcData);
-  }, [candles]);
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    if (!series || !chart) return;
+    if (candles.length === 0) {
+      series.setData([]);
+      lastSetRef.current = null;
+      return;
+    }
+    const prev = lastSetRef.current;
+    const n = candles.length;
+    const appended =
+      prev && prev.type === chartType && n === prev.len + 1 &&
+      candles[0].time === prev.first && candles[n - 2].time === prev.last;
+    if (appended) {
+      series.update(toPoint(chartType, candles[n - 1]) as never);
+    } else {
+      series.setData(candles.map((c) => toPoint(chartType, c)) as never);
+    }
+    lastSetRef.current = { len: n, first: candles[0].time, last: candles[n - 1].time, type: chartType };
 
-  // Update order lines (positions, pending orders, SL/TP)
+    // Frame the view: on a new replay window / timeframe / symbol, or when context bars arrive.
+    const key = `${symbol}|${timeframe}|${anchorTime}`;
+    const prependedHistory = prev && !appended && candles[0].time < prev.first;
+    // While a (re)load is in flight the bars on screen are the old dataset — frame once the new one lands.
+    if (!dataLoading && (key !== dataKeyRef.current || prependedHistory)) {
+      const keepRange = savedRangeRef.current && key === dataKeyRef.current;
+      dataKeyRef.current = key;
+      const anchorIdx = Math.max(0, candles.findIndex((c) => c.time >= anchorTime));
+      const idx = anchorIdx >= 0 ? Math.max(anchorIdx, n - 1) : n - 1;
+      const width = chart.paneSize().width || 900;
+      const bars = Math.max(30, Math.floor(width / 8));
+      if (keepRange && savedRangeRef.current) {
+        chart.timeScale().setVisibleLogicalRange(savedRangeRef.current);
+      } else {
+        chart.timeScale().setVisibleLogicalRange({ from: idx - bars * 0.72, to: idx + bars * 0.28 });
+      }
+    } else if (savedRangeRef.current) {
+      chart.timeScale().setVisibleLogicalRange(savedRangeRef.current);
+    }
+    savedRangeRef.current = null;
+  }, [candles, epoch, chartType, symbol, timeframe, anchorTime, dataLoading]);
+
+  /* ---------------- drawings → primitive ---------------- */
+  useEffect(() => {
+    primitiveRef.current?.set({ drawings, selectedId, hidden: drawingsHidden });
+  }, [drawings, selectedId, drawingsHidden, epoch]);
+
+  // Repaint when bars (and therefore x-positions / autoscale) change.
+  useEffect(() => { primitiveRef.current?.repaint(); }, [candles, allTimes, epoch]);
+
+  /* ---------------- order / position / alert lines ---------------- */
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
-
-    // Remove old price lines
-    for (const line of priceLinesRef.current) {
-      try { series.removePriceLine(line); } catch { /* line may already be gone */ }
-    }
+    for (const l of priceLinesRef.current) { try { series.removePriceLine(l); } catch { /* gone */ } }
     priceLinesRef.current = [];
-    draggableLinesRef.current = [];
+    draggableRef.current = [];
 
-    // Draw open position lines
     for (const pos of openPositions) {
       if (pos.symbol !== symbol) continue;
-
-      // Entry line (not draggable — entry price is fixed once filled)
-      const entryLine = series.createPriceLine({
-        price: pos.entryPrice,
-        color: pos.side === 'buy' ? '#26a69a' : '#ef5350',
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: true,
-        title: `${pos.side === 'buy' ? 'LONG' : 'SHORT'} ${pos.quantity} @ ${pos.entryPrice.toFixed(2)}`,
+      const long = pos.side === "buy";
+      const pnl = pos.unrealizedPnl;
+      const entry = series.createPriceLine({
+        price: pos.entryPrice, color: TV_BLUE, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true,
+        title: `${long ? "Long" : "Short"} ${pos.quantity}  ${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl))}`,
       });
-      priceLinesRef.current.push(entryLine);
-
-      // SL line — draggable
+      priceLinesRef.current.push(entry);
       if (pos.stopLoss) {
-        const slLine = series.createPriceLine({
-          price: pos.stopLoss,
-          color: '#ef5350',
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: `SL ${pos.stopLoss.toFixed(2)} ⇕`,
+        const l = series.createPriceLine({
+          price: pos.stopLoss, color: "#F23645", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: `Stop ${(long ? pos.stopLoss - pos.entryPrice : pos.entryPrice - pos.stopLoss) >= 0 ? "+" : "−"}${formatMoney(Math.abs((long ? pos.stopLoss - pos.entryPrice : pos.entryPrice - pos.stopLoss) * (spec?.pointValue ?? 1) * pos.quantity))}`,
         });
-        priceLinesRef.current.push(slLine);
-        draggableLinesRef.current.push({ id: pos.orderId, kind: 'sl', price: pos.stopLoss, line: slLine });
+        priceLinesRef.current.push(l);
+        draggableRef.current.push({ id: pos.orderId, kind: "sl", price: pos.stopLoss, line: l });
       }
-
-      // TP line — draggable
       if (pos.takeProfit) {
-        const tpLine = series.createPriceLine({
-          price: pos.takeProfit,
-          color: '#26a69a',
-          lineWidth: 2,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: `TP ${pos.takeProfit.toFixed(2)} ⇕`,
+        const l = series.createPriceLine({
+          price: pos.takeProfit, color: "#089981", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: `Target +${formatMoney(Math.abs((long ? pos.takeProfit - pos.entryPrice : pos.entryPrice - pos.takeProfit) * (spec?.pointValue ?? 1) * pos.quantity))}`,
         });
-        priceLinesRef.current.push(tpLine);
-        draggableLinesRef.current.push({ id: pos.orderId, kind: 'tp', price: pos.takeProfit, line: tpLine });
+        priceLinesRef.current.push(l);
+        draggableRef.current.push({ id: pos.orderId, kind: "tp", price: pos.takeProfit, line: l });
       }
     }
 
-    // Draw pending order lines — trigger price is draggable
-    for (const order of pendingOrders) {
-      if (order.symbol !== symbol || !order.price) continue;
-      const orderLine = series.createPriceLine({
-        price: order.price,
-        color: order.side === 'buy' ? '#26a69a80' : '#ef535080',
-        lineWidth: 2,
-        lineStyle: LineStyle.Dotted,
-        axisLabelVisible: true,
-        title: `${order.type.toUpperCase()} ${order.side.toUpperCase()} ${order.quantity} ⇕`,
+    for (const o of pendingOrders) {
+      if (o.symbol !== symbol || !o.price) continue;
+      const l = series.createPriceLine({
+        price: o.price, color: o.side === "buy" ? TV_BLUE : "#F23645", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true,
+        title: `${o.side === "buy" ? "Buy" : "Sell"} ${o.type} ${o.quantity}`,
       });
-      priceLinesRef.current.push(orderLine);
-      draggableLinesRef.current.push({ id: order.id, kind: 'order', price: order.price, line: orderLine });
+      priceLinesRef.current.push(l);
+      draggableRef.current.push({ id: o.id, kind: "order", price: o.price, line: l });
     }
 
-    // Draw user drawings (horizontal lines)
-    for (const drawing of drawings) {
-      if (drawing.type === 'horizontal-line' && drawing.points[0]) {
-        const line = series.createPriceLine({
-          price: drawing.points[0].price,
-          color: drawing.color || '#FFD700',
-          lineWidth: (drawing.lineWidth || 1) as 1 | 2 | 3 | 4,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: drawing.label || '',
-        });
-        priceLinesRef.current.push(line);
-      }
+    for (const a of alerts) {
+      if (a.symbol !== symbol || a.triggered) continue;
+      priceLinesRef.current.push(series.createPriceLine({
+        price: a.price, color: "#FF9800", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "Alert",
+      }));
     }
-  }, [openPositions, pendingOrders, drawings, symbol]);
+  }, [openPositions, pendingOrders, alerts, symbol, epoch, spec?.pointValue]);
 
-  // Pointer-drag handling for SL/TP/pending-order lines. Runs on the raw
-  // DOM container rather than lightweight-charts' own click/crosshair APIs
-  // since we need continuous move tracking + a hit-test against known
-  // line prices, not just chart-native click events.
+  /* ---------------- drag SL / TP / pending-order lines ---------------- */
   useEffect(() => {
     const container = containerRef.current;
     const chart = chartRef.current;
     if (!container || !chart) return;
 
-    function handlePointerDown(e: PointerEvent) {
-      if (e.button !== 0) return;
-      const rect = container!.getBoundingClientRect();
-      const y = e.clientY - rect.top;
-      const hit = findNearbyLine(y);
-      if (!hit) return;
+    const near = (y: number): DraggableLine | null => {
+      const series = seriesRef.current;
+      if (!series) return null;
+      for (const dl of draggableRef.current) {
+        const c = series.priceToCoordinate(dl.price);
+        if (c !== null && Math.abs(c - y) <= 6) return dl;
+      }
+      return null;
+    };
+    const snap = (price: number) => Math.round(price / (tickRef.current || 0.01)) * (tickRef.current || 0.01);
 
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const r = container.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      const paneW = chart.paneSize().width;
+      if (x > paneW) return;
+      const hit = near(y);
+      if (!hit) return;
       e.preventDefault();
       e.stopPropagation();
-      dragStateRef.current = { id: hit.id, kind: hit.kind };
-      chart!.applyOptions({ handleScroll: false, handleScale: false });
-      container!.setPointerCapture(e.pointerId);
-      container!.style.cursor = 'ns-resize';
-    }
-
-    function handlePointerMove(e: PointerEvent) {
-      const rect = container!.getBoundingClientRect();
-      const y = e.clientY - rect.top;
+      dragRef.current = { id: hit.id, kind: hit.kind };
+      chart.applyOptions({ handleScroll: false, handleScale: false });
+      try { container.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      container.style.cursor = "ns-resize";
+    };
+    const move = (e: PointerEvent) => {
+      const r = container.getBoundingClientRect();
+      const y = e.clientY - r.top;
       const series = seriesRef.current;
-
-      const dragging = dragStateRef.current;
+      const dragging = dragRef.current;
       if (!dragging || !series) {
-        // Not dragging — just update hover cursor when near a draggable line.
-        const hit = findNearbyLine(y);
-        container!.style.cursor = hit ? 'ns-resize' : 'default';
+        if (e.buttons === 0 && !controllerRef.current?.isCreating) {
+          const t = useBacktest.getState().activeDrawingTool;
+          if (t === "cursor" || t === "crosshair" || t === "dot" || t === "pointer") {
+            const hit = near(y);
+            if (hit) container.style.cursor = "ns-resize";
+          }
+        }
         return;
       }
-
-      const rawPrice = series.coordinateToPrice(y);
-      if (rawPrice === null) return;
-      const price = snapToTick(rawPrice);
-
-      // Live-update the visual line so it tracks the cursor while dragging.
-      const dl = draggableLinesRef.current.find(
-        (d) => d.id === dragging.id && d.kind === dragging.kind,
-      );
+      const raw = series.coordinateToPrice(y);
+      if (raw === null) return;
+      const price = snap(raw);
+      const dl = draggableRef.current.find((d) => d.id === dragging.id && d.kind === dragging.kind);
       if (dl) {
         dl.price = price;
-        dl.line.applyOptions({
-          price,
-          title: dl.kind === 'sl'
-            ? `SL ${price.toFixed(2)} ⇕`
-            : dl.kind === 'tp'
-              ? `TP ${price.toFixed(2)} ⇕`
-              : `${price.toFixed(2)} ⇕`,
-        });
+        dl.line.applyOptions({ price });
       }
-    }
-
-    function handlePointerUp(e: PointerEvent) {
-      const dragging = dragStateRef.current;
-      if (!dragging) return;
-
-      const dl = draggableLinesRef.current.find(
-        (d) => d.id === dragging.id && d.kind === dragging.kind,
-      );
-
-      if (dl) {
-        if (dl.kind === 'sl') {
-          onUpdatePositionRiskRef.current?.(dl.id, { stopLoss: dl.price });
-        } else if (dl.kind === 'tp') {
-          onUpdatePositionRiskRef.current?.(dl.id, { takeProfit: dl.price });
-        } else if (dl.kind === 'order') {
-          onUpdatePendingOrderPriceRef.current?.(dl.id, dl.price);
-        }
-      }
-
-      dragStateRef.current = null;
-      chart!.applyOptions({ handleScroll: { vertTouchDrag: false }, handleScale: true });
-      try { container!.releasePointerCapture(e.pointerId); } catch { /* already released */ }
-      container!.style.cursor = 'default';
-    }
-
-    container.addEventListener('pointerdown', handlePointerDown);
-    container.addEventListener('pointermove', handlePointerMove);
-    container.addEventListener('pointerup', handlePointerUp);
-    function handlePointerLeave() {
-      // Only reset hover cursor, not an active drag (pointer capture keeps
-      // pointerup firing on the container even if the cursor leaves it).
-      if (!dragStateRef.current) container!.style.cursor = 'default';
-    }
-    container.addEventListener('pointerleave', handlePointerLeave);
-
-    return () => {
-      container.removeEventListener('pointerdown', handlePointerDown);
-      container.removeEventListener('pointermove', handlePointerMove);
-      container.removeEventListener('pointerup', handlePointerUp);
-      container.removeEventListener('pointerleave', handlePointerLeave);
     };
-  }, [findNearbyLine, snapToTick]);
+    const up = (e: PointerEvent) => {
+      const dragging = dragRef.current;
+      if (!dragging) return;
+      const dl = draggableRef.current.find((d) => d.id === dragging.id && d.kind === dragging.kind);
+      if (dl) {
+        if (dl.kind === "sl") riskCbRef.current?.(dl.id, { stopLoss: dl.price });
+        else if (dl.kind === "tp") riskCbRef.current?.(dl.id, { takeProfit: dl.price });
+        else orderCbRef.current?.(dl.id, dl.price);
+      }
+      dragRef.current = null;
+      chart.applyOptions({
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      });
+      try { container.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      container.style.cursor = "";
+    };
+    container.addEventListener("pointerdown", down);
+    container.addEventListener("pointermove", move);
+    container.addEventListener("pointerup", up);
+    return () => {
+      container.removeEventListener("pointerdown", down);
+      container.removeEventListener("pointermove", move);
+      container.removeEventListener("pointerup", up);
+    };
+  }, [epoch]);
 
-  // Trade markers (buy/sell arrows on entry/exit candles)
+  /* ---------------- trade markers ---------------- */
   useEffect(() => {
     const series = seriesRef.current;
-    if (!series || candles.length === 0) return;
-
+    if (!series) return;
     const markers: SeriesMarker<Time>[] = [];
-
-    for (const trade of closedTrades) {
-      if (trade.symbol !== symbol) continue;
-
-      // Entry marker
-      markers.push({
-        time: trade.entryTime as UTCTimestamp,
-        position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
-        color: trade.side === 'buy' ? '#26a69a' : '#ef5350',
-        shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: `${trade.side === 'buy' ? 'BUY' : 'SELL'} ${trade.quantity}`,
-      });
-
-      // Exit marker
-      if (trade.exitTime) {
+    const known = new Set(candles.map((c) => c.time));
+    for (const t of closedTrades) {
+      if (t.symbol !== symbol) continue;
+      if (known.has(t.entryTime)) {
         markers.push({
-          time: trade.exitTime as UTCTimestamp,
-          position: trade.side === 'buy' ? 'aboveBar' : 'belowBar',
-          color: trade.netPnl >= 0 ? '#26a69a' : '#ef5350',
-          shape: trade.side === 'buy' ? 'arrowDown' : 'arrowUp',
-          text: `EXIT ${trade.netPnl >= 0 ? '+' : ''}${trade.netPnl.toFixed(0)}`,
+          time: t.entryTime as UTCTimestamp,
+          position: t.side === "buy" ? "belowBar" : "aboveBar",
+          color: t.side === "buy" ? TV_BLUE : "#F23645",
+          shape: t.side === "buy" ? "arrowUp" : "arrowDown",
+          text: `${t.side === "buy" ? "Buy" : "Sell"} ${t.quantity}`,
+        });
+      }
+      if (t.exitTime && known.has(t.exitTime)) {
+        markers.push({
+          time: t.exitTime as UTCTimestamp,
+          position: t.side === "buy" ? "aboveBar" : "belowBar",
+          color: t.netPnl >= 0 ? "#089981" : "#F23645",
+          shape: t.side === "buy" ? "arrowDown" : "arrowUp",
+          text: `${t.netPnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(t.netPnl))}`,
         });
       }
     }
-
-    // Sort markers by time (required by lightweight-charts)
     markers.sort((a, b) => (a.time as number) - (b.time as number));
+    if (markersRef.current) markersRef.current.setMarkers(markers);
+    else if (markers.length) markersRef.current = createSeriesMarkers(series, markers);
+  }, [closedTrades, candles, symbol, epoch]);
 
-    // Use v5 createSeriesMarkers API
-    if (markersPluginRef.current) {
-      markersPluginRef.current.setMarkers(markers);
-    } else if (markers.length > 0) {
-      markersPluginRef.current = createSeriesMarkers(series, markers);
+  /* ---------------- price scale (%, log, auto, invert) ---------------- */
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    chart.priceScale("right").applyOptions({
+      mode: scale.mode === "log" ? PriceScaleMode.Logarithmic : scale.mode === "percent" ? PriceScaleMode.Percentage : PriceScaleMode.Normal,
+      invertScale: scale.invert,
+      autoScale: scale.auto,
+    });
+  }, [scale, epoch]);
+
+  /* ---------------- cursor flavour ---------------- */
+  useEffect(() => {
+    const chart = chartRef.current;
+    const el = containerRef.current;
+    if (!chart || !el) return;
+    const lines = tool !== "dot" && tool !== "pointer";
+    chart.applyOptions({
+      crosshair: {
+        vertLine: { visible: lines, labelVisible: true },
+        horzLine: { visible: lines, labelVisible: true },
+      },
+    });
+    el.classList.toggle("tv-cursor-dot", tool === "dot");
+    el.style.cursor =
+      selectingBar ? "col-resize"
+        : tool === "zoom" ? "zoom-in"
+          : tool === "eraser" ? "not-allowed"
+            : tool && tool !== "cursor" && tool !== "crosshair" && tool !== "dot" && tool !== "pointer" ? "crosshair" : "";
+  }, [tool, selectingBar, epoch]);
+
+  /* ---------------- chart commands from toolbars ---------------- */
+  useEffect(() => {
+    return onChartCommand((cmd) => {
+      const chart = chartRef.current;
+      const proj = projRef.current;
+      if (!chart || !proj) return;
+      const cs = candlesRef.current;
+      const lastIdx = Math.max(0, cs.length - 1);
+      const frame = (fromIdx: number) => {
+        chart.timeScale().setVisibleLogicalRange({ from: fromIdx, to: lastIdx + 14 });
+        useBacktest.getState().setScale({ auto: true });
+        seriesRef.current?.priceScale().setAutoScale(true);
+      };
+      if (cmd.type === "reset") {
+        const w = chart.paneSize().width || 900;
+        const bars = Math.max(30, Math.floor(w / 8));
+        chart.timeScale().setVisibleLogicalRange({ from: lastIdx - bars * 0.72, to: lastIdx + bars * 0.28 });
+        useBacktest.getState().setScale({ auto: true, invert: false });
+        seriesRef.current?.priceScale().setAutoScale(true);
+      } else if (cmd.type === "scroll-latest") {
+        chart.timeScale().scrollToRealTime();
+      } else if (cmd.type === "range") {
+        if (cs.length === 0) return;
+        const last = cs[lastIdx].time;
+        let from = cs[0].time;
+        if (cmd.seconds === "ytd") {
+          from = Date.UTC(new Date(last * 1000).getUTCFullYear(), 0, 1) / 1000;
+        } else if (cmd.seconds !== "all") {
+          from = last - cmd.seconds;
+        }
+        frame(Math.max(-5, Math.floor(proj.timeToLogical(from))));
+      } else if (cmd.type === "goto") {
+        const l = proj.timeToLogical(cmd.time);
+        const half = Math.max(30, Math.floor((chart.paneSize().width || 900) / 16));
+        chart.timeScale().setVisibleLogicalRange({ from: l - half, to: l + half });
+      } else if (cmd.type === "screenshot") {
+        const canvas = chart.takeScreenshot(true);
+        if (cmd.mode === "download") {
+          canvas.toBlob((blob) => {
+            if (!blob) return;
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `${symbolRef.current}_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+          });
+        } else {
+          canvas.toBlob((blob) => {
+            if (!blob || !navigator.clipboard || typeof ClipboardItem === "undefined") return;
+            void navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).catch(() => undefined);
+          });
+        }
+      }
+    });
+  }, []);
+
+  /* ---------------- replay "Jump to" guide line ---------------- */
+  useEffect(() => {
+    const el = containerRef.current;
+    const line = selectLineRef.current;
+    if (!el || !line || !selectingBar) return;
+    const move = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      line.style.transform = `translateX(${Math.round(e.clientX - r.left)}px)`;
+      line.style.opacity = "1";
+    };
+    el.addEventListener("pointermove", move);
+    return () => { el.removeEventListener("pointermove", move); line.style.opacity = "0"; };
+  }, [selectingBar]);
+
+  /* ---------------- right-click ---------------- */
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const el = containerRef.current, proj = projRef.current, series = seriesRef.current;
+    if (!el || !proj || !series) return;
+    const r = el.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const { w, h } = proj.paneSize();
+    if (x < 0 || y < 0 || x > w || y > h) return;
+    const raw = series.coordinateToPrice(y);
+    if (raw === null) return;
+    const hit = controllerRef.current?.hitAt({ x, y });
+    if (hit) useBacktest.getState().selectDrawing(hit.d.id);
+    const tk = tickRef.current || 0.25;
+    setMenu({
+      price: Math.round(raw / tk) * tk,
+      time: proj.xToTime(x) ?? 0,
+      drawingId: hit?.d.id ?? null,
+      clientX: e.clientX - (wrapRef.current?.getBoundingClientRect().left ?? 0),
+      clientY: e.clientY - (wrapRef.current?.getBoundingClientRect().top ?? 0),
+    });
+  }, []);
+
+  /* ---------------- legend ---------------- */
+  const bar = useMemo(() => {
+    if (candles.length === 0) return null;
+    let idx = candles.length - 1;
+    if (hoverTime !== null) {
+      let lo = 0, hi = candles.length - 1, ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (candles[mid].time <= hoverTime) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+      }
+      if (ans >= 0) idx = ans;
     }
-  }, [closedTrades, candles, symbol]);
+    const c = candles[idx];
+    const prevClose = idx > 0 ? candles[idx - 1].close : c.open;
+    return { c, change: c.close - prevClose, pct: prevClose ? ((c.close - prevClose) / prevClose) * 100 : 0 };
+  }, [candles, hoverTime]);
 
-  // Color-code OHLC change
-  const priceColor = legendData
-    ? legendData.c >= legendData.o ? colors.upColor : colors.downColor
-    : colors.textColor;
+  const last = candles.length ? candles[candles.length - 1].close : null;
+  const canTrade = status === "paused" || status === "running";
+  const upCol = appearance.upColor, dnCol = appearance.downColor;
+  const legendColor = bar ? (bar.c.close >= bar.c.open ? upCol : dnCol) : pal.text;
+  const tfLabel = timeframe.replace(/^(\d+)m$/, "$1").replace("1D", "D");
 
-  // Cursor style based on active drawing tool
-  const cursorStyle = activeDrawingTool && activeDrawingTool !== 'cursor' && activeDrawingTool !== 'crosshair'
-    ? 'crosshair' : 'default';
+  /* ---------------- text drawing editor ---------------- */
+  const commitText = (value: string) => {
+    if (!textEdit) return;
+    const st = useBacktest.getState();
+    const v = value.trim();
+    if (!v) st.removeDrawing(symbol, textEdit.id);
+    else st.updateDrawing(symbol, textEdit.id, { text: v }, true);
+    setTextEdit(null);
+  };
 
   return (
-    <div className="relative h-full w-full" style={{ cursor: cursorStyle }}>
-      {/* OHLC Legend overlay */}
-      <div className="absolute left-3 top-2 z-10 flex items-center gap-3 text-[12px] font-mono" style={{ color: colors.textColor }}>
-        <span className="font-semibold">{symbol}</span>
-        {legendData && (
-          <>
-            <span>O <span style={{ color: priceColor }}>{legendData.o.toFixed(2)}</span></span>
-            <span>H <span style={{ color: priceColor }}>{legendData.h.toFixed(2)}</span></span>
-            <span>L <span style={{ color: priceColor }}>{legendData.l.toFixed(2)}</span></span>
-            <span>C <span style={{ color: priceColor }}>{legendData.c.toFixed(2)}</span></span>
-          </>
-        )}
+    <div ref={wrapRef} className="tv-chart-wrap" style={{ background: pal.bg }} onContextMenu={onContextMenu}>
+      <div ref={containerRef} className="tv-chart-canvas" />
+
+      {/* Legend + quick trade (top-left, like TradingView) */}
+      {appearance.showLegend && (
+        <div className="tv-legend" style={{ color: pal.text }}>
+          <div className="tv-legend-row">
+            <span className="tv-legend-title">{spec?.name ?? symbol}</span>
+            <span className="tv-legend-dot">·</span>
+            <span>{tfLabel}</span>
+            <span className="tv-legend-dot">·</span>
+            <span>{spec?.exchange ?? ""}</span>
+            {bar && !isPriceType(chartType) && (
+              <span className="tv-legend-ohlc" style={{ color: legendColor }}>
+                <span>O<b>{fmtPrice(bar.c.open)}</b></span>
+                <span>H<b>{fmtPrice(bar.c.high)}</b></span>
+                <span>L<b>{fmtPrice(bar.c.low)}</b></span>
+                <span>C<b>{fmtPrice(bar.c.close)}</b></span>
+                <span>{fmtSigned(bar.change)} ({bar.pct >= 0 ? "+" : "−"}{Math.abs(bar.pct).toFixed(2)}%)</span>
+              </span>
+            )}
+            {bar && isPriceType(chartType) && (
+              <span className="tv-legend-ohlc" style={{ color: legendColor }}>
+                <span>C<b>{fmtPrice(bar.c.close)}</b></span>
+                <span>{fmtSigned(bar.change)} ({bar.pct >= 0 ? "+" : "−"}{Math.abs(bar.pct).toFixed(2)}%)</span>
+              </span>
+            )}
+          </div>
+
+          {appearance.showTradePill && last !== null && (
+            <div className="tv-pill">
+              <button
+                type="button" disabled={!canTrade} className="tv-pill-sell"
+                onClick={() => placeOrder("sell", orderQty)} title={`Sell ${orderQty} at market (Shift+S)`}
+              >
+                <b>{fmtPrice(last)}</b><span>SELL</span>
+              </button>
+              <input
+                aria-label="Quantity" className="tv-pill-qty" type="number" min={1} value={orderQty}
+                onChange={(e) => setOrderQty(Number(e.target.value))}
+              />
+              <button
+                type="button" disabled={!canTrade} className="tv-pill-buy"
+                onClick={() => placeOrder("buy", orderQty)} title={`Buy ${orderQty} at market (Shift+B)`}
+              >
+                <b>{fmtPrice(last)}</b><span>BUY</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Properties toolbar for the selected drawing */}
+      <DrawingToolbar symbol={symbol} />
+
+      {/* Replay "Jump to" guide */}
+      <div ref={selectLineRef} className={cn("tv-select-line", selectingBar && "is-on")}>
+        <span>Click a bar to jump there</span>
       </div>
-      <div ref={containerRef} className="h-full w-full" />
+
+      {textEdit && (
+        <textarea
+          autoFocus
+          className="tv-text-edit"
+          style={{ left: textEdit.x, top: textEdit.y - 12 }}
+          defaultValue={textEdit.value}
+          placeholder="Add text"
+          onBlur={(e) => commitText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { e.preventDefault(); setTextEdit(null); const st = useBacktest.getState(); if (!textEdit.value) st.removeDrawing(symbol, textEdit.id); }
+            else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitText((e.target as HTMLTextAreaElement).value); }
+          }}
+        />
+      )}
+
+      {menu && (
+        <ChartContextMenu
+          target={menu}
+          x={menu.clientX}
+          y={menu.clientY}
+          symbol={symbol}
+          lastPrice={last}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }
+
+export type { DrawingObject, Logical };
