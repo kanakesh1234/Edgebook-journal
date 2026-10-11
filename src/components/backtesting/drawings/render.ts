@@ -298,9 +298,12 @@ export function paintDrawing(
         const tk = env.tick ? Math.round(delta / env.tick) : 0;
         return `${name}: ${fmtPrice(delta)} (${pct.toFixed(2)}%) ${tk}, $${fmtPrice(delta * env.pointValue)}`;
       };
-      chip(ctx, [lbl("Target", reward)], cx, tp.y + (long ? -13 : 13), profit);
-      chip(ctx, [lbl("Stop", risk)], cx, sl.y + (long ? 13 : -13), loss);
-      chip(ctx, [`Risk/Reward: ${risk > 0 ? (reward / risk).toFixed(2) : "—"}`], cx, e.y, "#363A45");
+      // Values only while the position is selected (clicked); otherwise just the clean zones.
+      if (state.selected) {
+        chip(ctx, [lbl("Target", reward)], cx, tp.y + (long ? -13 : 13), profit);
+        chip(ctx, [lbl("Stop", risk)], cx, sl.y + (long ? 13 : -13), loss);
+        chip(ctx, [`Risk/Reward: ${risk > 0 ? (reward / risk).toFixed(2) : "—"}`], cx, e.y, "#363A45");
+      }
       break;
     }
 
