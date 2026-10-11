@@ -12,6 +12,7 @@ import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
 import { TodayPanel, type RiskPosture } from "@/components/dashboard/today-panel";
+import { dayRisk as computeDayRisk } from "@/lib/risk";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,8 @@ export default function DashboardPage() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const [planOpen, setPlanOpen] = useState(false);
   const dayLogs = useApp((st) => st.dayLogs);
+  const plans = useApp((st) => st.plans);
+  const todayRisk = useMemo(() => computeDayRisk(todayKey(), allEntries, plans), [allEntries, plans]);
 
   // Primary challenge scoping — one shared source of truth for the whole page.
   const { entries, settings, challenge } = useMemo(
@@ -155,6 +158,7 @@ export default function DashboardPage() {
           brokenWeek={brokenWeek}
           intention={futureIntention ? { rule: futureIntention.rule, outcome: futureIntention.outcome } : null}
           recent={recent}
+          dayRisk={todayRisk}
         />
 
         <div className="min-w-0 xl:col-start-1 xl:row-start-2">

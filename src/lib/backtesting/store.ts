@@ -88,6 +88,8 @@ export interface BacktestStoreState {
   dataResolution: string;
   dataLoading: boolean;
   dataError: string | null;
+  /** Non-blocking notice (partial data, one symbol missing). */
+  dataWarning: string | null;
 
   /* --- Instruments --- */
   instruments: string[];
@@ -201,6 +203,7 @@ export interface BacktestStoreState {
   setStatus: (status: BacktestStatus) => void;
   setDataLoading: (loading: boolean) => void;
   setDataError: (error: string | null) => void;
+  setDataWarning: (warning: string | null) => void;
 
   /** Reset everything. */
   reset: () => void;
@@ -267,6 +270,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   dataResolution: '1m',
   dataLoading: false,
   dataError: null,
+  dataWarning: null,
 
   // Instruments
   instruments: [],
@@ -316,6 +320,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       allCandles: {},
       dataLoading: false,
       dataError: null,
+      dataWarning: null,
       pendingOrders: [],
       openPositions: [],
       closedTrades: [],
@@ -626,40 +631,30 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     // Fetch data for the new day
     set({ dataLoading: true, playing: false });
     const syms = state.instruments;
-    const { lseProvider } = await import('./data/lse-provider');
-    const { cacheKey: ck, getCachedCandles, setCachedCandles } = await import('./data/cache');
-    const { instrumentBySymbol: lookupSpec } = await import('./instruments');
-
+    const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(nextSession.startUtc * 1000).toISOString();
     const newEndUtc = new Date(nextSession.endUtc * 1000).toISOString();
 
-    for (const symbol of syms) {
-      try {
-        const key = ck('lse', symbol, nextSession.dateKey, state.timeframe);
-        const cached = await getCachedCandles(key);
-        if (cached && cached.length > 0) {
-          get().setCandleData(symbol, cached);
-          continue;
-        }
-        const providerSymbol = lookupSpec(symbol)?.providerSymbol || symbol;
-        const candles = await lseProvider.getCandles(providerSymbol, state.timeframe, newStartUtc, newEndUtc);
-        get().setCandleData(symbol, candles);
-        if (candles.length > 0) await setCachedCandles(key, candles);
-      } catch (err) {
-        set({ dataError: err instanceof Error ? err.message : 'Failed to load data' });
-      }
-    }
-
-    // Set clock to start of new session
-    const allCandles = get().allCandles;
-    const firstSymbol = syms[0];
-    const firstCandles = allCandles[firstSymbol];
-    if (firstCandles && firstCandles.length > 0) {
-      set({ currentTime: firstCandles[0].time, dataLoading: false, status: 'paused' });
-      get().updateVisibleCandles();
+    const results = await Promise.all(
+      syms.map((symbol) => loadSymbolCandles(symbol, state.timeframe, newStartUtc, newEndUtc)),
+    );
+    const failed = results.filter((r) => r.candles.length === 0);
+    const firstCandles = results[0]?.candles ?? [];
+    if (firstCandles.length > 0) {
+      // Replace every symbol (empty ones too) so no symbol shows another day's candles.
+      for (const r of results) get().setCandleData(r.symbol, r.candles);
+      set({
+        currentTime: firstCandles[0].time,
+        dataLoading: false,
+        dataError: null,
+        dataWarning: failed.length ? failed.map((r) => r.error).join(' ') : (results.find((r) => r.warning)?.warning ?? null),
+        status: 'paused',
+      });
     } else {
-      set({ dataLoading: false });
+      // Keep the day the user is on; explain why we didn't move (weekend, holiday, no data).
+      set({ dataLoading: false, dataWarning: results[0]?.error ?? 'No data for that session.' });
     }
+    get().updateVisibleCandles();
     get().saveSession();
   },
 
@@ -682,39 +677,28 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
 
     set({ dataLoading: true, playing: false });
     const syms = state.instruments;
-    const { lseProvider } = await import('./data/lse-provider');
-    const { cacheKey: ck, getCachedCandles, setCachedCandles } = await import('./data/cache');
-    const { instrumentBySymbol: lookupSpec } = await import('./instruments');
-
+    const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(prevSession.startUtc * 1000).toISOString();
     const newEndUtc = new Date(prevSession.endUtc * 1000).toISOString();
 
-    for (const symbol of syms) {
-      try {
-        const key = ck('lse', symbol, prevSession.dateKey, state.timeframe);
-        const cached = await getCachedCandles(key);
-        if (cached && cached.length > 0) {
-          get().setCandleData(symbol, cached);
-          continue;
-        }
-        const providerSymbol = lookupSpec(symbol)?.providerSymbol || symbol;
-        const candles = await lseProvider.getCandles(providerSymbol, state.timeframe, newStartUtc, newEndUtc);
-        get().setCandleData(symbol, candles);
-        if (candles.length > 0) await setCachedCandles(key, candles);
-      } catch (err) {
-        set({ dataError: err instanceof Error ? err.message : 'Failed to load data' });
-      }
-    }
-
-    const allCandles = get().allCandles;
-    const firstSymbol = syms[0];
-    const firstCandles = allCandles[firstSymbol];
-    if (firstCandles && firstCandles.length > 0) {
-      set({ currentTime: firstCandles[0].time, dataLoading: false, status: 'paused' });
-      get().updateVisibleCandles();
+    const results = await Promise.all(
+      syms.map((symbol) => loadSymbolCandles(symbol, state.timeframe, newStartUtc, newEndUtc)),
+    );
+    const failed = results.filter((r) => r.candles.length === 0);
+    const firstCandles = results[0]?.candles ?? [];
+    if (firstCandles.length > 0) {
+      for (const r of results) get().setCandleData(r.symbol, r.candles);
+      set({
+        currentTime: firstCandles[0].time,
+        dataLoading: false,
+        dataError: null,
+        dataWarning: failed.length ? failed.map((r) => r.error).join(' ') : (results.find((r) => r.warning)?.warning ?? null),
+        status: 'paused',
+      });
     } else {
-      set({ dataLoading: false });
+      set({ dataLoading: false, dataWarning: results[0]?.error ?? 'No data for that session.' });
     }
+    get().updateVisibleCandles();
     get().saveSession();
   },
 
@@ -742,6 +726,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   setStatus: (status) => set({ status }),
   setDataLoading: (loading) => set({ dataLoading: loading }),
   setDataError: (error) => set({ dataError: error }),
+  setDataWarning: (warning) => set({ dataWarning: warning }),
 
   reset: () => {
     engineRegistry.orderEngines = {};
@@ -759,6 +744,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       dataResolution: '1m',
       dataLoading: false,
       dataError: null,
+      dataWarning: null,
       instruments: [],
       activeInstrument: '',
       pendingOrders: [],

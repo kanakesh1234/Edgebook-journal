@@ -35,7 +35,10 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     commissionPerContract: 0.74,
     feesPerContract: 0.62,
     timezone: "America/Chicago", // CME floor timezone
-    providerSymbol: "MNQ",
+    // LSE has no micro contracts ("'MNQ' has no candle data"). A micro tracks the
+    // full-size index 1:1, so we price from NQ.F and keep the micro's own
+    // pointValue/tick value/fees for P&L. Verified against LSE /catalog.
+    providerSymbol: "NQ.F",
   },
   {
     symbol: "ES",
@@ -63,7 +66,8 @@ export const INSTRUMENTS: InstrumentSpec[] = [
     commissionPerContract: 0.74,
     feesPerContract: 0.62,
     timezone: "America/Chicago",
-    providerSymbol: "MES",
+    // See MNQ: priced from ES.F, P&L uses micro specs.
+    providerSymbol: "ES.F",
   },
 ];
 

@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import { todayKey } from "@/lib/format";
 import { Sym, type SymName } from "./symbols";
 import { IconButton, MenuDivider, MenuHeading, MenuItem, Popover, SPRING } from "./journal-ui";
-import type { Outcome, SortKey, ViewMode } from "./journal-model";
+import type { MistakeFilter, Outcome, SortKey, ViewMode } from "./journal-model";
 import { cn } from "@/lib/utils";
 
 const VIEWS: { id: ViewMode; label: string; icon: SymName }[] = [
@@ -16,6 +16,7 @@ const VIEWS: { id: ViewMode; label: string; icon: SymName }[] = [
 const SORTS: { id: SortKey; label: string }[] = [
   { id: "newest", label: "Newest first" }, { id: "oldest", label: "Oldest first" },
   { id: "best", label: "Best result" }, { id: "worst", label: "Worst result" }, { id: "rr", label: "Highest R" },
+  { id: "mistake", label: "By mistake" },
 ];
 const OUTCOMES: { id: Outcome; label: string }[] = [
   { id: "all", label: "All results" }, { id: "win", label: "Wins" }, { id: "loss", label: "Losses" }, { id: "flat", label: "Break-even" },
@@ -29,11 +30,12 @@ export function JournalToolbar(p: {
   query: string; onQuery: (q: string) => void; searchRef: RefObject<HTMLInputElement | null>;
   outcome: Outcome; onOutcome: (o: Outcome) => void;
   instrument: string; instruments: string[]; onInstrument: (i: string) => void;
+  mistake: MistakeFilter; mistakes: { key: string; label: string; count: number }[]; onMistake: (m: MistakeFilter) => void;
   sort: SortKey; onSort: (s: SortKey) => void;
   onJump: (date: string) => void;
   selectMode: boolean; onSelectMode: () => void; canSelect: boolean;
 }) {
-  const filterCount = (p.outcome !== "all" ? 1 : 0) + (p.instrument !== "all" ? 1 : 0);
+  const filterCount = (p.outcome !== "all" ? 1 : 0) + (p.instrument !== "all" ? 1 : 0) + (p.mistake !== "all" ? 1 : 0);
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2 py-2">
       <div className="flex min-w-0 flex-1 items-center gap-0.5">
@@ -91,10 +93,22 @@ export function JournalToolbar(p: {
                   </div>
                 </>
               )}
+              {p.mistakes.length > 0 && (
+                <>
+                  <MenuDivider />
+                  <MenuHeading>Mistake</MenuHeading>
+                  <div className="max-h-48 overflow-y-auto">
+                    <MenuItem checked={p.mistake === "all"} onClick={() => { p.onMistake("all"); close(); }}>All trades</MenuItem>
+                    <MenuItem checked={p.mistake === "any"} onClick={() => { p.onMistake("any"); close(); }}>Any mistake</MenuItem>
+                    <MenuItem checked={p.mistake === "none"} onClick={() => { p.onMistake("none"); close(); }}>No mistake</MenuItem>
+                    {p.mistakes.map((m) => <MenuItem key={m.key} checked={p.mistake === m.key} onClick={() => { p.onMistake(m.key); close(); }}>{m.label} · {m.count}</MenuItem>)}
+                  </div>
+                </>
+              )}
               {filterCount > 0 && (
                 <>
                   <MenuDivider />
-                  <MenuItem onClick={() => { p.onOutcome("all"); p.onInstrument("all"); close(); }}>Clear filters</MenuItem>
+                  <MenuItem onClick={() => { p.onOutcome("all"); p.onInstrument("all"); p.onMistake("all"); close(); }}>Clear filters</MenuItem>
                 </>
               )}
             </>

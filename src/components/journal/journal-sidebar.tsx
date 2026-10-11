@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 export type SidebarSetup = { id: string; name: string; count: number };
 export type SidebarLesson = { id: string; title: string; count: number };
+export type SidebarMistake = { key: string; label: string; count: number };
 
 export function Row({ icon, label, count, selected, onClick, indent = 0, lead }: {
   icon?: SymName; label: string; count?: number; selected?: boolean; onClick: () => void; indent?: number; lead?: React.ReactNode;
@@ -37,9 +38,9 @@ export const Heading = ({ children }: { children: React.ReactNode }) => (
 
 /** The navigator: Library · Dates (Year ▸ Month) · Setups. Selection mirrors the Folder view's path. */
 export function SidebarContent({
-  total, review, tree, path, lens, setups, lessons = [], onLens, onPath,
+  total, review, tree, path, lens, setups, lessons = [], mistakes = [], onLens, onPath,
 }: {
-  total: number; review: number; tree: YearNode[]; path: string; lens: Lens; setups: SidebarSetup[]; lessons?: SidebarLesson[];
+  total: number; review: number; tree: YearNode[]; path: string; lens: Lens; setups: SidebarSetup[]; lessons?: SidebarLesson[]; mistakes?: SidebarMistake[];
   onLens: (l: Lens) => void; onPath: (p: string) => void;
 }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(tree[0] ? [tree[0].key] : []));
@@ -86,6 +87,15 @@ export function SidebarContent({
       {setups.map((s) => (
         <Row key={s.id} icon="book" label={s.name} count={s.count} selected={lens.kind === "setup" && lens.id === s.id} onClick={() => { onLens({ kind: "setup", id: s.id }); onPath(""); }} />
       ))}
+
+      {mistakes.length > 0 && <Heading>Mistakes</Heading>}
+      <AnimatePresence initial={false}>
+        {mistakes.map((m) => (
+          <motion.div key={m.key} layout="position" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={SPRING}>
+            <Row icon="tag" label={m.label} count={m.count} selected={lens.kind === "mistake" && lens.id === m.key} onClick={() => { onLens({ kind: "mistake", id: m.key }); onPath(""); }} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
 
       {lessons.length > 0 && <Heading>Lessons</Heading>}
       <AnimatePresence initial={false}>

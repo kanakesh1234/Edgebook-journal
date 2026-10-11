@@ -6,7 +6,7 @@
 /*  reaches the browser.                                                */
 /* ------------------------------------------------------------------ */
 
-import type { CandleData, DataAvailability, HistoricalDataProvider } from './types';
+import type { CandleData, CandleFetchMeta, DataAvailability, HistoricalDataProvider } from './types';
 
 export class LseProvider implements HistoricalDataProvider {
   readonly name = 'London Strategic Edge';
@@ -17,21 +17,25 @@ export class LseProvider implements HistoricalDataProvider {
     startUtc: string,
     endUtc: string,
   ): Promise<CandleData[]> {
-    const params = new URLSearchParams({
-      symbol,
-      timeframe,
-      start: startUtc,
-      end: endUtc,
-    });
+    return (await this.getCandlesWithMeta(symbol, timeframe, startUtc, endUtc)).candles;
+  }
+
+  /** Same as getCandles, plus what the server actually did (rows, truncation, range). */
+  async getCandlesWithMeta(
+    symbol: string,
+    timeframe: string,
+    startUtc: string,
+    endUtc: string,
+  ): Promise<{ candles: CandleData[]; meta: CandleFetchMeta | null }> {
+    const params = new URLSearchParams({ symbol, timeframe, start: startUtc, end: endUtc });
     const res = await fetch(`/api/market-data?${params}`);
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(
-        `LSE data fetch failed (${res.status}): ${body || res.statusText}`,
-      );
+      // The route returns { error, message } — show the human message, not raw JSON.
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(body?.message || `Data request failed (${res.status}).`);
     }
-    const json = (await res.json()) as { candles: CandleData[] };
-    return json.candles;
+    const json = (await res.json()) as { candles: CandleData[]; meta?: CandleFetchMeta };
+    return { candles: json.candles ?? [], meta: json.meta ?? null };
   }
 
   async getAvailableSymbols(): Promise<string[]> {

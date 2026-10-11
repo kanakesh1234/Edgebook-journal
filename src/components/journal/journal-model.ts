@@ -1,15 +1,18 @@
 import type { JournalEntry } from "@/lib/types";
 import { reviewStatusOf } from "@/lib/types";
 import { formatDateMedium, monthName } from "@/lib/format";
+import { mistakeOf } from "@/lib/mistakes";
 
 /**
  * Pure view-model helpers. Everything here is derived from `useApp().entries` —
  * the Journal owns no data of its own, only a lens over the store.
  */
 export type Outcome = "all" | "win" | "loss" | "flat";
-export type SortKey = "newest" | "oldest" | "best" | "worst" | "rr";
+export type SortKey = "newest" | "oldest" | "best" | "worst" | "rr" | "mistake";
 export type ViewMode = "list" | "grid" | "folders";
-export type Lens = { kind: "all" } | { kind: "review" } | { kind: "setup"; id: string } | { kind: "lesson"; id: string };
+export type Lens = { kind: "all" } | { kind: "review" } | { kind: "setup"; id: string } | { kind: "lesson"; id: string } | { kind: "mistake"; id: string };
+/** Mistake filter: every trade, any trade with a mistake, only clean trades, or one category. */
+export type MistakeFilter = "all" | "any" | "none" | (string & {});
 
 /** Trades linked to one lesson. */
 export const tradesForLesson = (lessonId: string, list: JournalEntry[]) => list.filter((e) => e.lessonIds?.includes(lessonId));
@@ -76,8 +79,11 @@ export function childrenOf(tree: YearNode[], path: string): Node[] {
   return [];
 }
 
-export function filterEntries(list: JournalEntry[], f: { outcome: Outcome; instrument: string; query: string }): JournalEntry[] {
+export function filterEntries(list: JournalEntry[], f: { outcome: Outcome; instrument: string; query: string; mistake?: MistakeFilter }): JournalEntry[] {
   let out = list;
+  if (f.mistake && f.mistake !== "all") {
+    out = out.filter((e) => { const m = mistakeOf(e); return f.mistake === "any" ? !!m : f.mistake === "none" ? !m : m?.key === f.mistake; });
+  }
   if (f.outcome === "win") out = out.filter((e) => e.pnl > 0);
   else if (f.outcome === "loss") out = out.filter((e) => e.pnl < 0);
   else if (f.outcome === "flat") out = out.filter((e) => e.pnl === 0);
@@ -85,15 +91,23 @@ export function filterEntries(list: JournalEntry[], f: { outcome: Outcome; instr
   const q = f.query.trim().toLowerCase();
   if (q) {
     out = out.filter((e) =>
-      [e.notes ?? "", e.instrument, e.setup ?? "", e.date, formatDateMedium(e.date), dayLong(e.date), e.reflection?.lesson ?? "", e.review?.psychology?.emotionBefore ?? ""].some((s) => s.toLowerCase().includes(q)),
+      [e.notes ?? "", e.instrument, e.setup ?? "", e.date, formatDateMedium(e.date), dayLong(e.date), e.reflection?.lesson ?? "", e.review?.psychology?.emotionBefore ?? "", mistakeOf(e)?.label ?? "", mistakeOf(e)?.text ?? "", e.review?.followUp?.mistakeNote ?? ""].some((s) => s.toLowerCase().includes(q)),
     );
   }
   return out;
 }
 
 export function sortEntries(list: JournalEntry[], sort: SortKey): JournalEntry[] {
+  // "By mistake": the most common mistake first, trades with the same mistake together (costliest first), clean trades last.
+  const freq = new Map<string, number>();
+  if (sort === "mistake") for (const e of list) { const m = mistakeOf(e); if (m) freq.set(m.key, (freq.get(m.key) ?? 0) + 1); }
   return [...list].sort((a, b) => {
     switch (sort) {
+      case "mistake": {
+        const ma = mistakeOf(a), mb = mistakeOf(b);
+        if (!ma || !mb) return ma ? -1 : mb ? 1 : b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
+        return (freq.get(mb.key)! - freq.get(ma.key)!) || ma.label.localeCompare(mb.label) || a.pnl - b.pnl || b.date.localeCompare(a.date);
+      }
       case "oldest": return a.date.localeCompare(b.date) || a.createdAt - b.createdAt;
       case "best": return b.pnl - a.pnl;
       case "worst": return a.pnl - b.pnl;

@@ -10,16 +10,17 @@ import type { CandleData } from './types';
 
 const DB_NAME = 'edgebook-market-data';
 const STORE_NAME = 'candles';
-const DB_VERSION = 1;
+// v2: keys now include the full window + timeframe. Old v1 entries were keyed by
+// start-date only and could hold partial data, so the store is wiped on upgrade.
+const DB_VERSION = 2;
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
+      if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
+      db.createObjectStore(STORE_NAME);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

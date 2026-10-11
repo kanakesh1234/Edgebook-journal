@@ -4,7 +4,7 @@
  * Autopsy — four quick questions, revealed one at a time.
  *
  *   1. Did you follow your plan?          (Yes / No)
- *   2. How did it feel?                   (chips)
+ *   2. How did it feel?                   (chips — a few up front, the rest behind "More…")
  *   3. Good process, whatever the P&L?    (Yes / No)
  *   4. One lesson to carry forward        (optional, one sentence)
  *
@@ -12,23 +12,23 @@
  * a copy captured earlier. Screenshots attached a moment ago are therefore always
  * seen, so the review is never wrongly marked "incomplete".
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { JournalEntry, TradeReviewData } from "@/lib/types";
 import { formatSignedMoney, weekdayLong } from "@/lib/format";
 import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
-import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, PrimaryButton, Reveal, Segmented, TextBlock, TextBox } from "./flow-ui";
+import { MORE_FEELINGS, PRIMARY_FEELINGS, feelingFromReview, feelingOf, type FeelingKey } from "@/lib/feelings";
+import { MISTAKE_CATEGORIES, categoryOf, classifyMistake, isMistakeKey, type MistakeKey } from "@/lib/mistakes";
+import { dayRisk } from "@/lib/risk";
+import { auditLabel, auditTrade, isPresetKey, type Audit } from "@/lib/audit";
+import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, PrimaryButton, Reveal, Segmented, Stagger, TextBlock, TextBox } from "./flow-ui";
+import { RiskMeter } from "./risk-meter";
 
-type Emotion = "calm" | "fomo" | "revenge" | "fear" | "";
-
-const EMOTIONS: { key: Exclude<Emotion, "">; label: string }[] = [
-  { key: "calm", label: "Calm" },
-  { key: "fomo", label: "FOMO" },
-  { key: "revenge", label: "Urgent" },
-  { key: "fear", label: "Hesitant" },
-];
+type Emotion = FeelingKey | "";
+/** The bucket this mistake is filed under, and who decided: a quick-pick, the AI, the local fallback, or the trader. */
+type Category = { key: MistakeKey; source: "preset" | "ai" | "rules" | "you"; confidence: number };
 
 const MISTAKES: { key: string; label: string }[] = [
   { key: "none", label: "No mistake" },
@@ -55,6 +55,10 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const entry = live ?? fallback ?? null;
   const entryRef = useRef(entry);
   entryRef.current = entry;
+  // The day's loss limit against the day as it really went. Live, so it includes the trade that was just saved.
+  const allEntries = useApp((s) => s.entries);
+  const plans = useApp((s) => s.plans);
+  const risk = useMemo(() => (entry ? dayRisk(entry.date, allEntries, plans) : null), [entry, allEntries, plans]);
 
   const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
   const [emotion, setEmotion] = useState<Emotion>("");
@@ -68,7 +72,27 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   /** True once the trader has confirmed their custom mistake text. */
   const [otherDone, setOtherDone] = useState(false);
   /** Which answered step is being re-opened from its summary pill. */
-  const [editing, setEditing] = useState<"mistake" | "blunder" | null>(null);
+  const [editing, setEditing] = useState<"mistake" | "blunder" | "category" | null>(null);
+  /** Filing of the mistake into the shared categories. Written-in mistakes ("Others") are sorted by AI in the background. */
+  const [category, setCategory] = useState<Category | null>(null);
+  const [sorting, setSorting] = useState(false);
+  const categoryRef = useRef<Category | null>(null);
+  categoryRef.current = category;
+  const sortRun = useRef(0);
+  const sortPromise = useRef<Promise<void> | null>(null);
+  const sortedText = useRef("");
+  /** The audit's independent read of the whole trade. Runs once when the review opens; the saved copy is re-run with the answers. */
+  const [audit, setAudit] = useState<Audit | null>(null);
+  const [auditDismissed, setAuditDismissed] = useState(false);
+  const auditedFor = useRef<string | null>(null);
+  useEffect(() => { if (!active) { auditedFor.current = null; setAudit(null); setAuditDismissed(false); } }, [active]);
+  useEffect(() => {
+    if (!active || !entryId || auditedFor.current === entryId) return;
+    const e = entryRef.current; if (!e) return;
+    auditedFor.current = entryId;
+    const st = useApp.getState();
+    void auditTrade(e, st.entries, st.plans).then((a) => { if (auditedFor.current === entryId) setAudit(a); });
+  }, [active, entryId]);
   /** The just-tapped option, shown selected for a beat before its step folds away. */
   const [pending, setPending] = useState<{ kind: "mistake" | "blunder"; value: string } | null>(null);
   const settleTimer = useRef<number | undefined>(undefined);
@@ -87,7 +111,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     const e = entryRef.current;
     const r = e?.review;
     setFollowedPlan(r?.outcome?.followedPlan ?? null);
-    setEmotion(r?.psychology?.fomo ? "fomo" : r?.psychology?.revenge ? "revenge" : r?.psychology?.fearExit ? "fear" : r?.psychology?.convictionOrUrgency === "conviction" ? "calm" : "");
+    setEmotion(feelingFromReview(r?.psychology));
     setGoodProcess(r?.outcome?.processVerdict === "a-plus" ? true : r?.outcome?.processVerdict === "process-failure" ? false : null);
     setLesson(r?.followUp?.biggestMistake ?? e?.reflection?.lesson ?? "");
     setMistake(r?.followUp?.mistake ?? "");
@@ -95,6 +119,10 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     setMistakeNote(r?.followUp?.mistakeNote ?? "");
     setMistakeOther(r?.followUp?.mistakeOther ?? "");
     setOtherDone(r?.followUp?.mistake === "other" && !!r?.followUp?.mistakeOther?.trim());
+    const savedKey = r?.followUp?.mistakeCategory;
+    setCategory(savedKey && isMistakeKey(savedKey) ? { key: savedKey, source: r?.followUp?.mistakeCategorySource ?? "preset", confidence: r?.followUp?.mistakeCategoryConfidence ?? 1 } : null);
+    sortedText.current = r?.followUp?.mistakeOther?.trim() ?? "";
+    sortRun.current++; setSorting(false);
     setEditing(null);
     setPending(null);
     setError(null);
@@ -105,11 +133,28 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     window.clearTimeout(settleTimer.current);
     settleTimer.current = window.setTimeout(() => { apply(); setEditing(null); setPending(null); }, 240);
   };
+  /** Files a written-in mistake under a category. Never blocks the trader: the local sorter answers if AI is slow or off. */
+  const sortOther = (text: string, note: string) => {
+    const id = ++sortRun.current;
+    setSorting(true);
+    const run = classifyMistake(text, note)
+      .then((c) => { if (id === sortRun.current) setCategory((prev) => (prev?.source === "you" && sortedText.current === text ? prev : { key: c.key, source: c.source, confidence: c.confidence })); })
+      .finally(() => { if (id === sortRun.current) setSorting(false); });
+    sortPromise.current = run;
+    return run;
+  };
+  const chooseCategory = (key: MistakeKey) => {
+    sortRun.current++; // an answer still in flight must not overwrite the trader's choice
+    setSorting(false);
+    setCategory({ key, source: "you", confidence: 1 });
+    setEditing(null);
+  };
   const chooseMistake = (m: string) => {
     // "Others" needs a typed answer first, so it stays open instead of folding away.
     if (m === "other") {
       setMistake("other");
       setOtherDone(false);
+      if (category?.source === "preset") { setCategory(null); sortedText.current = ""; }
       setEditing("mistake");
       if (blunder === 0) setBlunder(null);
       return;
@@ -117,15 +162,34 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     settleMistake(m);
   };
   const confirmOther = () => {
-    if (!mistakeOther.trim()) return;
+    const text = mistakeOther.trim();
+    if (!text) return;
     setOtherDone(true);
     setEditing(null);
+    if (sortedText.current !== text) { // new or changed words: sort again (a manual choice about OLD words no longer applies)
+      sortedText.current = text;
+      setCategory(null);
+      void sortOther(text, mistakeNote);
+    }
   };
   const settleMistake = (m: string) => settle("mistake", m, () => {
     setMistake(m);
+    sortRun.current++; setSorting(false);
+    setCategory(m !== "none" && isMistakeKey(m) ? { key: m, source: "preset", confidence: 1 } : null);
     if (m === "none") setBlunder(0);
     else if (blunder === 0) setBlunder(null);
   });
+  /** One tap: take the audit's finding as the mistake of the day (quick-picks file under themselves, others go to "Others"). */
+  const acceptAudit = () => {
+    if (!audit || audit.key === "none") return;
+    setAuditDismissed(true);
+    if (isPresetKey(audit.key)) { settleMistake(audit.key); return; }
+    sortRun.current++; setSorting(false);
+    setMistake("other"); setMistakeOther(auditLabel(audit)); setOtherDone(true); sortedText.current = auditLabel(audit);
+    setCategory({ key: audit.key, source: "ai", confidence: audit.confidence });
+    if (blunder === 0) setBlunder(null);
+    setEditing(null);
+  };
   const chooseBlunder = (v: Blunder) => settle("blunder", String(v), () => setBlunder(v));
   const otherOk = mistake !== "other" || (mistakeOther.trim().length > 0 && otherDone);
   const blunderDone = mistake === "none" || blunder !== null;
@@ -150,13 +214,26 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     setSaving(true);
     setError(null);
     try {
+      // File the mistake. A written-in one waits for the sort already running; if that was unsure and the trader has since
+      // described what happened, it is sorted once more with those details. Quick-picks file under themselves.
+      let cat: Category | null = null;
+      if (mistake === "other") {
+        if (sortPromise.current) await sortPromise.current;
+        cat = categoryRef.current;
+        if (!cat || (cat.source !== "you" && cat.confidence < 0.6 && mistakeNote.trim())) {
+          const c = await classifyMistake(mistakeOther.trim(), mistakeNote, 6000);
+          cat = { key: c.key, source: c.source, confidence: c.confidence };
+        }
+      } else if (mistake !== "none" && isMistakeKey(mistake)) cat = { key: mistake, source: "preset", confidence: 1 };
+      const feel = feelingOf(emotion);
       const preTrade = current.preTradeChecklist ?? [];
       const preAllConfirmed = preTrade.length === 0 || preTrade.every((i) => i.confirmed);
       const review: TradeReviewData = {
         checklist: current.checklist,
         execution: { followedStop: followedPlan },
         psychology: {
-          convictionOrUrgency: emotion === "calm" ? "conviction" : emotion === "fomo" || emotion === "revenge" ? "urgency" : "",
+          emotionAfter: emotion || undefined,
+          convictionOrUrgency: feel?.drive ?? "",
           fomo: emotion === "fomo",
           revenge: emotion === "revenge",
           fearExit: emotion === "fear",
@@ -167,9 +244,13 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
           badTradeDespiteWin: current.pnl > 0 ? goodProcess === false : null,
           processVerdict: goodProcess === true ? "a-plus" : goodProcess === false ? "process-failure" : "",
         },
-        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
+        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, mistakeCategory: mistake === "none" ? undefined : cat?.key, mistakeCategorySource: mistake === "none" ? undefined : cat?.source, mistakeCategoryConfidence: mistake === "none" || !cat ? undefined : cat.confidence, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
         reviewedAt: Date.now(),
       };
+      // Final audit with the trader's answers included, so a generous "No mistake" is checked against the facts.
+      const st = useApp.getState();
+      const au = await auditTrade({ ...current, review }, st.entries, st.plans, 6000);
+      review.followUp = { ...review.followUp, audit: { key: au.key, confidence: au.confidence, reason: au.reason, objective: au.objective, source: au.source, flags: au.flags, at: Date.now() } };
       await useApp.getState().saveTradeReview(current.id, {
         review,
         reflection: {
@@ -191,7 +272,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     }
   };
 
-  return { entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, mistakeOther, setMistakeOther, confirmOther, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
+  return { audit, auditDismissed, dismissAudit: () => setAuditDismissed(true), acceptAudit, risk, category, sorting, chooseCategory, entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, mistakeOther, setMistakeOther, confirmOther, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
 }
 
 export type AutopsyState = ReturnType<typeof useAutopsy>;
@@ -224,6 +305,9 @@ const GlyphWarning = () => (
 const GlyphBars = () => (
   <svg viewBox="0 0 24 24" className={glyph} fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden><path d="M6 19v-4M12 19V9.5M18 19V5" /></svg>
 );
+const GlyphSpark = () => (
+  <svg viewBox="0 0 24 24" className={glyph} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m11 3.5 1.7 5 5 1.7-5 1.7L11 17l-1.7-5.1-5-1.7 5-1.7zM19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" /></svg>
+);
 const GlyphCheck = () => (
   <svg viewBox="0 0 24 24" className={glyph} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
 );
@@ -243,6 +327,16 @@ function AnswerList({ a }: { a: AutopsyState }) {
         value={mLabel}
         onClick={() => a.setEditing("mistake")}
       />
+      {a.mistake === "other" && (a.category || a.sorting) && (
+        <AnswerRow
+          label={`Category: ${a.sorting && !a.category ? "sorting" : categoryOf(a.category?.key)?.label}. Change`}
+          icon={<span className={cn(a.sorting && !a.category && "animate-pulse")}><GlyphSpark /></span>}
+          tile="bg-[#5e5ce6]"
+          title={a.category?.source === "ai" ? "Category · AI" : "Category"}
+          value={a.sorting && !a.category ? "Sorting…" : categoryOf(a.category?.key)?.label ?? "—"}
+          onClick={() => a.setEditing("category")}
+        />
+      )}
       {l && a.mistake !== "none" && (
         <AnswerRow
           label={`Blunder level: ${l.label}. Change`}
@@ -259,6 +353,7 @@ function AnswerList({ a }: { a: AutopsyState }) {
 }
 
 export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: () => void }) {
+  const [moreFeelings, setMoreFeelings] = useState(false);
   const entry = a.entry;
   if (!entry) return null;
   const preTrade = entry.preTradeChecklist ?? [];
@@ -292,6 +387,8 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
         </span>
         {preTrade.length > 0 && <span>{confirmed}/{preTrade.length} rules confirmed</span>}
       </div>
+      {/* The day's loss limit against what actually happened — shown before the questions so the answers are given with the numbers in view. */}
+      {a.risk && <div className="mt-5"><RiskMeter risk={a.risk} currency={a.currency} compact /></div>}
 
       <div>
         <Reveal>
@@ -303,9 +400,12 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
           {a.followedPlan !== null && (
             <Reveal key="feel">
               <Label done={a.emotion !== ""}>How did it feel?</Label>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {EMOTIONS.map((e) => <Chip key={e.key} selected={a.emotion === e.key} onClick={() => a.setEmotion(e.key)}>{e.label}</Chip>)}
-              </div>
+              {/* Same pattern as the plan: a few up front, the rest behind "More…" (and open if the answer lives there). */}
+              <Stagger className="mt-3 flex flex-wrap gap-2" delay={0.05}>
+                {PRIMARY_FEELINGS.map((f) => <Chip key={f.key} selected={a.emotion === f.key} onClick={() => a.setEmotion(a.emotion === f.key ? "" : f.key)}>{f.label}</Chip>)}
+                {(moreFeelings || MORE_FEELINGS.some((f) => f.key === a.emotion)) && MORE_FEELINGS.map((f) => <Chip key={f.key} selected={a.emotion === f.key} onClick={() => a.setEmotion(a.emotion === f.key ? "" : f.key)}>{f.label}</Chip>)}
+                {!moreFeelings && !MORE_FEELINGS.some((f) => f.key === a.emotion) && <Chip selected={false} onClick={() => setMoreFeelings(true)}>More…</Chip>}
+              </Stagger>
             </Reveal>
           )}
 
@@ -319,6 +419,21 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
           {/* 4 — Mistake of the day: one tap, then it folds away. */}
           {askMistake && (
             <Reveal key="mistake">
+              <AnimatePresence initial={false}>
+                {a.audit && a.audit.key !== "none" && !a.auditDismissed && (a.mistake === "" || a.mistake === "none") && (
+                  <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={FLOW_FADE} className="mb-4 flex items-start gap-3 rounded-2xl bg-[#5e5ce6]/[0.09] p-3.5 ring-1 ring-inset ring-[#5e5ce6]/20">
+                    <span className="mt-0.5 grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] bg-[#5e5ce6] text-white"><GlyphSpark /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold text-ink">{a.audit.objective ? "Spotted from your data" : "AI noticed"} · {auditLabel(a.audit)}</p>
+                      <p className="mt-0.5 text-[13.5px] leading-snug text-muted">{a.audit.reason}</p>
+                      <div className="mt-2.5 flex items-center gap-4 text-[13.5px] font-medium">
+                        <button type="button" onClick={a.acceptAudit} className="text-[#5e5ce6] hover:underline dark:text-[#9d9bff]">Use this</button>
+                        <button type="button" onClick={a.dismissAudit} className="text-faint hover:text-ink">Not a mistake</button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               <Label hint="the main error in this trade">Mistake of the day</Label>
               <div className="mt-3 flex flex-wrap gap-2">
                 {MISTAKES.map((m) => <Chip key={m.key} tone={m.key === "none" ? "profit" : "gold"} selected={shownMistake === m.key} onClick={() => a.chooseMistake(m.key)}>{m.label}</Chip>)}
@@ -344,6 +459,17 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
               <div className="mt-3">
                 <PrimaryButton disabled={a.mistakeOther.trim().length === 0} onClick={a.confirmOther}>Continue</PrimaryButton>
               </div>
+            </Reveal>
+          )}
+
+          {/* 4c — Category: the AI's filing of a written-in mistake. Tap its row to change it; one tap and it folds away. */}
+          {a.editing === "category" && (
+            <Reveal key="category">
+              <Label hint="how this mistake is filed in your journal">Pick a category</Label>
+              <Stagger className="mt-3 flex flex-wrap gap-2" delay={0.03}>
+                {MISTAKE_CATEGORIES.filter((c) => c.key !== "other").concat(MISTAKE_CATEGORIES.filter((c) => c.key === "other")).map((c) => <Chip key={c.key} selected={a.category?.key === c.key} onClick={() => a.chooseCategory(c.key)}>{c.label}</Chip>)}
+              </Stagger>
+              <p className="mt-3 min-h-5 text-[13px] text-faint">{categoryOf(a.category?.key)?.hint}</p>
             </Reveal>
           )}
 

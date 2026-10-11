@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { checklistItems, checklistScore, reviewStatusOf, type JournalEntry } from "@/lib/types";
-import { formatDateFull, formatSignedMoney, relativeDayLabel } from "@/lib/format";
+import { formatDateFull, formatDateMedium, formatSignedMoney, relativeDayLabel } from "@/lib/format";
+import { feelingFromReview, feelingOf as feelingByKey } from "@/lib/feelings";
+import { mistakeOf as bucketOf } from "@/lib/mistakes";
+import { dayRisk } from "@/lib/risk";
+import { RiskMeter } from "./risk-meter";
 import { useImageUrls } from "@/lib/hooks";
 import { Lightbox } from "@/components/ui/lightbox";
 import { ReflectionFlow } from "./reflection-flow";
@@ -332,17 +336,17 @@ const TONE: Record<Tone, string> = { good: "text-profit", bad: "text-loss", warn
 const HANDLED = new Set([
   "Followed plan", "Good trade despite loss", "Bad trade despite win", "Process verdict", "Followed setup", "Respected risk", "Followed stop",
   "Drive", "FOMO", "Revenge", "Fear of exiting", "Make-it-back", "Biggest mistake", "Mistake", "Mistake note", "Mistake other", "Blunder level",
+  "Felt after", "Emotion after", "Mistake category", "Category source", "Category confidence",
   "Next time", "Went well", "Didn’t go well", "Cause",
 ]);
 
 function feelingOf(e: JournalEntry): { label: string; tone: Tone } | null {
   const p = e.review?.psychology;
   if (!p) return null;
-  if (p.fomo) return { label: "FOMO", tone: "bad" };
-  if (p.revenge) return { label: "Urgent", tone: "bad" }; // the review flow calls this answer "Urgent"
-  if (p.fearExit) return { label: "Hesitant", tone: "bad" };
+  const k = feelingFromReview(p);
+  const f = k ? feelingByKey(k) : null;
+  if (f) return { label: f.label, tone: f.tone === "good" ? "good" : f.tone === "risk" ? "bad" : "plain" }; // "Urgent" is how the review flow words its revenge answer
   if (p.makeItBack) return { label: "Make-it-back", tone: "bad" };
-  if (p.convictionOrUrgency === "conviction") return { label: "Calm", tone: "good" };
   return null;
 }
 function mistakeOf(e: JournalEntry): { label: string; none: boolean } | null {
@@ -362,6 +366,9 @@ function buildAnswers(e: JournalEntry): Answer[] {
   if (v) { const bad = v === "process-failure"; out.push({ icon: "shield", tint: "#0a84ff", title: "Process", value: bad ? "Needs work" : "Good", tone: bad ? "bad" : "good" }); }
   const m = mistakeOf(e);
   if (m) out.push({ icon: "arrowDownRight", tint: "#ff9f0a", title: "Mistake", value: m.label, tone: m.none ? "good" : "bad" });
+  // A mistake the trader wrote in their own words is filed under a category (by AI, or by them) so it can be sorted in the Journal.
+  const bucket = bucketOf(e);
+  if (m && !m.none && bucket && r?.followUp?.mistake === "other") out.push({ icon: "tag", tint: "#5e5ce6", title: bucket.source === "ai" ? "Category · AI" : "Category", value: bucket.label, tone: "plain" });
   const lvl = Number(r?.followUp?.blunderLevel ?? 0);
   if (m && !m.none && lvl >= 1 && lvl <= 3) out.push({ icon: "chart", tint: "#8e8e93", title: "Severity", value: SEVERITY[lvl - 1].label, tone: lvl === 1 ? "warn" : "bad", meter: lvl });
   return out;
@@ -528,6 +535,10 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
   const status = entry.reviewStatus ?? reviewStatusOf(entry);
   const reviewed = status === "reviewed";
   const groups = useMemo(() => buildReviewGroups(entry), [entry]);
+  const allEntries = useApp((s) => s.entries);
+  const plans = useApp((s) => s.plans);
+  const currency = useApp((s) => s.settings.currency);
+  const risk = useMemo(() => dayRisk(entry.date, allEntries, plans), [entry.date, allEntries, plans]);
   const answers = useMemo(() => buildAnswers(entry), [entry]);
   const prose = useMemo(() => buildProse(entry), [entry]);
   const extra = useMemo(
@@ -572,7 +583,7 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
   const chips: { label: string; good: boolean }[] = autopsy
     ? [
         { label: entry.review?.outcome?.followedPlan ? "Followed plan" : "Broke plan", good: !!entry.review?.outcome?.followedPlan },
-        ...(feelingOf(entry) ? [{ label: feelingOf(entry)!.label, good: feelingOf(entry)!.tone === "good" }] : []),
+        ...(feelingOf(entry) ? [{ label: feelingOf(entry)!.label, good: feelingOf(entry)!.tone !== "bad" }] : []),
         ...(mistakeOf(entry) ? [{ label: mistakeOf(entry)!.label, good: mistakeOf(entry)!.none }] : []),
       ]
     : [...process.map((r) => ({ label: r.label, good: r.ok })), ...flags.map((f) => ({ label: f, good: false }))];
@@ -655,6 +666,8 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
                     </ul>
                   </section>
                 )}
+
+                {risk && <RiskMeter risk={risk} currency={currency} label={`${formatDateMedium(entry.date)} vs your limit`} />}
 
                 {lesson && <Callout label="Next time" text={lesson} />}
 

@@ -1,5 +1,7 @@
 import type { JournalEntry } from "@/lib/types";
 import type { SymName } from "./symbols";
+import { mistakeLabel } from "@/lib/mistakes";
+import { feelingOf } from "@/lib/feelings";
 
 /**
  * Turns everything stored on a trade's `review` / `reflection` into readable, grouped rows,
@@ -13,6 +15,7 @@ const LABELS: Record<string, string> = {
   fomo: "FOMO", revenge: "Revenge", fearExit: "Fear of exiting", makeItBack: "Make-it-back",
   convictionOrUrgency: "Drive", emotionBefore: "Feeling before", emotionalState: "Emotional state",
   processVerdict: "Process verdict", followedSetup: "Followed setup", followedRisk: "Respected risk",
+  emotionAfter: "Felt after", mistakeCategory: "Mistake category", mistakeCategorySource: "Category source", mistakeCategoryConfidence: "Category confidence",
   wentWell: "Went well", wentPoorly: "Didn’t go well", watchNext: "Watch next", lesson: "Next time", rr: "R multiple",
 };
 const ENUMS: Record<string, string> = { "a-plus": "A+ trade", "process-success": "Good process", "process-failure": "Process failure" };
@@ -33,7 +36,8 @@ function walk(v: unknown, key: string, out: ReviewRow[], depth: number, forceLon
   else if (typeof v === "number") out.push({ label, value: String(v) });
   else if (typeof v === "string") {
     const t = v.trim();
-    if (t) out.push({ label, value: pretty(t), long: forceLong || t.length > 42 || t.includes("\n") });
+    const text = key === "mistakeCategory" ? mistakeLabel(t) : key === "emotionAfter" ? feelingOf(t)?.label ?? pretty(t) : pretty(t);
+    if (t) out.push({ label, value: text, long: forceLong || t.length > 42 || t.includes("\n") });
   } else if (Array.isArray(v)) {
     if (v.every((x) => typeof x === "string" || typeof x === "number")) {
       const t = v.map(String).filter(Boolean).map(pretty).join(", ");

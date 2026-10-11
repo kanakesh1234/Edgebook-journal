@@ -24,8 +24,9 @@ import { SidebarContent } from "@/components/journal/journal-sidebar";
 import { FolderList, Timeline, type Money, type RowProps } from "@/components/journal/journal-views";
 import {
   buildTree, childrenOf, filterEntries, needsReview, parentPath, pathLabel, pct, sortEntries, summarize, tradesForLesson,
-  type Lens, type Outcome, type SortKey, type ViewMode,
+  type Lens, type MistakeFilter, type Outcome, type SortKey, type ViewMode,
 } from "@/components/journal/journal-model";
+import { mistakeIndex } from "@/lib/mistakes";
 import { cn } from "@/lib/utils";
 
 const VIEW_KEY = "edgebook.journal.view";
@@ -52,6 +53,7 @@ export default function JournalPage() {
   const [outcome, setOutcome] = useState<Outcome>("all");
   const [instrument, setInstrument] = useState("all");
   const [sort, setSort] = useState<SortKey>("newest");
+  const [mistakeFilter, setMistakeFilter] = useState<MistakeFilter>("all");
   const dirRef = useRef(1);
 
   useEffect(() => {
@@ -60,8 +62,9 @@ export default function JournalPage() {
   // Deep links from Lessons: /journal?trade=ID opens that trade, /journal?lesson=ID shows the trades linked to a lesson.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    const trade = q.get("trade"), lesson = q.get("lesson");
-    if (!trade && !lesson) return;
+    const trade = q.get("trade"), lesson = q.get("lesson"), mistake = q.get("mistake");
+    if (!trade && !lesson && !mistake) return;
+    if (mistake) setLens({ kind: "mistake", id: mistake });
     if (lesson) setLens({ kind: "lesson", id: lesson });
     if (trade) setViewingId(trade);
     window.history.replaceState(null, "", window.location.pathname);
@@ -112,18 +115,22 @@ export default function JournalPage() {
     return { counts, list: [...counts].flatMap(([id, count]) => { const l = lessonById.get(id); return l ? [{ id, title: l.title, count }] : []; }).sort((a, b) => b.count - a.count || a.title.localeCompare(b.title)) };
   }, [entries, lessonById]);
   const activeLessonId = lens.kind === "lesson" && (lessonInfos.counts.get(lens.id) ?? 0) > 0 ? lens.id : null;
-  const effLens: Lens = (lens.kind === "setup" && !activeSetup) || (lens.kind === "lesson" && !activeLessonId) ? { kind: "all" } : lens;
+  // Mistakes: every bucket that has trades, most common first (the sidebar list and the "Mistake" filter).
+  const mistakes = useMemo(() => mistakeIndex(entries), [entries]);
+  const activeMistake = lens.kind === "mistake" ? mistakes.find((m) => m.key === lens.id) ?? null : null;
+  const effLens: Lens = (lens.kind === "setup" && !activeSetup) || (lens.kind === "lesson" && !activeLessonId) || (lens.kind === "mistake" && !activeMistake) ? { kind: "all" } : lens;
 
   const base = useMemo(() => {
     if (effLens.kind === "review") return entries.filter(needsReview);
+    if (effLens.kind === "mistake" && activeMistake) return entries.filter((e) => activeMistake.ids.has(e.id));
     if (effLens.kind === "lesson" && activeLessonId) return tradesForLesson(activeLessonId, entries);
     if (effLens.kind === "setup" && activeSetup) { const ids = new Set(activeSetup.trades.map((t) => t.id)); return entries.filter((e) => ids.has(e.id)); }
     return entries;
-  }, [entries, effLens.kind, activeSetup, activeLessonId]);
+  }, [entries, effLens.kind, activeSetup, activeLessonId, activeMistake]);
 
   const tree = useMemo(() => buildTree(base), [base]);
   const scoped = useMemo(() => (path ? base.filter((e) => e.date.startsWith(path)) : base), [base, path]);
-  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query }), sort), [scoped, outcome, instrument, query, sort]);
+  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query, mistake: mistakeFilter }), sort), [scoped, outcome, instrument, query, sort, mistakeFilter]);
   const folderNodes = useMemo(() => childrenOf(buildTree(filtered, sort === "oldest"), path), [filtered, sort, path]);
   const summary = useMemo(() => summarize(filtered), [filtered]);
   const instruments = useMemo(() => [...new Set(entries.map((e) => e.instrument))].filter((i) => i !== "—").sort(), [entries]);
@@ -134,9 +141,9 @@ export default function JournalPage() {
 
   const searching = query.trim().length > 0;
   const chronological = sort === "newest" || sort === "oldest";
-  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : "Journal";
+  const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : effLens.kind === "mistake" ? activeMistake?.label ?? "Mistakes" : "Journal";
   const title = path ? pathLabel(path) : rootTitle;
-  const filtersActive = outcome !== "all" || instrument !== "all" || searching;
+  const filtersActive = outcome !== "all" || instrument !== "all" || mistakeFilter !== "all" || searching;
 
   const crumbs: Crumb[] = useMemo(() => {
     const out: Crumb[] = [{ label: rootTitle, onClick: () => setPath("") }];
@@ -188,7 +195,7 @@ export default function JournalPage() {
 
   // ── navigation actions ────────────────────────────────────────
   const goUp = () => { haptic.selection(); setPath(parentPath(path)); };
-  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); };
+  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); setMistakeFilter("all"); };
   const jumpToDate = (date: string) => {
     if (!date || entries.length === 0) return;
     const all = [...new Set(entries.map((e) => e.date))].sort();
@@ -250,6 +257,7 @@ export default function JournalPage() {
       total={entries.length} review={reviewCount} tree={tree} path={path} lens={effLens}
       setups={setupInfos.map((i) => ({ id: i.setup.id, name: i.setup.name, count: i.trades.length }))}
       lessons={lessonInfos.list}
+      mistakes={mistakes.map((m) => ({ key: m.key, label: m.label, count: m.count }))}
       onLens={(l) => { setLens(l); }} onPath={setPath}
     />
   );
@@ -303,6 +311,7 @@ export default function JournalPage() {
             view={view} onView={setView} crumbs={crumbs} onUp={path ? goUp : undefined} onSidebar={toggleSidebar}
             query={query} onQuery={setQuery} searchRef={searchRef}
             outcome={outcome} onOutcome={setOutcome} instrument={instrument} instruments={instruments} onInstrument={setInstrument}
+            mistake={mistakeFilter} mistakes={mistakes.map((m) => ({ key: m.key, label: m.label, count: m.count }))} onMistake={setMistakeFilter}
             sort={sort} onSort={setSort} onJump={jumpToDate}
             selectMode={selectMode} onSelectMode={() => (selectMode ? exitSelect() : setSelectMode(true))} canSelect={!empty && !showFolders}
           />
@@ -314,6 +323,9 @@ export default function JournalPage() {
               <h1 className="font-display text-[32px] font-semibold tracking-[-0.03em] text-ink sm:text-[36px]">{searching ? "Search" : title}</h1>
               {activeSetup && !path && (
                 <Button variant="outline" size="sm" onClick={() => setOpenSetupId(activeSetup.setup.id)}>Setup details</Button>
+              )}
+              {activeMistake && !path && activeMistake.cost > 0 && (
+                <span className="mt-1 shrink-0 rounded-full bg-loss/[0.09] px-3 py-1 text-[13px] font-medium text-loss">Cost {money(-activeMistake.cost)}</span>
               )}
               {activeLessonId && !path && (
                 <Link href={`/lessons/${activeLessonId}`} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-line bg-raised px-3 text-[13.5px] font-medium text-ink transition-[border-color,transform] hover:border-line-strong active:scale-[0.97]">

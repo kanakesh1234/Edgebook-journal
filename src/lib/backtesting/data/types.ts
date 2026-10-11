@@ -16,6 +16,22 @@ export interface CandleData {
   volume: number;
 }
 
+/** What the /api/market-data route reports about a fetch. */
+export interface CandleFetchMeta {
+  symbol: string;
+  providerSymbol: string;
+  timeframe: string;
+  start: string;
+  end: string;
+  chunks: number;
+  upstreamRows: number;
+  returned: number;
+  /** True when the provider hit a row cap — data may be cut off. */
+  truncated: boolean;
+  firstTime: number | null;
+  lastTime: number | null;
+}
+
 /** A single tick in normalized format. */
 export interface TickData {
   /** UTC epoch timestamp in milliseconds. */

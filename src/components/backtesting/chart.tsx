@@ -15,12 +15,37 @@ import {
   ColorType,
   CrosshairMode,
   LineStyle,
+  TickMarkType,
 } from "lightweight-charts";
 import type { CandleData } from "@/lib/backtesting/data/types";
 import type { SimPosition, SimOrder, SimTrade } from "@/lib/backtesting/engine/order-engine";
 import type { DrawingObject } from "@/lib/backtesting/types";
 import { useTheme } from "@/lib/theme";
 import { uid } from "@/lib/utils";
+
+/* New York wall-clock formatting. lightweight-charts treats timestamps as UTC and
+   prints them that way unless told otherwise; the whole app speaks America/New_York. */
+const NY_TZ = "America/New_York";
+const nyFmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: NY_TZ, hour12: false, ...opts });
+const fmtTick = {
+  time: nyFmt({ hour: "2-digit", minute: "2-digit" }),
+  timeSec: nyFmt({ hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+  day: nyFmt({ day: "numeric", month: "short" }),
+  month: nyFmt({ month: "short" }),
+  year: nyFmt({ year: "numeric" }),
+  full: nyFmt({ weekday: "short", day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }),
+};
+const toDate = (t: Time) => new Date(Number(t) * 1000);
+const nyTickMark = (time: Time, type: TickMarkType): string => {
+  const d = toDate(time);
+  switch (type) {
+    case TickMarkType.Year: return fmtTick.year.format(d);
+    case TickMarkType.Month: return fmtTick.month.format(d);
+    case TickMarkType.DayOfMonth: return fmtTick.day.format(d);
+    case TickMarkType.TimeWithSeconds: return fmtTick.timeSec.format(d);
+    default: return fmtTick.time.format(d);
+  }
+};
 
 interface ChartProps {
   candles: CandleData[];
@@ -144,7 +169,9 @@ export default function BacktestChart({
         borderColor: colors.borderColor,
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
+      localization: { timeFormatter: (t: Time) => fmtTick.full.format(toDate(t)) },
       timeScale: {
+        tickMarkFormatter: nyTickMark,
         borderColor: colors.borderColor,
         timeVisible: true,
         secondsVisible: false,
@@ -230,7 +257,9 @@ export default function BacktestChart({
 
   // Update candle data
   useEffect(() => {
-    if (!seriesRef.current || candles.length === 0) return;
+    if (!seriesRef.current) return;
+    // Empty input must CLEAR the series, otherwise the previous day's candles stay on screen.
+    if (candles.length === 0) { seriesRef.current.setData([]); return; }
     const lwcData: CandlestickData[] = candles.map((c) => ({
       time: c.time as UTCTimestamp,
       open: c.open,

@@ -1,35 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { INSTRUMENTS } from '@/lib/backtesting/instruments';
 import { rateLimited, sessionEmail } from '@/lib/server/auth';
+import {
+  LSE_NATIVE_TIMEFRAMES,
+  isLseNativeTimeframe,
+  maxWindowDays,
+  normaliseTimeframe,
+  planChunks,
+  roundToTick,
+} from '@/lib/backtesting/data/timeframes';
 
 /* ------------------------------------------------------------------ */
 /*  Market data proxy — server-side only                                */
 /*                                                                      */
 /*  Proxies candle requests to London Strategic Edge's vault API.       */
 /*  The LSE_API_KEY is read from process.env and NEVER sent to the     */
-/*  browser. All responses are normalized before returning.             */
+/*  browser.                                                            */
+/*                                                                      */
+/*  Verified LSE behaviour (Oct 2026):                                  */
+/*   • response is a plain array: {ts, symbol, open, high, low, close,  */
+/*     volume}; `ts` is "YYYY-MM-DD HH:MM:SS.ffffff" in UTC             */
+/*   • `start`/`end` are whole dates, `end` is exclusive                */
+/*   • prices carry float noise (31430.500000000004) → snapped to tick  */
+/*   • unknown symbols return an error body, not an empty array         */
 /* ------------------------------------------------------------------ */
 
 const LSE_BASE = 'https://api.londonstrategicedge.com/vault';
-const MAX_ROWS = 5000;
+const MAX_CHUNKS = 40;
+const CONCURRENCY = 4;
 
-/**
- * LSE's actual response shape — the critical field is `ts`, a string
- * timestamp like "2026-01-01 00:00:00.000000".  We also keep the old
- * numeric-epoch fields (`t`, `time`, `timestamp`) for backward compat
- * in case LSE ever changes its format or the data comes from a
- * different endpoint.
- */
 interface LseCandle {
-  // String timestamp — LSE's real format: "YYYY-MM-DD HH:MM:SS.ffffff"
-  ts?: string;
-  date?: string;
-  datetime?: string;
-  // Numeric epoch — fallback / alternative formats
-  t?: number;
-  time?: number;
-  timestamp?: number;
-  // OHLCV — accept both short and long field names
+  ts?: string; date?: string; datetime?: string;
+  t?: number; time?: number; timestamp?: number;
   o?: number; open?: number;
   h?: number; high?: number;
   l?: number; low?: number;
@@ -41,193 +43,186 @@ function getApiKey(): string | null {
   return process.env.LSE_API_KEY || null;
 }
 
-/** LSE's vault API expects plain YYYY-MM-DD dates, not full ISO timestamps. */
-function toLseDate(value: string): string {
-  // Already in YYYY-MM-DD form — leave as-is.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value; // let LSE surface the error if truly invalid
-  return d.toISOString().slice(0, 10);
-}
-
-/**
- * Parse a string timestamp (e.g. "2026-01-01 09:30:00.000000") into
- * epoch seconds (UTC).  Returns 0 on failure so the row gets filtered.
- */
+/** "2026-10-08 13:30:00.000000" (UTC) → epoch seconds. 0 on failure. */
 function parseStringTimestamp(value: string): number {
-  // Replace the space between date and time with "T" for ISO parsing,
-  // trim microsecond precision that Date() can't handle, and assume UTC
-  // when no timezone suffix is present.
-  let iso = value.trim();
-  // "2026-01-01 09:30:00.000000" → "2026-01-01T09:30:00.000000"
-  iso = iso.replace(' ', 'T');
-  // Truncate microseconds → milliseconds (keep max 3 decimal digits)
+  let iso = value.trim().replace(' ', 'T');
   iso = iso.replace(/(\.\d{3})\d*$/, '$1');
-  // Append Z if no timezone indicator present
-  if (!/[Zz+\-]\d{0,4}$/.test(iso)) iso += 'Z';
+  if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(iso)) iso += 'Z';
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
 }
 
-/**
- * Resolve an internal symbol (e.g. "NQ") to the provider symbol
- * that LSE's API recognizes (e.g. "NQ.F").  Falls through to the
- * original symbol if no mapping exists.  Also handles the reverse:
- * if someone already passes "NQ.F", don't double-map it.
- */
+/** Internal symbol → LSE symbol (NQ→NQ.F, MNQ→NQ.F). Pass-through if unknown or already LSE's. */
 function resolveProviderSymbol(symbol: string): string {
-  // Direct match on internal symbol → providerSymbol
-  const byInternal = INSTRUMENTS.find(
-    (i) => i.symbol.toUpperCase() === symbol.toUpperCase(),
-  );
+  const up = symbol.toUpperCase();
+  const byInternal = INSTRUMENTS.find((i) => i.symbol.toUpperCase() === up);
   if (byInternal?.providerSymbol) return byInternal.providerSymbol;
-
-  // Already a provider symbol? (e.g. caller passed "NQ.F" directly)
-  const byProvider = INSTRUMENTS.find(
-    (i) => i.providerSymbol?.toUpperCase() === symbol.toUpperCase(),
-  );
-  if (byProvider) return symbol; // already correct
-
-  // No mapping found — pass through as-is
   return symbol;
 }
 
-const SYMBOL_RE = /^[A-Za-z0-9._-]{1,20}$/;
-const TIMEFRAME_RE = /^\d{1,3}(s|m|h|d|w)$/;
+function tickSizeFor(providerSymbol: string): number | undefined {
+  return INSTRUMENTS.find((i) => i.providerSymbol?.toUpperCase() === providerSymbol.toUpperCase())?.tickSize;
+}
+
+const SYMBOL_RE = /^[A-Za-z0-9._/-]{1,20}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]{0,20}(Z|[+-]\d{2}:?\d{2})?)?$/;
 
+function fail(error: string, message: string, status: number) {
+  return NextResponse.json({ error, message }, { status });
+}
+
+class UpstreamError extends Error {
+  constructor(public kind: 'unknown_symbol' | 'rate_limited' | 'provider', public status: number) {
+    super(kind);
+  }
+}
+
+function toCandle(r: LseCandle, tick: number | undefined) {
+  let timeSec = 0;
+  const strTs = r.ts ?? r.datetime ?? r.date;
+  if (strTs && typeof strTs === 'string') timeSec = parseStringTimestamp(strTs);
+  if (timeSec === 0) {
+    const numTs = r.t ?? r.time ?? r.timestamp ?? 0;
+    timeSec = typeof numTs === 'number' && numTs > 0 ? (numTs > 1e12 ? Math.floor(numTs / 1000) : numTs) : 0;
+  }
+  return {
+    time: timeSec,
+    open: roundToTick(r.o ?? r.open ?? 0, tick),
+    high: roundToTick(r.h ?? r.high ?? 0, tick),
+    low: roundToTick(r.l ?? r.low ?? 0, tick),
+    close: roundToTick(r.c ?? r.close ?? 0, tick),
+    volume: Math.round(r.v ?? r.volume ?? 0),
+  };
+}
+
+async function fetchChunk(
+  apiKey: string,
+  symbol: string,
+  timeframe: string,
+  chunk: { start: string; end: string; limit: number },
+): Promise<LseCandle[]> {
+  const params = new URLSearchParams({
+    symbol,
+    timeframe,
+    start: chunk.start,
+    end: chunk.end,
+    limit: String(chunk.limit),
+  });
+  const res = await fetch(`${LSE_BASE}/candles?${params}`, {
+    headers: { 'x-api-key': apiKey },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    // Log status only — never forward the provider body (may contain account/quota details).
+    console.error(`[market-data] LSE ${res.status} for ${symbol} ${timeframe} ${chunk.start}`);
+    if (res.status === 400 || res.status === 404 || res.status === 422) throw new UpstreamError('unknown_symbol', res.status);
+    if (res.status === 429) throw new UpstreamError('rate_limited', 429);
+    throw new UpstreamError('provider', res.status);
+  }
+  const raw = await res.json();
+  const list = Array.isArray(raw) ? raw : (raw?.data || raw?.candles || raw?.results);
+  return Array.isArray(list) ? list : [];
+}
+
 export async function GET(req: NextRequest) {
-  // The upstream data plan is paid for — only signed-in users may spend it.
   const me = sessionEmail(req);
-  if (!me) return NextResponse.json({ error: 'not_logged_in' }, { status: 401 });
-  if (rateLimited(`market:${me}`, 120, 60_000)) return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  if (!me) return fail('not_logged_in', 'Please sign in again.', 401);
+  if (rateLimited(`market:${me}`, 120, 60_000)) return fail('rate_limited', 'Too many requests — wait a moment.', 429);
 
   const apiKey = getApiKey();
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'LSE_API_KEY not configured. Add it to .env.local.' },
-      { status: 503 },
-    );
-  }
+  if (!apiKey) return fail('not_configured', 'LSE_API_KEY is not set in .env.local.', 503);
 
   const { searchParams } = req.nextUrl;
   const rawSymbol = searchParams.get('symbol');
-  const timeframe = searchParams.get('timeframe') || '1m';
+  const rawTf = searchParams.get('timeframe') || '1m';
   const start = searchParams.get('start');
   const end = searchParams.get('end');
 
-  if (!rawSymbol) {
-    return NextResponse.json({ error: 'Missing required parameter: symbol' }, { status: 400 });
+  if (!rawSymbol || !SYMBOL_RE.test(rawSymbol)) return fail('bad_request', 'Missing or invalid symbol.', 400);
+  if (!start || !end || !DATE_RE.test(start) || !DATE_RE.test(end)) {
+    return fail('bad_request', 'start and end are required (ISO date or datetime).', 400);
   }
 
-  if (!SYMBOL_RE.test(rawSymbol) || !TIMEFRAME_RE.test(timeframe) || (start && !DATE_RE.test(start)) || (end && !DATE_RE.test(end))) {
-    return NextResponse.json({ error: 'Invalid symbol, timeframe or date.' }, { status: 400 });
+  const timeframe = normaliseTimeframe(rawTf);
+  if (!timeframe || !isLseNativeTimeframe(timeframe)) {
+    return fail(
+      'unsupported_timeframe',
+      `Timeframe "${rawTf}" isn't served by LSE. Supported: ${LSE_NATIVE_TIMEFRAMES.join(', ')}.`,
+      400,
+    );
   }
 
-  // Resolve to LSE provider symbol (NQ → NQ.F, ES → ES.F, etc.)
+  const startEpoch = Math.floor(Date.parse(start) / 1000);
+  const endEpoch = Math.floor(Date.parse(end) / 1000);
+  if (!Number.isFinite(startEpoch) || !Number.isFinite(endEpoch) || endEpoch <= startEpoch) {
+    return fail('bad_request', 'The end must be after the start.', 400);
+  }
+
+  const days = (endEpoch - startEpoch) / 86400;
+  if (days > maxWindowDays(timeframe)) {
+    return fail('window_too_large', `Window is ${Math.ceil(days)} days; the limit for ${timeframe} is ${maxWindowDays(timeframe)}.`, 400);
+  }
+
   const symbol = resolveProviderSymbol(rawSymbol);
+  const tick = tickSizeFor(symbol);
+  const chunks = planChunks(startEpoch, endEpoch, timeframe);
+  if (chunks.length === 0 || chunks.length > MAX_CHUNKS) {
+    return fail('window_too_large', 'That window needs too many requests — shorten it.', 400);
+  }
 
   try {
-    // Precise requested window (epoch seconds) — used to slice the final
-    // result down to exactly what the session asked for. LSE's vault API
-    // only understands whole calendar dates, so the fetch below has to be
-    // widened to whole days; without this final slice you'd either get a
-    // degenerate (often empty/near-empty) window when start/end fall on the
-    // same day, or a full day of extra candles outside the requested range.
-    const startEpoch = start ? Math.floor(Date.parse(start) / 1000) : null;
-    const endEpoch = end ? Math.floor(Date.parse(end) / 1000) : null;
-
-    // Build LSE vault URL using whole-day bounds. If start/end land on the
-    // same calendar day (the normal case for an intraday session), push the
-    // fetch end date one day later so LSE doesn't see start === end and
-    // collapse the range to nothing.
-    const params = new URLSearchParams({ symbol, timeframe, limit: String(MAX_ROWS) });
-    if (start) {
-      const fetchStartDate = toLseDate(start);
-      params.set('start', fetchStartDate);
-      if (end) {
-        let fetchEndDate = toLseDate(end);
-        if (fetchEndDate === fetchStartDate) {
-          const d = new Date(fetchEndDate + 'T00:00:00Z');
-          d.setUTCDate(d.getUTCDate() + 1);
-          fetchEndDate = d.toISOString().slice(0, 10);
-        }
-        params.set('end', fetchEndDate);
+    const results: LseCandle[][] = new Array(chunks.length);
+    let next = 0;
+    let truncated = false;
+    const worker = async () => {
+      while (next < chunks.length) {
+        const i = next++;
+        const rows = await fetchChunk(apiKey, symbol, timeframe, chunks[i]);
+        if (rows.length >= chunks[i].limit) truncated = true; // hit our own row cap → data may be cut
+        results[i] = rows;
       }
-    } else if (end) {
-      params.set('end', toLseDate(end));
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, worker));
+
+    const upstreamRows = results.reduce((n, r) => n + r.length, 0);
+
+    const byTime = new Map<number, ReturnType<typeof toCandle>>();
+    for (const rows of results) {
+      for (const r of rows) {
+        const c = toCandle(r, tick);
+        // Window is [start, end): a candle's time is its OPEN, so the candle
+        // stamped exactly at `end` belongs to the next session.
+        if (c.time > 0 && c.open > 0 && c.time >= startEpoch && c.time < endEpoch) byTime.set(c.time, c);
+      }
     }
+    const candles = [...byTime.values()].sort((a, b) => a.time - b.time);
 
-    const url = `${LSE_BASE}/candles?${params}`;
-    const lseRes = await fetch(url, {
-      headers: { 'x-api-key': apiKey },
-      cache: 'no-store',
+    return NextResponse.json({
+      candles,
+      count: candles.length,
+      meta: {
+        symbol: rawSymbol,
+        providerSymbol: symbol,
+        timeframe,
+        start,
+        end,
+        chunks: chunks.length,
+        upstreamRows,
+        returned: candles.length,
+        truncated,
+        firstTime: candles[0]?.time ?? null,
+        lastTime: candles[candles.length - 1]?.time ?? null,
+      },
     });
-
-    if (!lseRes.ok) {
-      // Never forward the provider's raw error body to the browser (can contain account / quota details).
-      console.error(`[market-data] LSE responded ${lseRes.status}`);
-      return NextResponse.json(
-        { error: `Market data provider error (${lseRes.status}).` },
-        { status: lseRes.status >= 500 ? 502 : lseRes.status === 429 ? 429 : 502 },
-      );
-    }
-
-    const raw = await lseRes.json();
-
-    // Normalize: LSE may return an array directly or under a key
-    const rawList = Array.isArray(raw) ? raw : (raw.data || raw.candles || raw.results);
-    const rows: LseCandle[] = Array.isArray(rawList) ? rawList : [];
-
-    const candles = rows.map((r: LseCandle) => {
-      /* -------------------------------------------------------------- */
-      /*  Timestamp resolution — priority order:                         */
-      /*  1. `ts`  (string, LSE's real field: "2026-01-01 09:30:00...")  */
-      /*  2. `date` / `datetime` (string alternatives)                  */
-      /*  3. `t` / `time` / `timestamp` (numeric epoch, seconds or ms)  */
-      /* -------------------------------------------------------------- */
-      let timeSec = 0;
-
-      // String timestamp fields (LSE's actual format)
-      const strTs = r.ts ?? r.datetime ?? r.date;
-      if (strTs && typeof strTs === 'string') {
-        timeSec = parseStringTimestamp(strTs);
-      }
-
-      // Numeric fallback — only if string parsing didn't yield a result
-      if (timeSec === 0) {
-        const numTs = r.t ?? r.time ?? r.timestamp ?? 0;
-        // Normalize to epoch seconds (lightweight-charts expects seconds)
-        timeSec = typeof numTs === 'number' && numTs > 0
-          ? (numTs > 1e12 ? Math.floor(numTs / 1000) : numTs)
-          : 0;
-      }
-
-      return {
-        time: timeSec,
-        open: r.o ?? r.open ?? 0,
-        high: r.h ?? r.high ?? 0,
-        low: r.l ?? r.low ?? 0,
-        close: r.c ?? r.close ?? 0,
-        volume: r.v ?? r.volume ?? 0,
-      };
-    }).filter(c => c.time > 0 && c.open > 0);
-
-    // Sort chronologically
-    candles.sort((a: { time: number }, b: { time: number }) => a.time - b.time);
-
-    // Slice down to exactly the requested window. This is what actually
-    // guarantees a continuous, gap-free run of candles for the session
-    // instead of a whole day (or a degenerate empty range).
-    const sliced = candles.filter((c) => {
-      if (startEpoch !== null && c.time < startEpoch) return false;
-      if (endEpoch !== null && c.time > endEpoch) return false;
-      return true;
-    });
-
-    return NextResponse.json({ candles: sliced, count: sliced.length });
   } catch (err) {
+    if (err instanceof UpstreamError) {
+      if (err.kind === 'unknown_symbol') {
+        return fail('unknown_symbol', `LSE has no candle data for "${symbol}" at ${timeframe}.`, 404);
+      }
+      if (err.kind === 'rate_limited') return fail('provider_rate_limited', 'The data provider is rate-limiting us — try again shortly.', 429);
+      return fail('provider_error', `Market data provider error (${err.status}).`, 502);
+    }
     console.error('[market-data] fetch failed:', err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: 'Failed to fetch market data.' }, { status: 502 });
+    return fail('provider_error', 'Failed to fetch market data.', 502);
   }
 }

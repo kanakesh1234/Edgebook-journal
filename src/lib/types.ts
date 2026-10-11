@@ -102,6 +102,12 @@ export interface JournalEntry {
   updatedAt: number;
 }
 
+export interface WeeklyReviewNote {
+  wentWell?: string;
+  focus?: string;
+  updatedAt: number;
+}
+
 export interface JournalSettings {
   /** Display name used across the app (dashboard greeting, profile). Overrides the auth name when set. */
   fullName?: string;
@@ -120,6 +126,8 @@ export interface JournalSettings {
   primaryChallengeId?: string | null;
   /** AI companion preferences. */
   aiPrefs?: AiPrefs;
+  /** Weekly review notes, keyed by the Monday of the week (YYYY-MM-DD). */
+  weeklyReviews?: Record<string, WeeklyReviewNote>;
   /** Trade Time Machine progression. Answers stay local to the journal; raw
    * trade evidence is never replaced or inferred by game state. */
   practiceProgress?: PracticeProgress;
@@ -229,6 +237,12 @@ export interface TradePlan {
   emotionalState?: (typeof PLAN_EMOTIONS)[number];
   emotionalNote?: string;
   whatCouldBreakPlan?: string;
+  /** The most the trader accepts losing today (positive number, account currency). Compared with the day's real result. */
+  maxLoss?: number;
+  /** Mistakes the trader chose to watch for today (keys from lib/mistakes.ts) — a pre-commitment, checked against the review. */
+  watchMistakes?: string[];
+  /** News / events the trader flagged for the day. Empty or undefined = "No news". */
+  newsEvents?: { name: string; time?: string }[];
   rules: PlanRule[];
   /** Execution-checklist confirmations from the pre-trade analysis stage. */
   executionChecklist?: PreTradeChecklistItem[];
@@ -308,6 +322,8 @@ export interface ExecutionReview {
 /** Psychology review — emotional state around the trade. */
 export interface PsychologyReview {
   emotionBefore?: string;
+  /** How the trade felt (autopsy), exactly as picked — e.g. "proud", "adrenaline". */
+  emotionAfter?: string;
   convictionOrUrgency?: "conviction" | "urgency" | "";
   fomo?: boolean | null;
   revenge?: boolean | null;
@@ -348,6 +364,12 @@ export interface TradeReviewData {
     mistakeNote?: string;
     /** Free-text mistake name, used when `mistake` is "other". */
     mistakeOther?: string;
+    /** Normalised bucket (see lib/mistakes.ts). Presets map to themselves; "Others" is classified by AI. */
+    mistakeCategory?: string;
+    mistakeCategorySource?: "preset" | "ai" | "rules" | "you";
+    mistakeCategoryConfidence?: number;
+    /** An independent read of the whole trade (plan → trade → autopsy) by the audit. Objective = proven by data, not by what the trader said. */
+    audit?: { key: string; confidence: number; reason: string; objective: boolean; source: "ai" | "rules"; flags: string[]; at: number };
     blunderLevel?: 0 | 1 | 2 | 3;
   };
   setup?: {

@@ -7,6 +7,7 @@ import { relativeDayLabel } from "@/lib/format";
 import { useImageUrls } from "@/lib/hooks";
 import { Sym } from "./symbols";
 import { dayShort, groupMonthDay, monthLabel, pathLabel, pct, tradeTitle, type Node } from "./journal-model";
+import { mistakeOf } from "@/lib/mistakes";
 import { cn } from "@/lib/utils";
 
 export type Money = (n: number) => string;
@@ -37,6 +38,17 @@ function SelectDot({ on }: { on: boolean }) {
 function useThumb(entry: JournalEntry) {
   const urls = useImageUrls(entry.images.slice(0, 1).map((i) => i.id));
   return entry.images[0] ? urls[entry.images[0].id] : null;
+}
+
+/** The mistake a trade was filed under — a quiet tag, shown only when the review recorded one. */
+function MistakeTag({ entry, className }: { entry: JournalEntry; className?: string }) {
+  const m = mistakeOf(entry);
+  if (!m) return null;
+  return (
+    <span title={m.source === "audit" ? `Flagged from your data: ${m.text ?? m.label}` : m.text ? `${m.label} — “${m.text}”` : m.label} className={cn("inline-flex items-center gap-1 rounded-full bg-loss/[0.09] px-2 py-px text-[11.5px] font-medium normal-case text-loss", className)}>
+      <Sym name={m.source === "audit" ? "sparkles" : "tag"} className="h-3 w-3" strokeWidth={1.8} />{m.label}
+    </span>
+  );
 }
 
 /* ───────────── List row ───────────── */
@@ -72,6 +84,7 @@ export const TradeRow = memo(function TradeRow({ entry, showDate, p }: { entry: 
         <p className="truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">
           {tradeTitle(entry)}
           {entry.tradeNumber ? <span className="ml-2 font-normal text-faint">Trade {entry.tradeNumber}</span> : null}
+          <MistakeTag entry={entry} className="ml-2 translate-y-[-1px]" />
           {entry.lessonIds?.length ? (
             <span title={`${entry.lessonIds.length} linked ${entry.lessonIds.length === 1 ? "lesson" : "lessons"}`} className="ml-2 inline-flex translate-y-[2px] items-center gap-0.5 font-normal text-gold">
               <Sym name="bulb" className="h-3.5 w-3.5" /><span className="sr-only">{entry.lessonIds.length} linked lessons</span>
@@ -138,6 +151,7 @@ export const TradeTile = memo(function TradeTile({ entry, showDate, p, anchor }:
         <p className="truncate text-[14px] font-medium capitalize text-ink">{tradeTitle(entry)}</p>
         <p className={cn("kpi shrink-0 text-[14px] tabular-nums", tone(entry.pnl))}>{p.money(entry.pnl)}</p>
       </div>
+      <MistakeTag entry={entry} className="mb-0.5 ml-0.5" />
       <p className="truncate px-0.5 text-[12.5px] text-muted">{[showDate ? dayShort(entry.date) : null, entry.setup, entry.rr != null ? `${entry.rr > 0 ? "+" : ""}${entry.rr}R` : null].filter(Boolean).join(" · ") || "\u00A0"}</p>
     </button>
   );

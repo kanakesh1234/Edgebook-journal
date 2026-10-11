@@ -5,12 +5,16 @@ import { AnimatePresence, motion } from "motion/react";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
-import { currencySymbol, formatDateMedium, todayKey, weekdayLong } from "@/lib/format";
+import { currencySymbol, formatDateMedium, formatMoney, todayKey, weekdayLong } from "@/lib/format";
+import { dayLimitFor, dayTrades, deepestLoss, riskFor } from "@/lib/risk";
 import { Modal } from "@/components/ui/modal";
 import { ShieldIcon } from "@/components/ui/icons";
 import { cn, uid } from "@/lib/utils";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
+import { RiskMeter } from "./risk-meter";
+import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
+import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
 import {
   BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
   Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox, useIsDesktop, type Rail,
@@ -40,9 +44,14 @@ const IconMinus = () => (
   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
 );
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
+/** Positive money only: digits and one decimal point, at most two decimals. */
+const cleanAmount = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [a = "", ...rest] = t.split("."); return rest.length ? `${a}.${rest.join("").slice(0, 2)}` : a; };
+/** Round a suggested limit to a figure a person would actually type. */
+const niceMoney = (n: number) => (n < 100 ? Math.max(5, Math.round(n / 5) * 5) : n < 1000 ? Math.round(n / 10) * 10 : Math.round(n / 50) * 50);
 
 export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
   const entries = useApp((s) => s.entries);
+  const plans = useApp((s) => s.plans);
   const settings = useApp((s) => s.settings);
   const playbook = settings.playbook ?? [];
   const challenges = settings.challenges ?? [];
@@ -68,6 +77,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [emotionReason, setEmotionReason] = useState("");
   const [newsAnswer, setNewsAnswer] = useState<boolean | null>(null);
   const [newsEvents, setNewsEvents] = useState<NewsEvent[]>([]);
+  const [maxLoss, setMaxLoss] = useState("");
+  const [watch, setWatch] = useState<string[]>([]);
+  const [maxLossCarried, setMaxLossCarried] = useState(false); // prefilled from an earlier plan today
   const [instrument, setInstrument] = useState("");
   const [draw, setDraw] = useState("");
   const [invalidation, setInvalidation] = useState("");
@@ -131,7 +143,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const showFeeling = thesis.trim().length > 0 || emotion !== "";
   const showReason = emotion !== "" || emotionReason.trim().length > 0;
   const showNews = emotionReason.trim().length > 0 || newsAnswer !== null;
-  const showDetail = newsAnswer !== null;
+  const showMaxLoss = newsAnswer !== null || maxLoss.trim().length > 0;
+  const showDetail = maxLoss.trim().length > 0;
   const chooseNews = (v: boolean) => {
     setNewsAnswer(v);
     if (v && newsEvents.length === 0) setNewsEvents([{ id: uid("ev"), name: "", time: "" }]);
@@ -142,13 +155,38 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   useEffect(() => {
     if (!open) return;
     setStep("plan"); setDir(1); setLockAck(false); setLockChecked(false);
-    setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw(""); setInvalidation(""); setBreakPlan("");
+    setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw("");
+    // One loss limit per day: a second plan the same day starts from the limit already set.
+    const carried = dayLimitFor(todayKey(), useApp.getState().plans);
+    setWatch([]); setMaxLoss(carried ? String(carried) : ""); setMaxLossCarried(carried !== null); setInvalidation(""); setBreakPlan("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
     setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime("09:30"); setExitTime("09:30"); setQuantity("1"); setPnlDone(false);
     setImportRows(null); setImportError(null);
     setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
+
+  /* ---------------- daily loss limit ---------------- */
+  const maxLossText = maxLoss.trim();
+  const maxLossValue = maxLossText === "" ? NaN : Number(maxLossText);
+  const maxLossOk = Number.isFinite(maxLossValue) && maxLossValue > 0;
+  const maxLossBad = maxLossText !== "" && !maxLossOk;
+  // What today has already cost, and a few round figures to start from (share of the account, else a multiple of the usual loss).
+  const todayDeepest = useMemo(() => deepestLoss(dayTrades(today, entries)).used, [entries, today]);
+  const limitChips = useMemo(() => {
+    const net = entries.reduce((s, e) => s + e.pnl, 0);
+    const equity = settings.startingEquity > 0 ? settings.startingEquity + net : 0;
+    if (equity > 0) return [0.005, 0.01, 0.02].map((p) => ({ value: niceMoney(equity * p), note: `${p * 100}%` }));
+    const lossList = entries.filter((e) => e.pnl < 0).map((e) => -e.pnl);
+    if (lossList.length >= 3) { const avg = lossList.reduce((a, b) => a + b, 0) / lossList.length; return [1, 2, 3].map((k) => ({ value: niceMoney(avg * k), note: `${k}× usual loss` })); }
+    return [] as { value: number; note: string }[];
+  }, [entries, settings.startingEquity]);
+  // Mistakes worth watching today: the ones that keep coming back first, then the rest of the list.
+  const watchOptions = useMemo(() => {
+    const rec = new Map(recurringMistakes(entries, thisWeekStart()).map((r) => [r.key as string, r.weeks]));
+    return MISTAKE_CATEGORIES.filter((c) => c.key !== "other").map((c) => ({ ...c, weeks: rec.get(c.key) ?? 0 })).sort((a, b) => b.weeks - a.weeks);
+  }, [entries]);
+  const accountBase = settings.startingEquity > 0 ? settings.startingEquity + entries.reduce((s, e) => s + e.pnl, 0) : 0;
 
   /* ---------------- gating + quiet hints per step ---------------- */
   const pnlText = pnl.trim();
@@ -161,6 +199,14 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
   // Functional update so press-and-hold repeats never read stale state.
   const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
+  // The day as it would stand if this trade were saved: the loss limit from the plan, measured against the real running P&L.
+  const tradeDay = tradeDate <= todayKey() ? tradeDate : todayKey();
+  const tradeRisk = useMemo(() => {
+    if (mode !== "manual" || !manualReady || !maxLossOk || tradeDay !== today) return null; // a backdated trade is not part of today's budget
+    const others = entries.filter((e) => e.date === tradeDay && e.id !== createdId);
+    const mine = { pnl: pnlValue, date: tradeDay, entryTime: entryTime.trim() || undefined, createdAt: Number.MAX_SAFE_INTEGER } as JournalEntry;
+    return riskFor(maxLossValue, dayTrades(tradeDay, [...others, mine]));
+  }, [mode, manualReady, maxLossOk, maxLossValue, tradeDay, today, entries, createdId, pnlValue, entryTime]);
   // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
   useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
 
@@ -172,6 +218,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         if (!emotionReason.trim()) return { ok: false, hint: "Say what's behind that feeling" };
         if (newsAnswer === null) return { ok: false, hint: "Any news or events today?" };
         if (newsAnswer && !newsEvents.some((e) => e.name.trim())) return { ok: false, hint: "Name the event, or choose No news" };
+        if (maxLossBad) return { ok: false, hint: "Numbers only — the most you'll accept losing" };
+        if (!maxLossOk) return { ok: false, hint: "Set how much you're willing to lose today" };
         return { ok: true, hint: null };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
@@ -209,6 +257,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     expectedSetup: selectedPlaybook?.name,
     emotionalState: emotion || undefined,
     whatCouldBreakPlan: breakPlan.trim() || undefined,
+    watchMistakes: watch.length ? watch : undefined,
+    maxLoss: maxLossOk ? Math.round(maxLossValue * 100) / 100 : undefined,
+    newsEvents: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => ({ name: e.name.trim(), time: e.time || undefined })) : [],
     rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] ?? "waiting", note: r.description })),
     status: "executed",
     createdAt: Date.now(),
@@ -462,6 +513,50 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   </div>
                 </Reveal>
               )}
+              {showMaxLoss && (
+                <Reveal focus={newsAnswer === false}>
+                  <div className="space-y-3">
+                    <Label done={maxLossOk} hint="your daily limit" htmlFor="flow-maxloss">How much are you willing to lose today?</Label>
+                    {/* Same card-as-input pattern as Net P&L: tap anywhere to type, the card shows focus. */}
+                    <div
+                      onClick={() => document.getElementById("flow-maxloss")?.focus()}
+                      className="cursor-text rounded-[22px] border border-line bg-raised px-5 py-4 transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
+                    >
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[22px] text-faint">{sym}</span>
+                        <input
+                          id="flow-maxloss"
+                          inputMode="decimal"
+                          enterKeyHint="next"
+                          autoComplete="off"
+                          value={maxLoss}
+                          onChange={(e) => { setMaxLoss(cleanAmount(e.target.value)); setMaxLossCarried(false); }}
+                          placeholder="0.00"
+                          aria-invalid={maxLossBad || undefined}
+                          className={cn("min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-[32px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60", maxLossBad && "text-loss")}
+                        />
+                      </div>
+                      <p className="mt-1.5 min-h-5 text-[12.5px] text-faint">
+                        {maxLossBad ? <span className="text-loss">Numbers only — the most you&apos;ll accept losing</span>
+                          : maxLossCarried ? "Carried over from your earlier plan today"
+                          : maxLossOk && accountBase > 0 ? `${((maxLossValue / accountBase) * 100).toFixed(2)}% of your account. This is compared with how the day actually goes.`
+                          : "Compared with how the day actually goes."}
+                      </p>
+                    </div>
+                    {todayDeepest > 0 && (
+                      <p className="px-1 text-[13px] text-muted">
+                        Today is already down <span className="num font-medium text-loss">{formatMoney(todayDeepest, settings.currency)}</span> at its deepest point.
+                        {maxLossOk && maxLossValue <= todayDeepest ? <span className="text-loss"> That is at or past this limit.</span> : null}
+                      </p>
+                    )}
+                    {limitChips.length > 0 && (
+                      <Stagger className="flex flex-wrap gap-2" delay={0.06}>
+                        {limitChips.map((c) => <Chip key={c.note} selected={maxLossOk && maxLossValue === c.value} onClick={() => { setMaxLoss(String(c.value)); setMaxLossCarried(false); }}>{sym}{c.value.toLocaleString("en-US")} <span className="ml-1.5 text-[12.5px] font-normal opacity-70">{c.note}</span></Chip>)}
+                      </Stagger>
+                    )}
+                  </div>
+                </Reveal>
+              )}
               {showDetail && (
                 <Reveal delay={0.12}>
                   <Disclosure label="Add detail" autoFocusOnOpen>
@@ -475,6 +570,17 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
                     <div className="space-y-2.5"><Label htmlFor="flow-inval">What would invalidate it?</Label><TextBox id="flow-inval" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} /></div>
                     <div className="space-y-2.5"><Label htmlFor="flow-break">What could make you break the plan?</Label><TextBox id="flow-break" value={breakPlan} onChange={(e) => setBreakPlan(e.target.value)} /></div>
+                    <div className="space-y-3">
+                      <Label hint="optional — the review checks how you did">Mistakes to watch for today</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {watchOptions.map((o) => (
+                          <Chip key={o.key} tone="gold" selected={watch.includes(o.key)} onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}>
+                            {o.label}{o.weeks >= 2 && <span title={`Seen in ${o.weeks} of the last 5 weeks`} className="ml-1.5 text-[11.5px] font-normal opacity-70">recurring</span>}
+                          </Chip>
+                        ))}
+                      </div>
+                      <p className="text-[12.5px] text-faint">You don&apos;t have to tag mistakes after the trade. The AI reads the whole trade — plan, timing, size, your limit and your answers — and flags what it finds.</p>
+                    </div>
                   </Disclosure>
                 </Reveal>
               )}
@@ -543,6 +649,14 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </div>
                     <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
                   </div>
+
+                  <AnimatePresence initial={false}>
+                    {tradeRisk && (
+                      <Collapse key="trade-risk">
+                        <div className="pt-4"><RiskMeter risk={tradeRisk} currency={settings.currency} label="If you save this trade" /></div>
+                      </Collapse>
+                    )}
+                  </AnimatePresence>
 
                   {(pnlDone || direction !== null) && (
                     <Reveal>
@@ -651,6 +765,11 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
               </motion.div>
               <h2 className="mt-7 text-[32px] font-semibold tracking-[-0.025em] text-ink">Logged.</h2>
               <p className="mt-2 max-w-[22rem] text-[15px] leading-snug text-muted">Process noted — the outcome is just data.</p>
+              {autopsy.risk && (
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.15 }} className="mt-6 w-full max-w-[24rem] text-left">
+                  <RiskMeter risk={autopsy.risk} currency={settings.currency} label="Today vs your limit" />
+                </motion.div>
+              )}
               {createdId && <button type="button" onClick={() => { useUi.getState().openMinatoWithTrade(createdId); onClose(); }} className="mt-6 text-[14px] font-medium text-gold hover:underline">Talk it through with MINATO</button>}
             </div>
           )}

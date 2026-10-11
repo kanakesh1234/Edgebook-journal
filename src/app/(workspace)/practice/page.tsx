@@ -10,6 +10,9 @@ import { NO_EXTRAS, type RoundExtras } from "@/lib/practice/rewards";
 import { PreparingScreen } from "@/components/practice/home";
 import { MODE_META } from "@/components/practice/modes";
 import { SectionCard } from "@/components/practice/section-card";
+import Link from "next/link";
+import { buildWeek, thisWeekStart } from "@/lib/weekly";
+import { formatSignedMoney } from "@/lib/format";
 import { PlayerHero, weekStrip } from "@/components/practice/player-hero";
 import { Challenges, TrophyCase } from "@/components/practice/shelf";
 import "@/components/practice/practice.css";
@@ -73,6 +76,8 @@ export default function PracticePage() {
   const deepLink = useRef<ArenaMode | null>(null);
 
   const levels = arenaLevels(progress);
+  const plans = useApp((s) => s.plans);
+  const thisWeek = useMemo(() => buildWeek(allEntries, plans, thisWeekStart()), [allEntries, plans]);
   const usable = useMemo(() => entries.filter(isUsable), [entries]);
   const weekInfo = useMemo(() => weekTrades(entries), [entries]);
 
@@ -269,6 +274,21 @@ export default function PracticePage() {
           secondary={{ label: cards.length > 0 ? "Manage questions" : "How it works", href: "/practice/ict" }}
         />
       </div>
+
+      <h2 className="pr-section-title pr-rise mt-14" style={{ "--i": 3 } as React.CSSProperties}>Review</h2>
+      <Link href="/practice/weekly" className="pr-surface pr-rise group mt-5 flex flex-wrap items-center gap-x-8 gap-y-4 px-6 py-5 transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.995]" style={{ "--i": 3 } as React.CSSProperties}>
+        <div className="min-w-0 flex-1">
+          <p className="text-[18px] font-semibold tracking-[-0.02em] text-ink">Weekly review</p>
+          <p className="mt-1 max-w-[46ch] text-[14px] leading-snug text-muted">
+            {thisWeek.count === 0 ? "Your week in numbers: P&L, plan discipline, loss limits and recurring mistakes." : thisWeek.insights[0]?.text}
+          </p>
+        </div>
+        <dl className="flex items-center gap-6 text-right">
+          <div><dd className={`kpi text-[20px] tabular-nums ${thisWeek.net > 0 ? "text-profit" : thisWeek.net < 0 ? "text-loss" : "text-ink"}`}>{formatSignedMoney(thisWeek.net, settings.currency, { compact: true })}</dd><dt className="text-[11px] uppercase tracking-[.1em] text-faint">This week</dt></div>
+          <div><dd className="kpi text-[20px] tabular-nums text-ink">{thisWeek.plan.adherence == null ? "—" : `${Math.round(thisWeek.plan.adherence * 100)}%`}</dd><dt className="text-[11px] uppercase tracking-[.1em] text-faint">Plan</dt></div>
+        </dl>
+        <span aria-hidden className="text-[20px] text-faint transition-transform group-hover:translate-x-0.5">›</span>
+      </Link>
 
       <h2 className="pr-section-title pr-rise mt-14" style={{ "--i": 4 } as React.CSSProperties}>Today</h2>
       <div className="pr-rise mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start" style={{ "--i": 5 } as React.CSSProperties}>
