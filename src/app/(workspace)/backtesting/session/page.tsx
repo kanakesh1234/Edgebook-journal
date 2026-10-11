@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useBacktest } from "@/lib/backtesting/store";
 import { loadSymbolCandles, resolveClock } from "@/lib/backtesting/data/loader";
@@ -48,7 +48,6 @@ function BacktestWorkspaceInner() {
   const setDataError = useBacktest((s) => s.setDataError);
   const setDataWarning = useBacktest((s) => s.setDataWarning);
   const setCurrentTime = useBacktest((s) => s.setCurrentTime);
-  const advanceClock = useBacktest((s) => s.advanceClock);
   const updateVisibleCandles = useBacktest((s) => s.updateVisibleCandles);
   const saveSession = useBacktest((s) => s.saveSession);
   const setStatus = useBacktest((s) => s.setStatus);
@@ -56,7 +55,6 @@ function BacktestWorkspaceInner() {
   const updatePendingOrder = useBacktest((s) => s.updatePendingOrder);
   const speed = useBacktest((s) => s.speed);
 
-  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [replayOpen, setReplayOpen] = useState(true);
   const [ticketOpen, setTicketOpen] = useState(false);
@@ -135,35 +133,17 @@ function BacktestWorkspaceInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config?.periodStartUtc, config?.periodEndUtc, config?.timeframe, retryNonce]);
 
-  // Playback timer
+  // Playback timer — ONE interval, owned by this effect (no shared ref), so
+  // pausing / changing speed always clears exactly the interval that was started.
   useEffect(() => {
-    if (playing) {
-      const intervalMs = 1000 / speed;
-      playIntervalRef.current = setInterval(() => {
-        advanceClock();
-      }, intervalMs);
-    } else {
-      if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
-        playIntervalRef.current = null;
-      }
-    }
-    return () => {
-      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
-    };
-  }, [playing, speed, advanceClock]);
-
-  // Playback timer
-  useEffect(() => {
-    if (playing) {
-      const intervalMs = 1000 / speed;
-      playIntervalRef.current = setInterval(() => { advanceClock(); }, intervalMs);
-    } else if (playIntervalRef.current) {
-      clearInterval(playIntervalRef.current);
-      playIntervalRef.current = null;
-    }
-    return () => { if (playIntervalRef.current) clearInterval(playIntervalRef.current); };
-  }, [playing, speed, advanceClock]);
+    if (!playing) return;
+    const id = setInterval(() => {
+      const st = useBacktest.getState();
+      if (!st.playing) return;
+      st.advanceClock();
+    }, 1000 / speed);
+    return () => clearInterval(id);
+  }, [playing, speed]);
 
   // Keyboard: TradingView shortcuts + the app's replay keys
   useEffect(() => {

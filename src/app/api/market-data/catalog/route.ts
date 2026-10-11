@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sessionEmail } from '@/lib/server/auth';
+import { getLseApiKey } from '@/lib/server/lse-key';
 
 /* ------------------------------------------------------------------ */
 /*  LSE catalog proxy — discover available symbols                     */
@@ -13,7 +14,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export async function GET(request: Request) {
   if (!sessionEmail(request)) return NextResponse.json({ error: 'not_logged_in', symbols: [] }, { status: 401 });
-  const apiKey = process.env.LSE_API_KEY;
+  const apiKey = getLseApiKey();
   if (!apiKey) {
     return NextResponse.json(
       { error: 'LSE_API_KEY not configured', symbols: [] },

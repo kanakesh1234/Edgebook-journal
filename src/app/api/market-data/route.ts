@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { INSTRUMENTS } from '@/lib/backtesting/instruments';
 import { rateLimited, sessionEmail } from '@/lib/server/auth';
+import { getLseApiKey, LSE_KEY_HELP } from '@/lib/server/lse-key';
 import {
   LSE_NATIVE_TIMEFRAMES,
   isLseNativeTimeframe,
@@ -40,7 +41,7 @@ interface LseCandle {
 }
 
 function getApiKey(): string | null {
-  return process.env.LSE_API_KEY || null;
+  return getLseApiKey();
 }
 
 /** "2026-10-08 13:30:00.000000" (UTC) → epoch seconds. 0 on failure. */
@@ -130,7 +131,7 @@ export async function GET(req: NextRequest) {
   if (rateLimited(`market:${me}`, 120, 60_000)) return fail('rate_limited', 'Too many requests — wait a moment.', 429);
 
   const apiKey = getApiKey();
-  if (!apiKey) return fail('not_configured', 'LSE_API_KEY is not set in .env.local.', 503);
+  if (!apiKey) return fail('not_configured', LSE_KEY_HELP, 503);
 
   const { searchParams } = req.nextUrl;
   const rawSymbol = searchParams.get('symbol');
