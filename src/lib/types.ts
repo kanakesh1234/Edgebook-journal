@@ -129,6 +129,8 @@ export interface JournalSettings {
   challenges?: Challenge[];
   /** Weekly / Monthly review write-ups (the numbers are always recomputed from trades, never stored). */
   reviews?: ReviewStore;
+  /** Practice-page weekly write-ups, keyed by the Monday of the week (YYYY-MM-DD). */
+  weeklyReviews?: Record<string, { wentWell?: string; focus?: string; updatedAt: number }>;
   /**
    * EFFECTIVE-ONLY — filled in by scopeToPrimary() from the primary challenge
    * so computeStats uses its drawdown model. Never persisted or edited here;
@@ -268,6 +270,12 @@ export interface TradePlan {
   emotionalState?: (typeof PLAN_EMOTIONS)[number];
   emotionalNote?: string;
   whatCouldBreakPlan?: string;
+  /** Mistake keys the trader chose to watch for today. */
+  watchMistakes?: string[];
+  /** The most the trader will accept losing today (account currency). */
+  maxLoss?: number;
+  /** News events listed in the plan; `time` is HH:MM. */
+  newsEvents?: { name: string; time?: string }[];
   rules: PlanRule[];
   /** Execution-checklist confirmations from the pre-trade analysis stage. */
   executionChecklist?: PreTradeChecklistItem[];
@@ -346,6 +354,7 @@ export interface ExecutionReview {
 
 /** Psychology review — emotional state around the trade. */
 export interface PsychologyReview {
+  emotionAfter?: string;
   emotionBefore?: string;
   convictionOrUrgency?: "conviction" | "urgency" | "";
   fomo?: boolean | null;
@@ -387,6 +396,19 @@ export interface TradeReviewData {
     mistakeNote?: string;
     /** Free-text mistake name, used when `mistake` is "other". */
     mistakeOther?: string;
+    mistakeCategory?: string;
+    mistakeCategorySource?: "preset" | "ai" | "rules" | "you";
+    mistakeCategoryConfidence?: number;
+    /** Final data-backed audit of the trade (news window, limit, size, trade count…), stored with the review. */
+    audit?: {
+      key: string;
+      confidence: number;
+      reason: string;
+      objective: boolean;
+      source: "ai" | "rules";
+      flags: string[];
+      at: number;
+    };
     blunderLevel?: 0 | 1 | 2 | 3;
   };
   setup?: {

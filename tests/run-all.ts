@@ -8,3 +8,4 @@ import "./practice/xp.test.ts";
 import "./practice/focus.test.ts";
 import "./friends/state.test.ts";
 import "./journal/weekly-review.test.ts";
+import "./backtesting/data.test.ts";

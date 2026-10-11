@@ -1,36 +1,22 @@
 #!/bin/bash
-# Run from inside your ox-test project folder (the one that contains "src").
+# Run from INSIDE your ox-test project folder (the one containing package.json and src/):
+#   bash /path/to/ox-test-fixes/APPLY.sh
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-if [ ! -d "src/app" ]; then echo "Please cd into your ox-test folder first (the one containing src/)."; exit 1; fi
+[ -f package.json ] && [ -d src/app ] || { echo "cd into your ox-test project folder first."; exit 1; }
 
-FILES=(
-  "src/lib/server/storage.ts"
-  "src/lib/server/lessons-store.ts"
-  "src/lib/server/lessons-html.ts"
-  "src/app/api/lessons/route.ts"
-  "src/app/api/lessons/media/route.ts"
-  "src/components/lessons/writer.tsx"
-  "scripts/migrate-lessons.mjs"
-)
-
-BK="$HOME/ox-test-backup-before-storage-$(date +%Y%m%d-%H%M%S)"
-for f in "${FILES[@]}"; do
-  if [ -f "$f" ]; then mkdir -p "$BK/$(dirname "$f")"; cp "$f" "$BK/$f"; fi
+# 1. copy every fixed file to the same path (overwrite)
+(cd "$HERE" && find . -type f ! -name APPLY.sh ! -name FIXES.md -print0) | while IFS= read -r -d '' f; do
+  mkdir -p "$(dirname "$f")"; cp "$HERE/$f" "$f"; echo "updated  $f"
 done
-echo "Backed up your old files to $BK"
 
-for f in "${FILES[@]}"; do
-  mkdir -p "$(dirname "$f")"
-  cp "$HERE/$f" "$f"
+# 2. remove stale leftovers from old drop-in patches (they reference packages/files that don't exist)
+for f in apply.sh APPLY.md INSTALL.md INTEGRATION.md DELETED.txt src/README.md scripts/migrate-lessons.mjs; do
+  [ -e "$f" ] && { git rm -q --cached "$f" 2>/dev/null || true; rm -f "$f"; echo "removed  $f"; }
 done
-echo "Replaced/added ${#FILES[@]} files."
 
-# keep local lesson data and media out of git
-touch .gitignore
-if ! grep -qx '.data/' .gitignore; then printf '\n.data/\n' >> .gitignore; echo "Added .data/ to .gitignore"; fi
+# 3. make sure local-only junk is not tracked
+git rm -q --cached -r --ignore-unmatch .DS_Store tsconfig.tsbuildinfo .env.local .env.local.bak 2>/dev/null || true
 
-echo "Installing packages..."
-npm install @upstash/redis @vercel/blob
-echo
-echo "Done. Next: add the env vars to .env.local, run the migration, then restart npm run dev."
+echo; echo "Now run:  npm run typecheck && npm test"
+echo "Then:     git add -A && git commit -m 'Fix type errors and deployment issues' && git push"

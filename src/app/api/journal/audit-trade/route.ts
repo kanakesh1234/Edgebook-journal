@@ -5,6 +5,8 @@ import { getGoogleConfig } from "@/lib/server/google-config";
 import { MISTAKE_CATEGORIES, coerceKey } from "@/lib/mistakes";
 
 export const dynamic = "force-dynamic";
+// AI calls can exceed the default serverless timeout on Vercel.
+export const maxDuration = 60;
 
 /** Reads one whole trade (plan, timing, size, day, autopsy) and names its main mistake. Picks from a fixed list; never advises. */
 const SYSTEM = [

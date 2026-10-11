@@ -20,14 +20,14 @@ import { Sym } from "@/components/journal/symbols";
 import Link from "next/link";
 import { ContextMenu, EASE, IconButton, MenuDivider, MenuItem, SPRING } from "@/components/journal/journal-ui";
 import { ReviewsPanel } from "@/components/review/reviews-panel";
-import { classifyMistakes, hasMistake, MISTAKE_BY_KEY } from "@/lib/review/mistakes";
+import { classifyMistakes, hasMistake, MISTAKE_BY_KEY, mistakesOfEntry } from "@/lib/review/mistakes";
 import { monthOf, mondayOf } from "@/lib/review/period";
 import { JournalToolbar, type Crumb } from "@/components/journal/journal-toolbar";
 import { SidebarContent } from "@/components/journal/journal-sidebar";
 import { FolderList, Timeline, type Money, type RowProps } from "@/components/journal/journal-views";
 import {
   buildTree, childrenOf, filterEntries, isReviewLens, needsReview, parentPath, pathLabel, pct, sortEntries, summarize, tradesForLesson,
-  type Lens, type Outcome, type SortKey, type ViewMode,
+  type Lens, type MistakeFilter, type Outcome, type SortKey, type ViewMode,
 } from "@/components/journal/journal-model";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +54,7 @@ export default function JournalPage() {
   const [query, setQuery] = useState("");
   const [outcome, setOutcome] = useState<Outcome>("all");
   const [instrument, setInstrument] = useState("all");
+  const [mistake, setMistake] = useState<MistakeFilter>("all");
   const [sort, setSort] = useState<SortKey>("newest");
   const dirRef = useRef(1);
   // Weekly / Monthly review periods, and where "back" returns to after drilling into trades from a review.
@@ -138,7 +139,13 @@ export default function JournalPage() {
 
   const tree = useMemo(() => buildTree(base), [base]);
   const scoped = useMemo(() => (path ? base.filter((e) => e.date.startsWith(path)) : base), [base, path]);
-  const filtered = useMemo(() => sortEntries(filterEntries(scoped, { outcome, instrument, query }), sort), [scoped, outcome, instrument, query, sort]);
+  const filtered = useMemo(() => {
+    const byMistake = mistake === "all" ? scoped
+      : mistake === "any" ? scoped.filter((e) => mistakesOfEntry(e).length > 0)
+      : mistake === "none" ? scoped.filter((e) => mistakesOfEntry(e).length === 0)
+      : scoped.filter((e) => hasMistake(e, mistake));
+    return sortEntries(filterEntries(byMistake, { outcome, instrument, query }), sort);
+  }, [scoped, mistake, outcome, instrument, query, sort]);
   const folderNodes = useMemo(() => childrenOf(buildTree(filtered, sort === "oldest"), path), [filtered, sort, path]);
   const summary = useMemo(() => summarize(filtered), [filtered]);
   const instruments = useMemo(() => [...new Set(entries.map((e) => e.instrument))].filter((i) => i !== "—").sort(), [entries]);
@@ -151,7 +158,7 @@ export default function JournalPage() {
   const chronological = sort === "newest" || sort === "oldest";
   const rootTitle = effLens.kind === "review" ? "Needs review" : effLens.kind === "setup" ? activeSetup?.setup.name ?? "Journal" : effLens.kind === "lesson" ? (activeLessonId && lessonById.get(activeLessonId)?.title) || "Lesson" : effLens.kind === "mistake" ? activeMistake?.label ?? MISTAKE_BY_KEY.get(effLens.key)?.label ?? "Mistake" : effLens.kind === "ids" ? effLens.label : "Journal";
   const title = path ? pathLabel(path) : rootTitle;
-  const filtersActive = outcome !== "all" || instrument !== "all" || searching;
+  const filtersActive = outcome !== "all" || instrument !== "all" || mistake !== "all" || searching;
 
   const crumbs: Crumb[] = useMemo(() => {
     const out: Crumb[] = [{ label: rootTitle, onClick: () => setPath("") }];
@@ -203,7 +210,7 @@ export default function JournalPage() {
 
   // ── navigation actions ────────────────────────────────────────
   const goUp = () => { haptic.selection(); setPath(parentPath(path)); };
-  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); };
+  const clearFilters = () => { setQuery(""); setOutcome("all"); setInstrument("all"); setMistake("all"); };
   const jumpToDate = (date: string) => {
     if (!date || entries.length === 0) return;
     const all = [...new Set(entries.map((e) => e.date))].sort();
@@ -329,6 +336,7 @@ export default function JournalPage() {
             view={view} onView={setView} crumbs={crumbs} onUp={path ? goUp : undefined} onSidebar={toggleSidebar}
             query={query} onQuery={setQuery} searchRef={searchRef}
             outcome={outcome} onOutcome={setOutcome} instrument={instrument} instruments={instruments} onInstrument={setInstrument}
+            mistake={mistake} mistakes={mistakeGroups.map((g) => ({ key: g.key, label: g.label, count: g.count }))} onMistake={setMistake}
             sort={sort} onSort={setSort} onJump={jumpToDate}
             selectMode={selectMode} onSelectMode={() => (selectMode ? exitSelect() : setSelectMode(true))} canSelect={!empty && !showFolders}
           />}

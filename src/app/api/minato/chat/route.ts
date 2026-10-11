@@ -10,6 +10,8 @@ import { getOpenRouterConfig, type OpenRouterConfig } from "@/lib/services/ai";
 import type { Challenge } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+// AI calls can exceed the default serverless timeout on Vercel.
+export const maxDuration = 60;
 
 const MIN_REPLY_TOKENS = 250;
 const MAX_REPLY_TOKENS = 8_000;

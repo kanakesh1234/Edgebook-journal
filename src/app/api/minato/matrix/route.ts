@@ -4,6 +4,8 @@ import { rateLimited, sessionEmail } from "@/lib/server/auth";
 import { getGoogleConfig } from "@/lib/server/google-config";
 
 export const dynamic = "force-dynamic";
+// AI calls can exceed the default serverless timeout on Vercel.
+export const maxDuration = 60;
 
 type MatrixQuestionInput = { signature?: unknown; type?: unknown; prompt?: unknown; explanation?: unknown; answer?: unknown; unit?: unknown };
 type SubmittedAnswers = Record<string, string | number | null>;

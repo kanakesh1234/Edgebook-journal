@@ -1,14 +1,16 @@
 import type { JournalEntry } from "@/lib/types";
 import { reviewStatusOf } from "@/lib/types";
 import { formatDateMedium, monthName } from "@/lib/format";
-import { mistakeSearchText } from "@/lib/review/mistakes";
+import { mistakeSearchText, mistakesOfEntry } from "@/lib/review/mistakes";
 
 /**
  * Pure view-model helpers. Everything here is derived from `useApp().entries` —
  * the Journal owns no data of its own, only a lens over the store.
  */
 export type Outcome = "all" | "win" | "loss" | "flat";
-export type SortKey = "newest" | "oldest" | "best" | "worst" | "rr";
+export type SortKey = "newest" | "oldest" | "best" | "worst" | "rr" | "mistake";
+/** "all" = no filter, "any" = has a mistake, "none" = clean, otherwise one mistake key. */
+export type MistakeFilter = string;
 export type ViewMode = "list" | "grid" | "folders";
 export type Lens =
   | { kind: "all" } | { kind: "review" } | { kind: "setup"; id: string } | { kind: "lesson"; id: string }
@@ -108,6 +110,12 @@ export function sortEntries(list: JournalEntry[], sort: SortKey): JournalEntry[]
       case "best": return b.pnl - a.pnl;
       case "worst": return a.pnl - b.pnl;
       case "rr": return (b.rr ?? -Infinity) - (a.rr ?? -Infinity) || b.date.localeCompare(a.date);
+      case "mistake": {
+        // Trades with a mistake first, grouped by mistake name, newest first inside a group.
+        const ma = mistakesOfEntry(a)[0]?.label ?? "\uffff";
+        const mb = mistakesOfEntry(b)[0]?.label ?? "\uffff";
+        return ma.localeCompare(mb) || b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
+      }
       default: return b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
     }
   });
