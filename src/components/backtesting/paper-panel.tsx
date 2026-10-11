@@ -90,7 +90,7 @@ export default function PaperPanel() {
                       <td className="num">{p.stopLoss ? fmtPrice(p.stopLoss) : "—"}</td>
                       <td className="num">{p.takeProfit ? fmtPrice(p.takeProfit) : "—"}</td>
                       <td className={`num ${pnlCls(p.unrealizedPnl)}`}>{signed(p.unrealizedPnl)}</td>
-                      <td className="num"><button type="button" className="tv-linkbtn" onClick={() => closePosition(p.symbol)}>Close</button></td>
+                      <td className="num"><button type="button" className="tv-linkbtn" onClick={() => closePosition(p.symbol, p.orderId)}>Close</button></td>
                     </tr>
                   ))}
                 </tbody>

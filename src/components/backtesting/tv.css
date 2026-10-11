@@ -282,3 +282,21 @@
 .tv-setrow { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; gap: 12px; }
 .tv-setrow input[type="color"] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--tv-border); border-radius: 4px; background: none; cursor: pointer; }
 .tv-setrow input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--tv-active); }
+
+/* ---- live position tags (P&L + SL / TP / close) pinned to the entry line ---- */
+.tv-ptags { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.tv-ptag {
+  position: absolute; top: 0; display: none; align-items: center; gap: 0; height: 26px;
+  pointer-events: auto; border-radius: 4px; overflow: hidden; font-size: 12px; font-variant-numeric: tabular-nums;
+  background: var(--tv-panel); color: var(--tv-text); border: 1px solid #2962ff; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  will-change: transform;
+}
+.tv-ptag-pnl { padding: 0 8px; height: 100%; display: flex; align-items: center; font-weight: 700; color: #fff; background: #787b86; min-width: 74px; justify-content: center; }
+.tv-ptag-pnl.up { background: #089981; }
+.tv-ptag-pnl.down { background: #f23645; }
+.tv-ptag-side { padding: 0 8px; font-weight: 600; white-space: nowrap; }
+.tv-ptag-btn { height: 100%; padding: 0 8px; border: 0; border-left: 1px solid var(--tv-border, rgba(128,128,128,.3)); background: transparent; color: var(--tv-muted); font-weight: 700; font-size: 11px; cursor: pointer; }
+.tv-ptag-btn:hover { background: rgba(128,128,128,.15); color: var(--tv-text); }
+.tv-ptag-btn.sl.is-on { color: #f23645; }
+.tv-ptag-btn.tp.is-on { color: #089981; }
+.tv-ptag-btn.close:hover { background: #f23645; color: #fff; }

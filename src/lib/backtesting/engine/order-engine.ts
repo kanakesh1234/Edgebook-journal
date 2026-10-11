@@ -2,7 +2,11 @@
 /*  Order execution engine — PHASE 1                                   */
 /*                                                                      */
 /*  Simulates order fills against historical candle data.               */
-/*  Market orders fill at the candle's open price (next available bar). */
+/*  Market orders fill IMMEDIATELY at the price you see (the current   */
+/*  bar's close — the number on the Buy/Sell buttons). Limit/stop      */
+/*  orders are checked against bars that are revealed afterwards.      */
+/*  An order in the opposite direction of an open position closes it   */
+/*  first (netting, like TradingView / futures prop accounts).         */
 /*  Limit orders fill when price touches the limit level.              */
 /*  Stop orders activate and fill when price reaches stop level.       */
 /*                                                                      */
@@ -156,6 +160,98 @@ export class OrderEngine {
   }
 
   /**
+   * Execute a market order RIGHT NOW at `price` (the current bar's close, i.e.
+   * the price shown on the Buy/Sell buttons).
+   *
+   * Netting: an order against an open position first closes it (FIFO, partial
+   * closes supported) and only the remainder opens a new position, so
+   * Buy-then-Sell flattens instead of leaving a hedged long + short.
+   * Returns the trades realised by closing opposite exposure.
+   */
+  executeMarket(
+    side: OrderSide,
+    quantity: number,
+    price: number,
+    time: number,
+    stopLoss?: number,
+    takeProfit?: number,
+  ): SimTrade[] {
+    const order: SimOrder = {
+      id: genId('ord'),
+      symbol: this._spec.symbol,
+      side,
+      type: 'market',
+      quantity,
+      price: null,
+      stopLoss: stopLoss ?? null,
+      takeProfit: takeProfit ?? null,
+      status: 'filled',
+      submittedAt: time,
+      filledAt: time,
+      filledPrice: price,
+      cancelledAt: null,
+    };
+    this._filledOrders.push(order);
+    return this.applyFill(order, price, time);
+  }
+
+  /** Re-mark every open position to `price` (no SL/TP checks, no fills). */
+  markToMarket(price: number): void {
+    for (const pos of this._openPositions) {
+      const dir = pos.side === 'buy' ? 1 : -1;
+      pos.unrealizedPnl = (price - pos.entryPrice) * dir * this._spec.pointValue * pos.quantity;
+    }
+  }
+
+  /** Total unrealised P&L of all open positions (as of the last mark). */
+  get openPnl(): number {
+    return this._openPositions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+  }
+
+  /**
+   * Apply a fill: close opposite positions first (FIFO), open a new position
+   * with whatever quantity is left. Returns trades realised by the closes.
+   */
+  private applyFill(order: SimOrder, fillPrice: number, time: number): SimTrade[] {
+    const trades: SimTrade[] = [];
+    let remaining = order.quantity;
+
+    const opposing = this._openPositions
+      .filter(p => p.side !== order.side)
+      .sort((a, b) => a.entryTime - b.entryTime);
+    for (const pos of opposing) {
+      if (remaining <= 0) break;
+      const closeQty = Math.min(pos.quantity, remaining);
+      const trade = this.createTrade(pos, fillPrice, time, closeQty);
+      trades.push(trade);
+      this._closedTrades.push(trade);
+      if (closeQty >= pos.quantity) {
+        this._openPositions = this._openPositions.filter(p => p !== pos);
+      } else {
+        pos.quantity -= closeQty;
+      }
+      remaining -= closeQty;
+    }
+
+    if (remaining > 0) {
+      this._openPositions.push({
+        symbol: order.symbol,
+        side: order.side,
+        quantity: remaining,
+        entryPrice: fillPrice,
+        entryTime: time,
+        stopLoss: order.stopLoss,
+        takeProfit: order.takeProfit,
+        unrealizedPnl: 0,
+        mae: 0,
+        mfe: 0,
+        orderId: order.id,
+      });
+    }
+    return trades;
+  }
+
+  /**
    * Modify the stop loss and/or take profit of an open position (e.g. from
    * dragging its line on the chart). Pass `null` to remove a level, pass
    * `undefined` to leave it unchanged.
@@ -216,20 +312,8 @@ export class OrderEngine {
         order.filledPrice = fillPrice;
         this._filledOrders.push(order);
 
-        // Open a position
-        this._openPositions.push({
-          symbol: order.symbol,
-          side: order.side,
-          quantity: order.quantity,
-          entryPrice: fillPrice,
-          entryTime: candle.time,
-          stopLoss: order.stopLoss,
-          takeProfit: order.takeProfit,
-          unrealizedPnl: 0,
-          mae: 0,
-          mfe: 0,
-          orderId: order.id,
-        });
+        // Close opposite exposure first, then open the remainder.
+        trades.push(...this.applyFill(order, fillPrice, candle.time));
       } else {
         remaining.push(order);
       }
@@ -237,6 +321,7 @@ export class OrderEngine {
     this._pendingOrders = remaining;
 
     // 2. Update open positions and check SL/TP
+    const slTpTrades: SimTrade[] = [];
     const closedPositions: SimPosition[] = [];
     for (const pos of this._openPositions) {
       // Update unrealized P&L
@@ -258,7 +343,8 @@ export class OrderEngine {
           ? candle.low <= pos.stopLoss
           : candle.high >= pos.stopLoss;
         if (slHit) {
-          trades.push(this.createTrade(pos, pos.stopLoss, candle.time));
+          const t = this.createTrade(pos, pos.stopLoss, candle.time);
+          trades.push(t); slTpTrades.push(t);
           closedPositions.push(pos);
           continue;
         }
@@ -270,7 +356,8 @@ export class OrderEngine {
           ? candle.high >= pos.takeProfit
           : candle.low <= pos.takeProfit;
         if (tpHit) {
-          trades.push(this.createTrade(pos, pos.takeProfit, candle.time));
+          const t = this.createTrade(pos, pos.takeProfit, candle.time);
+          trades.push(t); slTpTrades.push(t);
           closedPositions.push(pos);
           continue;
         }
@@ -280,8 +367,8 @@ export class OrderEngine {
     // Remove closed positions
     this._openPositions = this._openPositions.filter(p => !closedPositions.includes(p));
 
-    // Record closed trades so `.closedTrades` reflects fills from SL/TP
-    this._closedTrades.push(...trades);
+    // Record SL/TP closures (netting closes were recorded in applyFill).
+    this._closedTrades.push(...slTpTrades);
 
     return trades;
   }
@@ -324,16 +411,16 @@ export class OrderEngine {
     }
   }
 
-  private createTrade(pos: SimPosition, exitPrice: number, exitTime: number): SimTrade {
+  private createTrade(pos: SimPosition, exitPrice: number, exitTime: number, quantity: number = pos.quantity): SimTrade {
     const pnl = calculateFuturesPnl(
-      pos.entryPrice, exitPrice, pos.quantity, pos.side, this._spec,
+      pos.entryPrice, exitPrice, quantity, pos.side, this._spec,
     );
     return {
       id: genId('trd'),
       orderId: pos.orderId,
       symbol: pos.symbol,
       side: pos.side,
-      quantity: pos.quantity,
+      quantity,
       entryPrice: pos.entryPrice,
       entryTime: pos.entryTime,
       exitPrice,

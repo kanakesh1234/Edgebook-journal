@@ -80,7 +80,29 @@ interface ChartProps {
 }
 
 type DraggableKind = "sl" | "tp" | "order";
-interface DraggableLine { id: string; kind: DraggableKind; price: number; line: IPriceLine }
+interface DraggableLine {
+  id: string; kind: DraggableKind; price: number; line: IPriceLine;
+  /** Position context for SL/TP lines (live projected P&L while dragging). */
+  entry?: number; long?: boolean; qty?: number;
+}
+
+/** "Stop −$300.00" / "Target +$600.00" — the P&L the trade would book if that level is hit. */
+function riskTitle(kind: "sl" | "tp", price: number, entry: number, long: boolean, qty: number, pointValue: number) {
+  const money = (long ? price - entry : entry - price) * pointValue * qty;
+  return `${kind === "sl" ? "Stop" : "Target"} ${money >= 0 ? "+" : "−"}${formatMoney(Math.abs(money))}`;
+}
+
+/** Average true range of the last `n` bars — used to size a sensible default SL/TP. */
+function atr(candles: CandleData[], n = 14): number {
+  const k = Math.min(n, candles.length - 1);
+  if (k <= 0) return 0;
+  let sum = 0;
+  for (let i = candles.length - k; i < candles.length; i++) {
+    const c = candles[i], pc = candles[i - 1].close;
+    sum += Math.max(c.high - c.low, Math.abs(c.high - pc), Math.abs(c.low - pc));
+  }
+  return sum / k;
+}
 
 const isPriceType = (t: ChartType) => t === "line" || t === "area" || t === "baseline";
 
@@ -97,6 +119,96 @@ const rgba = (hex: string, a: number) => {
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Position tags — live P&L pinned to each open position's entry line  */
+/* ------------------------------------------------------------------ */
+
+function PositionTags({
+  symbol, chartRef, seriesRef, candlesRef, tick, epoch, onSetRisk,
+}: {
+  symbol: string;
+  chartRef: React.MutableRefObject<IChartApi | null>;
+  seriesRef: React.MutableRefObject<ISeriesApi<SeriesType> | null>;
+  candlesRef: React.MutableRefObject<CandleData[]>;
+  tick: number;
+  epoch: number;
+  onSetRisk: (id: string, updates: { stopLoss?: number | null; takeProfit?: number | null }) => void;
+}) {
+  const positions = useBacktest((s) => s.openPositions).filter((p) => p.symbol === symbol);
+  const closePosition = useBacktest((s) => s.closePositionForSymbol);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const has = positions.length > 0;
+
+  // Follow the entry price as the user scrolls / zooms / the scale autoscales.
+  useEffect(() => {
+    if (!has) return;
+    let raf = 0;
+    const loop = () => {
+      const series = seriesRef.current, chart = chartRef.current, root = rootRef.current;
+      if (series && chart && root) {
+        const right = chart.priceScale("right").width() + 8;
+        const h = chart.paneSize().height;
+        for (const el of Array.from(root.children) as HTMLElement[]) {
+          const y = series.priceToCoordinate(parseFloat(el.dataset.price || "NaN"));
+          if (y === null || y < 0 || y > h) { el.style.display = "none"; continue; }
+          el.style.display = "flex";
+          el.style.right = `${right}px`;
+          el.style.transform = `translateY(${Math.round(y) - 13}px)`;
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [has, chartRef, seriesRef, epoch]);
+
+  if (!has) return null;
+
+  const snapTo = (v: number) => Math.round(v / (tick || 0.25)) * (tick || 0.25);
+  /** Default level: 1×ATR for the stop, 2×ATR for the target, measured from the current price. */
+  const addRisk = (pos: (typeof positions)[number], kind: "sl" | "tp") => {
+    const cs = candlesRef.current;
+    const last = cs.at(-1)?.close ?? pos.entryPrice;
+    const a = atr(cs) || (tick || 0.25) * 20;
+    const long = pos.side === "buy";
+    if (kind === "sl") {
+      const px = long ? Math.min(pos.entryPrice, last) - a : Math.max(pos.entryPrice, last) + a;
+      onSetRisk(pos.orderId, { stopLoss: snapTo(px) });
+    } else {
+      const px = long ? Math.max(pos.entryPrice, last) + 2 * a : Math.min(pos.entryPrice, last) - 2 * a;
+      onSetRisk(pos.orderId, { takeProfit: snapTo(px) });
+    }
+  };
+
+  return (
+    <div ref={rootRef} className="tv-ptags" onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+      {positions.map((p) => {
+        const long = p.side === "buy";
+        const pnl = p.unrealizedPnl;
+        return (
+          <div key={p.orderId} data-price={p.entryPrice} className="tv-ptag">
+            <span className={`tv-ptag-pnl ${pnl > 0 ? "up" : pnl < 0 ? "down" : ""}`}>
+              {pnl >= 0 ? "+" : "−"}{formatMoney(Math.abs(pnl))}
+            </span>
+            <span className="tv-ptag-side">{long ? "Long" : "Short"} {p.quantity}</span>
+            <button
+              type="button" className={`tv-ptag-btn sl${p.stopLoss ? " is-on" : ""}`}
+              title={p.stopLoss ? "Remove stop loss" : "Add stop loss — then drag the line"}
+              onClick={() => (p.stopLoss ? onSetRisk(p.orderId, { stopLoss: null }) : addRisk(p, "sl"))}
+            >SL{p.stopLoss ? " ×" : ""}</button>
+            <button
+              type="button" className={`tv-ptag-btn tp${p.takeProfit ? " is-on" : ""}`}
+              title={p.takeProfit ? "Remove take profit" : "Add take profit — then drag the line"}
+              onClick={() => (p.takeProfit ? onSetRisk(p.orderId, { takeProfit: null }) : addRisk(p, "tp"))}
+            >TP{p.takeProfit ? " ×" : ""}</button>
+            <button type="button" className="tv-ptag-btn close" title="Close position at market" onClick={() => closePosition(symbol, p.orderId)}>✕</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function BacktestChart({
   candles, allTimes, symbol, anchorTime, tickSize = 0.25, onUpdatePositionRisk, onUpdatePendingOrderPrice,
@@ -362,34 +474,35 @@ export default function BacktestChart({
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
+    if (dragRef.current) return; // never rebuild the line being dragged (replay may tick mid-drag)
     for (const l of priceLinesRef.current) { try { series.removePriceLine(l); } catch { /* gone */ } }
     priceLinesRef.current = [];
     draggableRef.current = [];
 
+    const pv = spec?.pointValue ?? 1;
     for (const pos of openPositions) {
       if (pos.symbol !== symbol) continue;
       const long = pos.side === "buy";
-      const pnl = pos.unrealizedPnl;
+      // Entry line: no title — the live P&L tag (PositionTags) sits on it instead.
       const entry = series.createPriceLine({
-        price: pos.entryPrice, color: TV_BLUE, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true,
-        title: `${long ? "Long" : "Short"} ${pos.quantity}  ${pnl >= 0 ? "+" : "−"}${formatMoney(Math.abs(pnl))}`,
+        price: pos.entryPrice, color: TV_BLUE, lineWidth: 1, lineStyle: LineStyle.Solid, axisLabelVisible: true, title: "",
       });
       priceLinesRef.current.push(entry);
       if (pos.stopLoss) {
         const l = series.createPriceLine({
-          price: pos.stopLoss, color: "#F23645", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
-          title: `Stop ${(long ? pos.stopLoss - pos.entryPrice : pos.entryPrice - pos.stopLoss) >= 0 ? "+" : "−"}${formatMoney(Math.abs((long ? pos.stopLoss - pos.entryPrice : pos.entryPrice - pos.stopLoss) * (spec?.pointValue ?? 1) * pos.quantity))}`,
+          price: pos.stopLoss, color: "#F23645", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: riskTitle("sl", pos.stopLoss, pos.entryPrice, long, pos.quantity, pv),
         });
         priceLinesRef.current.push(l);
-        draggableRef.current.push({ id: pos.orderId, kind: "sl", price: pos.stopLoss, line: l });
+        draggableRef.current.push({ id: pos.orderId, kind: "sl", price: pos.stopLoss, line: l, entry: pos.entryPrice, long, qty: pos.quantity });
       }
       if (pos.takeProfit) {
         const l = series.createPriceLine({
-          price: pos.takeProfit, color: "#089981", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
-          title: `Target +${formatMoney(Math.abs((long ? pos.takeProfit - pos.entryPrice : pos.entryPrice - pos.takeProfit) * (spec?.pointValue ?? 1) * pos.quantity))}`,
+          price: pos.takeProfit, color: "#089981", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
+          title: riskTitle("tp", pos.takeProfit, pos.entryPrice, long, pos.quantity, pv),
         });
         priceLinesRef.current.push(l);
-        draggableRef.current.push({ id: pos.orderId, kind: "tp", price: pos.takeProfit, line: l });
+        draggableRef.current.push({ id: pos.orderId, kind: "tp", price: pos.takeProfit, line: l, entry: pos.entryPrice, long, qty: pos.quantity });
       }
     }
 
@@ -460,11 +573,23 @@ export default function BacktestChart({
       }
       const raw = series.coordinateToPrice(y);
       if (raw === null) return;
-      const price = snap(raw);
+      let price = snap(raw);
       const dl = draggableRef.current.find((d) => d.id === dragging.id && d.kind === dragging.kind);
       if (dl) {
+        // Keep SL on the losing side and TP on the winning side of the current
+        // price, otherwise the very next bar would close the trade instantly.
+        const lastPx = candlesRef.current.at(-1)?.close;
+        const tk = tickRef.current || 0.25;
+        if (lastPx !== undefined && dl.long !== undefined && dl.kind !== "order") {
+          const below = (dl.kind === "sl") === dl.long; // long SL / short TP live below price
+          price = below ? Math.min(price, lastPx - tk) : Math.max(price, lastPx + tk);
+        }
         dl.price = price;
-        dl.line.applyOptions({ price });
+        if (dl.kind !== "order" && dl.entry !== undefined && dl.long !== undefined && dl.qty !== undefined) {
+          dl.line.applyOptions({ price, title: riskTitle(dl.kind, price, dl.entry, dl.long, dl.qty, pointValueRef.current) });
+        } else {
+          dl.line.applyOptions({ price });
+        }
       }
     };
     const up = (e: PointerEvent) => {
@@ -736,6 +861,13 @@ export default function BacktestChart({
           )}
         </div>
       )}
+
+      {/* Live P&L tag on every open position + one-click SL / TP / close */}
+      <PositionTags
+        symbol={symbol} chartRef={chartRef} seriesRef={seriesRef} candlesRef={candlesRef}
+        tick={tickSize} epoch={epoch}
+        onSetRisk={(id, u) => riskCbRef.current?.(id, u)}
+      />
 
       {/* Properties toolbar for the selected drawing */}
       <DrawingToolbar symbol={symbol} />

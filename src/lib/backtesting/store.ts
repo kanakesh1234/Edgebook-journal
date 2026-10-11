@@ -40,6 +40,17 @@ import { uid } from '../utils';
 /*  those snapshots. One OrderEngine per instrument (contract specs    */
 /*  differ), one shared AccountTracker for the whole session.          */
 /* ------------------------------------------------------------------ */
+/** Close of the last bar at or before `time` (the price the Buy/Sell buttons show). */
+function priceAt(candles: CandleData[] | undefined, time: number): number | null {
+  if (!candles || candles.length === 0) return null;
+  let lo = 0, hi = candles.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (candles[mid].time <= time) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans >= 0 ? candles[ans].close : null;
+}
+
 const engineRegistry: {
   orderEngines: Record<string, OrderEngine>;
   accountTracker: AccountTracker | null;
@@ -190,8 +201,11 @@ export interface BacktestStoreState {
     quantity: number,
     opts?: { symbol?: string; type?: OrderType; price?: number; stopLoss?: number; takeProfit?: number },
   ) => void;
-  /** Flatten (close) the open position for a symbol at the current candle's close. */
-  closePositionForSymbol: (symbol?: string) => void;
+  /**
+   * Close at the current candle's close. With `orderId`: just that position.
+   * Without: every open position of the symbol (flatten).
+   */
+  closePositionForSymbol: (symbol?: string, orderId?: string) => void;
   /** Cancel a pending order. */
   cancelPendingOrder: (symbol: string, orderId: string) => void;
   /** Drag-to-modify an open position's stop loss / take profit. */
@@ -646,41 +660,41 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     const symbol = opts?.symbol ?? activeInstrument;
     const engine = engineRegistry.orderEngines[symbol];
     if (!engine || quantity <= 0) return;
-    engine.submitOrder(
-      side,
-      opts?.type ?? 'market',
-      quantity,
-      currentTime,
-      opts?.price,
-      opts?.stopLoss,
-      opts?.takeProfit,
-    );
-    // Market orders fill on the *next* processed candle (matches
-    // real-world/TradingView replay semantics: you can't fill against
-    // a bar that has already closed). Immediately try against the
-    // current bar too, so a market order placed mid-bar feels responsive.
-    const candle = (get().allCandles[symbol] || []).find(c => c.time === currentTime);
-    if (candle) {
-      const trades = engine.processCandle(candle);
+
+    const type = opts?.type ?? 'market';
+    if (type === 'market') {
+      // Fill immediately at the price on the Buy/Sell buttons: the close of the
+      // bar the replay is sitting on. (Previously this re-ran the current bar
+      // through the engine, which filled at that bar's OPEN.)
+      const price = priceAt(get().allCandles[symbol], currentTime);
+      if (price === null) return;
+      const trades = engine.executeMarket(side, quantity, price, currentTime, opts?.stopLoss, opts?.takeProfit);
       for (const trade of trades) {
         engineRegistry.accountTracker?.recordTrade(trade, utcToNyDateKey(trade.exitTime ?? trade.entryTime));
       }
+    } else {
+      // Limit / stop orders rest until a bar that is revealed AFTER now touches
+      // them (a bar that has already printed must not fill them retroactively).
+      engine.submitOrder(side, type, quantity, currentTime, opts?.price, opts?.stopLoss, opts?.takeProfit);
     }
     get().syncEngineState();
   },
 
-  closePositionForSymbol: (symbol) => {
+  closePositionForSymbol: (symbol, orderId) => {
     const { activeInstrument, currentTime, allCandles } = get();
     const sym = symbol ?? activeInstrument;
     const engine = engineRegistry.orderEngines[sym];
     if (!engine) return;
-    const pos = engine.openPositions[0];
-    if (!pos) return;
-    const candle = (allCandles[sym] || []).filter(c => c.time <= currentTime).at(-1);
-    const exitPrice = candle?.close ?? pos.entryPrice;
-    const trade = engine.closePosition(pos.orderId, exitPrice, currentTime);
-    if (trade) {
-      engineRegistry.accountTracker?.recordTrade(trade, utcToNyDateKey(trade.exitTime ?? trade.entryTime));
+    const targets = orderId
+      ? engine.openPositions.filter((p) => p.orderId === orderId)
+      : engine.openPositions;
+    if (targets.length === 0) return;
+    const price = priceAt(allCandles[sym], currentTime);
+    for (const pos of targets) {
+      const trade = engine.closePosition(pos.orderId, price ?? pos.entryPrice, currentTime);
+      if (trade) {
+        engineRegistry.accountTracker?.recordTrade(trade, utcToNyDateKey(trade.exitTime ?? trade.entryTime));
+      }
     }
     get().syncEngineState();
   },
@@ -710,6 +724,19 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
 
   syncEngineState: () => {
     const { orderEngines, accountTracker } = engineRegistry;
+    // Mark every open position to the current bar's close so Open P&L and
+    // equity are correct after ANY change (new order, close, SL/TP edit,
+    // bar advance) — not only when the clock ticks.
+    {
+      const { allCandles, currentTime } = get();
+      let totalOpenPnl = 0;
+      for (const [sym, engine] of Object.entries(orderEngines)) {
+        const px = priceAt(allCandles[sym], currentTime);
+        if (px !== null) engine.markToMarket(px);
+        totalOpenPnl += engine.openPnl;
+      }
+      accountTracker?.setOpenPnl(totalOpenPnl, currentTime);
+    }
     const pendingOrders = Object.values(orderEngines).flatMap(e => e.pendingOrders);
     const openPositions = Object.values(orderEngines).flatMap(e => e.openPositions);
     const closedTrades = Object.values(orderEngines)

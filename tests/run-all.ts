@@ -9,3 +9,5 @@ import "./practice/focus.test.ts";
 import "./friends/state.test.ts";
 import "./journal/weekly-review.test.ts";
 import "./backtesting/drawings.test.ts";
+import "./backtesting/order-engine.test.ts";
+import "./backtesting/replay-trading.test.ts";
