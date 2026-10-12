@@ -194,7 +194,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlValue);
   const manualReady = Number.isFinite(pnlValue);
   // Instrument comes from the plan step; the trade step no longer asks for it.
-  const finalInstrument = instrument.trim().toUpperCase();
+  // If nothing was chosen, default to MNQ.
+  const finalInstrument = instrument.trim().toUpperCase() || "MNQ";
   const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
   const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
   // Functional update so press-and-hold repeats never read stale state.
@@ -561,7 +562,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                 <Reveal delay={0.12}>
                   <Disclosure label="Add detail" autoFocusOnOpen>
                     <div className="space-y-2.5">
-                      <Label hint="optional" htmlFor="flow-instrument">Instrument</Label>
+                      <Label hint="defaults to MNQ" htmlFor="flow-instrument">Instrument</Label>
                       <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
                       <Stagger className="flex flex-wrap gap-2" delay={0.05}>
                         {suggestedInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
