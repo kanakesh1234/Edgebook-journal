@@ -300,3 +300,19 @@
 .tv-ptag-btn.sl.is-on { color: #f23645; }
 .tv-ptag-btn.tp.is-on { color: #089981; }
 .tv-ptag-btn.close:hover { background: #f23645; color: #fff; }
+
+/* ---- journal "Replay this trade" banner ---- */
+.tv-rtbanner {
+  position: absolute; left: 12px; bottom: 12px; z-index: 7; display: flex; align-items: center; gap: 10px;
+  max-width: calc(100% - 100px); padding: 6px 8px 6px 10px; border-radius: 10px; font-size: 12.5px;
+  background: var(--tv-panel); color: var(--tv-text); border: 1px solid var(--tv-border, rgba(128,128,128,.3));
+  box-shadow: 0 2px 10px rgba(0,0,0,.18); font-variant-numeric: tabular-nums;
+}
+.tv-rt-label { font-weight: 700; padding: 2px 8px; border-radius: 6px; background: #2962ff; color: #fff; white-space: nowrap; }
+.tv-rt-body { color: var(--tv-text); }
+.tv-rt-body b { font-weight: 700; }
+.tv-rt-sep { margin: 0 6px; color: var(--tv-muted); }
+.tv-rt-pnl.up { color: #089981; }
+.tv-rt-pnl.down { color: #f23645; }
+.tv-rt-btn { border: 1px solid var(--tv-border, rgba(128,128,128,.4)); background: transparent; color: var(--tv-text); border-radius: 6px; padding: 3px 9px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tv-rt-btn:hover { background: rgba(128,128,128,.15); }

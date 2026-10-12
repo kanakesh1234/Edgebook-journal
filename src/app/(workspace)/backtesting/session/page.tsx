@@ -11,6 +11,7 @@ import TopToolbar from "@/components/backtesting/top-toolbar";
 import LeftToolbar from "@/components/backtesting/left-toolbar";
 import ReplayToolbar from "@/components/backtesting/replay-toolbar";
 import RangeBar from "@/components/backtesting/range-bar";
+import ReplayTradeBanner from "@/components/backtesting/replay-trade-banner";
 import PaperPanel from "@/components/backtesting/paper-panel";
 import OrderTicket from "@/components/backtesting/order-ticket";
 import SettingsDialog from "@/components/backtesting/settings-dialog";
@@ -256,6 +257,7 @@ function BacktestWorkspaceInner() {
               onUpdatePendingOrderPrice={(id, price) => updatePendingOrder(activeInstrument, id, { price })}
             />
 
+            <ReplayTradeBanner />
             {replayOpen && <ReplayToolbar shifted={!!selectedDrawingId} onClose={() => setReplayOpen(false)} />}
             {ticketOpen && <OrderTicket onClose={() => setTicketOpen(false)} />}
 

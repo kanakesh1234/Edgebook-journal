@@ -97,6 +97,31 @@ export type DataResolution = 'tick' | '1s' | '5s' | '10s' | '15s' | '30s' | '1m'
 
 /* -------------------------------- Backtest config -------------------------------- */
 
+/**
+ * A trade from the journal that this session replays. When present, the replay
+ * executes the trader's real entry (price, SL, TP) and exit when the clock
+ * reaches those bars, so the trade can be watched exactly as it happened.
+ */
+export interface ReplayTradeRef {
+  entryId: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  /** Epoch seconds (UTC) of the entry / exit minute. */
+  entryUtc: number;
+  exitUtc: number | null;
+  /** The prices the trader actually got. Null → fall back to the bar's close. */
+  entryPrice: number | null;
+  exitPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  /** Net P&L recorded in the journal, for comparison once the replay finishes. */
+  journalPnl: number;
+  /** Short human label, e.g. "NQ Long ×1". */
+  label: string;
+  entryClock: string; // "09:31" (NY)
+  exitClock: string | null;
+}
+
 /** What the setup screen collects before a backtest can start. */
 export interface BacktestConfig {
   instrumentSymbol: string;
@@ -113,6 +138,8 @@ export interface BacktestConfig {
   periodStartUtc: string;
   periodEndUtc: string;
   timeframe: Timeframe;
+  /** Set when this session was opened from a journal trade ("Replay this trade"). */
+  replayTrade?: ReplayTradeRef;
 }
 
 /* -------------------------------- Backtest state -------------------------------- */

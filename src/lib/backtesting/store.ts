@@ -29,6 +29,7 @@ import type { PersistedSession } from './persistence';
 import { instrumentBySymbol } from './instruments';
 import { utcToNyDateKey, navigateToNextSession, navigateToPreviousSession, utcToNyTimeStr } from './engine/session-manager';
 import { uid } from '../utils';
+import { barCovers, timeframeSec } from './journal-replay';
 
 /* ------------------------------------------------------------------ */
 /*  Engine registry — lives outside Zustand state.                    */
@@ -49,6 +50,23 @@ function priceAt(candles: CandleData[] | undefined, time: number): number | null
     if (candles[mid].time <= time) { ans = mid; lo = mid + 1; } else hi = mid - 1;
   }
   return ans >= 0 ? candles[ans].close : null;
+}
+
+/** Id of the position the journal-trade script opened (so it can close exactly that one). */
+let scriptPositionId: string | null = null;
+
+/**
+ * On resume: open positions aren't persisted, so a trade whose entry the clock
+ * has already passed can't be re-created — leave the user in free practice.
+ */
+function resumeTradeScript(
+  config: BacktestConfig, tradeCount: number, clock: number, tf: string,
+): 'off' | 'pending' | 'done' {
+  const t = config.replayTrade;
+  if (!t) return 'off';
+  if (tradeCount > 0) return 'done';
+  if (clock > 0 && clock + timeframeSec(tf) > t.entryUtc) return 'done';
+  return 'pending';
 }
 
 const engineRegistry: {
@@ -138,6 +156,8 @@ export interface BacktestStoreState {
   orderQty: number;
   alerts: PriceAlert[];
   alertNotice: { id: string; text: string } | null;
+  /** Journal-trade replay progress: off (none / disabled) → pending → open → done. */
+  tradeScript: 'off' | 'pending' | 'open' | 'done';
   scale: { mode: 'normal' | 'log' | 'percent'; auto: boolean; invert: boolean };
   /** Bars before the replay window, shown so there is context to the left (never traded). */
   historyCandles: Record<string, CandleData[]>;
@@ -249,6 +269,8 @@ export interface BacktestStoreState {
   addAlert: (symbol: string, price: number, direction: 'up' | 'down') => void;
   removeAlert: (id: string) => void;
   clearAlertNotice: () => void;
+  /** Turn the journal-trade script on (auto-play my trade) or off (trade it myself). Only before the entry fires. */
+  setTradeScript: (enabled: boolean) => void;
   setScale: (patch: Partial<{ mode: 'normal' | 'log' | 'percent'; auto: boolean; invert: boolean }>) => void;
   setSelectingBar: (v: boolean) => void;
   setTradePanelOpen: (v: boolean) => void;
@@ -402,6 +424,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   orderQty: 1,
   alerts: [],
   alertNotice: null,
+  tradeScript: 'off',
   scale: { mode: 'normal', auto: true, invert: false },
   historyCandles: {},
   selectingBar: false,
@@ -419,6 +442,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   initSession: (config) => {
     const instruments = config.instruments?.length ? config.instruments : [config.instrumentSymbol];
     createEnginesForInstruments(instruments, config);
+    scriptPositionId = null;
     set({
       sessionId: uid('bt'),
       config,
@@ -443,6 +467,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       drawHistory: { past: {}, future: {} },
       alerts: [],
       alertNotice: null,
+      tradeScript: config.replayTrade ? 'pending' : 'off',
       historyCandles: {},
       accountState: {
         ...INITIAL_ACCOUNT_STATE,
@@ -465,6 +490,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     // reflect history exactly (open positions/pending orders aren't
     // persisted yet, so they start flat on reopen).
     createEnginesForInstruments(instruments, session.config);
+    scriptPositionId = null;
     if (engineRegistry.accountTracker) {
       for (const trade of session.trades) {
         engineRegistry.accountTracker.recordTrade(trade, utcToNyDateKey(trade.exitTime ?? trade.entryTime));
@@ -484,6 +510,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       selectedDrawingId: null,
       drawHistory: { past: {}, future: {} },
       alerts: session.alerts || [],
+      tradeScript: resumeTradeScript(session.config, session.trades.length, session.clockPosition, (session.timeframe || session.config.timeframe) as string),
       historyCandles: {},
       timeframe: (session.timeframe || session.config.timeframe) as any,
       speed: (session.playbackSpeed || 1) as PlaybackSpeed,
@@ -577,6 +604,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     const candles = allCandles[activeInstrument] || [];
     const nextCandle = candles.find(c => c.time > currentTime);
     if (nextCandle) {
+      runTradeScript(nextCandle.time, 'pre');
       // Process every instrument's engine against its candle at (or up to)
       // the new time — the clock is global, so all engines step together.
       let totalOpenPnl = 0;
@@ -600,6 +628,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
 
       set({ currentTime: nextCandle.time });
       get().updateVisibleCandles();
+      runTradeScript(nextCandle.time, 'post');
       get().syncEngineState();
 
       // Price alerts: fire when this bar's range reaches the level, then pause (like TradingView).
@@ -862,6 +891,14 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   removeAlert: (id) => set(s => ({ alerts: s.alerts.filter(a => a.id !== id) })),
   clearAlertNotice: () => set({ alertNotice: null }),
 
+  setTradeScript: (enabled) => {
+    const { tradeScript, config } = get();
+    if (!config?.replayTrade) return;
+    // Only meaningful before the entry fires; once the trade is live / done, leave it.
+    if (enabled && tradeScript === 'off') set({ tradeScript: 'pending' });
+    else if (!enabled && tradeScript === 'pending') set({ tradeScript: 'off' });
+  },
+
   setScale: (patch) => set(s => ({ scale: { ...s.scale, ...patch } })),
   setSelectingBar: (v) => set({ selectingBar: v }),
   setTradePanelOpen: (v) => set({ tradePanelOpen: v }),
@@ -923,7 +960,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     if (nextSession.startUtc > periodEndSec) return;
 
     // Fetch data for the new day
-    set({ dataLoading: true, playing: false, historyCandles: {} });
+    set({ dataLoading: true, playing: false, historyCandles: {}, tradeScript: get().tradeScript === 'done' ? 'done' : 'off' });
     const syms = state.instruments;
     const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(nextSession.startUtc * 1000).toISOString();
@@ -970,7 +1007,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       : 0;
     if (prevSession.endUtc < periodStartSec) return;
 
-    set({ dataLoading: true, playing: false, historyCandles: {} });
+    set({ dataLoading: true, playing: false, historyCandles: {}, tradeScript: get().tradeScript === 'done' ? 'done' : 'off' });
     const syms = state.instruments;
     const { loadSymbolCandles } = await import('./data/loader');
     const newStartUtc = new Date(prevSession.startUtc * 1000).toISOString();
@@ -1059,3 +1096,59 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
     });
   },
 }));
+
+
+/* ------------------------------------------------------------------ */
+/*  Journal-trade script                                                */
+/*                                                                      */
+/*  Session opened from a journal entry ("Replay this trade"): when the */
+/*  clock reaches the bar containing the trader's entry, execute their  */
+/*  REAL entry (price + SL/TP); when it reaches the exit bar, close at  */
+/*  their REAL exit price. Runs bar by bar, so jump-to / fast speeds    */
+/*  behave exactly like pressing play.                                  */
+/* ------------------------------------------------------------------ */
+function runTradeScript(barTime: number, phase: 'pre' | 'post'): void {
+  const st = useBacktest.getState();
+  const ref = st.config?.replayTrade;
+  if (!ref || (st.tradeScript !== 'pending' && st.tradeScript !== 'open')) return;
+  const symbol = st.config!.instrumentSymbol;
+  const engine = engineRegistry.orderEngines[symbol];
+  if (!engine) return;
+  const bar = (st.allCandles[symbol] || []).find((c) => c.time === barTime);
+  if (!bar) return;
+
+  const barSec = timeframeSec(st.timeframe);
+  const record = (trades: ReturnType<OrderEngine['executeMarket']>) => {
+    for (const t of trades) {
+      engineRegistry.accountTracker?.recordTrade(t, utcToNyDateKey(t.exitTime ?? t.entryTime));
+    }
+  };
+
+  // The exit runs BEFORE the engine processes its bar ('pre'), so a wick on that bar
+  // can't stop the trade out at the SL instead of the price the trader really got.
+  const exitIfDue = () => {
+    if (useBacktest.getState().tradeScript !== 'open' || !barCovers(bar.time, barSec, ref.exitUtc ?? Infinity, null)) return;
+    const pos = engine.openPositions.find((p) => p.orderId === scriptPositionId);
+    if (pos) {
+      const trade = engine.closePosition(pos.orderId, ref.exitPrice ?? bar.close, bar.time);
+      if (trade) record([trade]);
+    } // else: the real SL/TP already closed it on an earlier bar — nothing left to do.
+    scriptPositionId = null;
+    // Pause so the result is on screen the moment the trade ends.
+    useBacktest.setState({ tradeScript: 'done', playing: false });
+  };
+  if (phase === 'pre') { exitIfDue(); return; }
+
+  // 1) Entry — only on the bar that contains the entry minute (or right after a data gap).
+  if (st.tradeScript === 'pending') {
+    const lateOk = Math.max(5 * barSec, 300);
+    if (!barCovers(bar.time, barSec, ref.entryUtc, lateOk)) return;
+    const price = ref.entryPrice ?? bar.close;
+    record(engine.executeMarket(ref.side, ref.quantity, price, bar.time, ref.stopLoss ?? undefined, ref.takeProfit ?? undefined));
+    scriptPositionId = engine.openPositions.at(-1)?.orderId ?? null;
+    useBacktest.setState({ tradeScript: ref.exitUtc ? 'open' : 'done' });
+  }
+
+  // 2) Exit on the same bar is fine too (scalps that last seconds).
+  exitIfDue();
+}

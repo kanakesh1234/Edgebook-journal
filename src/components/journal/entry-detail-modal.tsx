@@ -21,6 +21,7 @@ import { fmtShort } from "@/components/lessons/format";
 import { statusOf, useReadProgress } from "@/components/lessons/progress";
 import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import { LessonPeek, LessonPicker, LessonThumb } from "./lesson-links";
+import { ReplayTradeCard, useReplayTrade } from "./replay-trade";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
@@ -54,6 +55,7 @@ export function EntryDetailModal({
   useEffect(() => setMounted(true), []);
   useEffect(() => { if (!visible) setLessonSheet(null); }, [visible]);
   const blocked = covered || !!lessonSheet;
+  const replay = useReplayTrade(entry);
 
   useEffect(() => {
     if (!visible) return;
@@ -108,6 +110,7 @@ export function EntryDetailModal({
                 )}
               </div>
               <div className="flex items-center gap-0.5">
+                <IconButton label={replay.plan?.ok ? "Replay this trade" : "Replay unavailable"} icon="play" disabled={!replay.plan?.ok || replay.busy} onClick={replay.start} />
                 {onEdit && <IconButton label="Edit entry" icon="pencil" onClick={() => onEdit(entry)} />}
                 {onDelete && <IconButton label="Delete entry" icon="trash" onClick={() => onDelete(entry)} className="hover:!bg-loss/10 hover:!text-loss" />}
                 <span className="mx-1 h-4 w-px bg-line-soft" />
@@ -643,6 +646,8 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
                 )}
 
                 {figures.length > 0 && <Stats items={figures} />}
+
+                <ReplayTradeCard entry={entry} />
 
                 {(verdict || chips.length > 0) && (
                   <section aria-label="Process" className={cn("rounded-[16px] p-4 ring-1 ring-inset", goodProcess && chips.every((c) => c.good) ? "bg-profit/[0.07] ring-profit/[0.16]" : "bg-loss/[0.06] ring-loss/[0.15]")}>
