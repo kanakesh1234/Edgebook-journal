@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { useBacktest } from "@/lib/backtesting/store";
 import { formatMoney, formatPct, formatSignedMoney } from "@/lib/format";
 import { generateTradesCsv, downloadCsv } from "@/lib/backtesting/csv-export";
+import { GlassIconButton, IconClose, PrimaryButton, QuietButton } from "@/components/journal/flow-ui";
 
 interface SessionResultsProps {
   onReturnToSessions: () => void;
@@ -62,7 +64,12 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
     downloadCsv(csvContent, `${config.sessionName || "backtest"}-trades.csv`);
   };
 
-  return (
+  // Rendered in a portal on <body>: the replay workspace (.tv-root) ships an unlayered
+  // `button { padding: 0; background: none }` reset that otherwise beats Tailwind's
+  // layered utilities and strips every button inside the popup of its styling.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <motion.div
       className="fixed inset-0 z-[80] flex items-end justify-center bg-[var(--scrim)] p-0 backdrop-blur-xl sm:items-center sm:p-6"
       initial={{ opacity: 0 }}
@@ -78,7 +85,7 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.42, ease: EASE }}
         onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[92dvh] w-full max-w-[560px] select-text flex-col overflow-hidden rounded-t-[28px] border border-line bg-overlay/95 text-ink shadow-overlay backdrop-saturate-150 sm:rounded-[28px]"
+        className="relative flex max-h-[92dvh] w-full max-w-[560px] flex-col overflow-hidden rounded-t-[28px] border border-line bg-overlay/95 text-ink shadow-overlay backdrop-saturate-150 sm:rounded-[28px]"
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6 pt-7 sm:px-8">
           {/* Header */}
@@ -99,16 +106,9 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
                 {config.sessionName}
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowResults(false)}
-              aria-label="Close and resume session"
-              className="-mr-2 -mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink/[0.06] text-muted transition-colors hover:bg-ink/[0.1] hover:text-ink"
-            >
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
-              </svg>
-            </button>
+            <GlassIconButton label="Close and resume session" onClick={() => setShowResults(false)}>
+              <IconClose />
+            </GlassIconButton>
           </div>
 
           {/* Hero result */}
@@ -196,18 +196,15 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
 
         {/* Actions */}
         <div className="flex flex-col-reverse gap-2 border-t border-line-soft bg-surface/60 px-7 py-4 pb-[max(1rem,var(--safe-bottom,0px))] sm:flex-row sm:items-center sm:px-8">
-          <PillButton variant="text" onClick={handleExportCsv} className="sm:mr-auto">
-            Export CSV
-          </PillButton>
-          <PillButton variant="tinted" onClick={() => setShowResults(false)}>
-            Resume Session
-          </PillButton>
-          <PillButton variant="filled" onClick={onReturnToSessions}>
-            Return to Sessions
-          </PillButton>
+          <div className="sm:mr-auto">
+            <QuietButton onClick={handleExportCsv}>Export CSV</QuietButton>
+          </div>
+          <TintedButton onClick={() => setShowResults(false)}>Resume Session</TintedButton>
+          <PrimaryButton onClick={onReturnToSessions}>Return to Sessions</PrimaryButton>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
 
@@ -229,35 +226,14 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-function PillButton({
-  variant,
-  onClick,
-  className,
-  children,
-}: {
-  variant: "filled" | "tinted" | "text";
-  onClick: () => void;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  const styles = {
-    filled: "bg-gold-strong text-on-gold hover:bg-gold-strong-hover shadow-sm",
-    tinted: "bg-ink/[0.07] text-ink hover:bg-ink/[0.11]",
-    text: "text-muted hover:text-ink hover:bg-ink/[0.05]",
-  }[variant];
+function TintedButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <motion.button
+    <button
       type="button"
       onClick={onClick}
-      whileTap={{ scale: 0.97 }}
-      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-      className={cn(
-        "inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full px-5 text-[14px] font-semibold tracking-[-0.01em] transition-colors duration-200",
-        styles,
-        className,
-      )}
+      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-full bg-ink/[0.07] px-5 text-[15px] font-semibold tracking-[-0.01em] text-ink transition-all duration-200 hover:bg-ink/[0.11] active:scale-[0.97]"
     >
       {children}
-    </motion.button>
+    </button>
   );
 }

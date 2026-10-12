@@ -1,12 +1,24 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "motion/react";
-import { Field, Select, TextInput } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { CandlestickIcon } from "@/components/ui/icons";
+import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { currencySymbol } from "@/lib/format";
+import {
+  Chip,
+  Collapse,
+  Disclosure,
+  GlassIconButton,
+  Hint,
+  IconBack,
+  Label,
+  PrimaryButton,
+  Segmented,
+  StepTitle,
+  TextBox,
+  glass,
+} from "@/components/journal/flow-ui";
 import { useApp } from "@/lib/store";
 import { INSTRUMENTS } from "@/lib/backtesting/instruments";
 import {
@@ -25,6 +37,8 @@ const QUICK_WINDOWS = [
   { label: "09:30–11:30", start: "09:30", end: "11:30" },
   { label: "Full Session", start: "09:30", end: "16:00" },
 ];
+
+const COMMON_TIMEFRAMES: Timeframe[] = ["1m", "3m", "5m", "15m", "1h"];
 
 const FUTURES_INSTRUMENTS = INSTRUMENTS.filter(i => i.assetClass === "futures");
 
@@ -133,254 +147,287 @@ export default function CreateBacktestPage() {
     router.push(`/backtesting/session?id=${id}`);
   }
 
+  const [moreTimeframes, setMoreTimeframes] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const sym = currencySymbol(settings.currency);
+
+  const onCreate = async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      await handleCreate();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // ⌘↵ / Ctrl↵ creates the session, same shortcut as Plan Trade.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        void onCreate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const firstError = errors[0]?.message ?? null;
+  const summary = [selectedInstruments.join(", ") || "No instrument", session.label === "Custom Session" ? "Custom" : session.label, timeframe].join(" · ");
+  const visibleTimeframes = moreTimeframes || !COMMON_TIMEFRAMES.includes(timeframe) ? TIMEFRAMES : COMMON_TIMEFRAMES;
+  const shortName = (n: string) => n.replace("Micro E-mini ", "Micro ").replace("E-mini ", "");
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <header className="flex items-center gap-3">
-        <button
-          onClick={() => router.push("/lab#backtesting")}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-raised text-faint hover:text-ink transition-colors"
-        >
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
-          </svg>
-        </button>
-        <div>
-          <h1 className="font-display text-xl font-semibold text-ink">Create Backtest Session</h1>
-          <p className="text-sm text-faint">Configure your replay session before entering the chart.</p>
-        </div>
-      </header>
+    <div className="mx-auto w-full max-w-[40rem] pb-6">
+      <div className="mb-4 flex items-center">
+        <GlassIconButton label="Back to Trading Lab" onClick={() => router.push("/lab#backtesting")}>
+          <IconBack />
+        </GlassIconButton>
+      </div>
 
       <motion.div
-        initial={{ opacity: 0, y: 8 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="space-y-6 rounded-control border border-line bg-surface p-5 sm:p-6"
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        className="rounded-[28px] border border-line bg-surface shadow-lift"
       >
-        {/* Session Name */}
-        <Field label="Session name" htmlFor="session-name">
-          <TextInput
-            id="session-name"
-            placeholder="e.g. NQ Morning Scalp 2026-08-28"
-            value={sessionName}
-            onChange={(e) => setSessionName(e.target.value)}
-          />
-        </Field>
-
-        {/* Instruments — multi-select checkboxes */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Instruments</p>
-          {errorFor("instruments") && <p className="text-[11px] text-loss">{errorFor("instruments")}</p>}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {FUTURES_INSTRUMENTS.map((inst) => (
-              <label
-                key={inst.symbol}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2.5 rounded-control border px-3 py-2.5 text-[13px] font-medium transition-colors",
-                  selectedInstruments.includes(inst.symbol)
-                    ? "border-gold/40 bg-gold/[0.08] text-ink"
-                    : "border-line bg-raised text-faint hover:border-line-strong hover:text-muted",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedInstruments.includes(inst.symbol)}
-                  onChange={() => toggleInstrument(inst.symbol)}
-                  className="sr-only"
-                />
-                <span className={cn(
-                  "grid h-4 w-4 shrink-0 place-items-center rounded border transition-colors",
-                  selectedInstruments.includes(inst.symbol)
-                    ? "border-gold bg-gold text-white"
-                    : "border-line-strong bg-canvas",
-                )}>
-                  {selectedInstruments.includes(inst.symbol) && (
-                    <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M2 6l3 3 5-5" />
-                    </svg>
-                  )}
-                </span>
-                <span>{inst.symbol}</span>
-                <span className="ml-auto text-[10px] text-faint">{inst.name.replace('E-mini ', '').replace('Micro E-mini ', 'μ ')}</span>
-              </label>
-            ))}
+        <div className="space-y-10 px-6 pb-10 pt-9 sm:px-10">
+          <div>
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-gold">Trading Lab · Replay</p>
+            <StepTitle title="New replay session" subtitle="Pick what to practise. You can change the timeframe on the chart." />
           </div>
-        </div>
 
-        {/* Session */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Session</p>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            {SESSION_LIST.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSessionId(s.id)}
-                className={cn(
-                  "rounded-control border px-3 py-2 text-[13px] font-medium transition-colors",
-                  sessionId === s.id
-                    ? "border-gold/40 bg-gold/[0.08] text-ink"
-                    : "border-line bg-raised text-faint hover:border-line-strong hover:text-muted",
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
+          {/* Name */}
+          <div className="space-y-2.5">
+            <Label hint="optional" htmlFor="session-name">Name</Label>
+            <TextBox
+              id="session-name"
+              placeholder="e.g. NQ morning scalp"
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+            />
           </div>
-          {sessionId === "custom" ? (
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <Field label="Start (America/New_York)" htmlFor="custom-start">
-                <TextInput id="custom-start" type="time" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
-              </Field>
-              <Field label="End (America/New_York)" htmlFor="custom-end">
-                <TextInput id="custom-end" type="time" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
-              </Field>
+
+          {/* Instruments */}
+          <div className="space-y-3">
+            <Label done={selectedInstruments.length > 0}>Instruments</Label>
+            <div className="flex flex-wrap gap-2">
+              {FUTURES_INSTRUMENTS.map((inst) => (
+                <Chip key={inst.symbol} selected={selectedInstruments.includes(inst.symbol)} onClick={() => toggleInstrument(inst.symbol)}>
+                  <span className="font-mono font-semibold">{inst.symbol}</span>
+                  <span className="ml-2 text-[13px] font-normal opacity-60">{shortName(inst.name)}</span>
+                </Chip>
+              ))}
             </div>
-          ) : (
-            <p className="text-[11px] text-faint">
-              {session.startTime}–{session.endTime} · {session.timezone}
-            </p>
-          )}
-        </div>
-
-        {/* Account type */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Account type</p>
-          <div role="tablist" className="grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1">
-            {([
-              { id: "personal", label: "Real Account" },
-              { id: "prop", label: "Prop Account" },
-            ] as const).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={accountType === t.id}
-                onClick={() => setAccountType(t.id)}
-                className={cn(
-                  "rounded-lg py-2 text-sm font-medium transition-colors",
-                  accountType === t.id ? "bg-raised text-ink shadow-sm" : "text-faint hover:text-muted",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
+            {errorFor("instruments") && <p role="alert" className="text-[13px] text-loss">{errorFor("instruments")}</p>}
           </div>
-        </div>
 
-        <Field label="Starting balance" error={errorFor("startingBalance")} htmlFor="starting-balance">
-          <TextInput
-            id="starting-balance"
-            type="number"
-            min={0}
-            step={100}
-            value={startingBalance}
-            onChange={(e) => setStartingBalance(e.target.value)}
-          />
-        </Field>
-
-        {accountType === "prop" && (
-          <div className="space-y-4 rounded-control border border-dashed border-line-strong p-4">
-            <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Prop account risk rules</p>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Maximum drawdown" error={errorFor("propRules.maxDrawdown")} htmlFor="max-dd">
-                <TextInput id="max-dd" type="number" min={0} step={50} value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value)} />
-              </Field>
-              <Field label="Drawdown mode" htmlFor="dd-mode">
-                <Select id="dd-mode" value={drawdownMode} onChange={(e) => setDrawdownMode(e.target.value as DrawdownMode)}>
-                  <option value="static">Static (from starting balance)</option>
-                  <option value="trailing">Dynamic (high-water mark)</option>
-                </Select>
-              </Field>
-              <Field label="Daily loss limit" hint="optional" htmlFor="daily-loss">
-                <TextInput id="daily-loss" type="number" min={0} step={50} value={dailyLossLimit} onChange={(e) => setDailyLossLimit(e.target.value)} />
-              </Field>
-              <Field label="Maximum contracts" hint="optional" htmlFor="max-contracts">
-                <TextInput id="max-contracts" type="number" min={0} step={1} value={maxContracts} onChange={(e) => setMaxContracts(e.target.value)} />
-              </Field>
-            </div>
-
-            {/* Consistency Rule */}
-            <div className="space-y-3 border-t border-line pt-4">
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={consistencyEnabled}
-                  onChange={(e) => setConsistencyEnabled(e.target.checked)}
-                  className="rounded border-line-strong"
-                />
-                <span className="text-[13px] font-medium text-muted">Consistency rule</span>
-              </label>
-              {consistencyEnabled && (
-                <Field label="Max daily profit contribution (%)" htmlFor="consistency-pct">
-                  <TextInput
-                    id="consistency-pct"
-                    type="number"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={consistencyPct}
-                    onChange={(e) => setConsistencyPct(e.target.value)}
-                  />
-                </Field>
+          {/* Market session */}
+          <div className="space-y-3">
+            <Label>Market session</Label>
+            <Segmented
+              fullWidth
+              layoutId="seg-market"
+              label="Market session"
+              value={sessionId}
+              onChange={(id) => setSessionId(id)}
+              options={SESSION_LIST.map((x) => ({ id: x.id, label: x.id === "custom" ? "Custom" : x.label }))}
+            />
+            <AnimatePresence initial={false} mode="wait">
+              {sessionId === "custom" ? (
+                <Collapse key="custom">
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="space-y-2">
+                      <Label htmlFor="custom-start">Start</Label>
+                      <TextBox id="custom-start" type="time" value={customStart} onChange={(e) => setCustomStart(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="custom-end">End</Label>
+                      <TextBox id="custom-end" type="time" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+                    </div>
+                  </div>
+                </Collapse>
+              ) : (
+                <motion.p key="hours" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="text-[13px] text-faint">
+                  {session.startTime}–{session.endTime} · {session.timezone}
+                </motion.p>
               )}
+            </AnimatePresence>
+          </div>
+
+          {/* Account */}
+          <div className="space-y-3">
+            <Label>Account</Label>
+            <Segmented
+              fullWidth
+              layoutId="seg-account"
+              label="Account type"
+              value={accountType}
+              onChange={(id) => setAccountType(id)}
+              options={[
+                { id: "personal", label: "Real" },
+                { id: "prop", label: "Prop" },
+              ]}
+            />
+            <div className="space-y-2.5 pt-3">
+              <Label htmlFor="starting-balance">Starting balance</Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[16px] text-faint">{sym}</span>
+                <TextBox
+                  id="starting-balance"
+                  type="number"
+                  min={0}
+                  step={100}
+                  inputMode="decimal"
+                  className="pl-9 tabular-nums"
+                  value={startingBalance}
+                  onChange={(e) => setStartingBalance(e.target.value)}
+                />
+              </div>
+              {errorFor("startingBalance") && <p role="alert" className="text-[13px] text-loss">{errorFor("startingBalance")}</p>}
             </div>
-          </div>
-        )}
 
-        {/* Quick session windows */}
-        <div className="space-y-2">
-          <p className="text-[13px] font-medium text-muted">Quick window presets</p>
-          <div className="flex flex-wrap gap-1.5">
-            {QUICK_WINDOWS.map((w) => (
-              <button
-                key={w.label}
-                type="button"
-                onClick={() => applyQuickWindow(w.start, w.end)}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-[12px] font-medium transition-colors",
-                  fromTime === w.start && toTime === w.end
-                    ? "border-gold/40 bg-gold/[0.08] text-gold"
-                    : "border-line bg-raised text-faint hover:text-muted",
-                )}
-              >
-                {w.label}
-              </button>
-            ))}
+            <AnimatePresence initial={false}>
+              {accountType === "prop" && (
+                <Collapse>
+                  <div className="mt-3 space-y-5 rounded-[22px] border border-line bg-ink/[0.025] p-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">Prop risk rules</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="max-dd">Max drawdown</Label>
+                        <TextBox id="max-dd" type="number" min={0} step={50} inputMode="decimal" className="tabular-nums" value={maxDrawdown} onChange={(e) => setMaxDrawdown(e.target.value)} />
+                        {errorFor("propRules.maxDrawdown") && <p role="alert" className="text-[13px] text-loss">{errorFor("propRules.maxDrawdown")}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Drawdown type</Label>
+                        <Segmented
+                          fullWidth
+                          compact
+                          layoutId="seg-dd"
+                          label="Drawdown type"
+                          value={drawdownMode}
+                          onChange={(id) => setDrawdownMode(id)}
+                          options={[
+                            { id: "static", label: "Static" },
+                            { id: "trailing", label: "Trailing" },
+                          ]}
+                          className="h-[50px] items-center"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label hint="optional" htmlFor="daily-loss">Daily loss limit</Label>
+                        <TextBox id="daily-loss" type="number" min={0} step={50} inputMode="decimal" className="tabular-nums" value={dailyLossLimit} onChange={(e) => setDailyLossLimit(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label hint="optional" htmlFor="max-contracts">Max contracts</Label>
+                        <TextBox id="max-contracts" type="number" min={0} step={1} inputMode="numeric" className="tabular-nums" value={maxContracts} onChange={(e) => setMaxContracts(e.target.value)} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 border-t border-line pt-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-[15px] font-medium text-ink">Consistency rule</p>
+                          <p className="text-[13px] text-muted">Cap how much one day can contribute to total profit.</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={consistencyEnabled}
+                          aria-label="Consistency rule"
+                          onClick={() => setConsistencyEnabled((v) => !v)}
+                          className={cn(
+                            "relative h-[30px] w-[50px] shrink-0 rounded-full transition-colors duration-200",
+                            consistencyEnabled ? "bg-profit" : "bg-ink/[0.15]",
+                          )}
+                        >
+                          <span className={cn("absolute top-[2px] h-[26px] w-[26px] rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.25)] transition-all duration-200", consistencyEnabled ? "left-[22px]" : "left-[2px]")} />
+                        </button>
+                      </div>
+                      <AnimatePresence initial={false}>
+                        {consistencyEnabled && (
+                          <Collapse>
+                            <div className="max-w-[12rem] space-y-2 pt-1">
+                              <Label htmlFor="consistency-pct">Max daily share (%)</Label>
+                              <TextBox id="consistency-pct" type="number" min={1} max={100} step={1} inputMode="numeric" className="tabular-nums" value={consistencyPct} onChange={(e) => setConsistencyPct(e.target.value)} />
+                            </div>
+                          </Collapse>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                </Collapse>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Replay window */}
+          <div className="space-y-3">
+            <Label done={!!fromDate && !!toDate}>Replay window</Label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextBox
+                aria-label="From date"
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFromDate(v);
+                  // Most replays are a single day: mirror the end date until the user changes it.
+                  if (!toDate || toDate < v) setToDate(v);
+                }}
+              />
+              <TextBox aria-label="To date" type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {QUICK_WINDOWS.map((w) => (
+                <Chip key={w.label} selected={fromTime === w.start && toTime === w.end} onClick={() => applyQuickWindow(w.start, w.end)}>
+                  {w.label}
+                </Chip>
+              ))}
+            </div>
+            {errorFor("period") && <p role="alert" className="text-[13px] text-loss">{errorFor("period")}</p>}
+            <Disclosure label="Fine-tune time">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="from-time">From</Label>
+                  <TextBox id="from-time" type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="to-time">To</Label>
+                  <TextBox id="to-time" type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} />
+                </div>
+              </div>
+              <p className="text-[13px] text-faint">Times in {session.timezone} · DST handled automatically.</p>
+            </Disclosure>
+          </div>
+
+          {/* Timeframe */}
+          <div className="space-y-3">
+            <Label>Starting timeframe</Label>
+            <div className="flex flex-wrap gap-2">
+              {visibleTimeframes.map((tf) => (
+                <Chip key={tf} selected={timeframe === tf} onClick={() => setTimeframe(tf)}>
+                  <span className="font-mono">{tf}</span>
+                </Chip>
+              ))}
+              {visibleTimeframes === COMMON_TIMEFRAMES && <Chip selected={false} onClick={() => setMoreTimeframes(true)}>More…</Chip>}
+            </div>
+            {errorFor("timeframe") && <p role="alert" className="text-[13px] text-loss">{errorFor("timeframe")}</p>}
           </div>
         </div>
 
-        {/* Period */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="From date" htmlFor="from-date">
-            <TextInput id="from-date" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </Field>
-          <Field label="From time" htmlFor="from-time">
-            <TextInput id="from-time" type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} />
-          </Field>
-          <Field label="To date" htmlFor="to-date">
-            <TextInput id="to-date" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </Field>
-          <Field label="To time" htmlFor="to-time">
-            <TextInput id="to-time" type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} />
-          </Field>
-        </div>
-        {errorFor("period") && <p className="text-[11px] text-loss">{errorFor("period")}</p>}
-        <p className="text-[11px] text-faint">
-          Times in {session.timezone} · DST handled automatically.
-        </p>
-
-        {/* Timeframe */}
-        <Field label="Initial timeframe" error={errorFor("timeframe")} htmlFor="timeframe">
-          <Select id="timeframe" value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
-            {TIMEFRAMES.map((tf) => (
-              <option key={tf} value={tf}>{tf}</option>
-            ))}
-          </Select>
-        </Field>
-
-        <Button variant="gold" size="lg" className="w-full" onClick={handleCreate}>
-          Create Session
-        </Button>
+        {/* Glass action bar — same as Plan Trade */}
+        <footer className={cn("sticky bottom-[var(--chrome-bottom,0px)] z-20 rounded-b-[28px] border-t border-line/60 px-5 py-3.5 sm:px-10 sm:py-4", glass.bar)}>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 flex-1 text-[12.5px] text-faint">
+              <Hint text={firstError ?? summary} tone={firstError ? "warn" : "muted"} />
+            </div>
+            <PrimaryButton shortcut loading={creating} onClick={onCreate}>
+              Create session
+            </PrimaryButton>
+          </div>
+        </footer>
       </motion.div>
     </div>
   );
