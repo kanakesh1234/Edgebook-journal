@@ -28,7 +28,7 @@ export const MISTAKE_BY_KEY = new Map<string, MistakeDef>([...PSYCH_PATTERNS, ..
 
 /** Autopsy keys (focus.ts) → review pattern keys. */
 const AUTOPSY_TO_KEY: Record<string, string> = {
-  early: "fomo", chased: "fomo", stop: "moved-stop", size: "oversized", plan: "broke-plan", revenge: "revenge", overtrade: "overtrade",
+  early: "fomo", chased: "fomo", fomo: "fomo", stop: "moved-stop", size: "oversized", plan: "broke-plan", revenge: "revenge", overtrade: "overtrade",
 };
 
 /** All recorded mistake keys for one trade (deduplicated, stable order). Custom "Other" mistakes get their own `other:` key. */

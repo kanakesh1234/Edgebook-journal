@@ -373,6 +373,39 @@ export interface OutcomeReview {
   notes?: string;
 }
 
+/**
+ * One mistake tag on a trade (see lib/tagging). "Filed" tags count in the Journal and the Weekly Review.
+ * `support` is derived from how many independent voters agreed — it is never a number a model reported about itself.
+ */
+export interface MistakeTagRecord {
+  key: string;
+  primary: boolean;
+  /** How it got on the trade: the trader's own pick, or machine agreement. */
+  source: "you" | "preset" | "ai" | "rules";
+  /** Independent voters that agreed: "you", "data" (a measured fact), "rules", and one "ai:<model>" per model. */
+  voters: string[];
+  support: number;
+  /** Verbatim quotes from the trader's own words (or a measured fact) that justify the tag. */
+  evidence: { src: string; role: string; quote: string }[];
+  /** The trader confirmed it with one tap. */
+  confirmed?: boolean;
+}
+
+/** What the tagger concluded and could not conclude. Suggestions are NOT filed until the trader confirms them. */
+export interface MistakeTagging {
+  v: 1;
+  verdict: "filed" | "suggested" | "unsure" | "none";
+  suggestions: MistakeTagRecord[];
+  /** The trader's quick-pick disagrees with what they wrote — usually a mis-tap. */
+  conflict?: { declared: string; better: string; quote?: string };
+  models: string[];
+  /** True when no AI answered and the offline rules decided alone. */
+  degraded: boolean;
+  at: number;
+  /** The trader has looked at the suggestions (confirmed, changed or dismissed them). */
+  reviewed?: boolean;
+}
+
 export interface TradeReviewData {
   plannedVsActual?: {
     followedChecklist?: boolean | null;
@@ -399,6 +432,10 @@ export interface TradeReviewData {
     mistakeCategory?: string;
     mistakeCategorySource?: "preset" | "ai" | "rules" | "you";
     mistakeCategoryConfidence?: number;
+    /** Every FILED mistake tag, primary first (mistakeCategory always equals the primary). Added by lib/tagging. */
+    tags?: MistakeTagRecord[];
+    /** The tagger's full verdict, including suggestions waiting for the trader. */
+    tagging?: MistakeTagging;
     /** Final data-backed audit of the trade (news window, limit, size, trade count…), stored with the review. */
     audit?: {
       key: string;

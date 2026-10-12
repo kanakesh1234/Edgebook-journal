@@ -22,6 +22,7 @@ import { statusOf, useReadProgress } from "@/components/lessons/progress";
 import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import { LessonPeek, LessonPicker, LessonThumb } from "./lesson-links";
 import { ReplayTradeCard, useReplayTrade } from "./replay-trade";
+import { EntryTags } from "./tag-panel";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
@@ -709,6 +710,7 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
                   )}
                 </div>
                 {answers.length > 0 && <AnswerList items={answers} />}
+                <EntryTags entry={entry} />
                 {prose.map((p) => <ProseCard key={p.label} label={p.label} text={p.text} />)}
                 {lesson && <Callout label="Next time" text={lesson} />}
                 {extra.length > 0 && <MoreDetails groups={extra} />}

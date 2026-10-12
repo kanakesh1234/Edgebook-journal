@@ -14,6 +14,7 @@
  *                              it comes back after 1, 3, 7, 14 and 30 days; a miss resets it to today)
  */
 import type { JournalEntry, PracticeProgress } from "@/lib/types";
+import { categoryOf, mistakeLabel } from "../mistakes.ts";
 import { addDaysKey } from "./consistency.ts";
 
 export type TradeKind = "blunder" | "slip" | "mixed" | "clean";
@@ -81,6 +82,9 @@ export function mistakeOf(entry: JournalEntry): { key: string; label: string } |
   const key = f?.mistake?.trim();
   if (!key || key === "none") return null;
   if (key === "other") {
+    // Written-in mistakes that were FILED under a category join that category, so "Ignored news" and "Traded CPI" are one recurring pattern.
+    const filed = f?.tags?.find((t) => t.primary)?.key ?? f?.tags?.[0]?.key; // only the new tagging pipeline: trades saved before it keep their old grouping
+    if (filed && filed !== "other" && categoryOf(filed)) return { key: filed, label: mistakeLabel(filed) };
     const other = f?.mistakeOther?.trim();
     return other ? { key: `other:${other.toLowerCase().slice(0, 40)}`, label: other.slice(0, 60) } : { key: "other", label: "Another mistake" };
   }

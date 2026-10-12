@@ -20,7 +20,9 @@ import { useApp } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { MORE_FEELINGS, PRIMARY_FEELINGS, feelingFromReview, feelingOf, type FeelingKey } from "@/lib/feelings";
-import { MISTAKE_CATEGORIES, categoryOf, classifyMistake, isMistakeKey, type MistakeKey } from "@/lib/mistakes";
+import { MISTAKE_CATEGORIES, categoryOf, isMistakeKey, type MistakeKey } from "@/lib/mistakes";
+import { tagTrade, type Decision, type TagInputs } from "@/lib/tagging";
+import { TagPanel } from "./tag-panel";
 import { dayRisk } from "@/lib/risk";
 import { auditLabel, auditTrade, isPresetKey, type Audit } from "@/lib/audit";
 import { BinaryChoice, Chip, FLOW_FADE, IconCheck, Label, PrimaryButton, Reveal, Segmented, Stagger, TextBlock, TextBox } from "./flow-ui";
@@ -28,7 +30,7 @@ import { RiskMeter } from "./risk-meter";
 
 type Emotion = FeelingKey | "";
 /** The bucket this mistake is filed under, and who decided: a quick-pick, the AI, the local fallback, or the trader. */
-type Category = { key: MistakeKey; source: "preset" | "ai" | "rules" | "you"; confidence: number };
+type Category = { key: MistakeKey; source: "preset" | "ai" | "rules" | "you"; confidence: number; /** Offered by the tagger but not filed: waiting for the trader. */ suggested?: boolean };
 
 const MISTAKES: { key: string; label: string }[] = [
   { key: "none", label: "No mistake" },
@@ -76,10 +78,13 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   /** Filing of the mistake into the shared categories. Written-in mistakes ("Others") are sorted by AI in the background. */
   const [category, setCategory] = useState<Category | null>(null);
   const [sorting, setSorting] = useState(false);
+  /** What the tagger concluded from EVERYTHING written so far (see lib/tagging). Filed tags and open suggestions. */
+  const [tagging, setTagging] = useState<Decision | null>(null);
+  const [tagsReviewed, setTagsReviewed] = useState(false);
+  const tagCache = useRef<{ hash: string; promise: Promise<Decision | null> } | null>(null);
   const categoryRef = useRef<Category | null>(null);
   categoryRef.current = category;
   const sortRun = useRef(0);
-  const sortPromise = useRef<Promise<void> | null>(null);
   const sortedText = useRef("");
   /** The audit's independent read of the whole trade. Runs once when the review opens; the saved copy is re-run with the answers. */
   const [audit, setAudit] = useState<Audit | null>(null);
@@ -122,6 +127,9 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     const savedKey = r?.followUp?.mistakeCategory;
     setCategory(savedKey && isMistakeKey(savedKey) ? { key: savedKey, source: r?.followUp?.mistakeCategorySource ?? "preset", confidence: r?.followUp?.mistakeCategoryConfidence ?? 1 } : null);
     sortedText.current = r?.followUp?.mistakeOther?.trim() ?? "";
+    setTagging(r?.followUp?.tagging ? { tags: r.followUp.tags ?? [], tagging: r.followUp.tagging } : null);
+    setTagsReviewed(!!r?.followUp?.tagging?.reviewed);
+    tagCache.current = null;
     sortRun.current++; setSorting(false);
     setEditing(null);
     setPending(null);
@@ -133,16 +141,38 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     window.clearTimeout(settleTimer.current);
     settleTimer.current = window.setTimeout(() => { apply(); setEditing(null); setPending(null); }, 240);
   };
-  /** Files a written-in mistake under a category. Never blocks the trader: the local sorter answers if AI is slow or off. */
-  const sortOther = (text: string, note: string) => {
+  /** Everything the trader has filled in so far, as the tagger wants it. A category picked by hand is passed as final. */
+  const inputsNow = (): TagInputs => ({
+    mistake, mistakeOther: mistakeOther.trim() || undefined, mistakeNote: mistakeNote.trim() || undefined, lesson: lesson.trim() || undefined,
+    followedPlan, feeling: emotion || undefined, goodProcess, blunder,
+    pickedCategory: categoryRef.current?.source === "you" ? categoryRef.current.key : undefined,
+  });
+  /** Reads ALL the trader's words + the trade's data. Never blocks: offline rules answer if AI is slow or off. Cached per exact input. */
+  const runTagging = (inp: TagInputs, timeoutMs = 12_000): Promise<Decision | null> => {
+    const e = entryRef.current;
+    if (!e || inp.mistake === "" || inp.mistake === "none") return Promise.resolve(null);
+    const hash = JSON.stringify(inp);
+    if (tagCache.current?.hash === hash) return tagCache.current.promise;
     const id = ++sortRun.current;
     setSorting(true);
-    const run = classifyMistake(text, note)
-      .then((c) => { if (id === sortRun.current) setCategory((prev) => (prev?.source === "you" && sortedText.current === text ? prev : { key: c.key, source: c.source, confidence: c.confidence })); })
+    const st = useApp.getState();
+    const promise = tagTrade(e, st.entries, st.plans, inp, timeoutMs)
+      .then((d): Decision => { if (id === sortRun.current) setTagging({ tags: d.tags, tagging: d.tagging }); return { tags: d.tags, tagging: d.tagging }; })
       .finally(() => { if (id === sortRun.current) setSorting(false); });
-    sortPromise.current = run;
-    return run;
+    tagCache.current = { hash, promise };
+    return promise;
   };
+  // Live: re-read a moment after the trader stops typing, so the tags are ready before they press Complete.
+  const liveKey = JSON.stringify([mistake, mistakeOther.trim(), mistakeNote.trim(), lesson.trim(), followedPlan, emotion, goodProcess, blunder, category?.source === "you" ? category.key : null]);
+  useEffect(() => {
+    if (!active || !entryId) return;
+    if (mistake === "" || mistake === "none") { setTagging(null); return; }
+    if (mistake === "other" && !otherDone) return;
+    if (mistakeNote.trim().length < 12 && lesson.trim().length < 8 && mistake !== "other") return;
+    const t = window.setTimeout(() => void runTagging(inputsNow()), 1100);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey, active, entryId, otherDone]);
   const chooseCategory = (key: MistakeKey) => {
     sortRun.current++; // an answer still in flight must not overwrite the trader's choice
     setSorting(false);
@@ -166,10 +196,9 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     if (!text) return;
     setOtherDone(true);
     setEditing(null);
-    if (sortedText.current !== text) { // new or changed words: sort again (a manual choice about OLD words no longer applies)
+    if (sortedText.current !== text) { // new or changed words: a manual choice about OLD words no longer applies; the tagger re-reads on its own
       sortedText.current = text;
       setCategory(null);
-      void sortOther(text, mistakeNote);
     }
   };
   const settleMistake = (m: string) => settle("mistake", m, () => {
@@ -186,7 +215,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     if (isPresetKey(audit.key)) { settleMistake(audit.key); return; }
     sortRun.current++; setSorting(false);
     setMistake("other"); setMistakeOther(auditLabel(audit)); setOtherDone(true); sortedText.current = auditLabel(audit);
-    setCategory({ key: audit.key, source: "ai", confidence: audit.confidence });
+    setCategory({ key: audit.key, source: "you", confidence: 1 });
     if (blunder === 0) setBlunder(null);
     setEditing(null);
   };
@@ -214,17 +243,16 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     setSaving(true);
     setError(null);
     try {
-      // File the mistake. A written-in one waits for the sort already running; if that was unsure and the trader has since
-      // described what happened, it is sorted once more with those details. Quick-picks file under themselves.
+      // File the mistake. The tagger reads everything written and decides: the trader's own pick is final; otherwise a tag is only
+      // FILED when independent voters agree. Anything less stays a suggestion and is NOT guessed into the Journal.
       let cat: Category | null = null;
-      if (mistake === "other") {
-        if (sortPromise.current) await sortPromise.current;
-        cat = categoryRef.current;
-        if (!cat || (cat.source !== "you" && cat.confidence < 0.6 && mistakeNote.trim())) {
-          const c = await classifyMistake(mistakeOther.trim(), mistakeNote, 6000);
-          cat = { key: c.key, source: c.source, confidence: c.confidence };
-        }
-      } else if (mistake !== "none" && isMistakeKey(mistake)) cat = { key: mistake, source: "preset", confidence: 1 };
+      let decision: Decision | null = null;
+      if (mistake !== "none") {
+        decision = await runTagging(inputsNow(), 9000);
+        const prim = decision?.tags.find((t) => t.primary) ?? decision?.tags[0];
+        if (prim && isMistakeKey(prim.key)) cat = { key: prim.key, source: prim.source, confidence: prim.support };
+        else if (mistake !== "other" && isMistakeKey(mistake)) cat = { key: mistake, source: "preset", confidence: 1 };
+      }
       const feel = feelingOf(emotion);
       const preTrade = current.preTradeChecklist ?? [];
       const preAllConfirmed = preTrade.length === 0 || preTrade.every((i) => i.confirmed);
@@ -244,7 +272,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
           badTradeDespiteWin: current.pnl > 0 ? goodProcess === false : null,
           processVerdict: goodProcess === true ? "a-plus" : goodProcess === false ? "process-failure" : "",
         },
-        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, mistakeCategory: mistake === "none" ? undefined : cat?.key, mistakeCategorySource: mistake === "none" ? undefined : cat?.source, mistakeCategoryConfidence: mistake === "none" || !cat ? undefined : cat.confidence, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
+        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, mistakeCategory: mistake === "none" ? undefined : cat?.key, mistakeCategorySource: mistake === "none" ? undefined : cat?.source, mistakeCategoryConfidence: mistake === "none" || !cat ? undefined : cat.confidence, tags: mistake === "none" || !decision?.tags.length ? undefined : decision.tags, tagging: mistake === "none" || !decision ? undefined : { ...decision.tagging, reviewed: tagsReviewed || (decision.tagging.suggestions.length === 0 && !decision.tagging.conflict) }, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
         reviewedAt: Date.now(),
       };
       // Final audit with the trader's answers included, so a generous "No mistake" is checked against the facts.
@@ -272,7 +300,23 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     }
   };
 
-  return { audit, auditDismissed, dismissAudit: () => setAuditDismissed(true), acceptAudit, risk, category, sorting, chooseCategory, entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, mistakeOther, setMistakeOther, confirmOther, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
+  /** Trader taps a suggestion (or "Use X" on a mis-tap warning): it becomes their own pick, and the tagger re-reads with it as final. */
+  const pickTag = (key: string) => {
+    if (!isMistakeKey(key)) return;
+    sortRun.current++; setSorting(false); setTagsReviewed(false);
+    if (mistake === "other") setCategory({ key, source: "you", confidence: 1 }); // their own words stay; only the filing changes
+    else if (isPresetKey(key)) { setMistake(key); setCategory({ key, source: "preset", confidence: 1 }); } // a mis-tapped quick-pick becomes the right quick-pick
+    else { const name = categoryOf(key)?.label ?? key; setMistake("other"); setMistakeOther(name); setOtherDone(true); sortedText.current = name; setCategory({ key, source: "you", confidence: 1 }); }
+    if (blunder === 0) setBlunder(null);
+    setEditing(null);
+  };
+  const dismissTags = () => setTagsReviewed(true);
+  // What the Category row shows: the trader's own pick, else what the tagger filed, else what it is only suggesting.
+  const prim = tagging?.tags.find((t) => t.primary) ?? tagging?.tags[0];
+  const sug = tagging?.tagging.suggestions[0];
+  const shownCategory: Category | null = category ?? (prim && isMistakeKey(prim.key) ? { key: prim.key, source: prim.source, confidence: prim.support } : sug && isMistakeKey(sug.key) ? { key: sug.key, source: "ai", confidence: sug.support, suggested: true } : null);
+  const tagView = tagging && tagsReviewed ? { ...tagging, tagging: { ...tagging.tagging, reviewed: true } } : tagging;
+  return { tagging: tagView, tagBusy: sorting, pickTag, dismissTags, tagsReviewed, audit, auditDismissed, dismissAudit: () => setAuditDismissed(true), acceptAudit, risk, category: shownCategory, sorting, chooseCategory, entry, currency, followedPlan, setFollowedPlan, emotion, setEmotion, goodProcess, setGoodProcess, lesson, setLesson, mistake, chooseMistake, blunder, chooseBlunder, mistakeNote, setMistakeNote, mistakeOther, setMistakeOther, confirmOther, editing, setEditing, pending, hint, ready, hasChart, saving, error, submit, blunderDone };
 }
 
 export type AutopsyState = ReturnType<typeof useAutopsy>;
@@ -332,7 +376,7 @@ function AnswerList({ a }: { a: AutopsyState }) {
           label={`Category: ${a.sorting && !a.category ? "sorting" : categoryOf(a.category?.key)?.label}. Change`}
           icon={<span className={cn(a.sorting && !a.category && "animate-pulse")}><GlyphSpark /></span>}
           tile="bg-[#5e5ce6]"
-          title={a.category?.source === "ai" ? "Category · AI" : "Category"}
+          title={a.category?.suggested ? "Category · suggested" : a.category?.source === "ai" ? "Category · AI" : "Category"}
           value={a.sorting && !a.category ? "Sorting…" : categoryOf(a.category?.key)?.label ?? "—"}
           onClick={() => a.setEditing("category")}
         />
@@ -514,6 +558,13 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
               {noMistake && <AnswerList a={a} />}
               <Label done={a.lesson.trim().length > 0} htmlFor="autopsy-lesson">One lesson to carry forward</Label>
               <div className="mt-3"><TextBlock id="autopsy-lesson" maxLength={280} value={a.lesson} onChange={(e) => a.setLesson(e.target.value)} placeholder="One sentence is plenty." /></div>
+            </Reveal>
+          )}
+
+          {/* 8 — Tags: what the tagger read in everything above, and why. Informational; never blocks Complete. */}
+          {askLesson && !noMistake && a.lesson.trim().length > 0 && (a.tagging || a.tagBusy) && (
+            <Reveal key="tags">
+              <div className="mt-6"><TagPanel view={a.tagging} busy={a.tagBusy} onPick={a.pickTag} onDismiss={a.dismissTags} onOpenPicker={() => a.setEditing("category")} /></div>
             </Reveal>
           )}
         </AnimatePresence>

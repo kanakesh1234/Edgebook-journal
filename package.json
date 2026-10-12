@@ -6,9 +6,9 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "tsc --noEmit",
+    "lint": "next lint",
     "test": "node --experimental-strip-types --import ./tests/_alias-loader.mjs --no-warnings tests/run-all.ts",
-    "typecheck": "tsc --noEmit"
+    "eval:tagging": "node --experimental-strip-types --import ./tests/_alias-loader.mjs --no-warnings scripts/eval-tagging.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -49,8 +49,5 @@
     "puppeteer-core": "^25.8.0",
     "tailwindcss": "^4.1.7",
     "typescript": "^5.8.3"
-  },
-  "engines": {
-    "node": ">=22.6.0"
   }
 }

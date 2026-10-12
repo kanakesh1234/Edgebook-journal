@@ -1,25 +1,12 @@
-# Edgebook (ox-test)
+# Edgebook — AI mistake tagging: installer (built against ox-test_1.zip)
 
-Next.js 15 + React 19 + Supabase + Google Drive storage.
+Use this ONLY if you have edited more files since `ox-test_1.zip`. Otherwise use `ox-test-with-ai-tagging.zip` (the complete merged project).
 
-## Local development
-```bash
-npm install
-cp .env.example .env.local   # fill in the values
-npm run dev                  # http://localhost:3000
-```
+    unzip edgebook-ai-tagging-v3-installer.zip -d /tmp/tagging
+    /tmp/tagging/apply-tagging.sh /path/to/ox-test
+    cd /path/to/ox-test && npx tsc --noEmit && npm test
 
-## Checks (run before every push)
-```bash
-npm run typecheck   # tsc --noEmit
-npm test            # unit tests (needs Node >= 22.6)
-```
-
-## Deploy (Vercel)
-1. Push to GitHub — Vercel builds on every push.
-2. Set every variable from `.env.example` in Vercel → Project → Settings → Environment Variables.
-3. Never commit `.env.local` (it is git-ignored).
-
-Notes
-- `.data/lessons.json` is a read-only seed that is copied into Drive on first run. Keep it committed.
-- The AI API routes set `maxDuration = 60` so they don't hit Vercel's default timeout.
+- Merges into YOUR current files (6 small patches) and adds 12 new files. Nothing else is touched.
+- tests/run-all.ts: one line is appended; your other lines stay.
+- Dry run first. If a patch clashes with something you changed, NOTHING is modified and it names the file.
+- Safe to run twice.
