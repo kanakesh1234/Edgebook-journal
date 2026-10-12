@@ -50,7 +50,10 @@ export function nextStars(previous: number, attempts: MatrixAttempt[]): 0 | 1 | 
 function addDays(date: string, days: number): string {
   const value = new Date(`${date}T12:00:00`);
   value.setDate(value.getDate() + days);
-  return value.toISOString().slice(0, 10);
+  // Local calendar parts — toISOString() is UTC and returns the wrong day in zones ≥ UTC+12 (and ≤ UTC−12).
+  const mm = String(value.getMonth() + 1).padStart(2, "0");
+  const dd = String(value.getDate()).padStart(2, "0");
+  return `${value.getFullYear()}-${mm}-${dd}`;
 }
 
 /** A low score repeats soon; each completed revisit doubles the next interval. */

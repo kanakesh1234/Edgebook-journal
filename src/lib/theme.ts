@@ -80,7 +80,17 @@ function subscribe(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
+let initialised = false;
+
 function getSnapshot(): ThemeState {
+  // Seed from the saved choice once on the client. Without this the snapshot stays at
+  // "system / light" after a reload, so the toggle, Settings and the charts disagree with
+  // the theme the no-flash script already applied. Assigned once, so the snapshot stays stable.
+  if (!initialised && typeof window !== "undefined") {
+    initialised = true;
+    const choice = readStoredChoice();
+    snapshot = { choice, resolved: resolve(choice) };
+  }
   return snapshot;
 }
 
