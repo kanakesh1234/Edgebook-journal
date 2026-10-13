@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { currencySymbol } from "@/lib/format";
 import {
-  Chip,
   Collapse,
   Disclosure,
   FLOW_EASE,
@@ -15,7 +14,6 @@ import {
   IconBack,
   Label,
   PrimaryButton,
-  Segmented,
   StepTitle,
   TextBox,
   glass,
@@ -61,6 +59,55 @@ const Chevron = ({ dir }: { dir: "l" | "r" }) => (
     <path d={dir === "l" ? "M14.5 6 8.5 12l6 6" : "M9.5 6l6 6-6 6"} />
   </svg>
 );
+
+/** Apple-style segmented control: quiet inset track, a raised white pill that glides to the choice. */
+function Seg<T extends string>({ value, options, onChange, layoutId, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; layoutId: string; label: string }) {
+  return (
+    <div role="tablist" aria-label={label} className="grid h-[50px] w-full rounded-[16px] bg-ink/[0.06] p-[3px] shadow-[inset_0_1px_2px_rgb(0_0_0/0.06)]" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((o) => {
+        const on = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => { if (!on) haptic.selection(); onChange(o.id); }}
+            className={cn("relative rounded-[13px] text-[15px] tracking-[-0.01em] transition-colors duration-200", on ? "font-semibold text-ink" : "font-medium text-muted hover:text-ink")}
+          >
+            {on && (
+              <motion.span
+                layoutId={layoutId}
+                transition={{ type: "spring", stiffness: 520, damping: 38 }}
+                className="absolute inset-0 rounded-[13px] bg-raised shadow-[0_1px_1px_rgb(0_0_0/0.06),0_6px_14px_-6px_rgb(0_0_0/0.22)] ring-1 ring-black/[0.05] dark:ring-white/10"
+              />
+            )}
+            <span className="relative">{o.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Instrument pill: quiet when off, the same gold fill as the calendar when on. */
+function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={() => { haptic.selection(); onClick(); }}
+      className={cn(
+        "inline-flex h-11 min-w-[4.25rem] items-center justify-center rounded-full px-5 text-[15px] transition-all duration-200 active:scale-[0.95]",
+        on
+          ? "bg-gradient-to-b from-gold-strong to-gold-deep font-semibold text-on-gold shadow-[0_8px_16px_-8px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)]"
+          : "border border-line bg-raised font-medium text-muted hover:border-line-strong hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 /** Apple-style range calendar: tap a first day, tap a last day. One tap on the same day = a single day. */
 function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: string; anchored: boolean; max: string; onPick: (day: string) => void }) {
@@ -110,9 +157,9 @@ function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: 
               key={key}
               className={cn(
                 "relative flex justify-center",
-                inRange && "bg-gold/[0.12]",
+                inRange && "bg-gold/[0.14]",
                 inRange && (isStart || dow === 0) && "rounded-l-full",
-                inRange && (isEnd || dow === 6 || dow === 4) && "rounded-r-full",
+                inRange && (isEnd || dow === 6) && "rounded-r-full",
               )}
             >
               <button
@@ -297,9 +344,9 @@ export default function CreateBacktestPage() {
             <Label>Instruments</Label>
             <div className="flex flex-wrap gap-2">
               {FUTURES_INSTRUMENTS.map((inst) => (
-                <Chip key={inst.symbol} selected={instruments.includes(inst.symbol)} onClick={() => toggleInstrument(inst.symbol)}>
-                  <span className="font-mono font-semibold" title={shortName(inst.name)}>{inst.symbol}</span>
-                </Chip>
+                <Pill key={inst.symbol} on={instruments.includes(inst.symbol)} onClick={() => toggleInstrument(inst.symbol)}>
+                  <span className="font-mono" title={shortName(inst.name)}>{inst.symbol}</span>
+                </Pill>
               ))}
             </div>
             {errorFor("instruments") && <p role="alert" className="text-[13px] text-loss">{errorFor("instruments")}</p>}
@@ -308,13 +355,13 @@ export default function CreateBacktestPage() {
           {/* Market */}
           <motion.div {...rise(3)} className="space-y-3">
             <Label>Market</Label>
-            <Segmented fullWidth layoutId="seg-market" label="Market" value={sessionId} onChange={setSessionId} options={MARKETS.map((x) => ({ id: x.id, label: x.label }))} />
+            <Seg layoutId="seg-market" label="Market" value={sessionId} onChange={setSessionId} options={MARKETS.map((x) => ({ id: x.id, label: x.label }))} />
           </motion.div>
 
           {/* Account */}
           <motion.div {...rise(4)} className="space-y-3">
             <Label>Account</Label>
-            <Segmented fullWidth layoutId="seg-account" label="Account type" value={accountType} onChange={setAccountType} options={[{ id: "personal", label: "Real" }, { id: "prop", label: "Prop" }]} />
+            <Seg layoutId="seg-account" label="Account type" value={accountType} onChange={setAccountType} options={[{ id: "personal", label: "Real" }, { id: "prop", label: "Prop" }]} />
             <div className="relative pt-1">
               <span className="pointer-events-none absolute left-4 top-1/2 mt-0.5 -translate-y-1/2 text-[16px] text-faint">{sym}</span>
               <TextBox aria-label="Starting balance" type="number" min={0} step={100} inputMode="decimal" className="pl-9 text-[17px] font-medium tabular-nums" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} />
@@ -333,7 +380,7 @@ export default function CreateBacktestPage() {
                       </div>
                       <div className="space-y-2">
                         <Label>Type</Label>
-                        <Segmented fullWidth layoutId="seg-dd" label="Drawdown type" value={drawdownMode} onChange={setDrawdownMode} options={[{ id: "static", label: "Static" }, { id: "trailing", label: "Trailing" }]} className="h-[50px] items-center" />
+                        <Seg layoutId="seg-dd" label="Drawdown type" value={drawdownMode} onChange={setDrawdownMode} options={[{ id: "static", label: "Static" }, { id: "trailing", label: "Trailing" }]} />
                       </div>
                     </div>
                     <Disclosure label="More rules">
