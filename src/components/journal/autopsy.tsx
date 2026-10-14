@@ -148,7 +148,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     pickedCategory: categoryRef.current?.source === "you" ? categoryRef.current.key : undefined,
   });
   /** Reads ALL the trader's words + the trade's data. Never blocks: offline rules answer if AI is slow or off. Cached per exact input. */
-  const runTagging = (inp: TagInputs, timeoutMs = 12_000): Promise<Decision | null> => {
+  const runTagging = (inp: TagInputs, timeoutMs = 50_000): Promise<Decision | null> => {
     const e = entryRef.current;
     if (!e || inp.mistake === "" || inp.mistake === "none") return Promise.resolve(null);
     const hash = JSON.stringify(inp);
@@ -248,7 +248,8 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
       let cat: Category | null = null;
       let decision: Decision | null = null;
       if (mistake !== "none") {
-        decision = await runTagging(inputsNow(), 9000);
+        // Complete never hangs: if the AI is still thinking after 35 s the trade is saved and "Re-read my notes" can finish the job later.
+        decision = await Promise.race([runTagging(inputsNow()), new Promise<null>((res) => window.setTimeout(() => res(null), 35_000))]);
         const prim = decision?.tags.find((t) => t.primary) ?? decision?.tags[0];
         if (prim && isMistakeKey(prim.key)) cat = { key: prim.key, source: prim.source, confidence: prim.support };
         else if (mistake !== "other" && isMistakeKey(mistake)) cat = { key: mistake, source: "preset", confidence: 1 };

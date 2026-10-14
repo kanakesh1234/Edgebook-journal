@@ -74,7 +74,7 @@ export function coerceKey(v: unknown): MistakeKey | null {
  * Sorts a typed-in mistake. Tries the AI route first (it understands any wording), but never makes the trader
  * wait on it: after `timeoutMs` — or on any failure — the local classifier answers instead.
  */
-export async function classifyMistake(text: string, note?: string, timeoutMs = 9000): Promise<Classification> {
+export async function classifyMistake(text: string, note?: string, timeoutMs = 30_000): Promise<Classification> {
   const local = classifyLocal(text, note);
   const clean = text.trim();
   if (!clean || typeof fetch === "undefined") return local;
@@ -83,7 +83,7 @@ export async function classifyMistake(text: string, note?: string, timeoutMs = 9
     const timer = setTimeout(() => ctl.abort(), timeoutMs);
     const res = await fetch("/api/journal/classify-mistake", {
       method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.signal,
-      body: JSON.stringify({ text: clean.slice(0, 120), note: note?.trim().slice(0, 400) || undefined }),
+      body: JSON.stringify({ text: clean.slice(0, 600), note: note?.trim().slice(0, 4000) || undefined }),
     });
     clearTimeout(timer);
     if (!res.ok) return local;

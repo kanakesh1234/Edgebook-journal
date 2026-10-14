@@ -72,7 +72,7 @@ export function TagPanel({ view, busy, onPick, onDismiss, onOpenPicker }: {
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-semibold text-ink">Mistake tags</p>
           <p className="text-[13px] text-muted">
-            {busy ? "Reading everything you wrote…" : t?.degraded ? "Checked your notes and trade data (AI unavailable)" : "Checked your notes, your data and AI"}
+            {busy ? "Reading everything you wrote…" : t?.degraded ? `Checked your notes and trade data. AI did not answer${t.reason ? `: ${t.reason}` : "."}` : "Checked your notes, your data and AI"}
           </p>
         </div>
       </div>
@@ -145,7 +145,8 @@ export function EntryTags({ entry }: { entry: JournalEntry }) {
       const st = useApp.getState();
       const d = await retagEntry(entry, st.entries, st.plans);
       await save(mergeRecheck(f, d));
-      toast.success("Tags checked", d.tagging.degraded ? "AI was unavailable, so only your notes and data were read." : "Read everything you wrote again.");
+      if (d.tagging.degraded) toast.error("AI did not answer", d.tagging.reason ?? "Only your notes and data were read. Try again in a moment.");
+      else toast.success("Tags checked", "Read everything you wrote again.");
     } catch { toast.error("Couldn't re-check", "Try again in a moment."); } finally { setBusy(false); }
   };
 

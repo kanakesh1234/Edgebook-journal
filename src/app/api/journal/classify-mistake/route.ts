@@ -25,28 +25,33 @@ const SYSTEM = [
 ].join("\n");
 
 async function askModel(model: string, apiKey: string, text: string, note: string | undefined): Promise<{ key: MistakeKey; confidence: number } | null> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    signal: AbortSignal.timeout(8_000),
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model, temperature: 0, max_tokens: 60, response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM },
-        { role: "user", content: JSON.stringify({ mistake: text, details: note ?? "" }) },
-      ],
-    }),
-  });
-  if (!res.ok) return null;
-  const payload = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const raw = payload.choices?.[0]?.message?.content ?? "";
-  const json = raw.match(/\{[\s\S]*\}/)?.[0];
-  if (!json) return null;
-  const parsed = JSON.parse(json) as { category?: unknown; confidence?: unknown };
-  const key = coerceKey(parsed.category);
-  if (!key) return null;
-  const c = typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence) ? Math.max(0, Math.min(1, parsed.confidence)) : 0.7;
-  return { key, confidence: Math.round(c * 100) / 100 };
+  // First try with JSON mode; some free providers reject it, so retry once without. 800 tokens: reasoning models need room to think AND answer.
+  for (const plain of [false, true]) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: AbortSignal.timeout(25_000),
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0, max_tokens: 800,
+        ...(plain ? {} : { response_format: { type: "json_object" }, reasoning: { effort: "low" } }),
+        messages: [
+          { role: "system", content: SYSTEM },
+          { role: "user", content: JSON.stringify({ mistake: text, details: note ?? "" }) },
+        ],
+      }),
+    });
+    if (!res.ok) { if ((res.status === 400 || res.status === 422) && !plain) continue; return null; }
+    const payload = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+    const raw = payload.choices?.[0]?.message?.content ?? "";
+    const json = raw.match(/\{[\s\S]*\}/)?.[0];
+    if (!json) return null;
+    const parsed = JSON.parse(json) as { category?: unknown; confidence?: unknown };
+    const key = coerceKey(parsed.category);
+    if (!key) return null;
+    const c = typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence) ? Math.max(0, Math.min(1, parsed.confidence)) : 0.7;
+    return { key, confidence: Math.round(c * 100) / 100 };
+  }
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -55,8 +60,8 @@ export async function POST(request: Request) {
   if (rateLimited(`classify-mistake:${me ?? "local"}`, 40, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   const body = (await request.json().catch(() => ({}))) as { text?: unknown; note?: unknown };
-  const text = typeof body.text === "string" ? body.text.trim().slice(0, 120) : "";
-  const note = typeof body.note === "string" ? body.note.trim().slice(0, 400) || undefined : undefined;
+  const text = typeof body.text === "string" ? body.text.trim().slice(0, 600) : "";
+  const note = typeof body.note === "string" ? body.note.trim().slice(0, 4000) || undefined : undefined;
   if (!text) return NextResponse.json({ error: "Write the mistake first." }, { status: 400 });
 
   const local = classifyLocal(text, note);

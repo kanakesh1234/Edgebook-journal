@@ -118,7 +118,7 @@ export const TradeTile = memo(function TradeTile({ entry, showDate, p, anchor }:
       onClick={(e) => (p.selectMode ? p.onToggle(entry, e.shiftKey) : p.onOpen(entry))}
       onContextMenu={(e) => { e.preventDefault(); p.onContext(entry, e.clientX, e.clientY); }}
       aria-pressed={p.selectMode ? selected : undefined}
-      id={anchor} className="group block w-full scroll-mt-[calc(var(--tb)+56px)] text-left outline-none"
+      id={anchor} className="group flex w-full flex-col items-stretch justify-start self-start scroll-mt-[calc(var(--tb)+56px)] text-left outline-none"
     >
       <div className={cn(
         "relative aspect-[4/3] overflow-hidden rounded-[14px] bg-ink/[0.05] transition-[transform,box-shadow] duration-200 ease-out",
@@ -159,7 +159,7 @@ export const TradeTile = memo(function TradeTile({ entry, showDate, p, anchor }:
 
 /* ───────────── Timeline: list or grid, grouped by month (list also by day) ───────────── */
 export function Timeline({ entries, layout, grouped, p }: { entries: JournalEntry[]; layout: "list" | "grid"; grouped: boolean; p: RowProps }) {
-  const gridCls = "grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-[repeat(auto-fill,minmax(224px,1fr))]";
+  const gridCls = "grid grid-cols-2 items-start gap-x-4 gap-y-7 sm:grid-cols-[repeat(auto-fill,minmax(224px,1fr))]";
   const rows = (items: JournalEntry[], showDate: boolean) => (
     <div role="list" className="-mx-2.5">{items.map((e) => <TradeRow key={e.id} entry={e} showDate={showDate} p={p} />)}</div>
   );

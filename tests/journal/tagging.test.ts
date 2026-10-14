@@ -232,7 +232,7 @@ const ai = (model: string, b: TagBundle, key: string, quote: string, src = "s1")
   const b = mk({ detail: "Entered before the sweep happened" });
   assert.deepEqual(sanitizeBundle(JSON.parse(JSON.stringify(b)))?.sources.map((s) => s.id), ["s1"]);
   assert.equal(sanitizeBundle(null), null);
-  assert.equal(sanitizeBundle({ sources: [{ id: "s1", role: "mistake-detail", text: "x".repeat(20000) }] }), null, "oversized bundles are refused");
+  assert.equal(sanitizeBundle({ sources: [{ id: "s1", role: "mistake-detail", text: "x".repeat(70000) }] }), null, "oversized bundles are refused");
   const dirty = sanitizeBundle({ sources: [{ id: "s1", role: "hacker", text: "x" }, { id: "../etc", role: "lesson", text: "y" }, { id: "s2", role: "lesson", text: "ok" }], facts: [{ id: "f1", text: "z", objective: "yes" }], declared: { mistake: "early", mistakeKey: "nope" } });
   assert.deepEqual(dirty?.sources.map((s) => s.id), ["s2"], "unknown roles and bad ids are dropped");
   assert.equal(dirty?.facts[0]?.objective, false); assert.equal(dirty?.declared.mistakeKey, undefined);

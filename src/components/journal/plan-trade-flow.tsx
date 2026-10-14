@@ -13,6 +13,9 @@ import { cn, uid } from "@/lib/utils";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import { RiskMeter } from "./risk-meter";
+import { OutlookCard } from "./outlook-card";
+import type { PlanDraft } from "@/lib/prediction";
+import { ruleStats, statFor } from "@/lib/rule-stats";
 import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
 import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
 import {
@@ -116,7 +119,20 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const selectedPlaybook = playbook.find((p) => p.id === playbookId);
   const rules = useMemo(() => setupRules(selectedPlaybook), [selectedPlaybook]);
   const confirmedRules = rules.filter((_, i) => ruleStates[String(i)] === "ready").length;
-  const allRules = rules.length === 0 || confirmedRules === rules.length;
+  // Rules are OPTIONAL: skipping one never blocks the trader, it is recorded so the journal can show which rules get avoided.
+  const skippedRules = rules.length - confirmedRules;
+  const history = useMemo(() => ruleStats(plans, entries), [plans, entries]);
+  /** Everything the trader has planned so far, in the shape the outlook reads. */
+  const draftPlan: PlanDraft = useMemo(() => ({
+    date: todayKey(), setupId: playbookId || undefined, setupName: selectedPlaybook?.name,
+    emotion: emotion || undefined, emotionReason: emotionReason.trim() || undefined,
+    thesis, draw: draw.trim() || undefined, invalidation: invalidation.trim() || undefined, breakPlan: breakPlan.trim() || undefined,
+    news: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => e.name.trim()) : [],
+    maxLoss: Number.isFinite(Number(maxLoss)) && Number(maxLoss) > 0 ? Number(maxLoss) : undefined,
+    watch: watch.map((k) => MISTAKE_CATEGORIES.find((c) => c.key === k)?.label ?? k),
+    confirmedRules: rules.filter((_, i) => ruleStates[String(i)] === "ready").map((r) => r.text || ""),
+    skippedRules: rules.filter((_, i) => ruleStates[String(i)] !== "ready").map((r) => r.text || ""),
+  }), [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, invalidation, breakPlan, newsAnswer, newsEvents, maxLoss, watch, rules, ruleStates]);
 
   const order: StepId[] = useMemo(() => (playbook.length ? ["plan", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "trade", "chart", "autopsy", "done"]), [playbook.length]);
   const go = (to: StepId) => {
@@ -224,8 +240,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         return { ok: true, hint: null };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
-        if (!allRules) return { ok: false, hint: `${confirmedRules} of ${rules.length} rules confirmed` };
-        return { ok: true, hint: null };
+        return { ok: true, hint: skippedRules > 0 ? `${skippedRules} rule${skippedRules === 1 ? "" : "s"} unchecked — fine, it will be recorded` : null };
       case "trade":
         if (mode === "import") return importRows?.length ? { ok: true, hint: null } : { ok: false, hint: "Choose a file to import" };
         if (!pnlText) return { ok: false, hint: "Enter the net P&L" };
@@ -261,7 +276,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     watchMistakes: watch.length ? watch : undefined,
     maxLoss: maxLossOk ? Math.round(maxLossValue * 100) / 100 : undefined,
     newsEvents: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => ({ name: e.name.trim(), time: e.time || undefined })) : [],
-    rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] ?? "waiting", note: r.description })),
+    rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] === "ready" ? "ready" : "skipped", note: r.description })),
     status: "executed",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -356,7 +371,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     try {
       const blobs = new Map<string, Blob>();
       for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-      await useApp.getState().updateEntry(live.id, {
+      // Fast path: the autopsy opens immediately; uploads + the Drive sync finish in the background.
+      await useApp.getState().updateEntryFast(live.id, {
         date: live.date, pnl: live.pnl, rr: live.rr, instrument: live.instrument, direction: live.direction,
         setup: live.setup, setupId: live.setupId, notes: live.notes, images: images.map((i) => i.meta),
         compareImage: live.compareImage, challengeId: live.challengeId, tradeNumber: live.tradeNumber ?? null,
@@ -602,26 +618,30 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   <Collapse key={selectedPlaybook.id}>
                     <div className="space-y-3 pb-1">
                       <div className="flex items-center justify-between">
-                        <p className="text-[13px] font-medium text-muted">Confirm each rule</p>
+                        <p className="text-[13px] font-medium text-muted">Tick the rules you've confirmed <span className="text-faint">· optional</span></p>
                         <p className="text-[12px] tabular-nums text-faint">{confirmedRules}/{rules.length}</p>
                       </div>
                       <div className="h-[3px] overflow-hidden rounded-full bg-line-soft"><div className="h-full rounded-full bg-profit transition-[width] duration-300" style={{ width: `${(confirmedRules / rules.length) * 100}%` }} /></div>
                       <div className="space-y-2">
                         {rules.map((r, i) => {
                           const checked = ruleStates[String(i)] === "ready";
-                          return <CheckRow key={i} checked={checked} title={r.text || `Rule ${i + 1}`} note={r.description} onClick={() => setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" })} />;
+                          const h = statFor(history, playbookId, r.text || `Rule ${i + 1}`);
+                          const hint = h && h.skipped > 0 ? `Skipped ${h.skipped} of ${h.planned} times${h.skippedAvgPnl != null ? ` · avg ${h.skippedAvgPnl < 0 ? "−" : "+"}$${Math.abs(Math.round(h.skippedAvgPnl))} when skipped` : ""}` : undefined;
+                          return <CheckRow key={i} checked={checked} title={r.text || `Rule ${i + 1}`} note={[r.description, hint].filter(Boolean).join(" · ") || undefined} onClick={() => setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" })} />;
                         })}
                       </div>
                     </div>
                   </Collapse>
                 )}
               </AnimatePresence>
+              <OutlookCard draft={draftPlan} entries={entries} plans={plans} />
             </div>
           )}
 
           {step === "trade" && (
             <div className="space-y-8">
               <StepTitle title="Log the trade" />
+              {playbook.length === 0 && !createdId && <OutlookCard draft={draftPlan} entries={entries} plans={plans} />}
               {!createdId && <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />}
 
               {mode === "manual" && (

@@ -237,7 +237,8 @@ export const PLAN_EMOTIONS = [
 ] as const;
 
 /** Pre-trade checklist rule state — planning defines WHAT MUST HAPPEN, not what did. */
-export type PlanRuleState = "waiting" | "expected" | "ready" | "invalidated";
+/** "skipped" = the trader chose to go ahead without confirming this rule (rules are optional; skipping is tracked, not blocked). */
+export type PlanRuleState = "waiting" | "expected" | "ready" | "invalidated" | "skipped";
 
 export interface PlanRule {
   label: string;
@@ -401,6 +402,8 @@ export interface MistakeTagging {
   models: string[];
   /** True when no AI answered and the offline rules decided alone. */
   degraded: boolean;
+  /** Why no AI answered (shown to the trader), when `degraded`. */
+  reason?: string;
   at: number;
   /** The trader has looked at the suggestions (confirmed, changed or dismissed them). */
   reviewed?: boolean;

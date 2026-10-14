@@ -14,26 +14,31 @@ export { GUIDE, type ModelRun } from "./prompt";
  * Never blocks the trader: the offline rules + measured facts always produce an answer; AI is asked in addition, and if it
  * is slow, down, or not configured, the decision is simply made without it (and marked `degraded`).
  */
-export async function tagTrade(entry: JournalEntry, entries: JournalEntry[], plans: TradePlan[], inputs: TagInputs, timeoutMs = 12_000): Promise<Decision & { bundle: TagBundle }> {
+export async function tagTrade(entry: JournalEntry, entries: JournalEntry[], plans: TradePlan[], inputs: TagInputs, timeoutMs = 50_000): Promise<Decision & { bundle: TagBundle }> {
   const bundle = buildBundle(entry, entries, plans, inputs);
-  const runs = hasWords(bundle) || bundle.facts.length > 0 ? await askModels(bundle, timeoutMs) : [];
-  return { ...decide(bundle, runs, scanBundle(bundle)), bundle };
+  const { runs, reason } = hasWords(bundle) || bundle.facts.length > 0 ? await askModels(bundle, timeoutMs) : { runs: [] as ModelRun[], reason: "There was nothing written to read yet." };
+  const d = decide(bundle, runs, scanBundle(bundle));
+  // Tell the trader WHY the AI did not answer, instead of a bare "unavailable".
+  return { ...d, tagging: d.tagging.degraded && reason ? { ...d.tagging, reason } : d.tagging, bundle };
 }
 
 /** Re-checks a saved trade from its stored review (for trades finished before multi-tagging existed). */
 export const retagEntry = (entry: JournalEntry, entries: JournalEntry[], plans: TradePlan[], timeoutMs?: number) => tagTrade(entry, entries, plans, inputsFromEntry(entry), timeoutMs);
 
-async function askModels(bundle: TagBundle, timeoutMs: number): Promise<ModelRun[]> {
-  if (typeof fetch === "undefined") return [];
+async function askModels(bundle: TagBundle, timeoutMs: number): Promise<{ runs: ModelRun[]; reason?: string }> {
+  if (typeof fetch === "undefined") return { runs: [], reason: "No network in this environment." };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const res = await fetch("/api/journal/tag-trade", { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.signal, body: JSON.stringify({ bundle }) });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { runs?: { model?: unknown; tags?: unknown; unclear?: unknown }[] };
+    const data = (await res.json().catch(() => ({}))) as { runs?: { model?: unknown; tags?: unknown; unclear?: unknown }[]; reason?: unknown; error?: unknown };
+    if (!res.ok) return { runs: [], reason: typeof data.reason === "string" ? data.reason : typeof data.error === "string" ? data.error : `The tagging service answered with an error (${res.status}).` };
     // Verify again on this side: the verdict must never depend on the network having been honest.
-    return (data.runs ?? []).flatMap((r) => (typeof r.model === "string" ? [groundRun(r.model, { tags: r.tags, unclear: r.unclear }, bundle)] : []));
-  } catch { return []; } finally { clearTimeout(timer); }
+    const runs = (data.runs ?? []).flatMap((r) => (typeof r.model === "string" ? [groundRun(r.model, { tags: r.tags, unclear: r.unclear }, bundle)] : []));
+    return { runs, reason: runs.length === 0 ? (typeof data.reason === "string" ? data.reason : "No AI model answered.") : undefined };
+  } catch (err) {
+    return { runs: [], reason: err instanceof Error && err.name === "AbortError" ? "The AI took too long to answer." : "Could not reach the tagging service." };
+  } finally { clearTimeout(timer); }
 }
 
 /** The MistakeKey a trade's decision settled on, if anything was filed. */

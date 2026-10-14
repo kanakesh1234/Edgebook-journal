@@ -7,7 +7,7 @@ import { dataStore, DriveSyncError, loadJournalMirror, type JournalPayload } fro
 import { snapshotToWorkingMemory, markSnapshotFailed } from "./supabase-integration";
 import { clearWorkingMemory } from "./services/supabase-memory";
 import { auth, AuthError, type User } from "./services/auth";
-import { dropImageUrl } from "./images";
+import { dropImageUrl, primeImageUrl } from "./images";
 import { uid } from "./utils";
 import { purgeTradeTraces } from "./cleanup";
 import { generateDemoEntries } from "./seed";
@@ -64,6 +64,11 @@ interface AppState {
 
   createEntry(draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   updateEntry(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
+  /**
+   * Same as updateEntry, but returns as soon as the trade is updated on screen. Screenshots upload and the journal syncs in
+   * the background (with a toast if an upload fails, and the failed screenshot is removed so nothing dangles).
+   */
+  updateEntryFast(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   deleteEntry(id: string): Promise<void>;
   /** Delete many trades in ONE save (screenshots, plan links and practice history included). Returns how many were removed. */
   deleteEntries(ids: string[]): Promise<number>;
@@ -380,6 +385,36 @@ export const useApp = create<AppState>((set, get) => ({
     const next = entries.map((e) => (e.id === id ? updated : e));
     set({ entries: next });
     await persist(user.id, next, settings, dayLogs, plans);
+    return updated;
+  },
+
+  async updateEntryFast(id, draft, blobs) {
+    const { user } = get();
+    if (!user) throw new Error("Not signed in");
+    const before = get().entries.find((e) => e.id === id);
+    if (!before) throw new Error("Entry not found");
+
+    // 1. Show it NOW: previews come from memory, the entry updates in the store, the caller can move on.
+    if (blobs) for (const [imgId, blob] of blobs) primeImageUrl(imgId, blob);
+    const apply = (e: JournalEntry): JournalEntry => ({ ...e, ...draft, updatedAt: Date.now() });
+    const updated = apply(before);
+    set({ entries: get().entries.map((e) => (e.id === id ? apply(e) : e)) });
+
+    // 2. Everything slow happens behind the scenes: uploads in parallel, then ONE journal write.
+    void (async () => {
+      const failed = new Set<string>();
+      if (blobs) await Promise.all([...blobs].map(async ([imgId, blob]) => { try { await dataStore.putImage(imgId, blob); } catch { failed.add(imgId); } }));
+      const detached = [...before.images, ...(before.compareImage ? [before.compareImage] : [])]
+        .filter((img) => !draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id);
+      await Promise.all(detached.map(async (img) => { try { await dataStore.deleteImage(img.id); } catch { /* orphaned blob is harmless */ } dropImageUrl(img.id); }));
+      if (failed.size > 0) {
+        // Never keep a reference to a screenshot that did not reach Drive.
+        set({ entries: get().entries.map((e) => (e.id === id ? { ...e, images: e.images.filter((i) => !failed.has(i.id)) } : e)) });
+        toast.error("A chart didn't upload", "It was removed from the trade — add it again from the trade's Overview.");
+      }
+      const { entries, settings, dayLogs, plans } = get();
+      try { await persist(user.id, entries, settings, dayLogs, plans); } catch { /* persist() already shows its own "Unsaved, Retry" toast */ }
+    })();
     return updated;
   },
 

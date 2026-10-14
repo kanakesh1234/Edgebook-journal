@@ -53,7 +53,11 @@ export type TagInputs = {
   pickedCategory?: MistakeKey;
 };
 
-export const LIMITS = { source: 500, fact: 180, sources: 16, facts: 14, bundle: 12000 } as const;
+/**
+ * Caps exist only to stop a runaway payload — NOT to shorten what the trader wrote. A trader's real explanation is often a
+ * long paragraph, and the first version cut every field at 500 characters, so the part that named the mistake could be lost.
+ */
+export const LIMITS = { source: 4000, fact: 240, sources: 30, facts: 24, bundle: 60000 } as const;
 
 const clean = (s?: string | null) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "");
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
@@ -106,8 +110,31 @@ export function buildBundle(e: JournalEntry, entries: JournalEntry[], plans: Tra
   add("improve", "What to improve", r?.concepts?.improve);
   add("lesson", "What was learned", r?.concepts?.learned);
   add("watch-next", "What to watch next", r?.followUp?.watchNext);
+  add("lesson", "Reflection lesson", refl?.lesson);
   add("went-well", "What went well", refl?.wentWell);
   add("note", "Trade notes", e.notes);
+
+  // Everything else the trader typed on this trade. Nothing here is dropped: weak roles only carry less weight in the rules,
+  // while the AI is told each field's label and reads every word.
+  const ex = r?.execution;
+  add("cause", "Why the stop was moved", ex?.movedStopReason);
+  add("cause", "Why the trade was exited early", ex?.exitedEarlyReason);
+  add("note", "Why the trade was entered", ex?.whyEntered);
+  add("deviation", "Planned vs actual notes", r?.plannedVsActual?.notes);
+  add("note", "Strongest evidence for the trade", r?.followUp?.strongestEvidence);
+  add("note", "Concept applied", r?.followUp?.conceptApplied);
+  add("note", "Review insight", r?.compareInsight);
+  add("note", "Liquidity swept", r?.setup?.liquiditySwept);
+  add("note", "Sweep time", r?.setup?.sweepTimestamp);
+  add("note", "SMT evidence", r?.setup?.smtEvidence);
+  add("note", "Target description", r?.setup?.targetDescription);
+  add("note", "Manipulation identified", r?.setup?.manipulationIdentified);
+  add("note", "Plan: thesis", plan?.thesis);
+  add("note", "Plan: what could break it", plan?.whatCouldBreakPlan);
+  add("note", "Plan: feeling before", plan?.emotionalNote);
+  add("note", "Plan: must happen before entry", plan?.mustHappenBeforeEntry);
+  add("note", "Plan: invalidation", plan?.invalidation);
+  add("psych-note", "Feeling before the trade", r?.psychology?.emotionBefore);
   sources.splice(LIMITS.sources);
 
   /* ---- facts: measured, not claimed ---- */
@@ -133,6 +160,20 @@ export function buildBundle(e: JournalEntry, entries: JournalEntry[], plans: Tra
     }
   }
   if (e.holdDuration) fact("hold", `Held ${e.holdDuration}.`, true);
+
+  // The trader's own yes/no answers in the review. These are CLAIMS (objective = false): they inform the AI and can be quoted,
+  // but they never vote on their own.
+  const yn = (code: string, v: boolean | null | undefined, yes: string, no: string) => { if (v === true) fact(code, yes, false); else if (v === false && no) fact(code, no, false); };
+  const ex2 = r?.execution;
+  yn("ans-chased", ex2?.chased, "Trader answered: I chased this entry.", "");
+  yn("ans-moved-stop", ex2?.movedStop, "Trader answered: I moved my stop.", "");
+  yn("ans-exited-early", ex2?.exitedEarly, "Trader answered: I exited early.", "");
+  yn("ans-planned", ex2?.planned, "", "Trader answered: this trade was not planned.");
+  yn("ans-time", ex2?.correctTime, "", "Trader answered: I traded outside the right time.");
+  yn("ans-stop", ex2?.followedStop, "", "Trader answered: I did not follow my stop.");
+  if (r?.psychology?.convictionOrUrgency === "urgency") fact("ans-urgency", "Trader answered: the entry felt like urgency, not conviction.", false);
+  if (refl?.followedSetup === false) fact("ans-setup", "Trader answered: I did not follow my setup.", false);
+  if (refl?.followedRisk === false) fact("ans-risk", "Trader answered: I did not follow my risk rules.", false);
 
   /* ---- context for the model (never evidence by itself) ---- */
   const day = dayTrades(e.date, entries);

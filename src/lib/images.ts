@@ -153,6 +153,11 @@ export function resolveImageUrl(
   return p;
 }
 
+/** Shows a just-picked image instantly from memory, so no screen waits for the Drive upload to read it back. */
+export function primeImageUrl(id: string, blob: Blob) {
+  if (!urlCache.has(id)) urlCache.set(id, URL.createObjectURL(blob));
+}
+
 export function dropImageUrl(id: string) {
   const url = urlCache.get(id);
   if (url) {
