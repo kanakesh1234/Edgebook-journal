@@ -7,7 +7,7 @@
  * action bar, round icon buttons and segmented switches. Everything you read or
  * type into (cards, inputs, checklists) is a solid, quiet Edgebook surface.
  */
-import { Children, useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/button";
@@ -81,7 +81,7 @@ function useIsMac() {
 }
 
 export type RailStep = { id: string; label: string };
-export type Rail = { steps: RailStep[]; /** Id of the active step; an id that is not in `steps` (e.g. "done") marks them all complete. */ current: string; /** Quiet context pinned to the bottom of the rail. */ aside?: React.ReactNode };
+export type Rail = { /** Small heading above the steps. Defaults to "Plan & record". */ title?: string; steps: RailStep[]; /** Id of the active step; an id that is not in `steps` (e.g. "done") marks them all complete. */ current: string; /** Quiet context pinned to the bottom of the rail. */ aside?: React.ReactNode };
 
 /** Desktop-only progress rail: where you are in the ritual, at a glance. Purely informational. */
 function StepRail({ rail }: { rail: Rail }) {
@@ -90,7 +90,7 @@ function StepRail({ rail }: { rail: Rail }) {
   return (
     <aside aria-label="Progress" className="hidden w-[15.5rem] shrink-0 border-r border-line/60 bg-ink/[0.025] lg:block">
       <div className="sticky top-0 flex min-h-[36rem] flex-col px-7 py-9">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gold">Plan &amp; record</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gold">{rail.title ?? "Plan & record"}</p>
         <ol className="mt-10">
           {rail.steps.map((s, i) => {
             const state = finished || i < idx ? "done" : i === idx ? "current" : "todo";
@@ -421,8 +421,16 @@ const box =
 export function TextBox({ className, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "ref">) {
   return <input className={cn(box, className)} {...props} />;
 }
-export function TextBlock({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cn(box, "min-h-24 resize-none", className)} {...props} />;
+/** Grows with what is typed, so a long answer is never cut off mid-line (it scrolls only past ~20 lines). */
+export function TextBlock({ className, value, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, 520)}px`;
+  }, [value]);
+  return <textarea ref={ref} value={value} className={cn(box, "min-h-24 resize-none overflow-y-auto", className)} {...props} />;
 }
 
 export function Chip({ selected, onClick, children, tone = "gold" }: { selected: boolean; onClick: () => void; children: React.ReactNode; tone?: "gold" | "profit" | "loss" }) {

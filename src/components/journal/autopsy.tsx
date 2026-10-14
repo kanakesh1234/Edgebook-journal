@@ -254,13 +254,22 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
         if (prim && isMistakeKey(prim.key)) cat = { key: prim.key, source: prim.source, confidence: prim.support };
         else if (mistake !== "other" && isMistakeKey(mistake)) cat = { key: mistake, source: "preset", confidence: 1 };
       }
+      // Re-reviewing a trade that already has tags: if the AI could not file anything this time, keep what was filed before
+      // instead of wiping it. (When the AI DOES answer, its tags replace the old ones: the new review is read together with
+      // everything written earlier, so the tags are updated, not stacked.)
+      const prior = current.review;
+      const keepOld = mistake !== "none" && !decision?.tags.length && !!prior?.followUp?.tags?.length;
+      if (keepOld && !cat && prior?.followUp?.mistakeCategory && isMistakeKey(prior.followUp.mistakeCategory)) cat = { key: prior.followUp.mistakeCategory, source: (prior.followUp.mistakeCategorySource ?? "ai") as Category["source"], confidence: prior.followUp.mistakeCategoryConfidence ?? 0.6 };
       const feel = feelingOf(emotion);
       const preTrade = current.preTradeChecklist ?? [];
       const preAllConfirmed = preTrade.length === 0 || preTrade.every((i) => i.confirmed);
       const review: TradeReviewData = {
+        // Everything already written on this trade (why it was entered, setup notes, planned-vs-actual…) is kept; this review adds to it.
+        ...prior,
         checklist: current.checklist,
-        execution: { followedStop: followedPlan },
+        execution: { ...prior?.execution, followedStop: followedPlan },
         psychology: {
+          ...prior?.psychology,
           emotionAfter: emotion || undefined,
           convictionOrUrgency: feel?.drive ?? "",
           fomo: emotion === "fomo",
@@ -268,12 +277,13 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
           fearExit: emotion === "fear",
         },
         outcome: {
+          ...prior?.outcome,
           followedPlan,
           goodTradeDespiteLoss: current.pnl < 0 ? goodProcess : null,
           badTradeDespiteWin: current.pnl > 0 ? goodProcess === false : null,
           processVerdict: goodProcess === true ? "a-plus" : goodProcess === false ? "process-failure" : "",
         },
-        followUp: { biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, mistakeCategory: mistake === "none" ? undefined : cat?.key, mistakeCategorySource: mistake === "none" ? undefined : cat?.source, mistakeCategoryConfidence: mistake === "none" || !cat ? undefined : cat.confidence, tags: mistake === "none" || !decision?.tags.length ? undefined : decision.tags, tagging: mistake === "none" || !decision ? undefined : { ...decision.tagging, reviewed: tagsReviewed || (decision.tagging.suggestions.length === 0 && !decision.tagging.conflict) }, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
+        followUp: { ...prior?.followUp, biggestMistake: lesson.trim(), mistake, mistakeNote: mistake === "none" ? undefined : mistakeNote.trim() || undefined, mistakeOther: mistake === "other" ? mistakeOther.trim() || undefined : undefined, mistakeCategory: mistake === "none" ? undefined : cat?.key, mistakeCategorySource: mistake === "none" ? undefined : cat?.source, mistakeCategoryConfidence: mistake === "none" || !cat ? undefined : cat.confidence, tags: mistake === "none" ? undefined : decision?.tags.length ? decision.tags : keepOld ? prior?.followUp?.tags : undefined, tagging: mistake === "none" ? undefined : decision ? { ...decision.tagging, reviewed: tagsReviewed || (decision.tagging.suggestions.length === 0 && !decision.tagging.conflict) } : keepOld ? prior?.followUp?.tagging : undefined, blunderLevel: mistake === "none" ? 0 : (blunder ?? undefined) },
         reviewedAt: Date.now(),
       };
       // Final audit with the trader's answers included, so a generous "No mistake" is checked against the facts.
@@ -283,6 +293,8 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
       await useApp.getState().saveTradeReview(current.id, {
         review,
         reflection: {
+          // Keep what the trader wrote in earlier reviews (went well / went poorly / cause): the tagger reads those too.
+          ...current.reflection,
           lesson: lesson.trim() || undefined,
           followedSetup: preAllConfirmed ? true : followedPlan,
           followedRisk: followedPlan,

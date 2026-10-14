@@ -6,12 +6,12 @@ import { AnimatePresence, motion } from "motion/react";
 import { checklistItems, checklistScore, reviewStatusOf, type JournalEntry } from "@/lib/types";
 import { formatDateFull, formatDateMedium, formatSignedMoney, relativeDayLabel } from "@/lib/format";
 import { feelingFromReview, feelingOf as feelingByKey } from "@/lib/feelings";
-import { mistakeOf as bucketOf } from "@/lib/mistakes";
+import { mistakeOf as bucketOf, mistakeTagsOf } from "@/lib/mistakes";
 import { dayRisk } from "@/lib/risk";
 import { RiskMeter } from "./risk-meter";
 import { useImageUrls } from "@/lib/hooks";
 import { Lightbox } from "@/components/ui/lightbox";
-import { ReflectionFlow } from "./reflection-flow";
+import { TradeReviewFlow } from "./trade-review-flow";
 import { Sym, type SymName } from "./symbols";
 import { IconButton, SPRING } from "./journal-ui";
 import { buildReviewGroups, type ReviewGroup } from "./review-model";
@@ -139,7 +139,7 @@ export function EntryDetailModal({
     <>
       {mounted && createPortal(sheet, document.body)}
       <Lightbox src={zoomed} onClose={() => setZoomed(null)} alt="Trade screenshot" />
-      <ReflectionFlow open={reflecting && !!entry} entry={entry} onClose={() => setReflecting(false)} />
+      <TradeReviewFlow open={reflecting && !!entry} entry={entry} onClose={() => setReflecting(false)} />
       <LessonPicker open={lessonSheet?.kind === "pick" && !!entry} entry={entry} onClose={() => setLessonSheet(null)} />
       <LessonPeek
         id={lessonSheet?.kind === "peek" ? lessonSheet.id : null} onClose={() => setLessonSheet(null)}
@@ -583,12 +583,19 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
   const autopsy = entry.review?.outcome?.followedPlan != null;
   const flags = ([["FOMO", entry.review?.psychology?.fomo], ["Revenge", entry.review?.psychology?.revenge], ["Fear exit", entry.review?.psychology?.fearExit], ["Make-it-back", entry.review?.psychology?.makeItBack]] as [string, boolean | null | undefined][]).filter(([, v]) => v).map(([k]) => k);
 
+  /** What the trader wrote about their mistake, in their own words (shown in full). */
+  const mistakeWords = (() => {
+    const f = entry.review?.followUp;
+    if (!f || !f.mistake || f.mistake === "none") return "";
+    return [f.mistake === "other" ? f.mistakeOther?.trim() : "", f.mistakeNote?.trim()].filter(Boolean).join(" — ");
+  })();
   const hasReview = answers.length > 0 || prose.length > 0 || !!lesson || extra.length > 0;
   const chips: { label: string; good: boolean }[] = autopsy
     ? [
         { label: entry.review?.outcome?.followedPlan ? "Followed plan" : "Broke plan", good: !!entry.review?.outcome?.followedPlan },
         ...(feelingOf(entry) ? [{ label: feelingOf(entry)!.label, good: feelingOf(entry)!.tone !== "bad" }] : []),
-        ...(mistakeOf(entry) ? [{ label: mistakeOf(entry)!.label, good: mistakeOf(entry)!.none }] : []),
+        // Short, filed labels as chips. The trader's own sentence is shown whole, below, never squeezed into a pill.
+        ...(mistakeOf(entry)?.none ? [{ label: "No mistake", good: true }] : mistakeTagsOf(entry).length ? mistakeTagsOf(entry).map((t) => ({ label: t.label, good: false })) : mistakeOf(entry) ? [{ label: mistakeOf(entry)!.label.length > 28 ? "Mistake" : mistakeOf(entry)!.label, good: false }] : []),
       ]
     : [...process.map((r) => ({ label: r.label, good: r.ok })), ...flags.map((f) => ({ label: f, good: false }))];
   const tabs: { id: Tab; label: string }[] = [
@@ -665,11 +672,17 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
                     )}
                     <ul className={cn("flex flex-wrap gap-1.5", verdict && "mt-3.5")}>
                       {chips.map((c) => (
-                        <li key={c.label} className={cn("flex h-7 items-center gap-1.5 rounded-full pl-2 pr-3 text-[13px]", c.good ? "bg-surface/80 text-ink shadow-[0_0_0_0.5px_rgb(0_0_0/0.08)]" : "bg-loss/[0.1] font-medium text-loss")}>
-                          <Sym name={c.good ? "check" : "xmark"} className={cn("h-3.5 w-3.5", c.good ? "text-profit" : "text-loss")} strokeWidth={2.4} />{c.label}
+                        <li key={c.label} className={cn("flex min-h-7 max-w-full items-center gap-1.5 rounded-full py-1 pl-2 pr-3 text-[13px] leading-snug", c.good ? "bg-surface/80 text-ink shadow-[0_0_0_0.5px_rgb(0_0_0/0.08)]" : "bg-loss/[0.1] font-medium text-loss")}>
+                          <Sym name={c.good ? "check" : "xmark"} className={cn("h-3.5 w-3.5 shrink-0", c.good ? "text-profit" : "text-loss")} strokeWidth={2.4} />{c.label}
                         </li>
                       ))}
                     </ul>
+                    {mistakeWords && (
+                      <blockquote className="mt-3 rounded-[12px] border-l-[3px] border-loss/40 bg-surface/70 px-3.5 py-2.5 text-[14px] leading-relaxed text-ink [overflow-wrap:anywhere]">
+                        <span className="mb-0.5 block text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">In your words</span>
+                        <span className="whitespace-pre-line">{mistakeWords}</span>
+                      </blockquote>
+                    )}
                   </section>
                 )}
 
