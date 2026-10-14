@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { currencySymbol } from "@/lib/format";
 import {
@@ -51,6 +51,17 @@ function lastTradingDay(): string {
   const d = toUtc(nyDateKey(new Date()));
   do d.setUTCDate(d.getUTCDate() - 1);
   while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The first day of a range that ends on `max` and covers `n` trading days (weekends skipped). */
+function tradingDaysBack(max: string, n: number): string {
+  const d = toUtc(max);
+  let left = n - 1;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() - 1);
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) left--;
+  }
   return d.toISOString().slice(0, 10);
 }
 
@@ -110,9 +121,14 @@ function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 }
 
 /** Apple-style range calendar: tap a first day, tap a last day. One tap on the same day = a single day. */
-function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: string; anchored: boolean; max: string; onPick: (day: string) => void }) {
+function RangeCalendar({ from, to, anchored, max, onPick, jump }: { from: string; to: string; anchored: boolean; max: string; onPick: (day: string) => void; /** A new object moves the calendar to that day's month (used by the quick ranges). */ jump?: { day: string; n: number } }) {
   const seed = toUtc(from || max);
   const [view, setView] = useState({ y: seed.getUTCFullYear(), m: seed.getUTCMonth() });
+  useEffect(() => {
+    if (!jump) return;
+    const d = toUtc(jump.day);
+    setView({ y: d.getUTCFullYear(), m: d.getUTCMonth() });
+  }, [jump]);
   const maxD = toUtc(max);
   const atMax = view.y === maxD.getUTCFullYear() && view.m === maxD.getUTCMonth();
   const atMin = view.y <= 2010 && view.m === 0;
@@ -124,7 +140,7 @@ function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: 
   const nav = "grid h-9 w-9 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink disabled:pointer-events-none disabled:opacity-30";
 
   return (
-    <div className="rounded-[22px] border border-line bg-raised px-3 pb-3 pt-2.5 sm:px-4">
+    <div className="rounded-[22px] border border-line bg-raised px-2.5 pb-3 pt-2.5 sm:px-4">
       <div className="mb-1 flex items-center justify-between">
         <AnimatePresence mode="wait" initial={false}>
           <motion.p key={`${view.y}-${view.m}`} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.14 }} className="pl-2 text-[16px] font-semibold tracking-[-0.01em] text-ink">
@@ -156,7 +172,7 @@ function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: 
             <div
               key={key}
               className={cn(
-                "relative flex justify-center",
+                "relative flex justify-center py-px",
                 inRange && "bg-gold/[0.14]",
                 inRange && (isStart || dow === 0) && "rounded-l-full",
                 inRange && (isEnd || dow === 6) && "rounded-r-full",
@@ -169,7 +185,7 @@ function RangeCalendar({ from, to, anchored, max, onPick }: { from: string; to: 
                 aria-pressed={isStart || isEnd}
                 onClick={() => { haptic.selection(); onPick(key); }}
                 className={cn(
-                  "grid h-10 w-10 place-items-center rounded-full text-[15px] tabular-nums transition-all duration-150 active:scale-[0.92]",
+                  "grid aspect-square w-full max-w-[2.75rem] place-items-center rounded-full text-[15px] tabular-nums transition-all duration-150 active:scale-[0.92]",
                   isStart || isEnd
                     ? "bg-gradient-to-b from-gold-strong to-gold-deep font-semibold text-on-gold shadow-[0_6px_14px_-6px_var(--gold-strong),inset_0_1px_0_rgb(255_255_255/0.28)]"
                     : off ? "cursor-default text-faint/40" : "text-ink hover:bg-ink/[0.06]",
@@ -193,6 +209,7 @@ export default function CreateBacktestPage() {
   const saveSession = useBacktest((s) => s.saveSession);
   const sym = currencySymbol(settings.currency);
   const maxDay = useMemo(lastTradingDay, []);
+  const reduce = useReducedMotion();
 
   const [instruments, setInstruments] = useState<string[]>(["NQ"]);
   const [sessionId, setSessionId] = useState<SessionId>("new-york");
@@ -201,6 +218,7 @@ export default function CreateBacktestPage() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [anchored, setAnchored] = useState(false);
+  const [jump, setJump] = useState<{ day: string; n: number } | undefined>(undefined);
 
   const [accountType, setAccountType] = useState<AccountType>("personal");
   const [startingBalance, setStartingBalance] = useState(String(settings.startingEquity || 50000));
@@ -234,6 +252,20 @@ export default function CreateBacktestPage() {
       setToDate(b);
       setAnchored(false);
     }
+  }
+
+  // Quick ranges: one tap instead of two taps and some month-flipping. Always end on the latest trading day.
+  const presets = useMemo(() => [
+    { id: "day", label: "Last day", from: maxDay },
+    { id: "week", label: "Last 5 days", from: tradingDaysBack(maxDay, 5) },
+    { id: "two", label: "Last 2 weeks", from: tradingDaysBack(maxDay, 10) },
+  ], [maxDay]);
+  function applyPreset(from: string) {
+    setErrors((e) => e.filter((x) => x.field !== "period"));
+    setFromDate(from);
+    setToDate(maxDay);
+    setAnchored(false);
+    setJump((j) => ({ day: maxDay, n: (j?.n ?? 0) + 1 })); // show the month of the latest day
   }
 
   // The window always spans the market session's own hours; the chart's playback controls do the rest.
@@ -298,11 +330,14 @@ export default function CreateBacktestPage() {
   });
 
   const firstError = errors[0]?.message ?? null;
+  const rangeText = hasRange ? (fromDate === toDate ? DAY_FMT.format(toUtc(fromDate)) : `${DAY_FMT.format(toUtc(fromDate))} – ${DAY_FMT.format(toUtc(toDate))}`) : "";
+  // One calm line in the footer: the error, else what to do next, else exactly what will start.
+  const footerHint = firstError ?? (anchored ? "Tap the last day, or the same day again for a single day" : !hasRange ? "Pick a start and end day to begin" : `${rangeText} · ${instruments.join(", ") || "no instrument"} · ${session.label}`);
   const shortName = (n: string) => n.replace("Micro E-mini ", "Micro ").replace("E-mini ", "");
-  const rise = (i: number) => ({ initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.5, ease: FLOW_EASE, delay: 0.05 + i * 0.07 } });
+  const rise = (i: number) => (reduce ? {} : { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.5, ease: FLOW_EASE, delay: 0.05 + i * 0.07 } });
 
   return (
-    <div className="mx-auto w-full max-w-[40rem] pb-6">
+    <div className="mx-auto w-full max-w-[40rem] pb-6 lg:max-w-[62rem]">
       <div className="mb-4 flex items-center">
         <GlassIconButton label="Back to Trading Lab" onClick={() => router.push("/lab#backtesting")}>
           <IconBack />
@@ -315,10 +350,14 @@ export default function CreateBacktestPage() {
         transition={{ duration: 0.4, ease: FLOW_EASE }}
         className="rounded-[28px] border border-line bg-surface shadow-lift"
       >
-        <div className="mx-auto max-w-[32rem] space-y-9 px-6 pb-10 pt-10 sm:px-8">
+        <div className="mx-auto max-w-[32rem] px-4 pb-8 pt-7 sm:px-8 sm:pb-10 sm:pt-10 lg:max-w-none lg:px-12 lg:pb-12 lg:pt-12">
           <motion.div {...rise(0)}>
-            <StepTitle title="New replay" />
+            <StepTitle title="New replay" subtitle="Pick the days, then trade them bar by bar." />
           </motion.div>
+
+          {/* Phone & tablet: one calm column. Laptop & desktop: the calendar on the left, the settings beside it, nothing to scroll past. */}
+          <div className="mt-8 space-y-9 lg:mt-10 lg:grid lg:grid-cols-[minmax(0,27rem)_minmax(0,1fr)] lg:items-start lg:gap-x-14 lg:space-y-0">
+          <div className="space-y-9">
 
           {/* When — the one thing that matters */}
           <motion.div {...rise(1)} className="space-y-3">
@@ -335,10 +374,29 @@ export default function CreateBacktestPage() {
                 </div>
               ))}
             </div>
-            <RangeCalendar from={fromDate} to={toDate} anchored={anchored} max={maxDay} onPick={pickDay} />
+            <div role="group" aria-label="Quick ranges" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
+              {presets.map((pr) => {
+                const on = fromDate === pr.from && toDate === maxDay && !anchored;
+                return (
+                  <button
+                    key={pr.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => { haptic.selection(); applyPreset(pr.from); }}
+                    className={cn("inline-flex h-8 shrink-0 items-center rounded-full border px-3.5 text-[13px] font-medium transition-all duration-200 active:scale-[0.96]", on ? "border-gold/55 bg-gold/10 text-gold" : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
+                  >
+                    {pr.label}
+                  </button>
+                );
+              })}
+            </div>
+            <RangeCalendar from={fromDate} to={toDate} anchored={anchored} max={maxDay} onPick={pickDay} jump={jump} />
             {errorFor("period") && <p role="alert" className="text-[13px] text-loss">{errorFor("period")}</p>}
           </motion.div>
 
+          </div>
+
+          <div className="space-y-9">
           {/* Instruments */}
           <motion.div {...rise(2)} className="space-y-3">
             <Label>Instruments</Label>
@@ -362,9 +420,12 @@ export default function CreateBacktestPage() {
           <motion.div {...rise(4)} className="space-y-3">
             <Label>Account</Label>
             <Seg layoutId="seg-account" label="Account type" value={accountType} onChange={setAccountType} options={[{ id: "personal", label: "Real" }, { id: "prop", label: "Prop" }]} />
-            <div className="relative pt-1">
-              <span className="pointer-events-none absolute left-4 top-1/2 mt-0.5 -translate-y-1/2 text-[16px] text-faint">{sym}</span>
-              <TextBox aria-label="Starting balance" type="number" min={0} step={100} inputMode="decimal" className="pl-9 text-[17px] font-medium tabular-nums" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} />
+            <div className="space-y-2 pt-1">
+              <Label htmlFor="start-balance">Starting balance</Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[16px] text-faint">{sym}</span>
+                <TextBox id="start-balance" type="number" min={0} step={100} inputMode="decimal" enterKeyHint="done" className="pl-9 text-[17px] font-medium tabular-nums" value={startingBalance} onChange={(e) => setStartingBalance(e.target.value)} />
+              </div>
             </div>
             {errorFor("startingBalance") && <p role="alert" className="text-[13px] text-loss">{errorFor("startingBalance")}</p>}
 
@@ -423,12 +484,14 @@ export default function CreateBacktestPage() {
               )}
             </AnimatePresence>
           </motion.div>
+          </div>
+          </div>
         </div>
 
-        <footer className={cn("sticky bottom-[var(--chrome-bottom,0px)] z-20 rounded-b-[28px] border-t border-line/60 px-5 py-3.5 sm:px-8 sm:py-4", glass.bar)}>
-          <div className="mx-auto flex max-w-[32rem] items-center justify-between gap-4">
+        <footer className={cn("sticky bottom-[var(--chrome-bottom,0px)] z-20 rounded-b-[28px] border-t border-line/60 px-4 py-3 sm:px-8 sm:py-4 lg:px-12", glass.bar)}>
+          <div className="mx-auto flex max-w-[32rem] items-center justify-between gap-3 sm:gap-4 lg:max-w-none">
             <div className="min-w-0 flex-1 text-[12.5px] text-faint">
-              <Hint text={firstError} tone="warn" />
+              <div className="truncate" aria-live="polite"><Hint text={footerHint} tone={firstError ? "warn" : "muted"} /></div>
             </div>
             <PrimaryButton shortcut loading={creating} disabled={!hasRange} onClick={onCreate}>
               Start replay
