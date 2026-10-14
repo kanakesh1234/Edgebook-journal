@@ -21,6 +21,7 @@ import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
 import {
   BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
   Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox, useIsDesktop, type Rail,
+  GlyphArrowIn, GlyphArrowOut, GlyphStop, GlyphTarget, GlyphTimer, IconTile,
 } from "./flow-ui";
 
 /**
@@ -49,6 +50,19 @@ const IconMinus = () => (
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 /** Positive money only: digits and one decimal point, at most two decimals. */
 const cleanAmount = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [a = "", ...rest] = t.split("."); return rest.length ? `${a}.${rest.join("").slice(0, 2)}` : a; };
+/** Used whenever the trader leaves the instrument blank. */
+const DEFAULT_INSTRUMENT = "MNQ";
+/** Prices: digits and one decimal point (up to 5 places, so forex quotes fit too). Commas from a paste are dropped. */
+const cleanPrice = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [a = "", ...rest] = t.split("."); return rest.length ? `${a}.${rest.join("").slice(0, 5)}` : a; };
+const parsePrice = (v: string): number | null => { const t = v.trim(); if (t === "") return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+/** 12.5 → "12.5", 12 → "12", 12.3333 → "12.33" */
+const fmtPts = (n: number) => String(Math.round(n * 100) / 100);
+const minutesBetween = (a: string, b: string): number | null => {
+  const m = (t: string) => { const x = /^(\d{2}):(\d{2})/.exec(t); return x ? Number(x[1]) * 60 + Number(x[2]) : null; };
+  const s1 = m(a), s2 = m(b);
+  return s1 === null || s2 === null || s2 < s1 ? null : s2 - s1;
+};
+const fmtHeld = (min: number) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`);
 /** Round a suggested limit to a figure a person would actually type. */
 const niceMoney = (n: number) => (n < 100 ? Math.max(5, Math.round(n / 5) * 5) : n < 1000 ? Math.round(n / 10) * 10 : Math.round(n / 50) * 50);
 
@@ -100,6 +114,11 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [rr, setRr] = useState("");
   const [entryTime, setEntryTime] = useState("");
   const [exitTime, setExitTime] = useState("");
+  const [entryPrice, setEntryPrice] = useState("");
+  const [exitPrice, setExitPrice] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [takeProfit, setTakeProfit] = useState("");
+  const [levelsOpen, setLevelsOpen] = useState(false); // stop & target question has been revealed
   const [quantity, setQuantity] = useState("1");
   const [pnlDone, setPnlDone] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
@@ -145,7 +164,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   // Optional suggestions for the Instrument field: MNQ first, then recently used ones.
   const suggestedInstruments = useMemo(() => {
-    const seen: string[] = ["MNQ"];
+    const seen: string[] = [DEFAULT_INSTRUMENT];
     for (const e of [...entries].sort((a, b) => b.createdAt - a.createdAt)) {
       const i = e.instrument?.trim().toUpperCase();
       if (i && i !== "—" && !seen.includes(i)) seen.push(i);
@@ -178,6 +197,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
     setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime("09:30"); setExitTime("09:30"); setQuantity("1"); setPnlDone(false);
+    setEntryPrice(""); setExitPrice(""); setStopLoss(""); setTakeProfit(""); setLevelsOpen(false);
     setImportRows(null); setImportError(null);
     setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
@@ -210,10 +230,32 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlValue);
   const manualReady = Number.isFinite(pnlValue);
   // Instrument comes from the plan step; the trade step no longer asks for it.
-  // If nothing was chosen, default to MNQ.
-  const finalInstrument = instrument.trim().toUpperCase() || "MNQ";
+  // If nothing was chosen (or the field was cleared), default to MNQ.
+  const finalInstrument = instrument.trim().toUpperCase() || DEFAULT_INSTRUMENT;
   const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
   const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
+  // Prices are optional. Blank or half-typed ("." ) counts as "not given" and never blocks saving.
+  const entryN = parsePrice(entryPrice), exitN = parsePrice(exitPrice), stopN = parsePrice(stopLoss), targetN = parsePrice(takeProfit);
+  const isLong = direction === "long";
+  // Quiet sanity check: a stop belongs on the losing side of the entry, a target on the winning side.
+  const levelNote = (() => {
+    if (!direction || entryN === null) return null;
+    if (stopN !== null && (isLong ? stopN >= entryN : stopN <= entryN)) return `For a ${direction}, the stop sits ${isLong ? "below" : "above"} your entry.`;
+    if (targetN !== null && (isLong ? targetN <= entryN : targetN >= entryN)) return `For a ${direction}, the target sits ${isLong ? "above" : "below"} your entry.`;
+    return null;
+  })();
+  const riskPts = entryN !== null && stopN !== null ? Math.abs(entryN - stopN) : null;
+  const rewardPts = entryN !== null && targetN !== null ? Math.abs(targetN - entryN) : null;
+  const movePts = direction && entryN !== null && exitN !== null ? (isLong ? exitN - entryN : entryN - exitN) : null;
+  const realizedR = movePts !== null && riskPts !== null && riskPts > 0 ? movePts / riskPts : null;
+  const heldMin = minutesBetween(entryTime, exitTime);
+  const levelStats = [
+    riskPts !== null ? { k: "Risk", v: `${fmtPts(riskPts)} pts` } : null,
+    rewardPts !== null ? { k: "Reward", v: `${fmtPts(rewardPts)} pts` } : null,
+    riskPts !== null && riskPts > 0 && rewardPts !== null ? { k: "R : R", v: `1 : ${(rewardPts / riskPts).toFixed(1)}` } : null,
+    realizedR !== null ? { k: "Realized", v: `${realizedR > 0 ? "+" : realizedR < 0 ? "−" : ""}${Math.abs(realizedR).toFixed(2)}R`, tone: realizedR > 0 ? "profit" as const : realizedR < 0 ? "loss" as const : undefined } : null,
+  ].filter((x): x is { k: string; v: string; tone?: "profit" | "loss" } => x !== null);
+  const manualR = rr.trim() !== "" && Number.isFinite(Number(rr)) ? Number(rr) : null;
   // Functional update so press-and-hold repeats never read stale state.
   const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
   // The day as it would stand if this trade were saved: the loss limit from the plan, measured against the real running P&L.
@@ -226,6 +268,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   }, [mode, manualReady, maxLossOk, maxLossValue, tradeDay, today, entries, createdId, pnlValue, entryTime]);
   // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
   useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
+  // Same latch for the stop & target question: once any price is typed it stays revealed.
+  useEffect(() => { if (entryPrice || exitPrice || stopLoss || takeProfit) setLevelsOpen(true); }, [entryPrice, exitPrice, stopLoss, takeProfit]);
 
   const gate: { ok: boolean; hint: string | null } = (() => {
     switch (step) {
@@ -298,8 +342,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         const draft: EntryDraft = {
           date: tradeDate <= todayKey() ? tradeDate : todayKey(),
           pnl: Math.round(pnlValue * 100) / 100,
-          rr: rr.trim() === "" || !Number.isFinite(Number(rr)) ? null : Number(rr),
-          instrument: finalInstrument || "—",
+          // An R typed by hand wins; otherwise it is worked out from entry, stop and exit.
+          rr: manualR ?? (realizedR !== null ? Math.round(realizedR * 100) / 100 : null),
+          instrument: finalInstrument,
           direction,
           setup: selectedPlaybook?.name ?? "",
           setupId: playbookId || undefined,
@@ -310,6 +355,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           planId: plan.id,
           entryTime: entryTime.trim() || undefined,
           exitTime: exitTime.trim() || undefined,
+          entryPrice: entryN,
+          exitPrice: exitN,
+          stopLoss: stopN,
+          takeProfit: targetN,
           quantity: quantityValue,
         };
         if (live) {
@@ -328,7 +377,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         }
       } else if (importRows?.length) {
         const created = await useApp.getState().createEntries(importRows.map((row, i) => ({
-          date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument, direction: row.direction,
+          date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument?.trim() && row.instrument.trim() !== "—" ? row.instrument : DEFAULT_INSTRUMENT, direction: row.direction,
           setup: row.setup || selectedPlaybook?.name || "",
           setupId: row.setup ? undefined : playbookId || undefined,
           notes: row.notes, entryTime: row.entryTime ?? undefined,
@@ -581,7 +630,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                       <Label hint="defaults to MNQ" htmlFor="flow-instrument">Instrument</Label>
                       <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
                       <Stagger className="flex flex-wrap gap-2" delay={0.05}>
-                        {suggestedInstruments.map((i) => <Chip key={i} selected={instrument === i} onClick={() => setInstrument(instrument === i ? "" : i)}>{i}</Chip>)}
+                        {suggestedInstruments.map((i) => <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>{i}</Chip>)}
                       </Stagger>
                     </div>
                     <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
@@ -640,7 +689,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
           {step === "trade" && (
             <div className="space-y-8">
-              <StepTitle title="Log the trade" />
+              <StepTitle title="Log the trade" subtitle={`Logging ${finalInstrument}`} />
               {playbook.length === 0 && !createdId && <OutlookCard draft={draftPlan} entries={entries} plans={plans} />}
               {!createdId && <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />}
 
@@ -688,21 +737,78 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </Reveal>
                   )}
 
+                  {/* 1 · Entry & exit: price and time together, as two tickets side by side. */}
                   {direction !== null && (
                     <Reveal>
                       <div className="space-y-3">
-                        <Label hint="optional">Entry &amp; exit time</Label>
-                        {/* Inset-grouped list (same pattern as the news events): one rounded group, hairline divider. */}
-                        <div className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
-                          <TimeRow id="flow-in" label="Entry" value={entryTime} onChange={setEntryTime} />
-                          <TimeRow id="flow-out" label="Exit" value={exitTime} onChange={setExitTime} />
+                        <Label hint="price & time · optional" done={entryN !== null && exitN !== null}>Entry &amp; exit</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <TicketCard
+                            id="flow-entry-price" title="Entry" tile="bg-gradient-to-b from-gold-strong to-gold-deep" glyph={<GlyphArrowIn />}
+                            price={entryPrice} onPrice={(v) => setEntryPrice(cleanPrice(v))}
+                            time={entryTime} onTime={setEntryTime} timeId="flow-in"
+                          />
+                          <TicketCard
+                            id="flow-exit-price" title="Exit" tile="bg-gradient-to-b from-[#8f99a8] to-[#667085]" glyph={<GlyphArrowOut />}
+                            price={exitPrice} onPrice={(v) => setExitPrice(cleanPrice(v))}
+                            time={exitTime} onTime={setExitTime} timeId="flow-out"
+                            foot={movePts !== null || heldMin !== null ? (
+                              <>
+                                {movePts !== null && <span className={cn("font-medium", movePts > 0 && "text-profit", movePts < 0 && "text-loss")}>{movePts > 0 ? "+" : movePts < 0 ? "−" : ""}{fmtPts(Math.abs(movePts))} pts</span>}
+                                {movePts !== null && heldMin !== null && " · "}
+                                {heldMin !== null && `held ${fmtHeld(heldMin)}`}
+                              </>
+                            ) : undefined}
+                          />
                         </div>
+                        <AnimatePresence initial={false}>
+                          {!levelsOpen && (
+                            <Collapse key="add-levels">
+                              <button type="button" onClick={() => setLevelsOpen(true)} className="flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-gold transition-opacity hover:opacity-80">
+                                <IconPlus /> Add stop loss &amp; take profit
+                              </button>
+                            </Collapse>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </Reveal>
+                  )}
+
+                  {/* 2 · Stop & target: unfolds once a price is typed (or on request). */}
+                  {direction !== null && levelsOpen && (
+                    <Reveal>
+                      <div className="space-y-3">
+                        <Label hint="optional" done={stopN !== null && targetN !== null}>Stop loss &amp; take profit</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <TicketCard
+                            id="flow-sl" title="Stop loss" tile="bg-loss" glyph={<GlyphStop />}
+                            price={stopLoss} onPrice={(v) => setStopLoss(cleanPrice(v))}
+                            invalid={levelNote !== null && stopN !== null && entryN !== null && (isLong ? stopN >= entryN : stopN <= entryN)}
+                            foot={riskPts !== null ? `${fmtPts(riskPts)} pts from entry` : ""}
+                          />
+                          <TicketCard
+                            id="flow-tp" title="Take profit" tile="bg-profit" glyph={<GlyphTarget />}
+                            price={takeProfit} onPrice={(v) => setTakeProfit(cleanPrice(v))}
+                            invalid={levelNote !== null && targetN !== null && entryN !== null && (isLong ? targetN <= entryN : targetN >= entryN)}
+                            foot={rewardPts !== null ? `${fmtPts(rewardPts)} pts from entry` : ""}
+                          />
+                        </div>
+                        <AnimatePresence initial={false}>
+                          {levelNote && (
+                            <Collapse key="level-note"><p role="status" className="px-1 text-[13px] text-loss">{levelNote}</p></Collapse>
+                          )}
+                        </AnimatePresence>
+                        <AnimatePresence initial={false}>
+                          {levelStats.length > 0 && (
+                            <Collapse key="level-stats"><StatStrip stats={levelStats} /></Collapse>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </Reveal>
                   )}
 
                   {direction !== null && (
-                    <Reveal delay={0.1}>
+                    <Reveal delay={0.12}>
                       <div className="space-y-3">
                         <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">Quantity</Label>
                         {/* Apple HIG: the stepper (two-segment control) sits next to the field that shows the value. */}
@@ -729,7 +835,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     <Disclosure label="More detail">
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
-                        <div className="space-y-2.5"><Label htmlFor="flow-rr">R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder="2.5" value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
+                        <div className="space-y-2.5"><Label htmlFor="flow-rr" hint={manualR === null && realizedR !== null ? "auto from your prices" : undefined}>R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder={realizedR !== null ? realizedR.toFixed(2) : "2.5"} value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
                       </div>
                     </Disclosure>
                   </div>
@@ -844,8 +950,44 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   );
 }
 
-/** One row of the inset-grouped time list: label left, native time input right, tap anywhere to edit. */
-function TimeRow({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
+/**
+ * One "ticket": an iOS-Settings-style icon tile and title, a large monospaced price that is the input itself
+ * (tap anywhere on the card to type, the card shows focus), an optional one-line footnote, and an optional time row.
+ */
+function TicketCard({ id, title, tile, glyph, price, onPrice, foot, invalid, time, onTime, timeId }: {
+  id: string; title: string; tile: string; glyph: React.ReactNode;
+  price: string; onPrice: (v: string) => void;
+  /** Quiet line under the price. Pass "" to reserve the space without showing anything. */
+  foot?: React.ReactNode; invalid?: boolean;
+  time?: string; onTime?: (v: string) => void; timeId?: string;
+}) {
+  return (
+    <div className={cn("flex flex-col overflow-hidden rounded-[22px] border bg-raised transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10", invalid ? "border-loss/45" : "border-line")}>
+      <div onClick={() => document.getElementById(id)?.focus()} className="cursor-text px-4 pb-3.5 pt-3.5">
+        <div className="flex items-center gap-2.5">
+          <IconTile tile={tile}>{glyph}</IconTile>
+          <label htmlFor={id} className="text-[14px] font-medium tracking-[-0.01em] text-ink">{title}</label>
+        </div>
+        <input
+          id={id}
+          inputMode="decimal"
+          enterKeyHint="next"
+          autoComplete="off"
+          value={price}
+          onChange={(e) => onPrice(e.target.value)}
+          placeholder="0.00"
+          aria-invalid={invalid || undefined}
+          className={cn("mt-3.5 w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[22px] tracking-tight sm:text-[26px] !shadow-none !outline-none !ring-0 placeholder:text-faint/50", invalid ? "text-loss" : "text-ink")}
+        />
+        {foot !== undefined && <p className="mt-1.5 min-h-4 text-[12px] leading-4 text-faint">{foot}</p>}
+      </div>
+      {onTime && timeId && <div className="mt-auto border-t border-line-soft"><TimeField id={timeId} label={title} value={time ?? ""} onChange={onTime} /></div>}
+    </div>
+  );
+}
+
+/** Compact time row inside a ticket: clock glyph, native time input, tap anywhere to edit, clearable. */
+function TimeField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const open = (e: React.MouseEvent) => {
     const el = ref.current;
@@ -854,28 +996,41 @@ function TimeRow({ id, label, value, onChange }: { id: string; label: string; va
     try { el.showPicker?.(); } catch { /* picker needs a user gesture; focus is enough */ }
   };
   return (
-    <div onClick={open} className="flex h-14 cursor-pointer items-center justify-between gap-3 px-4 transition-colors hover:bg-ink/[0.03]">
-      <label htmlFor={id} className="text-[16px] text-ink">{label}</label>
-      <div className="flex items-center gap-2.5">
-        {value && (
-          <button
-            type="button"
-            aria-label={`Clear ${label.toLowerCase()} time`}
-            onClick={(e) => { e.stopPropagation(); onChange(""); }}
-            className="grid h-5 w-5 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
-          >
-            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M3 3l6 6M9 3l-6 6" /></svg>
-          </button>
-        )}
-        <input
-          ref={ref}
-          id={id}
-          type="time"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={cn("w-[7.25rem] border-0 bg-transparent p-0 text-right font-mono text-[17px] !shadow-none !outline-none !ring-0", value ? "text-ink" : "text-faint")}
-        />
-      </div>
+    <div onClick={open} className="flex h-11 cursor-pointer items-center gap-1.5 px-3.5 transition-colors hover:bg-ink/[0.03]">
+      <span className="shrink-0 text-faint"><GlyphTimer /></span>
+      <input
+        ref={ref}
+        id={id}
+        type="time"
+        aria-label={`${label} time`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn("min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-[14px] !shadow-none !outline-none !ring-0 sm:text-[15px]", value ? "text-ink" : "text-faint")}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label={`Clear ${label.toLowerCase()} time`}
+          onClick={(e) => { e.stopPropagation(); onChange(""); }}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
+        >
+          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M3 3l6 6M9 3l-6 6" /></svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A quiet row of live numbers (risk, reward, R : R, realized R) separated by hairlines. */
+function StatStrip({ stats }: { stats: { k: string; v: string; tone?: "profit" | "loss" }[] }) {
+  return (
+    <div className="mt-0.5 grid divide-x divide-line-soft overflow-hidden rounded-2xl border border-line-soft bg-ink/[0.03]" style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}>
+      {stats.map((x) => (
+        <div key={x.k} className="px-2 py-2.5 text-center">
+          <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-faint">{x.k}</p>
+          <p className={cn("mt-0.5 font-mono text-[14px] tabular-nums sm:text-[15px]", x.tone === "profit" ? "text-profit" : x.tone === "loss" ? "text-loss" : "text-ink")}>{x.v}</p>
+        </div>
+      ))}
     </div>
   );
 }

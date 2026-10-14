@@ -226,10 +226,14 @@ export const GlyphArrowOut = () => <G><path d="M7 17 17 7M8 7h9v9" /></G>;
 export const GlyphTimer = () => <G><circle cx="12" cy="13.5" r="7" /><path d="M12 10v3.8l2.4 1.4M9.5 3.5h5" /></G>;
 /** flag */
 export const GlyphFlag = () => <G><path d="M6 21V4.5M6 5h11l-2.2 3.8L17 12.5H6" /></G>;
+/** minus.circle — the stop */
+export const GlyphStop = () => <G><circle cx="12" cy="12" r="8.5" /><path d="M8.5 12h7" /></G>;
+/** scope — the target */
+export const GlyphTarget = () => <G><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.2" /></G>;
 
 /** Colored squircle that carries a glyph (iOS Settings-style row icon). */
-export function IconTile({ tile, children }: { tile: string; children: React.ReactNode }) {
-  return <span className={cn("grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]", tile)}>{children}</span>;
+export function IconTile({ tile, children, className }: { tile: string; children: React.ReactNode; className?: string }) {
+  return <span className={cn("grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]", tile, className)}>{children}</span>;
 }
 
 /* ------------------------- reveal / stagger / stepper ------------------------- */

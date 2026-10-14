@@ -224,6 +224,14 @@ export function Minato() {
 
   const launcherVisible = open || peek || atEnd;
 
+  // Escape closes the panel (keyboard users, and tablets with a keyboard).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !e.isComposing) setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, setOpen]);
+
   // Greet on open
   useEffect(() => {
     if (open) {
@@ -357,7 +365,7 @@ export function Minato() {
         style={{ pointerEvents: launcherVisible ? "auto" : "none" }}
         className={cn(
           "fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200 md:bottom-5 md:right-5",
-          open ? "border-gold/50" : "border-line-strong",
+          open ? "border-gold/50 max-md:hidden" : "border-line-strong",
         )}
       >
         <span
@@ -394,6 +402,24 @@ export function Minato() {
         </span>
       </motion.button>
 
+      {/* Phones: tapping anywhere outside the panel closes it (the tab bar stays usable). */}
+      <AnimatePresence>
+        {open && (
+          <motion.button
+            key="minato-backdrop"
+            type="button"
+            aria-label="Close MINATO"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-x-0 top-0 bottom-[var(--tabbar-h)] z-[89] bg-black/25 md:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Panel */}
       <AnimatePresence>
         {open && (
@@ -407,8 +433,8 @@ export function Minato() {
             className="panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex max-h-[min(600px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden shadow-overlay md:inset-x-auto md:bottom-20 md:right-5 md:max-h-[min(600px,calc(100dvh-7rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-              <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-between border-b border-line py-2.5 pl-4 pr-2 sm:py-3.5 sm:pl-5 sm:pr-3">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
@@ -432,8 +458,9 @@ export function Minato() {
                   </p>
                 </div>
               </div>
-              <label className="ml-3 flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 8,000 tokens">
-                <span>Reply</span>
+              <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
+              <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 8,000 tokens">
+                <span className="hidden sm:inline">Reply</span>
                 <input
                   aria-label="MINATO reply size in tokens"
                   type="number"
@@ -451,8 +478,17 @@ export function Minato() {
                   }}
                   className="w-14 rounded border border-line bg-raised px-1 py-1 text-right text-[10px] text-ink focus:border-gold/60 focus:outline-none"
                 />
-                <span>tokens</span>
+                <span className="hidden sm:inline">tokens</span>
               </label>
+              <button
+                type="button"
+                aria-label="Close MINATO"
+                onClick={() => setOpen(false)}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-muted outline-none transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-gold/50 active:scale-95"
+              >
+                <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
+              </button>
+              </div>
             </div>
 
             {challenge && (
