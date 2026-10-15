@@ -100,6 +100,8 @@ interface AppState {
   /** Persist structured review data for an entry and refresh its review status. */
   saveTradeReview(entryId: string, patch: { review?: JournalEntry["review"]; checklist?: JournalEntry["checklist"]; reflection?: JournalEntry["reflection"]; reviewStatus?: JournalEntry["reviewStatus"] }): Promise<void>;
   updateSettings(patch: Partial<JournalSettings>): Promise<void>;
+  /** Sets the day's loss limit. One per day: returns false (and changes nothing) if that day already has one. */
+  setDayLimit(date: string, amount: number): Promise<boolean>;
   replaceJournal(payload: JournalPayload): Promise<void>;
   exportPayload(): JournalPayload;
   loadDemoData(): Promise<void>;
@@ -670,6 +672,16 @@ export const useApp = create<AppState>((set, get) => ({
     const next = entries.map((e) => (e.id === entryId ? updated : e));
     set({ entries: next });
     await persist(user.id, next, settings, dayLogs, get().plans);
+  },
+
+  async setDayLimit(date, amount) {
+    const { user, entries, settings, dayLogs } = get();
+    if (!user || !(Number.isFinite(amount) && amount > 0)) return false;
+    if (settings.dayLimits?.[date]) return false; // locked for the day
+    const next = { ...settings, dayLimits: { ...(settings.dayLimits ?? {}), [date]: Math.round(amount * 100) / 100 } };
+    set({ settings: next });
+    await persist(user.id, entries, next, dayLogs, get().plans);
+    return true;
   },
 
   async updateSettings(patch) {

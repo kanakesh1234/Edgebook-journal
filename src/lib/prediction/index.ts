@@ -1,5 +1,5 @@
 import type { JournalEntry, TradePlan } from "../types";
-import { buildOutlookFacts, localOutlook, type Outlook, type PlanDraft } from "./outlook";
+import { buildOutlookFacts, localOutlook, winOdds, type Outlook, type PlanDraft, type WinOdds } from "./outlook";
 
 export * from "./outlook";
 
@@ -17,4 +17,9 @@ export async function outlookWithAi(d: PlanDraft, entries: JournalEntry[], plans
     const data = (await res.json().catch(() => ({}))) as { outlook?: Outlook | null; reason?: string };
     return { outlook: data.outlook ?? null, reason: data.reason };
   } catch { return { outlook: null, reason: "Could not reach the AI." }; }
+}
+
+/** Chance this trade wins or loses, from the trader's own past trades. Instant and offline. */
+export function winOddsNow(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]): WinOdds {
+  return winOdds(d, entries, plans);
 }

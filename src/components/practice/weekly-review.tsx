@@ -35,7 +35,7 @@ export function WeeklyReview() {
   const money = (n: number) => formatSignedMoney(n, cur, { compact: true });
 
   const [start, setStart] = useState(thisWeekStart);
-  const week = useMemo(() => buildWeek(entries, plans, start), [entries, plans, start]);
+  const week = useMemo(() => buildWeek(entries, plans, start, settings.dayLimits), [entries, plans, start, settings.dayLimits]);
   const trend = useMemo(() => weekTrend(entries, thisWeekStart(), 8), [entries]);
   const recurring = useMemo(() => recurringMistakes(entries, start), [entries, start]);
   const atNow = start >= thisWeekStart();

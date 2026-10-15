@@ -60,7 +60,8 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   // The day's loss limit against the day as it really went. Live, so it includes the trade that was just saved.
   const allEntries = useApp((s) => s.entries);
   const plans = useApp((s) => s.plans);
-  const risk = useMemo(() => (entry ? dayRisk(entry.date, allEntries, plans) : null), [entry, allEntries, plans]);
+  const dayLimits = useApp((s) => s.settings.dayLimits);
+  const risk = useMemo(() => (entry ? dayRisk(entry.date, allEntries, plans, dayLimits) : null), [entry, allEntries, plans, dayLimits]);
 
   const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
   const [emotion, setEmotion] = useState<Emotion>("");
@@ -96,7 +97,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     const e = entryRef.current; if (!e) return;
     auditedFor.current = entryId;
     const st = useApp.getState();
-    void auditTrade(e, st.entries, st.plans).then((a) => { if (auditedFor.current === entryId) setAudit(a); });
+    void auditTrade(e, st.entries, st.plans, undefined, st.settings.dayLimits).then((a) => { if (auditedFor.current === entryId) setAudit(a); });
   }, [active, entryId]);
   /** The just-tapped option, shown selected for a beat before its step folds away. */
   const [pending, setPending] = useState<{ kind: "mistake" | "blunder"; value: string } | null>(null);
@@ -288,7 +289,7 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
       };
       // Final audit with the trader's answers included, so a generous "No mistake" is checked against the facts.
       const st = useApp.getState();
-      const au = await auditTrade({ ...current, review }, st.entries, st.plans, 6000);
+      const au = await auditTrade({ ...current, review }, st.entries, st.plans, 6000, st.settings.dayLimits);
       review.followUp = { ...review.followUp, audit: { key: au.key, confidence: au.confidence, reason: au.reason, objective: au.objective, source: au.source, flags: au.flags, at: Date.now() } };
       await useApp.getState().saveTradeReview(current.id, {
         review,

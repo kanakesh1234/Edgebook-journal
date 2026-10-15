@@ -77,7 +77,8 @@ export default function PracticePage() {
 
   const levels = arenaLevels(progress);
   const plans = useApp((s) => s.plans);
-  const thisWeek = useMemo(() => buildWeek(allEntries, plans, thisWeekStart()), [allEntries, plans]);
+  const dayLimits = useApp((s) => s.settings.dayLimits);
+  const thisWeek = useMemo(() => buildWeek(allEntries, plans, thisWeekStart(), dayLimits), [allEntries, plans, dayLimits]);
   const usable = useMemo(() => entries.filter(isUsable), [entries]);
   const weekInfo = useMemo(() => weekTrades(entries), [entries]);
 

@@ -541,8 +541,9 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
   const groups = useMemo(() => buildReviewGroups(entry), [entry]);
   const allEntries = useApp((s) => s.entries);
   const plans = useApp((s) => s.plans);
+  const dayLimits = useApp((s) => s.settings.dayLimits);
   const currency = useApp((s) => s.settings.currency);
-  const risk = useMemo(() => dayRisk(entry.date, allEntries, plans), [entry.date, allEntries, plans]);
+  const risk = useMemo(() => dayRisk(entry.date, allEntries, plans, dayLimits), [entry.date, allEntries, plans, dayLimits]);
   const answers = useMemo(() => buildAnswers(entry), [entry]);
   const prose = useMemo(() => buildProse(entry), [entry]);
   const extra = useMemo(

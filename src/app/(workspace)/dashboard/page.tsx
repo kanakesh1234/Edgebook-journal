@@ -26,7 +26,7 @@ export default function DashboardPage() {
   const [planOpen, setPlanOpen] = useState(false);
   const dayLogs = useApp((st) => st.dayLogs);
   const plans = useApp((st) => st.plans);
-  const todayRisk = useMemo(() => computeDayRisk(todayKey(), allEntries, plans), [allEntries, plans]);
+  const todayRisk = useMemo(() => computeDayRisk(todayKey(), allEntries, plans, rawSettings.dayLimits), [allEntries, plans, rawSettings.dayLimits]);
 
   // Primary challenge scoping — one shared source of truth for the whole page.
   const { entries, settings, challenge } = useMemo(

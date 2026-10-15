@@ -40,27 +40,21 @@ const wrOf = (t: JournalEntry[]) => (t.length ? r2(t.filter((e) => e.pnl > 0).le
 const avgOf = (t: JournalEntry[]) => (t.length ? r2(t.reduce((s, e) => s + e.pnl, 0) / t.length) : null);
 const planFor = (e: JournalEntry, plans: TradePlan[]) => plans.find((p) => p.id === e.planId);
 
-export function buildOutlookFacts(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]): OutlookFacts {
-  // Only trades dated before today's plan, so a trade being logged right now never predicts itself.
+/** The groups of past trades that resemble this plan (setup, feeling, skipped rules, news day, after a loss). Shared by the facts and the odds. */
+function similarGroups(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]) {
+  // Only trades dated up to today's plan, so a trade being logged right now never predicts itself.
   const past = entries.filter((e) => e.date <= d.date && e.pnl !== undefined);
-  const base = { n: past.length, winRate: wrOf(past), avgPnl: avgOf(past) };
-  const factors: Factor[] = [];
-  const related = new Map<string, JournalEntry>();
-  const addFactor = (id: string, label: string, trades: JournalEntry[]) => {
-    if (trades.length === 0) return;
-    const w = wrOf(trades);
-    factors.push({ id, label, n: trades.length, winRate: w, avgPnl: avgOf(trades), delta: w != null && base.winRate != null ? r2(w - base.winRate) : null });
-    if (trades.length >= MIN) trades.forEach((t) => related.set(t.id, t));
-  };
+  const groups: { id: string; label: string; trades: JournalEntry[] }[] = [];
+  const add = (id: string, label: string, trades: JournalEntry[]) => { if (trades.length > 0) groups.push({ id, label, trades }); };
 
-  if (d.setupId) addFactor("setup", `trades on your “${d.setupName ?? "this"}” setup`, past.filter((e) => e.setupId === d.setupId));
-  if (d.emotion) addFactor("emotion", `plans written while feeling ${d.emotion.toLowerCase()}`, past.filter((e) => planFor(e, plans)?.emotionalState === d.emotion));
+  if (d.setupId) add("setup", `trades on your “${d.setupName ?? "this"}” setup`, past.filter((e) => e.setupId === d.setupId));
+  if (d.emotion) add("emotion", `plans written while feeling ${d.emotion.toLowerCase()}`, past.filter((e) => planFor(e, plans)?.emotionalState === d.emotion));
 
   const withPlan = past.map((e) => ({ e, p: planFor(e, plans) })).filter((x): x is { e: JournalEntry; p: TradePlan } => !!x.p);
   const anySkipped = (p: TradePlan) => p.rules.some((r) => r.state !== "ready");
-  if (d.skippedRules.length > 0) addFactor("skipped", "trades where you skipped a setup rule", withPlan.filter((x) => x.p.rules.length > 0 && anySkipped(x.p)).map((x) => x.e));
-  else if (d.confirmedRules.length > 0) addFactor("allrules", "trades where you confirmed every rule", withPlan.filter((x) => x.p.rules.length > 0 && !anySkipped(x.p)).map((x) => x.e));
-  if (d.news.length > 0) addFactor("news", "trades planned on a news day", withPlan.filter((x) => (x.p.newsEvents?.length ?? 0) > 0).map((x) => x.e));
+  if (d.skippedRules.length > 0) add("skipped", "trades where you skipped a setup rule", withPlan.filter((x) => x.p.rules.length > 0 && anySkipped(x.p)).map((x) => x.e));
+  else if (d.confirmedRules.length > 0) add("allrules", "trades where you confirmed every rule", withPlan.filter((x) => x.p.rules.length > 0 && !anySkipped(x.p)).map((x) => x.e));
+  if (d.news.length > 0) add("news", "trades planned on a news day", withPlan.filter((x) => (x.p.newsEvents?.length ?? 0) > 0).map((x) => x.e));
 
   // Position in the day: a trade after a loss earlier today behaves differently from a first trade.
   const today = dayTrades(d.date, entries);
@@ -69,7 +63,20 @@ export function buildOutlookFacts(d: PlanDraft, entries: JournalEntry[], plans: 
   if (afterLossToday) {
     const after: JournalEntry[] = [];
     for (const day of new Set(past.map((e) => e.date))) { if (day === d.date) continue; const t = dayTrades(day, entries); t.forEach((e, i) => { if (i > 0 && t.slice(0, i).some((x) => x.pnl < 0)) after.push(e); }); }
-    addFactor("afterloss", "trades taken after an earlier loss the same day", after);
+    add("afterloss", "trades taken after an earlier loss the same day", after);
+  }
+  return { past, groups, tradeOfDay, afterLossToday };
+}
+
+export function buildOutlookFacts(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]): OutlookFacts {
+  const { past, groups, tradeOfDay, afterLossToday } = similarGroups(d, entries, plans);
+  const base = { n: past.length, winRate: wrOf(past), avgPnl: avgOf(past) };
+  const factors: Factor[] = [];
+  const related = new Map<string, JournalEntry>();
+  for (const g of groups) {
+    const w = wrOf(g.trades);
+    factors.push({ id: g.id, label: g.label, n: g.trades.length, winRate: w, avgPnl: avgOf(g.trades), delta: w != null && base.winRate != null ? r2(w - base.winRate) : null });
+    if (g.trades.length >= MIN) g.trades.forEach((t) => related.set(t.id, t));
   }
 
   // Mistakes most common in the closest matches (or, with none, across the whole journal).
@@ -110,4 +117,51 @@ export function localOutlook(f: OutlookFacts, d: PlanDraft): Outlook {
   const watch = [...f.likelyMistakes.map((m) => `${m.label} — in ${m.count} of your ${m.of} most similar trades`), ...d.watch.map((w) => `${w} (you chose to watch this)`)].slice(0, 4);
   const headline = lean === "favorable" ? "Your history says this plan looks stronger than your average." : lean === "unfavorable" ? "Your history says plans like this have gone worse than your average." : "Mixed: nothing in your history strongly favours or warns against this plan.";
   return { lean, headline, points: points.slice(0, 5), watch, source: "rules" };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Win / loss probability                                             */
+/* ------------------------------------------------------------------ */
+
+export type WinOdds =
+  | { status: "thin"; n: number; needed: number }
+  | { status: "ready"; /** 0–100 */ win: number; loss: number; n: number; confidence: "low" | "medium" | "high"; /** the closest-matching group of past trades, if any */ basis: { n: number; label: string } | null };
+
+const MIN_HISTORY = 5;
+const PRIOR = 4; // how strongly a small group is pulled back toward the overall record
+const logit = (p: number) => Math.log(p / (1 - p));
+const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
+
+/**
+ * "How likely is THIS trade to win or lose, given how you have traded before?"
+ *
+ * Start from the overall record (smoothed, so 2 wins from 2 trades is not "100%"). Each group of past trades that resembles
+ * this plan nudges the figure up or down, pulled back toward the overall record when the group is small. Break-even trades
+ * are neither a win nor a loss and are left out. Like everything here it describes the trader's own habits, never the market.
+ */
+export function winOdds(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]): WinOdds {
+  const { past, groups } = similarGroups(d, entries, plans);
+  const decided = past.filter((e) => e.pnl !== 0);
+  if (decided.length < MIN_HISTORY) return { status: "thin", n: decided.length, needed: MIN_HISTORY };
+
+  const wins = (t: JournalEntry[]) => t.filter((e) => e.pnl > 0).length;
+  const p0 = (wins(decided) + 1) / (decided.length + 2);
+
+  let weight = 0, shift = 0;
+  const used: { n: number; label: string }[] = [];
+  for (const g of groups) {
+    const t = g.trades.filter((e) => e.pnl !== 0);
+    if (t.length < MIN) continue;
+    const pg = (wins(t) + PRIOR * p0) / (t.length + PRIOR);
+    const w = Math.min(t.length, 10);
+    shift += w * (logit(pg) - logit(p0));
+    weight += w;
+    used.push({ n: t.length, label: g.label });
+  }
+  const p = Math.min(0.95, Math.max(0.05, sigmoid(logit(p0) + (weight ? shift / weight : 0))));
+  const win = Math.round(p * 100);
+  const confidence = decided.length < 10 || used.length === 0 ? "low" : decided.length < 30 ? "medium" : "high";
+  // The most specific evidence to quote: the group with the most trades.
+  const basis = used.sort((a, b) => b.n - a.n)[0] ?? null;
+  return { status: "ready", win, loss: 100 - win, n: decided.length, confidence, basis };
 }

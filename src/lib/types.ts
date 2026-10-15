@@ -131,6 +131,8 @@ export interface JournalSettings {
   reviews?: ReviewStore;
   /** Practice-page weekly write-ups, keyed by the Monday of the week (YYYY-MM-DD). */
   weeklyReviews?: Record<string, { wentWell?: string; focus?: string; updatedAt: number }>;
+  /** The daily loss limit, set once per day from Home (date YYYY-MM-DD → amount in account currency). Locked once set. */
+  dayLimits?: Record<string, number>;
   /**
    * EFFECTIVE-ONLY — filled in by scopeToPrimary() from the primary challenge
    * so computeStats uses its drawdown model. Never persisted or edited here;

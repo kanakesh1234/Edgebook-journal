@@ -20,7 +20,7 @@ const median = (v: number[]) => { const s = [...v].sort((a, b) => a - b); const 
 export const planOf = (e: JournalEntry, plans: TradePlan[]) =>
   plans.find((p) => p.id === e.planId) ?? [...plans].filter((p) => p.date === e.date).sort((a, b) => b.createdAt - a.createdAt)[0];
 
-export function auditSignals(e: JournalEntry, entries: JournalEntry[], plans: TradePlan[]): Signal[] {
+export function auditSignals(e: JournalEntry, entries: JournalEntry[], plans: TradePlan[], dayLimits?: Record<string, number>): Signal[] {
   const out: Signal[] = [];
   const plan = planOf(e, plans);
   const day = dayTrades(e.date, entries);
@@ -37,7 +37,7 @@ export function auditSignals(e: JournalEntry, entries: JournalEntry[], plans: Tr
   }
 
   // Loss limit: this trade took the day to its limit, or was taken after the limit was already used.
-  const limit = dayLimitFor(e.date, plans);
+  const limit = dayLimitFor(e.date, plans, dayLimits);
   if (limit && idx >= 0) {
     const before = riskFor(limit, day.slice(0, idx)), after = riskFor(limit, day.slice(0, idx + 1));
     if (before && before.used >= limit) out.push({ key: "plan", code: "after-limit", weight: 0.95, objective: true, text: "Taken after the daily loss limit had already been reached." });
@@ -89,8 +89,8 @@ export function auditContext(e: JournalEntry, plans: TradePlan[], signals: Signa
 }
 
 /** Local verdict now; AI verdict if it answers in time. An AI "none" never erases an objective finding. */
-export async function auditTrade(e: JournalEntry, entries: JournalEntry[], plans: TradePlan[], timeoutMs = 9000): Promise<Audit> {
-  const signals = auditSignals(e, entries, plans);
+export async function auditTrade(e: JournalEntry, entries: JournalEntry[], plans: TradePlan[], timeoutMs = 9000, dayLimits?: Record<string, number>): Promise<Audit> {
+  const signals = auditSignals(e, entries, plans, dayLimits);
   const local = auditLocal(signals);
   if (typeof fetch === "undefined") return local;
   try {

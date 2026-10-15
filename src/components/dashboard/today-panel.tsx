@@ -14,7 +14,7 @@ import type { CurrencyCode, JournalEntry } from "@/lib/types";
 import { formatMoney, formatSignedMoney, weekdayShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { ChevronRightIcon } from "@/components/ui/icons";
-import { RiskMeter } from "@/components/journal/risk-meter";
+import { DailyLimit } from "./daily-limit";
 import type { DayRisk } from "@/lib/risk";
 
 export interface RiskPosture {
@@ -41,7 +41,7 @@ export function TodayPanel({
   dayRisk,
   className,
 }: {
-  /** Today's loss limit (set in the plan) against today's real result; null when no limit was set today. */
+  /** Today's loss limit (set once on Home) against today's real result; null until the limit is set. */
   dayRisk?: DayRisk | null;
   risk: RiskPosture;
   /** 0–1 share of the drawdown limit consumed. */
@@ -91,7 +91,7 @@ export function TodayPanel({
               </div>
             )}
 
-            {dayRisk && <RiskMeter risk={dayRisk} currency={currency} label="Today's limit" compact />}
+            <DailyLimit risk={dayRisk ?? null} currency={currency} />
 
             <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-control border border-line bg-line text-center">
               <div className="bg-surface px-3 py-2.5">

@@ -46,7 +46,7 @@ export function weekMistakes(trades: JournalEntry[]) {
   return [...map.values()];
 }
 
-export function buildWeek(entries: JournalEntry[], plans: TradePlan[], start: string): WeekReview {
+export function buildWeek(entries: JournalEntry[], plans: TradePlan[], start: string, dayLimits?: Record<string, number>): WeekReview {
   const end = weekEndOf(start);
   const today = todayKey();
   const trades = entries.filter((e) => e.date >= start && e.date <= end).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
@@ -54,7 +54,7 @@ export function buildWeek(entries: JournalEntry[], plans: TradePlan[], start: st
   const days: WeekDay[] = Array.from({ length: 7 }, (_, i) => {
     const date = addDays(start, i);
     const list = dayTrades(date, entries);
-    const limit = dayLimitFor(date, plans);
+    const limit = dayLimitFor(date, plans, dayLimits);
     return { date, label: weekdayShort(date), future: date > today, trades: list, net: r2(list.reduce((s, t) => s + t.pnl, 0)), limit, risk: riskFor(limit, list) };
   });
 
