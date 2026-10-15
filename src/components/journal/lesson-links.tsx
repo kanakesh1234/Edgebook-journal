@@ -64,27 +64,44 @@ function Tick({ on }: { on: boolean }) {
   );
 }
 
-function SearchField({ value, onChange, placeholder, autoFocus }: { value: string; onChange: (v: string) => void; placeholder: string; autoFocus?: boolean }) {
-  const ref = useRef<HTMLInputElement>(null);
+function SearchField({ value, onChange, placeholder, autoFocus, inputRef, onArrowDown }: { value: string; onChange: (v: string) => void; placeholder: string; autoFocus?: boolean; inputRef?: React.RefObject<HTMLInputElement | null>; onArrowDown?: () => void }) {
+  const own = useRef<HTMLInputElement>(null);
+  const ref = inputRef ?? own;
   useEffect(() => {
     if (!autoFocus || !window.matchMedia("(pointer: fine)").matches) return;
     const t = setTimeout(() => ref.current?.focus(), 220);
     return () => clearTimeout(t);
-  }, [autoFocus]);
+  }, [autoFocus]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <label className="flex h-9 items-center gap-2 rounded-[10px] bg-ink/[0.06] px-2.5 text-muted transition-shadow focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--gold-strong)_55%,transparent)]">
+    <label className="sf" style={{ height: 36 }}>
       <Sym name="search" className="h-4 w-4 shrink-0" />
       <input
         ref={ref} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
-        className="min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-faint"
+        type="text" inputMode="search" enterKeyHint="search" autoComplete="off" spellCheck={false}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown" && onArrowDown) { e.preventDefault(); onArrowDown(); }
+          else if (e.key === "Escape" && value) { e.preventDefault(); e.stopPropagation(); onChange(""); }
+        }}
       />
       {value && (
-        <button type="button" aria-label="Clear search" onClick={() => onChange("")} className="grid h-4 w-4 place-items-center rounded-full bg-ink/25 text-surface transition-transform active:scale-90">
+        <button type="button" aria-label="Clear search" onClick={() => { onChange(""); ref.current?.focus(); }} className="sf-clear">
           <Sym name="xmark" className="h-2.5 w-2.5" strokeWidth={3} />
         </button>
       )}
     </label>
   );
+}
+
+/** Arrow / Home / End move between rows (desktop keyboards); ArrowUp from the first row returns to the search field. */
+function moveFocus(e: React.KeyboardEvent<HTMLElement>, onTop?: () => void) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+  const rows = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"] > button'));
+  if (!rows.length) return;
+  const i = rows.indexOf(document.activeElement as HTMLButtonElement);
+  const n = e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : e.key === "ArrowDown" ? Math.min(rows.length - 1, i + 1) : i <= 0 ? -1 : i - 1;
+  e.preventDefault();
+  if (n === -1) onTop?.();
+  else { rows[n].focus(); rows[n].scrollIntoView({ block: "nearest" }); }
 }
 
 function Segmented<T extends string>({ id, tabs, value, onChange }: { id: string; tabs: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
@@ -127,7 +144,7 @@ const GhostButton = ({ children, ...p }: React.ButtonHTMLAttributes<HTMLButtonEl
  * The one sheet used by every flow here. A centred card on desktop; a bottom sheet on touch screens that
  * can be dragged down to dismiss. Renders on <body> above the trade sheet (z-70).
  */
-function Sheet({ open, onClose, label, wide, children }: { open: boolean; onClose: () => void; label: string; wide?: boolean; children: ReactNode }) {
+function Sheet({ open, onClose, label, wide, size, fixed, children }: { open: boolean; onClose: () => void; label: string; wide?: boolean; size?: "md"; fixed?: boolean; children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const drag = useDragControls();
   useEffect(() => setMounted(true), []);
@@ -160,7 +177,8 @@ function Sheet({ open, onClose, label, wide, children }: { open: boolean; onClos
             className={cn(
               "relative flex max-h-[88dvh] w-full flex-col overflow-hidden rounded-t-[26px] bg-surface pb-[env(safe-area-inset-bottom)] sm:max-h-[min(82dvh,720px)] sm:rounded-[26px] sm:pb-0",
               "shadow-[0_48px_120px_-28px_rgb(0_0_0/0.5),0_12px_32px_-14px_rgb(0_0_0/0.22),0_0_0_0.5px_rgb(0_0_0/0.16),inset_0_0.5px_0_rgb(255_255_255/0.55)] dark:shadow-[0_48px_120px_-28px_rgb(0_0_0/0.8),0_0_0_0.5px_rgb(255_255_255/0.14),inset_0_0.5px_0_rgb(255_255_255/0.08)]",
-              wide ? "sm:max-w-[720px]" : "sm:max-w-[520px]",
+              wide ? "sm:max-w-[720px]" : size === "md" ? "sm:max-w-[600px]" : "sm:max-w-[520px]",
+              fixed && "sm:h-[min(82dvh,680px)]", // pickers keep one height on desktop, so filtering never makes the window jump
             )}
           >
             <div onPointerDown={(e) => drag.start(e)} className="flex h-6 shrink-0 cursor-grab touch-none items-center justify-center sm:hidden" aria-hidden>
@@ -223,6 +241,8 @@ export function LessonPicker({ open, entry, onClose }: { open: boolean; entry: J
   const [scope, setScope] = useState<Scope>("all");
   const [busy, setBusy] = useState(false);
   const initial = useRef<string[]>([]);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Start from what is linked now, every time the sheet opens.
   useEffect(() => {
@@ -267,16 +287,16 @@ export function LessonPicker({ open, entry, onClose }: { open: boolean; entry: J
   const none = !!lessons && lessons.length === 0;
 
   return (
-    <Sheet open={open} onClose={onClose} label="Link lessons">
+    <Sheet open={open} onClose={onClose} label="Link lessons" size="md" fixed>
       <SheetHeader title="Link a lesson" subtitle={entry ? `${tradeTitle(entry)} · ${dayShort(entry.date)}` : undefined} onClose={onClose} />
       {!none && (
         <div className="shrink-0 space-y-2.5 px-5 pb-3 sm:px-6">
-          <SearchField value={query} onChange={setQuery} placeholder="Search lessons" autoFocus={open} />
+          <SearchField value={query} onChange={setQuery} placeholder="Search lessons" autoFocus={open} inputRef={searchRef} onArrowDown={() => listRef.current?.querySelector<HTMLButtonElement>('[role="option"] > button')?.focus()} />
           <Segmented id="lesson-scope" tabs={tabs} value={scope} onChange={setScope} />
         </div>
       )}
 
-      <div className="min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t border-line-soft py-1.5 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]">
+      <div ref={listRef} className="min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t border-line-soft py-1.5 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]">
         {loading ? <Skeleton /> : failed ? (
           <Empty icon="tray" title="Couldn’t load lessons" body="Check your connection and try again." action={<PrimaryButton onClick={() => void reload()}>Try again</PrimaryButton>} />
         ) : none ? (
@@ -284,7 +304,7 @@ export function LessonPicker({ open, entry, onClose }: { open: boolean; entry: J
         ) : list.length === 0 ? (
           <Empty icon="search" title="Nothing found" body={query ? "Try another word." : scope === "saved" ? "Bookmark a lesson to find it here." : "No lessons in this view."} />
         ) : (
-          <ul role="listbox" aria-multiselectable aria-label="Lessons" className="px-3">
+          <ul role="listbox" aria-multiselectable aria-label="Lessons" className="px-3" onKeyDown={(e) => moveFocus(e, () => searchRef.current?.focus())}>
             {list.map((l) => {
               const on = sel.includes(l.id);
               return (
@@ -391,33 +411,67 @@ export function LessonPeek({ id, onClose, onUnlink }: { id: string | null; onClo
 
 /* ───────────── The same link, started from a lesson ───────────── */
 
+type TradeFilter = "all" | "wins" | "losses" | "selected";
+
+const monthLabel = (d: string) => {
+  const t = new Date(`${d}T00:00:00`);
+  return Number.isNaN(t.getTime()) ? "Earlier" : t.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+};
+
 export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: boolean; lessonId: string; lessonTitle?: string; onClose: () => void }) {
   const entries = useApp((s) => s.entries);
   const currency = useApp((s) => s.settings.currency);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<TradeFilter>("all");
   const [busy, setBusy] = useState(false);
+  const [mac, setMac] = useState(false);
   const initial = useRef<Set<string>>(new Set());
+  const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setMac(/mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)); }, []);
 
   useEffect(() => {
     if (!open) return;
     const cur = new Set(useApp.getState().entries.filter((e) => e.lessonIds?.includes(lessonId)).map((e) => e.id));
     initial.current = cur;
-    setSel(new Set(cur)); setQuery(""); setBusy(false);
+    setSel(new Set(cur)); setQuery(""); setFilter("all"); setBusy(false);
   }, [open, lessonId]);
 
+  // Matching trades, newest first. Trades already linked to this lesson are pinned to the top.
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...entries]
-      .filter((e) => !q || [e.instrument, e.direction ?? "", e.setup, e.date, e.notes].some((s) => (s ?? "").toLowerCase().includes(q)))
+      .filter((e) => !q || [e.instrument, e.direction ?? "", e.setup, e.date, e.notes].some((x) => (x ?? "").toLowerCase().includes(q)))
+      .filter((e) => (filter === "wins" ? e.pnl > 0 : filter === "losses" ? e.pnl < 0 : filter === "selected" ? sel.has(e.id) : true))
       .sort((a, b) => Number(initial.current.has(b.id)) - Number(initial.current.has(a.id)) || b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, query, open]);
+  }, [entries, query, filter, open, filter === "selected" ? sel : null]);
+
+  // "Linked" first, then one group per month.
+  const groups = useMemo(() => {
+    const out: { key: string; label: string; items: JournalEntry[] }[] = [];
+    for (const e of list) {
+      const linked = initial.current.has(e.id);
+      const key = linked ? "linked" : monthLabel(e.date);
+      const g = out[out.length - 1];
+      if (g && g.key === key) g.items.push(e);
+      else out.push({ key, label: linked ? "Linked to this lesson" : key, items: [e] });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, open]);
 
   const changed = sel.size !== initial.current.size || [...sel].some((id) => !initial.current.has(id));
+  const net = useMemo(() => entries.reduce((n, e) => (sel.has(e.id) ? n + e.pnl : n), 0), [entries, sel]);
+  const allShown = list.length > 0 && list.every((e) => sel.has(e.id));
+
   const toggle = (id: string) => { haptic.selection(); setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const setShown = (on: boolean) => { haptic.selection(); setSel((s) => { const n = new Set(s); for (const e of list) { if (on) n.add(e.id); else n.delete(e.id); } return n; }); };
 
   const save = async () => {
+    if (busy) return;
     if (!changed) { onClose(); return; }
     setBusy(true);
     try {
@@ -431,48 +485,99 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
     }
   };
 
+  // ⌘↵ / Ctrl↵ saves from anywhere in the window.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void saveRef.current(); } };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [open]);
+
+  const tabs: { id: TradeFilter; label: string }[] = [
+    { id: "all", label: "All" }, { id: "wins", label: "Wins" }, { id: "losses", label: "Losses" },
+    { id: "selected", label: sel.size ? `Selected · ${sel.size}` : "Selected" },
+  ];
+  const focusFirst = () => listRef.current?.querySelector<HTMLButtonElement>('[role="option"] > button')?.focus();
+
   return (
-    <Sheet open={open} onClose={onClose} label="Link trades">
+    <Sheet open={open} onClose={onClose} label="Link trades" size="md" fixed>
       <SheetHeader title="Link trades" subtitle={lessonTitle ? `to “${lessonTitle}”` : undefined} onClose={onClose} />
       {entries.length > 0 && (
-        <div className="shrink-0 px-5 pb-3 sm:px-6"><SearchField value={query} onChange={setQuery} placeholder="Search by symbol, setup or date" autoFocus={open} /></div>
+        <>
+          <div className="flex shrink-0 flex-col gap-2.5 px-5 pb-3 sm:flex-row sm:items-center sm:gap-3 sm:px-6">
+            <div className="min-w-0 sm:flex-1">
+              <SearchField value={query} onChange={setQuery} placeholder="Search by symbol, setup or date" autoFocus={open} inputRef={searchRef} onArrowDown={focusFirst} />
+            </div>
+            <div className="sm:w-[310px] sm:shrink-0"><Segmented id="trade-filter" tabs={tabs} value={filter} onChange={setFilter} /></div>
+          </div>
+          <div className="flex shrink-0 items-center justify-between px-5 pb-2 text-[12.5px] text-muted sm:px-6">
+            <p className="num" aria-live="polite">{list.length} {list.length === 1 ? "trade" : "trades"}</p>
+            {list.length > 0 && (
+              <button type="button" onClick={() => setShown(!allShown)} className="-mr-2 h-7 rounded-full px-2.5 font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 active:scale-95 focus-visible:ring-2 focus-visible:ring-gold-strong/50">
+                {allShown ? "Clear" : "Select all"}
+              </button>
+            )}
+          </div>
+        </>
       )}
-      <div className="min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t border-line-soft py-1.5 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]">
+
+      <div ref={listRef} className="min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t border-line-soft pb-2 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]">
         {entries.length === 0 ? (
           <Empty icon="tray" title="No trades yet" body="Log a trade in your journal, then link it to this lesson." />
         ) : list.length === 0 ? (
-          <Empty icon="search" title="Nothing found" body="Try another symbol, setup or date." />
+          <Empty
+            icon="search" title="Nothing found"
+            body={filter === "selected" ? "Tick a trade to see it here." : query ? "Try another symbol, setup or date." : "No trades in this view."}
+            action={(query || filter !== "all") ? <GhostButton onClick={() => { setQuery(""); setFilter("all"); }}>Show all trades</GhostButton> : undefined}
+          />
         ) : (
-          <ul role="listbox" aria-multiselectable aria-label="Trades" className="px-3">
-            {list.map((e) => {
-              const on = sel.has(e.id);
-              return (
-                <li key={e.id} role="option" aria-selected={on}>
-                  <button
-                    type="button" onClick={() => toggle(e.id)}
-                    className={cn("flex w-full items-center gap-3 rounded-[12px] px-2.5 py-2 text-left outline-none transition-[background-color,transform] duration-150 active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "bg-gold/[0.10]" : "hover:bg-ink/[0.04] active:bg-ink/[0.07]")}
-                  >
-                    <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-[10px] bg-ink/[0.05]", tone(e.pnl))}>
-                      <Sym name={e.direction === "short" ? "arrowDownRight" : "arrowUpRight"} className="h-5 w-5" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">{tradeTitle(e)}</span>
-                      <span className="mt-px block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup].filter(Boolean).join(" · ")}</span>
-                    </span>
-                    <span className={cn("kpi text-[14px] tabular-nums", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
-                    <Tick on={on} />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <div role="listbox" aria-multiselectable aria-label="Trades" onKeyDown={(e) => moveFocus(e, () => searchRef.current?.focus())}>
+            {groups.map((g) => (
+              <div key={g.key} role="group" aria-label={g.label}>
+                <p className="sticky top-0 z-[1] bg-surface/85 px-6 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint backdrop-blur-md sm:px-7">{g.label}</p>
+                <div className="px-3">
+                  {g.items.map((e) => {
+                    const on = sel.has(e.id);
+                    return (
+                      <div key={e.id} role="option" aria-selected={on}>
+                        <button
+                          type="button" onClick={() => toggle(e.id)}
+                          className={cn("flex min-h-[56px] w-full scroll-mt-9 items-center gap-3.5 rounded-[14px] px-3 py-2 text-left outline-none transition-[background-color,transform] duration-150 active:scale-[0.995] focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "bg-gold/[0.10]" : "hover:bg-ink/[0.04] active:bg-ink/[0.07]")}
+                        >
+                          <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-[11px] bg-ink/[0.05]", tone(e.pnl))}>
+                            <Sym name={e.direction === "short" ? "arrowDownRight" : "arrowUpRight"} className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">{tradeTitle(e)}</span>
+                            <span className="mt-px block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup].filter(Boolean).join(" · ")}</span>
+                          </span>
+                          <span className={cn("kpi w-[92px] shrink-0 text-right text-[14px] tabular-nums", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
+                          <Tick on={on} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
+
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft px-4 py-3 sm:px-5">
-        <p className="num pl-1 text-[13px] text-muted" aria-live="polite">{sel.size === 0 ? "None linked" : `${sel.size} linked`}</p>
-        <div className="flex items-center gap-1">
+        <p className="num min-w-0 truncate pl-1 text-[13px] text-muted" aria-live="polite">
+          {sel.size === 0 ? "None linked" : `${sel.size} linked`}
+          {sel.size > 0 && <span className="hidden sm:inline"> · Net <span className={cn("font-medium", tone(net))}>{formatSignedMoney(net, currency)}</span></span>}
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
           <GhostButton onClick={onClose}>Cancel</GhostButton>
           <PrimaryButton onClick={() => void save()} disabled={busy}>{busy ? "Saving…" : changed ? "Save" : "Done"}</PrimaryButton>
+          <span className="ml-1 hidden items-center gap-1 text-faint [@media(hover:hover)_and_(min-width:1024px)]:flex" aria-hidden>
+            <kbd className="rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium">{mac ? "⌘" : "Ctrl"}</kbd>
+            <kbd className="rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium">↵</kbd>
+          </span>
         </div>
       </footer>
     </Sheet>

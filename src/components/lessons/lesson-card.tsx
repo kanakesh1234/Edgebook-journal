@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { LessonsIcon } from "./lessons-icon";
 import { BookmarkIcon, CheckIcon, CommentIcon, HeartIcon } from "./lesson-icons";
 import { statusOf, type ReadEntry } from "./progress";
 import { byline, fmtShort } from "./format";
@@ -9,8 +11,6 @@ import type { LessonAction, LessonView } from "./types";
 interface Props {
   l: LessonView;
   entry?: ReadEntry;
-  /** "featured" is the single large card at the top of the unfiltered library. */
-  variant?: "grid" | "featured";
   selecting: boolean;
   picked: boolean;
   onPick: (id: string) => void;
@@ -23,26 +23,42 @@ interface Props {
  * comment count and a bookmark. Repost and discussion live on the lesson page.
  * The whole card is one stretched link (title), so it is a real, focusable anchor.
  */
-export function LessonCard({ l, entry, variant = "grid", selecting, picked, onPick, onAct }: Props) {
+export function LessonCard({ l, entry, selecting, picked, onPick, onAct }: Props) {
   const status = statusOf(entry);
   const pct = Math.round((entry?.p ?? 0) * 100);
   const dek = l.hook || l.subtitle || l.excerpt;
   const selectable = selecting && l.mine;
+  const [loaded, setLoaded] = useState(false);
+  const [broken, setBroken] = useState(false);
+  const hasCover = Boolean(l.cover) && !broken;
 
   return (
     <article
       className="lc"
-      data-variant={variant}
-      data-cover={l.cover ? "true" : "false"}
       data-picked={picked ? "true" : undefined}
       data-dim={selecting && !l.mine ? "true" : undefined}
     >
-      {l.cover && (
-        <div className="lc-media">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={l.cover} alt="" loading={variant === "featured" ? "eager" : "lazy"} decoding="async" />
-        </div>
-      )}
+      {/* Media is always rendered, so every card keeps the same silhouette. */}
+      <div className="lc-media" data-empty={hasCover ? undefined : "true"}>
+        {hasCover ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={(el) => {
+              if (el?.complete && el.naturalWidth > 0) setLoaded(true);
+            }}
+            src={l.cover ?? undefined}
+            alt=""
+            data-ready={loaded ? "true" : undefined}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onLoad={() => setLoaded(true)}
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <LessonsIcon className="h-8 w-8 opacity-70" />
+        )}
+      </div>
 
       <div className="lc-body">
         {l.repostedBy.length > 0 && <p className="lc-kicker">{l.repostedBy.join(", ")} reposted</p>}
@@ -85,7 +101,7 @@ export function LessonCard({ l, entry, variant = "grid", selecting, picked, onPi
           )}
         </h3>
 
-        {dek && <p className="lc-dek">{dek}</p>}
+        <p className="lc-dek">{dek}</p>
 
         {!selecting && (
           <div className="lc-foot">
@@ -132,11 +148,11 @@ export function LessonCard({ l, entry, variant = "grid", selecting, picked, onPi
   );
 }
 
-/** Placeholder with the same silhouette as a card, shown while the library loads. */
-export function LessonCardSkeleton({ withCover = true }: { withCover?: boolean }) {
+/** Placeholder with the exact silhouette of a card, shown while the library loads. */
+export function LessonCardSkeleton() {
   return (
-    <div className="lc lc-skel animate-pulse-soft" data-cover={withCover ? "true" : "false"} aria-hidden="true">
-      {withCover && <div className="lc-media" />}
+    <div className="lc lc-skel animate-pulse-soft" aria-hidden="true">
+      <div className="lc-media" />
       <div className="lc-body">
         <div className="h-3 w-2/5 rounded bg-ink/[0.07]" />
         <div className="mt-3.5 h-5 w-11/12 rounded bg-ink/[0.08]" />

@@ -154,10 +154,6 @@ export default function LessonsPage() {
     return reading[0] ?? null;
   }, [all, entries]);
 
-  // One featured lesson, only when the library is unfiltered and the newest lesson has a cover.
-  const featured = pristine && f.sort === "newest" && filtered.length >= 3 && filtered[0].cover && filtered[0].id !== resume?.id ? filtered[0] : null;
-  const rest = featured ? filtered.slice(1) : filtered;
-
   const allPicked = mine.length > 0 && mine.every((l) => picked.has(l.id));
   const canSelect = f.tab === "yours" && filtered.some((l) => l.mine);
 
@@ -251,9 +247,9 @@ export default function LessonsPage() {
       <div className={cn("lessons-toolbar sticky top-14 z-30 -mx-4 mt-3 px-4 py-2.5 sm:-mx-6 sm:px-6 lg:top-0 lg:mx-0 lg:px-0", stuck && "is-stuck")}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
           <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-2">
-            <label className="relative min-w-0 flex-1">
+            <label className="sf min-w-0 flex-1">
               <span className="sr-only">Search lessons</span>
-              <SearchIcon className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-faint" />
+              <SearchIcon className="h-[18px] w-[18px]" />
               <input
                 ref={inputRef}
                 value={f.query}
@@ -270,7 +266,6 @@ export default function LessonsPage() {
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="Search lessons"
-                className="h-10 w-full rounded-control border border-line bg-raised pl-10 pr-10 text-base text-ink transition-[border-color,box-shadow] duration-200 placeholder:text-faint hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10 sm:text-[15px]"
               />
               {f.query ? (
                 <button
@@ -280,12 +275,12 @@ export default function LessonsPage() {
                     patch({ query: "" });
                     inputRef.current?.focus();
                   }}
-                  className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-faint transition-colors hover:text-ink"
+                  className="sf-clear"
                 >
-                  <XIcon className="h-4 w-4" />
+                  <XIcon className="h-3 w-3" />
                 </button>
               ) : (
-                <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-line bg-canvas/60 px-1.5 py-0.5 font-mono text-[11px] text-faint lg:block">/</kbd>
+                <kbd className="sf-kbd" aria-hidden="true">/</kbd>
               )}
             </label>
 
@@ -296,15 +291,13 @@ export default function LessonsPage() {
               aria-expanded={filtersOpen}
               aria-label={activeFilters ? `Filters, ${activeFilters} active` : "Filters"}
               onClick={() => setFiltersOpen((o) => !o)}
-              className={cn(
-                "relative inline-flex h-10 w-10 shrink-0 items-center justify-center gap-2 rounded-control border bg-raised text-[14px] font-medium text-muted transition-colors duration-200 hover:text-ink sm:w-auto sm:px-3.5",
-                dirty ? "border-gold/50 text-gold-deep dark:text-gold" : "border-line hover:border-line-strong",
-              )}
+              className="sf-btn"
+              data-on={dirty ? "true" : undefined}
             >
               <SlidersIcon className="h-[18px] w-[18px]" />
               <span className="hidden sm:inline">Filter</span>
               {activeFilters > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-gold-strong px-1 text-[11px] font-semibold text-on-gold">{activeFilters}</span>
+                <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-gold-strong px-1 text-[11px] font-semibold text-on-gold">{activeFilters}</span>
               )}
             </button>
           </div>
@@ -347,9 +340,9 @@ export default function LessonsPage() {
         {loading && (
           <div className="lc-grid" aria-busy="true" aria-label="Loading lessons">
             <LessonCardSkeleton />
-            <LessonCardSkeleton withCover={false} />
             <LessonCardSkeleton />
-            <LessonCardSkeleton withCover={false} />
+            <LessonCardSkeleton />
+            <LessonCardSkeleton />
           </div>
         )}
 
@@ -428,8 +421,7 @@ export default function LessonsPage() {
 
         {!loading && filtered.length > 0 && (
           <div className="lc-grid">
-            {featured && <LessonCard l={featured} entry={entries[featured.id]} variant="featured" selecting={selecting} picked={picked.has(featured.id)} onPick={togglePick} onAct={act} />}
-            {rest.map((l) => (
+            {filtered.map((l) => (
               <LessonCard key={l.id} l={l} entry={entries[l.id]} selecting={selecting} picked={picked.has(l.id)} onPick={togglePick} onAct={act} />
             ))}
           </div>

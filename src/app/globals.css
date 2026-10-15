@@ -253,6 +253,14 @@ body {
   outline-offset: 2px;
 }
 
+/* Text entry draws its own field-level ring (border / ring / focus-within on the shell).
+   The global outline is an unlayered rule that beats Tailwind's `outline-none`, so without
+   this it boxes the bare <input> inside its rounded shell as a visible inner rectangle. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
 input,
 textarea,
 select,
