@@ -44,16 +44,26 @@ const planFor = (e: JournalEntry, plans: TradePlan[]) => plans.find((p) => p.id 
 function similarGroups(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]) {
   // Only trades dated up to today's plan, so a trade being logged right now never predicts itself.
   const past = entries.filter((e) => e.date <= d.date && e.pnl !== undefined);
-  const groups: { id: string; label: string; trades: JournalEntry[] }[] = [];
-  const add = (id: string, label: string, trades: JournalEntry[]) => { if (trades.length > 0) groups.push({ id, label, trades }); };
+  // `weak` groups (single rules) count for half as much in the odds, because they overlap with the bigger groups.
+  const groups: { id: string; label: string; trades: JournalEntry[]; weak?: boolean }[] = [];
+  const add = (id: string, label: string, trades: JournalEntry[], weak = false) => { if (trades.length > 0) groups.push({ id, label, trades, weak }); };
 
-  if (d.setupId) add("setup", `trades on your “${d.setupName ?? "this"}” setup`, past.filter((e) => e.setupId === d.setupId));
+  const sameName = (e: JournalEntry) => !e.setupId && !!e.setup && !!d.setupName && e.setup.trim().toLowerCase() === d.setupName.trim().toLowerCase();
+  if (d.setupId) add("setup", `trades on your “${d.setupName ?? "this"}” setup`, past.filter((e) => e.setupId === d.setupId || sameName(e)));
   if (d.emotion) add("emotion", `plans written while feeling ${d.emotion.toLowerCase()}`, past.filter((e) => planFor(e, plans)?.emotionalState === d.emotion));
 
   const withPlan = past.map((e) => ({ e, p: planFor(e, plans) })).filter((x): x is { e: JournalEntry; p: TradePlan } => !!x.p);
   const anySkipped = (p: TradePlan) => p.rules.some((r) => r.state !== "ready");
   if (d.skippedRules.length > 0) add("skipped", "trades where you skipped a setup rule", withPlan.filter((x) => x.p.rules.length > 0 && anySkipped(x.p)).map((x) => x.e));
   else if (d.confirmedRules.length > 0) add("allrules", "trades where you confirmed every rule", withPlan.filter((x) => x.p.rules.length > 0 && !anySkipped(x.p)).map((x) => x.e));
+  // One group per rule the trader ticked / left unticked: what happened on past trades where that same rule got the same answer.
+  if (d.setupId) {
+    const key = (t: string) => ruleText(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const sameSetup = withPlan.filter((x) => x.p.playbookId === d.setupId);
+    const byRule = (text: string, confirmed: boolean) => sameSetup.filter((x) => x.p.rules.some((r) => key(r.label) === key(text) && (r.state === "ready") === confirmed)).map((x) => x.e);
+    d.confirmedRules.filter(Boolean).slice(0, 6).forEach((t, i) => add(`rule-on-${i}`, `trades where you confirmed “${ruleText(t)}”`, byRule(t, true), true));
+    d.skippedRules.filter(Boolean).slice(0, 6).forEach((t, i) => add(`rule-off-${i}`, `trades where you skipped “${ruleText(t)}”`, byRule(t, false), true));
+  }
   if (d.news.length > 0) add("news", "trades planned on a news day", withPlan.filter((x) => (x.p.newsEvents?.length ?? 0) > 0).map((x) => x.e));
 
   // Position in the day: a trade after a loss earlier today behaves differently from a first trade.
@@ -73,7 +83,7 @@ export function buildOutlookFacts(d: PlanDraft, entries: JournalEntry[], plans: 
   const base = { n: past.length, winRate: wrOf(past), avgPnl: avgOf(past) };
   const factors: Factor[] = [];
   const related = new Map<string, JournalEntry>();
-  for (const g of groups) {
+  for (const g of groups.filter((x) => !x.weak)) {
     const w = wrOf(g.trades);
     factors.push({ id: g.id, label: g.label, n: g.trades.length, winRate: w, avgPnl: avgOf(g.trades), delta: w != null && base.winRate != null ? r2(w - base.winRate) : null });
     if (g.trades.length >= MIN) g.trades.forEach((t) => related.set(t.id, t));
@@ -125,10 +135,10 @@ export function localOutlook(f: OutlookFacts, d: PlanDraft): Outlook {
 
 export type WinOdds =
   | { status: "thin"; n: number; needed: number }
-  | { status: "ready"; /** 0–100 */ win: number; loss: number; n: number; confidence: "low" | "medium" | "high"; /** the closest-matching group of past trades, if any */ basis: { n: number; label: string } | null };
+  | { status: "ready"; /** 0–100 */ win: number; loss: number; n: number; confidence: "low" | "medium" | "high"; /** the closest-matching group of past trades, if any */ basis: { n: number; label: string; weak: boolean } | null };
 
 const MIN_HISTORY = 5;
-const PRIOR = 4; // how strongly a small group is pulled back toward the overall record
+const PRIOR = 2; // how strongly a small group is pulled back toward the overall record
 const logit = (p: number) => Math.log(p / (1 - p));
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
@@ -145,23 +155,23 @@ export function winOdds(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[
   if (decided.length < MIN_HISTORY) return { status: "thin", n: decided.length, needed: MIN_HISTORY };
 
   const wins = (t: JournalEntry[]) => t.filter((e) => e.pnl > 0).length;
-  const p0 = (wins(decided) + 1) / (decided.length + 2);
+  const p0 = (wins(decided) + 0.5) / (decided.length + 1); // Jeffreys smoothing: 2 wins from 2 trades is not "100%"
 
   let weight = 0, shift = 0;
-  const used: { n: number; label: string }[] = [];
+  const used: { n: number; label: string; weak: boolean }[] = [];
   for (const g of groups) {
     const t = g.trades.filter((e) => e.pnl !== 0);
     if (t.length < MIN) continue;
     const pg = (wins(t) + PRIOR * p0) / (t.length + PRIOR);
-    const w = Math.min(t.length, 10);
+    const w = Math.min(t.length, 10) * (g.weak ? 0.5 : 1);
     shift += w * (logit(pg) - logit(p0));
     weight += w;
-    used.push({ n: t.length, label: g.label });
+    used.push({ n: t.length, label: g.label, weak: !!g.weak });
   }
   const p = Math.min(0.95, Math.max(0.05, sigmoid(logit(p0) + (weight ? shift / weight : 0))));
   const win = Math.round(p * 100);
   const confidence = decided.length < 10 || used.length === 0 ? "low" : decided.length < 30 ? "medium" : "high";
   // The most specific evidence to quote: the group with the most trades.
-  const basis = used.sort((a, b) => b.n - a.n)[0] ?? null;
+  const basis = used.filter((u) => !u.weak).sort((a, b) => b.n - a.n)[0] ?? null;
   return { status: "ready", win, loss: 100 - win, n: decided.length, confidence, basis };
 }
