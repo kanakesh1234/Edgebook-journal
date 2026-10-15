@@ -6,7 +6,7 @@ import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
 import { currencySymbol, formatDateMedium, todayKey, weekdayLong } from "@/lib/format";
-import { dayLimitFor, dayTrades, riskFor } from "@/lib/risk";
+import { dayLimitFor } from "@/lib/risk";
 import { Modal } from "@/components/ui/modal";
 import { ShieldIcon } from "@/components/ui/icons";
 import { cn, uid } from "@/lib/utils";
@@ -234,14 +234,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const manualR = rr.trim() !== "" && Number.isFinite(Number(rr)) ? Number(rr) : null;
   // Functional update so press-and-hold repeats never read stale state.
   const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
-  // The day as it would stand if this trade were saved: the loss limit from the plan, measured against the real running P&L.
-  const tradeDay = tradeDate <= todayKey() ? tradeDate : todayKey();
-  const tradeRisk = useMemo(() => {
-    if (mode !== "manual" || !manualReady || !dayLimit || tradeDay !== today) return null; // a backdated trade is not part of today's budget
-    const others = entries.filter((e) => e.date === tradeDay && e.id !== createdId);
-    const mine = { pnl: pnlValue, date: tradeDay, entryTime: entryTime.trim() || undefined, createdAt: Number.MAX_SAFE_INTEGER } as JournalEntry;
-    return riskFor(dayLimit, dayTrades(tradeDay, [...others, mine]));
-  }, [mode, manualReady, dayLimit, tradeDay, today, entries, createdId, pnlValue, entryTime]);
   // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
   useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
   // Same latch for the stop & target question: once any price is typed it stays revealed.
@@ -649,14 +641,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </div>
                     <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
                   </div>
-
-                  <AnimatePresence initial={false}>
-                    {tradeRisk && (
-                      <Collapse key="trade-risk">
-                        <div className="pt-4"><RiskMeter risk={tradeRisk} currency={settings.currency} label="If you save this trade" mascot /></div>
-                      </Collapse>
-                    )}
-                  </AnimatePresence>
 
                   {(pnlDone || direction !== null) && (
                     <Reveal>
