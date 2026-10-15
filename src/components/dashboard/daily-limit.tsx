@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
+import { scopeToPrimary } from "@/lib/challenges";
 import { currencySymbol, formatMoney, todayKey } from "@/lib/format";
 import { dayTrades, deepestLoss, limitSuggestions, type DayRisk } from "@/lib/risk";
 import { RiskMeter } from "@/components/journal/risk-meter";
@@ -26,7 +27,7 @@ const cleanAmount = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [
 
 export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency: CurrencyCode }) {
   const entries = useApp((s) => s.entries);
-  const startingEquity = useApp((s) => s.settings.startingEquity);
+  const rawSettings = useApp((s) => s.settings);
   const sym = currencySymbol(currency);
   const reduce = useReducedMotion();
   // Same easing as the plan flow; with Reduce Motion the swap is a plain cross-fade.
@@ -45,8 +46,10 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
   const amount = value.trim() === "" ? NaN : Number(value);
   const ok = Number.isFinite(amount) && amount > 0;
   const bad = value.trim() !== "" && !ok;
-  const chips = useMemo(() => limitSuggestions(entries, startingEquity), [entries, startingEquity]);
-  const account = startingEquity > 0 ? startingEquity + entries.reduce((s, e) => s + e.pnl, 0) : 0;
+  // The account is the one Home shows: the primary challenge's starting balance plus ITS trades (not the global default).
+  const scoped = useMemo(() => scopeToPrimary(rawSettings, entries), [rawSettings, entries]);
+  const chips = useMemo(() => limitSuggestions(scoped.entries, scoped.settings.startingEquity), [scoped]);
+  const account = scoped.settings.startingEquity > 0 ? scoped.settings.startingEquity + scoped.entries.reduce((s, e) => s + e.pnl, 0) : 0;
   const downToday = useMemo(() => deepestLoss(dayTrades(today, entries)).used, [entries, today]);
 
   const commit = async () => {

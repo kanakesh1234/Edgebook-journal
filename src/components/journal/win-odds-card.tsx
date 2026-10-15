@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import type { JournalEntry, TradePlan } from "@/lib/types";
 import { winOddsNow, type PlanDraft, type WinOdds } from "@/lib/prediction";
@@ -9,8 +9,8 @@ import { cn } from "@/lib/utils";
 /**
  * Win probability — one glance, read mid-trade.
  *
- * A frosted-glass card with a progress ring (win share) and the two numbers that matter. It recomputes on every change to
- * the plan (a ticked rule, a different feeling) and the ring, the number and the ambient glow all glide to the new value.
+ * A frosted-glass card, one even white throughout, with a progress ring (win share) and the two numbers that matter. It recomputes on every
+ * change to the plan (a ticked rule, a different feeling) and the ring and numbers glide to the new value.
  * Everything is derived from the trader's own past trades — never the market.
  */
 const SPRING = { type: "spring", stiffness: 140, damping: 24, mass: 0.9 } as const;
@@ -46,10 +46,6 @@ export function WinOddsCard({ draft, entries, plans }: { draft: PlanDraft; entri
   const ready = odds.status === "ready";
   const win = ready ? odds.win : 0;
   const progress = ready ? win / 100 : odds.n / odds.needed;
-  const tone = !ready ? "gold" : win >= 55 ? "profit" : win <= 45 ? "loss" : "gold";
-  const prev = useRef(win);
-  const moved = ready && prev.current !== win;
-  useEffect(() => { prev.current = win; }, [win]);
 
   return (
     <section
@@ -58,24 +54,15 @@ export function WinOddsCard({ draft, entries, plans }: { draft: PlanDraft; entri
       className={cn(
         "relative isolate overflow-hidden rounded-[22px] border border-ink/[0.08] backdrop-blur-xl",
         // Frosted glass: a translucent wash, a bright top edge, and a soft lift.
-        "bg-gradient-to-b from-white/75 to-white/40 shadow-[inset_0_1px_0_rgb(255_255_255/0.85),0_14px_34px_-18px_rgb(60_45_20/0.35)]",
-        "dark:from-white/[0.07] dark:to-white/[0.02] dark:shadow-[inset_0_1px_0_rgb(255_255_255/0.09),0_14px_34px_-18px_rgb(0_0_0/0.7)]",
+        "bg-white/70 shadow-[inset_0_1px_0_rgb(255_255_255/0.9),0_10px_28px_-18px_rgb(60_45_20/0.28)]",
+        "dark:bg-white/[0.05] dark:shadow-[inset_0_1px_0_rgb(255_255_255/0.09),0_10px_28px_-18px_rgb(0_0_0/0.7)]",
       )}
     >
-      {/* Ambient glow behind the glass; its colour follows the result. */}
-      <motion.span
-        aria-hidden
-        className={cn("pointer-events-none absolute -left-8 -top-12 -z-10 h-48 w-48 rounded-full blur-3xl transition-colors duration-700", tone === "profit" ? "bg-profit" : tone === "loss" ? "bg-loss" : "bg-gold-strong")}
-        initial={false}
-        animate={{ opacity: 0.2, scale: moved && !reduce ? 1.12 : 1 }}
-        transition={{ duration: 0.6 }}
-      />
-
       <div className="flex items-center gap-4 px-5 py-4">
         {/* Ring */}
         <div className="relative shrink-0" style={{ width: SIZE, height: SIZE }}>
           <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="-rotate-90" aria-hidden>
-            <circle cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" strokeWidth={STROKE} className={ready ? "stroke-loss/25" : "stroke-ink/[0.08]"} />
+            <circle cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" strokeWidth={STROKE} className="stroke-ink/[0.08]" />
             <motion.circle
               cx={SIZE / 2} cy={SIZE / 2} r={R} fill="none" strokeWidth={STROKE} strokeLinecap="round"
               className={ready ? "stroke-profit" : "stroke-gold-strong"}
@@ -99,8 +86,8 @@ export function WinOddsCard({ draft, entries, plans }: { draft: PlanDraft; entri
           {ready ? (
             <>
               <p className="mt-1.5 flex items-center gap-4 text-[15px] font-semibold tabular-nums">
-                <span className="inline-flex items-center gap-1.5 text-profit"><span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />Win <Count value={win} />%</span>
-                <span className="inline-flex items-center gap-1.5 text-loss"><span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />Loss <Count value={100 - win} />%</span>
+                <span className="inline-flex items-center gap-1.5 text-profit"><span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden /><span>Win <Count value={win} />%</span></span>
+                <span className="inline-flex items-center gap-1.5 text-loss"><span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden /><span>Loss <Count value={100 - win} />%</span></span>
               </p>
               <p className="mt-1.5 flex items-center gap-2 text-[12.5px] text-muted">
                 <Strength level={CONF[odds.confidence].n} />
