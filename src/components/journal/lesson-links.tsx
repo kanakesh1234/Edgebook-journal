@@ -155,7 +155,7 @@ const GhostButton = ({ children, ...p }: React.ButtonHTMLAttributes<HTMLButtonEl
  * The one sheet used by every flow here. A centred card on desktop; a bottom sheet on touch screens that
  * can be dragged down to dismiss. Renders on <body> above the trade sheet (z-70).
  */
-function Sheet({ open, onClose, label, wide, size, fixed, children }: { open: boolean; onClose: () => void; label: string; wide?: boolean; size?: "md"; fixed?: boolean; children: ReactNode }) {
+function Sheet({ open, onClose, label, wide, size, fixed, children }: { open: boolean; onClose: () => void; label: string; wide?: boolean; size?: "md" | "lg"; fixed?: boolean; children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
   const drag = useDragControls();
   useEffect(() => setMounted(true), []);
@@ -188,8 +188,8 @@ function Sheet({ open, onClose, label, wide, size, fixed, children }: { open: bo
             className={cn(
               "relative flex max-h-[88dvh] w-full flex-col overflow-hidden rounded-t-[26px] bg-surface pb-[env(safe-area-inset-bottom)] sm:max-h-[min(82dvh,720px)] sm:rounded-[26px] sm:pb-0",
               "shadow-[0_48px_120px_-28px_rgb(0_0_0/0.5),0_12px_32px_-14px_rgb(0_0_0/0.22),0_0_0_0.5px_rgb(0_0_0/0.16),inset_0_0.5px_0_rgb(255_255_255/0.55)] dark:shadow-[0_48px_120px_-28px_rgb(0_0_0/0.8),0_0_0_0.5px_rgb(255_255_255/0.14),inset_0_0.5px_0_rgb(255_255_255/0.08)]",
-              wide ? "sm:max-w-[720px]" : size === "md" ? "sm:max-w-[600px]" : "sm:max-w-[520px]",
-              fixed && "sm:h-[min(82dvh,680px)]", // pickers keep one height on desktop, so filtering never makes the window jump
+              wide ? "sm:max-w-[720px]" : size === "lg" ? "sm:max-w-[780px]" : size === "md" ? "sm:max-w-[600px]" : "sm:max-w-[520px]",
+              fixed && "sm:h-[min(84dvh,720px)]", // pickers keep one height on desktop, so filtering never makes the window jump
             )}
           >
             <div onPointerDown={(e) => drag.start(e)} className="flex h-6 shrink-0 cursor-grab touch-none items-center justify-center sm:hidden" aria-hidden>
@@ -483,6 +483,10 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
   const net = useMemo(() => entries.reduce((n, e) => (sel.has(e.id) ? n + e.pnl : n), 0), [entries, sel]);
   const allShown = list.length > 0 && list.every((e) => sel.has(e.id));
   const narrowed = !!query.trim() || filter !== "all";
+  const shownWins = useMemo(() => list.filter((e) => e.pnl > 0).length, [list]);
+  const shownLosses = useMemo(() => list.filter((e) => e.pnl < 0).length, [list]);
+  const selWins = useMemo(() => entries.filter((e) => sel.has(e.id) && e.pnl > 0).length, [entries, sel]);
+  const selLosses = useMemo(() => entries.filter((e) => sel.has(e.id) && e.pnl < 0).length, [entries, sel]);
 
   const toggle = (id: string, range = false) => {
     haptic.selection();
@@ -533,16 +537,22 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
   const focusFirst = () => listRef.current?.querySelector<HTMLButtonElement>('[role="option"] > button')?.focus();
 
   return (
-    <Sheet open={open} onClose={onClose} label="Link trades" size="md" fixed>
+    <Sheet open={open} onClose={onClose} label="Link trades" size="lg" fixed>
       <SheetHeader title="Link trades" subtitle={lessonTitle ? `to “${lessonTitle}”` : undefined} onClose={onClose} />
       {entries.length > 0 && (
         <>
-          <div className="flex shrink-0 flex-col gap-2.5 px-5 pb-3 sm:px-6">
-            <SearchField value={query} onChange={setQuery} placeholder="Search symbol, setup or date" autoFocus={open} inputRef={searchRef} onArrowDown={focusFirst} />
-            <Segmented id="trade-filter" tabs={tabs} value={filter} onChange={pickFilter} />
+          <div className="flex shrink-0 flex-col gap-2.5 px-5 pb-3 sm:flex-row sm:items-center sm:gap-3 sm:px-7">
+            <div className="min-w-0 sm:flex-1">
+              <SearchField value={query} onChange={setQuery} placeholder="Search symbol, setup or date" autoFocus={open} inputRef={searchRef} onArrowDown={focusFirst} />
+            </div>
+            <div className="sm:w-[348px] sm:shrink-0"><Segmented id="trade-filter" tabs={tabs} value={filter} onChange={pickFilter} /></div>
           </div>
-          <div className="flex shrink-0 items-center justify-between px-5 pb-2 text-[12.5px] text-muted sm:px-6">
-            <p className="num" aria-live="polite">{list.length} {list.length === 1 ? "trade" : "trades"}</p>
+          <div className="flex shrink-0 items-center justify-between gap-4 px-5 pb-2 text-[12.5px] text-muted sm:px-7">
+            <p className="num min-w-0 truncate" aria-live="polite">
+              {list.length} {list.length === 1 ? "trade" : "trades"}
+              <span className="hidden sm:inline"> · <span className="text-profit">{shownWins} {shownWins === 1 ? "win" : "wins"}</span> · <span className="text-loss">{shownLosses} {shownLosses === 1 ? "loss" : "losses"}</span></span>
+            </p>
+            <p className="ml-auto hidden items-center gap-1.5 text-faint [@media(hover:hover)_and_(min-width:1024px)]:flex" aria-hidden><kbd className="lt-key">⇧</kbd>click to select a range</p>
             {list.length > 0 && (
               <button type="button" onClick={() => setShown(!allShown)} className="-mr-2 h-7 rounded-full px-2.5 font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 active:scale-95 focus-visible:ring-2 focus-visible:ring-gold-strong/50">
                 {allShown ? (narrowed ? "Deselect these" : "Clear") : (narrowed ? "Select these" : "Select all")}
@@ -568,8 +578,8 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
           <div role="listbox" aria-multiselectable aria-label="Trades" onKeyDown={(e) => moveFocus(e, () => searchRef.current?.focus())}>
             {groups.map((g) => (
               <div key={g.key} role="group" aria-label={g.label}>
-                <p className="lt-head sticky top-0 z-[1] px-6 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint sm:px-7">{g.label}</p>
-                <div className="px-3">
+                <p className="lt-head sticky top-0 z-[1] px-6 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint sm:px-8">{g.label}</p>
+                <div className="px-3 sm:px-4">
                   {g.items.map((e) => {
                     const on = sel.has(e.id);
                     const win = e.pnl > 0, loss = e.pnl < 0;
@@ -584,9 +594,14 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">{tradeTitle(e)}</span>
-                            <span className="mt-px block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup ? e.setup.toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : ""].filter(Boolean).join(" · ")}</span>
+                            <span className="mt-px block truncate text-[12.5px] text-muted">
+                              {dayShort(e.date)}{e.entryTime ? ` · ${e.entryTime}` : ""}
+                              {e.setup && <span className="sm:hidden"> · {e.setup}</span>}
+                            </span>
                           </span>
-                          <span className={cn("kpi shrink-0 text-right text-[14.5px] font-semibold tabular-nums tracking-[-0.01em]", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
+                          {e.setup && <span className="hidden max-w-[168px] shrink-0 truncate rounded-full bg-ink/[0.05] px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.05em] text-muted sm:inline-block">{e.setup}</span>}
+                          <span className={cn("num hidden w-[54px] shrink-0 text-right text-[12.5px] tabular-nums sm:block", e.rr == null ? "text-faint" : tone(e.rr))}>{e.rr == null ? "—" : `${e.rr > 0 ? "+" : ""}${e.rr.toFixed(1)}R`}</span>
+                          <span className={cn("kpi w-[92px] shrink-0 text-right text-[14.5px] font-semibold tabular-nums tracking-[-0.01em] sm:w-[96px]", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
                           <Tick on={on} />
                         </button>
                       </div>
@@ -599,11 +614,13 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
         )}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft bg-surface px-4 py-3 sm:px-5">
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft bg-surface px-4 py-3 sm:px-6">
         <div className="num min-w-0 pl-1 leading-tight" aria-live="polite">
           <p className="truncate text-[13.5px] font-medium text-ink">{sel.size === 0 ? "None linked" : `${sel.size} linked`}</p>
           {sel.size > 0 && (
-            <p className="mt-0.5 truncate text-[12px] text-muted">Net <span className={cn("font-semibold tabular-nums", tone(net))}>{formatSignedMoney(net, currency)}</span></p>
+            <p className="mt-0.5 truncate text-[12px] text-muted">
+              <span className="hidden sm:inline">{selWins}W · {selLosses}L · </span>Net <span className={cn("font-semibold tabular-nums", tone(net))}>{formatSignedMoney(net, currency)}</span>
+            </p>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
