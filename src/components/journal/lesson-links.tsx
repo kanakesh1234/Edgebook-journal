@@ -29,6 +29,7 @@ import { IconButton, SPRING } from "./journal-ui";
 import { dayShort, tradeTitle } from "./journal-model";
 import { cn } from "@/lib/utils";
 import "@/components/lessons/lessons.css";
+import "./lesson-links.css";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
 
@@ -73,7 +74,7 @@ function SearchField({ value, onChange, placeholder, autoFocus, inputRef, onArro
     return () => clearTimeout(t);
   }, [autoFocus]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <label className="sf" style={{ height: 36 }}>
+    <label className="sf sf-soft" style={{ height: 36 }}>
       <Sym name="search" className="h-4 w-4 shrink-0" />
       <input
         ref={ref} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder}
@@ -104,18 +105,28 @@ function moveFocus(e: React.KeyboardEvent<HTMLElement>, onTop?: () => void) {
   else { rows[n].focus(); rows[n].scrollIntoView({ block: "nearest" }); }
 }
 
-function Segmented<T extends string>({ id, tabs, value, onChange }: { id: string; tabs: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+function Segmented<T extends string>({ id, tabs, value, onChange }: { id: string; tabs: { id: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <div role="tablist" className="grid h-8 auto-cols-fr grid-flow-col rounded-[10px] bg-ink/[0.06] p-0.5">
+    <div role="tablist" className="seg grid h-8 w-full auto-cols-fr grid-flow-col rounded-[10px] bg-ink/[0.06] p-0.5">
       {tabs.map((t) => {
         const on = value === t.id;
         return (
           <button
             key={t.id} type="button" role="tab" aria-selected={on} onClick={() => { haptic.selection(); onChange(t.id); }}
-            className={cn("relative rounded-[8px] text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "text-ink" : "text-muted hover:text-ink")}
+            className={cn("relative flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-[8px] px-2 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "text-ink" : "text-muted hover:text-ink")}
           >
             {on && <motion.span layoutId={id} transition={SPRING} className="absolute inset-0 rounded-[8px] bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.14),0_0_0_0.5px_rgb(0_0_0/0.06)]" />}
-            <span className="relative">{t.label}</span>
+            <span className="relative truncate">{t.label}</span>
+            <AnimatePresence initial={false}>
+              {!!t.count && (
+                <motion.span
+                  key="n" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.1 } }} transition={SPRING}
+                  className="num relative grid h-[17px] min-w-[17px] place-items-center rounded-full bg-gold-strong px-1 text-[11px] font-semibold leading-none text-on-gold"
+                >
+                  {t.count}
+                </motion.span>
+              )}
+            </AnimatePresence>
           </button>
         );
       })}
@@ -422,52 +433,72 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
   const entries = useApp((s) => s.entries);
   const currency = useApp((s) => s.settings.currency);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  // `pinned` is state (not a ref) so the list re-sorts the moment the sheet opens; a ref left the first open stale.
+  const [pinned, setPinned] = useState<Set<string>>(new Set());
+  // Ids shown under the "Selected" tab — frozen when the tab opens, so un-ticking a row doesn't make it vanish under your finger.
+  const [frozen, setFrozen] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TradeFilter>("all");
   const [busy, setBusy] = useState(false);
   const [mac, setMac] = useState(false);
-  const initial = useRef<Set<string>>(new Set());
+  const [scrolled, setScrolled] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const anchor = useRef<string | null>(null);
 
   useEffect(() => { setMac(/mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)); }, []);
 
   useEffect(() => {
     if (!open) return;
     const cur = new Set(useApp.getState().entries.filter((e) => e.lessonIds?.includes(lessonId)).map((e) => e.id));
-    initial.current = cur;
-    setSel(new Set(cur)); setQuery(""); setFilter("all"); setBusy(false);
+    setPinned(cur); setSel(new Set(cur)); setFrozen(new Set());
+    setQuery(""); setFilter("all"); setBusy(false); setScrolled(false); anchor.current = null;
   }, [open, lessonId]);
+
+  const pickFilter = (f: TradeFilter) => { if (f === "selected") setFrozen(new Set(sel)); setFilter(f); listRef.current?.scrollTo({ top: 0 }); };
 
   // Matching trades, newest first. Trades already linked to this lesson are pinned to the top.
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...entries]
-      .filter((e) => !q || [e.instrument, e.direction ?? "", e.setup, e.date, e.notes].some((x) => (x ?? "").toLowerCase().includes(q)))
-      .filter((e) => (filter === "wins" ? e.pnl > 0 : filter === "losses" ? e.pnl < 0 : filter === "selected" ? sel.has(e.id) : true))
-      .sort((a, b) => Number(initial.current.has(b.id)) - Number(initial.current.has(a.id)) || b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, query, filter, open, filter === "selected" ? sel : null]);
+      .filter((e) => !q || [e.instrument, e.direction ?? "", e.setup, e.date, dayShort(e.date), e.notes].some((x) => (x ?? "").toLowerCase().includes(q)))
+      .filter((e) => (filter === "wins" ? e.pnl > 0 : filter === "losses" ? e.pnl < 0 : filter === "selected" ? frozen.has(e.id) : true))
+      .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) || b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  }, [entries, query, filter, pinned, frozen]);
 
   // "Linked" first, then one group per month.
   const groups = useMemo(() => {
     const out: { key: string; label: string; items: JournalEntry[] }[] = [];
     for (const e of list) {
-      const linked = initial.current.has(e.id);
+      const linked = pinned.has(e.id);
       const key = linked ? "linked" : monthLabel(e.date);
       const g = out[out.length - 1];
       if (g && g.key === key) g.items.push(e);
       else out.push({ key, label: linked ? "Linked to this lesson" : key, items: [e] });
     }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list, open]);
+  }, [list, pinned]);
 
-  const changed = sel.size !== initial.current.size || [...sel].some((id) => !initial.current.has(id));
+  const changed = sel.size !== pinned.size || [...sel].some((id) => !pinned.has(id));
   const net = useMemo(() => entries.reduce((n, e) => (sel.has(e.id) ? n + e.pnl : n), 0), [entries, sel]);
   const allShown = list.length > 0 && list.every((e) => sel.has(e.id));
+  const narrowed = !!query.trim() || filter !== "all";
 
-  const toggle = (id: string) => { haptic.selection(); setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
+  const toggle = (id: string, range = false) => {
+    haptic.selection();
+    setSel((s) => {
+      const n = new Set(s);
+      const on = !n.has(id);
+      // Shift-click selects (or clears) everything between the last row you touched and this one.
+      if (range && anchor.current) {
+        const a = list.findIndex((e) => e.id === anchor.current), b = list.findIndex((e) => e.id === id);
+        if (a !== -1 && b !== -1) { for (const e of list.slice(Math.min(a, b), Math.max(a, b) + 1)) { if (on) n.add(e.id); else n.delete(e.id); } return n; }
+      }
+      if (on) n.add(id); else n.delete(id);
+      return n;
+    });
+    anchor.current = id;
+  };
   const setShown = (on: boolean) => { haptic.selection(); setSel((s) => { const n = new Set(s); for (const e of list) { if (on) n.add(e.id); else n.delete(e.id); } return n; }); };
 
   const save = async () => {
@@ -495,9 +526,9 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
     return () => window.removeEventListener("keydown", key);
   }, [open]);
 
-  const tabs: { id: TradeFilter; label: string }[] = [
+  const tabs: { id: TradeFilter; label: string; count?: number }[] = [
     { id: "all", label: "All" }, { id: "wins", label: "Wins" }, { id: "losses", label: "Losses" },
-    { id: "selected", label: sel.size ? `Selected · ${sel.size}` : "Selected" },
+    { id: "selected", label: "Selected", count: sel.size },
   ];
   const focusFirst = () => listRef.current?.querySelector<HTMLButtonElement>('[role="option"] > button')?.focus();
 
@@ -506,54 +537,56 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
       <SheetHeader title="Link trades" subtitle={lessonTitle ? `to “${lessonTitle}”` : undefined} onClose={onClose} />
       {entries.length > 0 && (
         <>
-          <div className="flex shrink-0 flex-col gap-2.5 px-5 pb-3 sm:flex-row sm:items-center sm:gap-3 sm:px-6">
-            <div className="min-w-0 sm:flex-1">
-              <SearchField value={query} onChange={setQuery} placeholder="Search by symbol, setup or date" autoFocus={open} inputRef={searchRef} onArrowDown={focusFirst} />
-            </div>
-            <div className="sm:w-[310px] sm:shrink-0"><Segmented id="trade-filter" tabs={tabs} value={filter} onChange={setFilter} /></div>
+          <div className="flex shrink-0 flex-col gap-2.5 px-5 pb-3 sm:px-6">
+            <SearchField value={query} onChange={setQuery} placeholder="Search symbol, setup or date" autoFocus={open} inputRef={searchRef} onArrowDown={focusFirst} />
+            <Segmented id="trade-filter" tabs={tabs} value={filter} onChange={pickFilter} />
           </div>
           <div className="flex shrink-0 items-center justify-between px-5 pb-2 text-[12.5px] text-muted sm:px-6">
             <p className="num" aria-live="polite">{list.length} {list.length === 1 ? "trade" : "trades"}</p>
             {list.length > 0 && (
               <button type="button" onClick={() => setShown(!allShown)} className="-mr-2 h-7 rounded-full px-2.5 font-medium text-gold outline-none transition-[background-color,transform] hover:bg-gold/10 active:scale-95 focus-visible:ring-2 focus-visible:ring-gold-strong/50">
-                {allShown ? "Clear" : "Select all"}
+                {allShown ? (narrowed ? "Deselect these" : "Clear") : (narrowed ? "Select these" : "Select all")}
               </button>
             )}
           </div>
         </>
       )}
 
-      <div ref={listRef} className="min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t border-line-soft pb-2 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]">
+      <div
+        ref={listRef} onScroll={(e) => { const v = e.currentTarget.scrollTop > 2; if (v !== scrolled) setScrolled(v); }}
+        className={cn("lt-list min-h-[220px] flex-1 overflow-y-auto overscroll-contain border-t pb-3 transition-[border-color] duration-200 [scrollbar-width:thin] [scrollbar-color:rgb(128_128_128/0.35)_transparent]", scrolled ? "border-line" : "border-line-soft")}
+      >
         {entries.length === 0 ? (
           <Empty icon="tray" title="No trades yet" body="Log a trade in your journal, then link it to this lesson." />
         ) : list.length === 0 ? (
           <Empty
             icon="search" title="Nothing found"
             body={filter === "selected" ? "Tick a trade to see it here." : query ? "Try another symbol, setup or date." : "No trades in this view."}
-            action={(query || filter !== "all") ? <GhostButton onClick={() => { setQuery(""); setFilter("all"); }}>Show all trades</GhostButton> : undefined}
+            action={narrowed ? <GhostButton onClick={() => { setQuery(""); pickFilter("all"); }}>Show all trades</GhostButton> : undefined}
           />
         ) : (
           <div role="listbox" aria-multiselectable aria-label="Trades" onKeyDown={(e) => moveFocus(e, () => searchRef.current?.focus())}>
             {groups.map((g) => (
               <div key={g.key} role="group" aria-label={g.label}>
-                <p className="sticky top-0 z-[1] bg-surface/85 px-6 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint backdrop-blur-md sm:px-7">{g.label}</p>
+                <p className="lt-head sticky top-0 z-[1] px-6 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint sm:px-7">{g.label}</p>
                 <div className="px-3">
                   {g.items.map((e) => {
                     const on = sel.has(e.id);
+                    const win = e.pnl > 0, loss = e.pnl < 0;
                     return (
                       <div key={e.id} role="option" aria-selected={on}>
                         <button
-                          type="button" onClick={() => toggle(e.id)}
-                          className={cn("flex min-h-[56px] w-full scroll-mt-9 items-center gap-3.5 rounded-[14px] px-3 py-2 text-left outline-none transition-[background-color,transform] duration-150 active:scale-[0.995] focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "bg-gold/[0.10]" : "hover:bg-ink/[0.04] active:bg-ink/[0.07]")}
+                          type="button" onClick={(ev) => toggle(e.id, ev.shiftKey)}
+                          className={cn("lt-row flex min-h-[58px] w-full scroll-mt-9 items-center gap-3.5 rounded-[14px] px-3 py-2 text-left outline-none transition-[background-color,transform] duration-150 active:scale-[0.995] focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "bg-gold/[0.10]" : "hover:bg-ink/[0.04] active:bg-ink/[0.07]")}
                         >
-                          <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-[11px] bg-ink/[0.05]", tone(e.pnl))}>
-                            <Sym name={e.direction === "short" ? "arrowDownRight" : "arrowUpRight"} className="h-5 w-5" />
+                          <span aria-hidden className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-[11px] shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.06)]", win ? "bg-profit/[0.12] text-profit" : loss ? "bg-loss/[0.12] text-loss" : "bg-ink/[0.05] text-muted")}>
+                            <Sym name={e.direction === "short" ? "arrowDownRight" : "arrowUpRight"} className="h-[18px] w-[18px]" strokeWidth={2} />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[15px] font-medium capitalize tracking-[-0.01em] text-ink">{tradeTitle(e)}</span>
-                            <span className="mt-px block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup].filter(Boolean).join(" · ")}</span>
+                            <span className="mt-px block truncate text-[12.5px] text-muted">{[dayShort(e.date), e.setup ? e.setup.toLowerCase().replace(/^\w/, (c) => c.toUpperCase()) : ""].filter(Boolean).join(" · ")}</span>
                           </span>
-                          <span className={cn("kpi w-[92px] shrink-0 text-right text-[14px] tabular-nums", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
+                          <span className={cn("kpi shrink-0 text-right text-[14.5px] font-semibold tabular-nums tracking-[-0.01em]", tone(e.pnl))}>{formatSignedMoney(e.pnl, currency)}</span>
                           <Tick on={on} />
                         </button>
                       </div>
@@ -566,17 +599,19 @@ export function TradePicker({ open, lessonId, lessonTitle, onClose }: { open: bo
         )}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft px-4 py-3 sm:px-5">
-        <p className="num min-w-0 truncate pl-1 text-[13px] text-muted" aria-live="polite">
-          {sel.size === 0 ? "None linked" : `${sel.size} linked`}
-          {sel.size > 0 && <span className="hidden sm:inline"> · Net <span className={cn("font-medium", tone(net))}>{formatSignedMoney(net, currency)}</span></span>}
-        </p>
+      <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-line-soft bg-surface px-4 py-3 sm:px-5">
+        <div className="num min-w-0 pl-1 leading-tight" aria-live="polite">
+          <p className="truncate text-[13.5px] font-medium text-ink">{sel.size === 0 ? "None linked" : `${sel.size} linked`}</p>
+          {sel.size > 0 && (
+            <p className="mt-0.5 truncate text-[12px] text-muted">Net <span className={cn("font-semibold tabular-nums", tone(net))}>{formatSignedMoney(net, currency)}</span></p>
+          )}
+        </div>
         <div className="flex shrink-0 items-center gap-1">
           <GhostButton onClick={onClose}>Cancel</GhostButton>
           <PrimaryButton onClick={() => void save()} disabled={busy}>{busy ? "Saving…" : changed ? "Save" : "Done"}</PrimaryButton>
-          <span className="ml-1 hidden items-center gap-1 text-faint [@media(hover:hover)_and_(min-width:1024px)]:flex" aria-hidden>
-            <kbd className="rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium">{mac ? "⌘" : "Ctrl"}</kbd>
-            <kbd className="rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium">↵</kbd>
+          <span className="ml-1.5 hidden items-center gap-1 [@media(hover:hover)_and_(min-width:1024px)]:flex" aria-hidden>
+            <kbd className="lt-key">{mac ? "⌘" : "Ctrl"}</kbd>
+            <kbd className="lt-key">↵</kbd>
           </span>
         </div>
       </footer>
