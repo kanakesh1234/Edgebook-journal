@@ -5,6 +5,7 @@ import type { CurrencyCode } from "@/lib/types";
 import { formatMoney, formatSignedMoney } from "@/lib/format";
 import { RISK_COPY, type DayRisk } from "@/lib/risk";
 import { cn } from "@/lib/utils";
+import { RiskCompanion } from "./risk-companion/companion";
 
 const TONE = {
   ok: { text: "text-profit", fill: "bg-profit", ring: "ring-profit/15", wash: "bg-profit/[0.06]" },
@@ -18,7 +19,7 @@ const TONE = {
  * The bar fills toward the limit and turns from green to gold to red; going past it is shown, not hidden.
  * `label` lets a screen say what the numbers are for (e.g. "If you save this trade").
  */
-export function RiskMeter({ risk, currency, label = "Daily loss limit", compact = false, className }: { risk: DayRisk; currency: CurrencyCode; label?: string; compact?: boolean; className?: string }) {
+export function RiskMeter({ risk, currency, label = "Daily loss limit", compact = false, mascot = false, className }: { risk: DayRisk; currency: CurrencyCode; label?: string; compact?: boolean; /** Show the animated companion reacting to this risk. */ mascot?: boolean; className?: string }) {
   const reduce = useReducedMotion();
   const t = TONE[risk.status];
   const fill = Math.min(1, risk.ratio);
@@ -27,6 +28,7 @@ export function RiskMeter({ risk, currency, label = "Daily loss limit", compact 
 
   return (
     <section aria-label={label} className={cn("rounded-[18px] ring-1 ring-inset", t.wash, t.ring, compact ? "px-4 py-3" : "px-4 py-4", className)}>
+      {mascot && <RiskCompanion risk={risk} className={cn("-mx-4 overflow-hidden rounded-t-[18px]", compact ? "-mt-3 mb-2" : "-mt-4 mb-2")} />}
       <div className="flex items-center justify-between gap-3">
         <p className="text-[12px] font-semibold uppercase tracking-[.1em] text-faint">{label}</p>
         <p role="status" className={cn("flex items-center gap-1.5 text-[12.5px] font-semibold", t.text)}>

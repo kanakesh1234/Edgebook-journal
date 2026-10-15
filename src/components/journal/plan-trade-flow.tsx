@@ -723,7 +723,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   <AnimatePresence initial={false}>
                     {tradeRisk && (
                       <Collapse key="trade-risk">
-                        <div className="pt-4"><RiskMeter risk={tradeRisk} currency={settings.currency} label="If you save this trade" /></div>
+                        <div className="pt-4"><RiskMeter risk={tradeRisk} currency={settings.currency} label="If you save this trade" mascot /></div>
                       </Collapse>
                     )}
                   </AnimatePresence>
