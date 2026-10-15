@@ -3,9 +3,9 @@
 /**
  * DailyLimit — "how much am I willing to lose today?", set ONCE per day, from Home.
  *
- *   not set  →  an input card + round-figure chips + "Set limit"
+ *   not locked →  an input card + round-figure chips + "Set limit"
  *   confirm  →  because it can't be changed afterwards, one calm confirmation step (no alarm styling)
- *   set      →  the live RiskMeter, with a quiet "locked for today" line
+ *   locked   →  the live RiskMeter, with a quiet "locked for today" line
  *
  * The plan flow no longer asks this question; it only reads the limit set here.
  */
@@ -33,7 +33,11 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
   const swap = { initial: reduce ? { opacity: 0 } : { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: reduce ? { opacity: 0 } : { opacity: 0, y: -6 }, transition: { duration: 0.22, ease: FLOW_EASE } };
   const today = todayKey();
 
-  const [value, setValue] = useState("");
+  // Locked only once the limit was confirmed here. A figure carried over from an older plan is offered as the starting
+  // amount but still has to be confirmed (and is then locked).
+  const locked = useApp((s) => !!s.settings.dayLimits?.[today]);
+  const carried = !locked && risk ? risk.limit : null;
+  const [value, setValue] = useState(carried ? String(carried) : "");
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +59,8 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
     finally { setSaving(false); setConfirming(false); }
   };
 
-  // Set: the live meter. Nothing to edit — the limit is locked until tomorrow.
-  if (risk) {
+  // Locked: the live meter. Nothing to edit — the limit stays until tomorrow.
+  if (locked && risk) {
     return (
       <div className="space-y-2">
         <RiskMeter risk={risk} currency={currency} label="Today's limit" compact />
@@ -69,7 +73,9 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
     <section aria-label="Set today's loss limit" className="space-y-3">
       <div>
         <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Today&apos;s loss limit</p>
-        <p className="mt-1.5 text-[13px] leading-snug text-muted">How much are you willing to lose today? You can set it once a day.</p>
+        <p className="mt-1.5 text-[13px] leading-snug text-muted">
+          {carried ? "From your earlier plan today. Confirm it to lock it in." : "How much are you willing to lose today? You can set it once a day."}
+        </p>
       </div>
 
       {/* Same card-as-input pattern as the plan flow: tap anywhere to type, the card shows focus. */}
