@@ -119,7 +119,7 @@ export function TodayPanel({
           <section className="p-5 @2xl:p-6" aria-label="Today's trades">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Today's trades</p>
-              <Link href="/journal" className="text-[12.5px] font-semibold text-gold hover:underline">
+              <Link href="/journal" className="inline-flex items-center text-[12.5px] font-semibold text-gold hover:underline pointer-coarse:min-h-11">
                 Journal →
               </Link>
             </div>

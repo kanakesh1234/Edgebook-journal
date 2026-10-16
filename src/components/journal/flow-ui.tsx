@@ -499,7 +499,7 @@ export function Segmented<T extends string>({ value, options, onChange, layoutId
   return (
     <div role="tablist" aria-label={label} className={cn("relative rounded-full p-1", fullWidth ? "grid w-full" : "inline-grid", glass.control, className)} style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => (
-        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (value !== o.id) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full font-medium transition-colors", compact ? "px-3.5 py-1 text-[13px]" : "px-5 py-1.5 text-[14px]", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
+        <button key={o.id} type="button" role="tab" aria-selected={value === o.id} onClick={() => { if (value !== o.id) haptic.selection(); onChange(o.id); }} className={cn("relative z-10 rounded-full font-medium transition-colors pointer-coarse:min-h-10", compact ? "px-3.5 py-1 text-[13px]" : "px-5 py-1.5 text-[14px]", value === o.id ? "text-ink" : "text-muted hover:text-ink")}>
           {value === o.id && <motion.span layoutId={layoutId} transition={{ type: "spring", stiffness: 500, damping: 36 }} className="absolute inset-0 -z-10 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
           {o.label}
         </button>

@@ -95,7 +95,7 @@ export function CalendarView({
               {challenges.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
-          <button onClick={() => navigate(-1)} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-raised text-muted hover:text-ink">
+          <button onClick={() => navigate(-1)} aria-label="Previous month" className="grid h-8 w-8 pointer-coarse:h-10 pointer-coarse:w-10 place-items-center rounded-lg border border-line bg-raised text-muted hover:text-ink">
             <ChevronLeftIcon className="h-4 w-4" />
           </button>
           <AnimatePresence mode="wait" initial={false}>
@@ -111,7 +111,7 @@ export function CalendarView({
               {monthLabel(view.year, view.month)}
             </motion.span>
           </AnimatePresence>
-          <button onClick={() => navigate(1)} aria-label="Next month" className="grid h-8 w-8 place-items-center rounded-lg border border-line bg-raised text-muted hover:text-ink">
+          <button onClick={() => navigate(1)} aria-label="Next month" className="grid h-8 w-8 pointer-coarse:h-10 pointer-coarse:w-10 place-items-center rounded-lg border border-line bg-raised text-muted hover:text-ink">
             <ChevronRightIcon className="h-4 w-4" />
           </button>
         </div>
@@ -172,7 +172,7 @@ export function CalendarView({
                   </span>
 
                   {trades > 0 && (
-                    <span className="hidden text-[9px] font-medium uppercase tracking-wide text-faint sm:block">
+                    <span className="hidden text-[10px] font-medium uppercase tracking-wide text-faint sm:block">
                       {trades} {trades === 1 ? "trade" : "trades"}
                     </span>
                   )}

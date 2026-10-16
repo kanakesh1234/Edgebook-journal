@@ -36,9 +36,11 @@ import { useUi } from "@/lib/ui-store";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
 import { LessonsIcon } from "@/components/lessons/lessons-icon";
+import { FeedIcon } from "@/components/feed/feed-icons";
 
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Home", short: "Home", icon: ChartLineIcon, blurb: "Equity, risk and today" },
+  { href: "/feed", label: "Feed", short: "Feed", icon: FeedIcon, blurb: "Swipe through charts, replays and lessons" },
   { href: "/lessons", label: "Lessons", short: "Lessons", icon: LessonsIcon, blurb: "Your written playbook" },
   { href: "/journal", label: "Journal", short: "Journal", icon: BookOpenIcon, blurb: "Every trade, reviewed" },
   { href: "/practice", label: "Practise", short: "Practise", icon: RouteIcon, blurb: "Daily reps and the Matrix" },
@@ -49,7 +51,7 @@ export const NAV_ITEMS = [
 type NavItem = (typeof NAV_ITEMS)[number];
 
 /** Phone tab bar shows the four daily destinations; the rest live in the menu sheet. */
-const TAB_HREFS = ["/dashboard", "/lessons", "/journal", "/practice"] as const;
+const TAB_HREFS = ["/dashboard", "/feed", "/journal", "/practice"] as const;
 const TAB_ITEMS = TAB_HREFS.map((h) => NAV_ITEMS.find((i) => i.href === h)!);
 const MORE_ITEMS = NAV_ITEMS.filter((i) => !(TAB_HREFS as readonly string[]).includes(i.href));
 
@@ -298,7 +300,7 @@ export function TabletRail() {
   return (
     <aside
       aria-label="Sidebar"
-      className="fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col items-center border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur md:flex xl:hidden"
+      className="fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col items-center border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto"
     >
       <Link href="/dashboard" aria-label="Edgebook dashboard" className="rounded-xl p-1">
         <LogoMark className="h-9 w-9" />
@@ -313,13 +315,13 @@ export function TabletRail() {
         <PlusIcon className="h-5 w-5" />
       </button>
 
-      <nav aria-label="Primary" className="no-scrollbar mt-4 flex w-full flex-1 flex-col gap-1 overflow-y-auto px-2">
+      <nav aria-label="Primary" className="no-scrollbar mt-4 flex w-full flex-1 flex-col gap-1 overflow-y-auto px-2 [@media(max-height:520px)]:flex-none [@media(max-height:520px)]:overflow-visible">
         {NAV_ITEMS.map((item) => (
           <RailLink key={item.href} item={item} active={isActive(pathname, item.href)} />
         ))}
       </nav>
 
-      <div className="flex flex-col items-center gap-2 border-t border-line px-2 pt-3">
+      <div className="flex flex-col items-center gap-2 border-t border-line px-2 pt-3 [@media(max-height:520px)]:mt-3">
         <ThemeToggle className="h-11 w-11 rounded-xl" />
         <SettingsGear />
         <SignOutButton className="h-11 w-11 rounded-xl" />
@@ -343,7 +345,7 @@ export function MobileTopBar({ title }: { title?: string }) {
   return (
     <>
       <header className="sticky top-0 z-40 flex h-[var(--topbar-h)] items-center justify-between border-b border-line bg-canvas/85 pl-[calc(1rem+var(--safe-left))] pr-[calc(0.75rem+var(--safe-right))] pt-[var(--safe-top)] backdrop-blur-xl md:hidden">
-        <Link href="/dashboard" aria-label="Edgebook dashboard" className="flex min-w-0 items-center gap-2.5">
+        <Link href="/dashboard" aria-label="Edgebook dashboard" className="flex h-11 min-w-0 items-center gap-2.5">
           <LogoMark className="h-7 w-7 shrink-0" />
           <h1 className="truncate font-display text-[17px] font-semibold tracking-[-0.01em] text-ink">{heading}</h1>
         </Link>
@@ -516,11 +518,11 @@ function TabLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-/** < md — Home · Lessons · ＋ · Journal · Practise. The primary action sits under the thumb. */
+/** < md — Home · Feed · ＋ · Journal · Practise. The primary action sits under the thumb. */
 export function BottomTabs() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
-  const [home, lessons, journal, practice] = TAB_ITEMS;
+  const [home, feed, journal, practice] = TAB_ITEMS;
 
   return (
     <nav
@@ -528,7 +530,7 @@ export function BottomTabs() {
       className="fixed inset-x-0 bottom-0 z-40 grid h-[var(--tabbar-h)] grid-cols-5 border-t border-line bg-surface/90 pb-[var(--safe-bottom)] pl-[var(--safe-left)] pr-[var(--safe-right)] backdrop-blur-xl md:hidden"
     >
       <TabLink item={home} active={isActive(pathname, home.href)} />
-      <TabLink item={lessons} active={isActive(pathname, lessons.href)} />
+      <TabLink item={feed} active={isActive(pathname, feed.href)} />
 
       <div className="relative flex items-start justify-center">
         <button

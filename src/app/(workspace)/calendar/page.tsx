@@ -409,7 +409,7 @@ function CalendarHeader({
           <button
             onClick={() => navigate(-1)}
             aria-label="Previous month"
-            className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-raised text-muted transition-colors hover:border-line-strong hover:text-ink active:scale-95"
+            className="grid h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11 place-items-center rounded-lg border border-line bg-raised text-muted transition-colors hover:border-line-strong hover:text-ink active:scale-95"
           >
             <ChevronLeftIcon className="h-4 w-4" />
           </button>
@@ -429,7 +429,7 @@ function CalendarHeader({
           <button
             onClick={() => navigate(1)}
             aria-label="Next month"
-            className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-raised text-muted transition-colors hover:border-line-strong hover:text-ink active:scale-95"
+            className="grid h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11 place-items-center rounded-lg border border-line bg-raised text-muted transition-colors hover:border-line-strong hover:text-ink active:scale-95"
           >
             <ChevronRightIcon className="h-4 w-4" />
           </button>

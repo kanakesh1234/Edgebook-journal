@@ -222,7 +222,9 @@ export function Minato() {
 
   useEffect(() => () => { if (peekTimer.current) clearTimeout(peekTimer.current); }, []);
 
-  const launcherVisible = open || peek || atEnd;
+  // The phone Feed uses the whole right edge for its action buttons, so the launcher stays tucked away there.
+  const feedPhone = pathname.startsWith("/feed") && typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  const launcherVisible = open || (!feedPhone && (peek || atEnd));
 
   // Escape closes the panel (keyboard users, and tablets with a keyboard).
   useEffect(() => {
@@ -323,7 +325,7 @@ export function Minato() {
       {/* Floating companion */}
       {/* Edge handle — the only trace of MINATO while the launcher is tucked away. */}
       <AnimatePresence>
-        {!launcherVisible && (
+        {!launcherVisible && !feedPhone && (
           <motion.button
             key="minato-handle"
             type="button"

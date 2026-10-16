@@ -18,7 +18,7 @@ export function IconButton({
     <button
       type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick}
       className={cn(
-        "relative grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-ink/75 outline-none transition-[background-color,transform,color] duration-150",
+        "relative grid h-8 w-8 shrink-0 place-items-center rounded-[9px] pointer-coarse:h-10 pointer-coarse:w-10 text-ink/75 outline-none transition-[background-color,transform,color] duration-150",
         "hover:bg-ink/[0.06] hover:text-ink active:scale-[0.94] active:bg-ink/[0.1] focus-visible:ring-2 focus-visible:ring-gold-strong/50 disabled:pointer-events-none disabled:opacity-30",
         active && "bg-ink/[0.08] text-ink", className,
       )}

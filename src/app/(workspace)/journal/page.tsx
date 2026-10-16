@@ -355,10 +355,10 @@ export default function JournalPage() {
                 <Sym name="chevronLeft" className="h-4 w-4" strokeWidth={2} />Back to {returnTo === "weekly" ? "weekly" : "monthly"} review
               </button>
             )}
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <h1 className="font-display text-[32px] font-semibold tracking-[-0.03em] text-ink sm:text-[36px]">{searching ? "Search" : title}</h1>
               {!returnTo && !activeSetup && !activeLessonId && !path && (
-                <div className="flex shrink-0 items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0 sm:flex-nowrap">
                   <Button variant="outline" size="sm" onClick={() => setLens({ kind: "weekly" })}><Sym name="calendar" className="mr-1.5 h-4 w-4" />Weekly review</Button>
                   <Button variant="outline" size="sm" onClick={() => setLens({ kind: "monthly" })}><Sym name="chart" className="mr-1.5 h-4 w-4" />Monthly review</Button>
                 </div>

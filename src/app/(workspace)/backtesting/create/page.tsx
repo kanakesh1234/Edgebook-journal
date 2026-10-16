@@ -137,7 +137,7 @@ function RangeCalendar({ from, to, anchored, max, onPick, jump }: { from: string
   const days = new Date(Date.UTC(view.y, view.m + 1, 0)).getUTCDate();
   const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
   const go = (delta: number) => setView((v) => { const d = new Date(Date.UTC(v.y, v.m + delta, 1)); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; });
-  const nav = "grid h-9 w-9 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink disabled:pointer-events-none disabled:opacity-30";
+  const nav = "grid h-9 w-9 pointer-coarse:h-11 pointer-coarse:w-11 place-items-center rounded-full text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink disabled:pointer-events-none disabled:opacity-30";
 
   return (
     <div className="rounded-[22px] border border-line bg-raised px-2.5 pb-3 pt-2.5 sm:px-4">
@@ -383,7 +383,7 @@ export default function CreateBacktestPage() {
                     type="button"
                     aria-pressed={on}
                     onClick={() => { haptic.selection(); applyPreset(pr.from); }}
-                    className={cn("inline-flex h-8 shrink-0 items-center rounded-full border px-3.5 text-[13px] font-medium transition-all duration-200 active:scale-[0.96]", on ? "border-gold/55 bg-gold/10 text-gold" : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
+                    className={cn("inline-flex h-8 pointer-coarse:h-10 shrink-0 items-center rounded-full border px-3.5 text-[13px] font-medium transition-all duration-200 active:scale-[0.96]", on ? "border-gold/55 bg-gold/10 text-gold" : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink")}
                   >
                     {pr.label}
                   </button>
