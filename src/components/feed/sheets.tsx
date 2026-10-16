@@ -134,7 +134,7 @@ export function ManageCollectionSheet({ collection, onClose, onDeleted }: { coll
       </form>
       <div style={{ display: "grid", gap: "0.5rem" }}>
         <p className="fd-help">Deleting a collection never deletes the trades, setups or lessons inside it.</p>
-        <button className="fd-linkbtn" style={{ justifySelf: "start", color: armed ? "#fff" : "var(--st-down)", background: armed ? "#c4545c" : undefined }}
+        <button className="fd-linkbtn" style={{ justifySelf: "start", color: armed ? "#fff" : "var(--loss)", background: armed ? "var(--loss)" : undefined }}
           onClick={() => { if (!armed) { setArmed(true); return; } if (collection) { del(collection.id); onDeleted(); } }}>
           {armed ? "Tap again to delete" : "Delete collection"}
         </button>
@@ -237,7 +237,7 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
           <p className="fd-help">Edgebook doesn’t include any songs. If you own a Telugu track — or have a licence to use it — you can add it here. Files stay in this browser only: they’re never uploaded or sent to Google Drive, so they won’t appear on your other devices.</p>
           <label className="fd-opt" style={{ cursor: "pointer" }}>
             <span><b>I own this audio or have a licence to use it</b></span>
-            <input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} style={{ width: 22, height: 22, accentColor: "#dcb872" }} />
+            <input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} style={{ width: 22, height: 22, accentColor: "var(--gold-strong)" }} />
           </label>
           <input className="fd-input" value={license} maxLength={200} onChange={(e) => setLicense(e.target.value)} placeholder="Licence or source note (optional)" aria-label="Licence or source note" />
           <input ref={file} type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac" hidden onChange={(e) => void onFile(e.target.files?.[0])} />

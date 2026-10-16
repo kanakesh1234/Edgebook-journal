@@ -48,6 +48,13 @@ Supabase is only an **advisory** layer in Edgebook (draft recovery, tab presence
 Using the app also generates activity. If it does pause, restore it from the dashboard within 90 days. Pro plan avoids pausing.
 **Security note:** `.env.local` in the zip you sent contains live keys. I didn't use or print them, but consider rotating them since the archive was shared.
 
+## Update 3 — Feed re-themed to match the site
+The first version used a fixed near-black palette and ignored the app's theme. The Feed is now built **only on the app's design tokens** (`--canvas`, `--surface`, `--raised`, `--line`, `--ink`, `--gold…`), so it follows light and dark exactly like every other screen, including a live theme switch while a replay is open (the chart reads the same tokens).
+- Cards are a hero panel + info block in the site's panel style (hairline border, soft shadow), with the site's frosted-glass pill controls, solid-gold primary buttons and Inter headings (no off-brand serif). Lessons without a cover and setups are designed posters, not text floating in empty space.
+- Desktop/tablet: a centred card column on the page (no dark frame) with a panel-style side column.
+- Accessibility: small labels use `--muted` (the `--faint` token measured 2.8:1 in light / 3.6:1 in dark on cards, below WCAG AA; now every text style on the Feed passes AA, apart from one decorative aria-hidden quote glyph). Landscape controls are 40 px.
+- **Fixes a regression from my previous zip:** on landscape phones the nav rail's "Add trade" button was squashed to 20 px tall (the rail's items shrank when I made it scrollable on short screens). Items now keep their size and the rail scrolls.
+
 ## Merge note (update 2)
 This build is based on **your newer upload (`ox-test_2.zip`)**, not the original. Of the files you changed, two also had small touch-target edits from me (`src/components/dashboard/today-panel.tsx`, `src/components/journal/flow-ui.tsx`); they were **three-way merged with no conflicts**, so your changes there are kept (your daily-limit / risk-companion work is untouched). Your other changed and added files are not in this zip and must not be replaced.
 Your `setDayLimit` / `settings.dayLimits` and the Feed's `settings.feed` both ride the same `updateSettings` path and don't interfere. Your new global rule hiding the outline on text inputs doesn't remove keyboard focus visibility in the Feed (inputs show a gold border; sliders and checkboxes are excluded from your rule).

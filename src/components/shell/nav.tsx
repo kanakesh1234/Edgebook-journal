@@ -300,7 +300,7 @@ export function TabletRail() {
   return (
     <aside
       aria-label="Sidebar"
-      className="fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col items-center border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto"
+      className="fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col items-center border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto [@media(max-height:520px)]:*:shrink-0"
     >
       <Link href="/dashboard" aria-label="Edgebook dashboard" className="rounded-xl p-1">
         <LogoMark className="h-9 w-9" />

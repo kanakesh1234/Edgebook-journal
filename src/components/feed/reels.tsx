@@ -76,7 +76,7 @@ function Frame({ props, rail, kind, children, label }: { props: ReelProps; rail:
 }
 
 const Skeleton = ({ text }: { text: string }) => (
-  <div className="fd-skel absolute inset-0 grid place-items-center text-[13px]" style={{ color: "var(--st-faint)" }} role="status"><span>{text}</span></div>
+  <div className="fd-skel absolute inset-0 grid place-items-center text-[13px]" style={{ color: "var(--faint)" }} role="status"><span>{text}</span></div>
 );
 
 /* -------------------------------- trade -------------------------------- */
@@ -258,18 +258,22 @@ export function SetupReel(props: ReelProps<SetupCard>) {
   const rules = (setup.rules ?? []).slice(0, 4);
   return (
     <Frame props={props} kind="Setup" label={`Setup: ${setup.name}`} rail={<Rail {...props} href="/lab#setups" openLabel="Playbook" />}>
-      <div className="fd-body">
-        <h3 className="fd-big">{setup.name}</h3>
-        {(setup.purpose || setup.strategy) && <p className="fd-quote fd-clamp2" style={{ WebkitLineClamp: 3 }}>{setup.purpose || setup.strategy}</p>}
-        {rules.length > 0 && (
-          <div><p className="fd-label mb-2">Your rules</p><ul className="fd-rules">{rules.map((r) => <li key={r.id}>{r.text}</li>)}</ul></div>
+      <div className="fd-hero" data-tone="gold" data-layout="spread">
+        {rules.length > 0 ? (
+          <div><p className="fd-label" style={{ marginBottom: "0.625rem" }}>Your rules</p><ul className="fd-rules">{rules.map((r) => <li key={r.id}>{r.text}</li>)}</ul></div>
+        ) : (
+          <p className="fd-quote">No rules written for this setup yet. Add them in the Trading Lab and they’ll show up here.</p>
         )}
         <div className="fd-stats" aria-label="Setup statistics">
           <div className="fd-stat"><b className="fd-num">{stats.trades}</b><span>trades</span></div>
           <div className="fd-stat"><b className="fd-num">{stats.winRate === null ? "—" : `${Math.round(stats.winRate * 100)}%`}</b><span>win rate</span></div>
           <div className="fd-stat"><b className="fd-num">{stats.avgR === null ? "—" : `${stats.avgR >= 0 ? "+" : "−"}${Math.abs(stats.avgR).toFixed(2)}R`}</b><span>avg R</span></div>
         </div>
-        {setup.minRR ? <p className="fd-help">Minimum reward-to-risk: {setup.minRR}R{setup.invalidation ? ` · Invalid if: ${setup.invalidation}` : ""}</p> : null}
+      </div>
+      <div className="fd-info">
+        <h3 className="fd-title">{setup.name}</h3>
+        {(setup.purpose || setup.strategy) && <p className="fd-sub fd-clamp2">{setup.purpose || setup.strategy}</p>}
+        {setup.minRR ? <p className="fd-sub">Minimum {setup.minRR}R{setup.invalidation ? ` · Invalid if: ${setup.invalidation}` : ""}</p> : null}
       </div>
     </Frame>
   );
@@ -282,6 +286,7 @@ export function LessonReel(props: ReelProps<LessonCard>) {
   const lessonOpened = useFeed((s) => s.lessonOpened);
   const [liked, setLiked] = useState(lesson.likedByMe);
   const [likes, setLikes] = useState(lesson.likes);
+  const [broken, setBroken] = useState(false);
   const busy = useRef(false);
   useEffect(() => { setLiked(lesson.likedByMe); setLikes(lesson.likes); }, [lesson.likedByMe, lesson.likes]);
 
@@ -295,16 +300,30 @@ export function LessonReel(props: ReelProps<LessonCard>) {
     busy.current = false;
   };
 
+  const hasCover = Boolean(lesson.cover) && !broken;
+  const pull = lesson.hook || lesson.excerpt;
+
   return (
     <Frame props={props} kind={community ? "Community" : "Lesson"} label={`Lesson: ${lesson.title}`}
       rail={<Rail {...props} href={`/lessons/${lesson.id}`} openLabel="Read" onOpen={() => lessonOpened(props.card.key)} />}>
-      {lesson.cover && props.near && <div className="fd-cover" aria-hidden><img src={lesson.cover} alt="" loading="lazy" decoding="async" draggable={false} /></div>}
-      <div className="fd-body">
-        <h3 className="fd-big">{lesson.title}</h3>
-        {lesson.subtitle && <p className="fd-sub" style={{ fontSize: "0.9375rem" }}>{lesson.subtitle}</p>}
-        {(lesson.hook || lesson.excerpt) && <p className="fd-quote fd-clamp2" style={{ WebkitLineClamp: 5 }}>“{lesson.hook || lesson.excerpt}”</p>}
-        <p className="fd-help">{lesson.readMins} min read · {community ? `by ${lesson.author.name}` : "by you"}</p>
-        <div className="fd-row">
+      {hasCover ? (
+        <div className="fd-hero" data-cover>
+          {props.near && <img className="fd-hero-img" src={lesson.cover ?? undefined} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />}
+          <div className="fd-hero-scrim" />
+        </div>
+      ) : (
+        <div className="fd-hero" data-tone="gold" data-layout="spread">
+          <p className="fd-qmark" aria-hidden>“</p>
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            <p className="fd-pull fd-clamp2" style={{ WebkitLineClamp: 7 }}>{pull || lesson.title}</p>
+            <p className="fd-pull-meta">{community ? lesson.author.name : "You"} · {lesson.readMins} min read</p>
+          </div>
+        </div>
+      )}
+      <div className="fd-info">
+        <h3 className="fd-title">{lesson.title}</h3>
+        {(lesson.subtitle || (hasCover && pull)) && <p className="fd-sub fd-clamp2">{lesson.subtitle || pull}</p>}
+        <div className="fd-row" style={{ marginTop: "0.625rem" }}>
           <Link href={`/lessons/${lesson.id}`} onClick={() => lessonOpened(props.card.key)} className="fd-linkbtn is-primary">Read lesson<ArrowUpRightIcon /></Link>
           <button className="fd-linkbtn" onClick={() => void like()} aria-pressed={liked} aria-label={liked ? "Unlike lesson" : "Like lesson"}>
             <HeartIcon filled={liked} />{likes > 0 ? likes : "Like"}
@@ -320,7 +339,7 @@ export function LessonReel(props: ReelProps<LessonCard>) {
 const STARTERS = {
   "first-trade": { title: "Log your first trade", body: "Cards here are built from your own journal. Add a trade with entry and exit times and it becomes a replay you can scrub through.", cta: "Add a trade" },
   "first-setup": { title: "Define a setup", body: "Write down the rules of one setup you trade. It appears here with your own win rate once trades are linked to it.", cta: "Open the Lab" },
-  "first-lesson": { title: "Write a lesson", body: "Capture something you learned in a few lines. Your lessons — and your friends' — show up in this feed.", cta: "Write a lesson" },
+  "first-lesson": { title: "Write a lesson", body: "Capture something you learned in a few lines. Your lessons — and your friends’ — show up in this feed.", cta: "Write a lesson" },
 } as const;
 
 export function StarterReel(props: ReelProps<StarterCard>) {
@@ -328,13 +347,13 @@ export function StarterReel(props: ReelProps<StarterCard>) {
   const openNew = useUi((u) => u.openNewEntry);
   return (
     <Frame props={props} kind="Get started" label={s.title} rail={null}>
-      <div className="fd-body" style={{ paddingRight: 0, alignItems: "flex-start" }}>
+      <div className="fd-hero" data-tone="gold">
         <h3 className="fd-big">{s.title}</h3>
         <p className="fd-quote">{s.body}</p>
-        <div className="fd-row">
-          {props.card.id === "first-trade" ? <button className="fd-linkbtn is-primary" onClick={openNew}>{s.cta}</button>
-            : <Link className="fd-linkbtn is-primary" href={props.card.id === "first-setup" ? "/lab#setups" : "/lessons/new"}>{s.cta}</Link>}
-        </div>
+      </div>
+      <div className="fd-info" style={{ paddingRight: 0 }}>
+        {props.card.id === "first-trade" ? <button className="fd-linkbtn is-primary" onClick={openNew}>{s.cta}</button>
+          : <Link className="fd-linkbtn is-primary" href={props.card.id === "first-setup" ? "/lab#setups" : "/lessons/new"}>{s.cta}</Link>}
       </div>
     </Frame>
   );
@@ -346,17 +365,19 @@ export function EndReel({ card, index, total, active, onSaved, savedCount, minut
   return (
     <article className="fd-card" data-i={index} data-key={card.key} data-active={active || undefined} role="article" aria-posinset={index + 1} aria-setsize={total} aria-label="You're all caught up">
       <div className="fd-inner">
-        <div className="fd-body" style={{ paddingRight: 0, alignItems: "flex-start" }}>
-          <p className="fd-kind">That’s everything for now</p>
+        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+          <p className="fd-chip"><span>That’s everything for now</span></p>
+        </div>
+        <div className="fd-hero" data-tone="gold">
           <h3 className="fd-big">You’re all caught up.</h3>
           <p className="fd-quote">
-            {today > 0 ? `You looked at ${today} card${today === 1 ? "" : "s"} today` : "Nothing new today"}{minutes > 0 ? ` over ${minutes} min` : ""}. This feed has a last card on purpose — new ones are ranked fresh tomorrow, so there’s nothing to keep refreshing for.
+            {today > 0 ? `You looked at ${today} card${today === 1 ? "" : "s"} today` : "Nothing new today"}{minutes > 0 ? ` over ${minutes} min` : ""}. This feed ends on purpose — new cards are ranked fresh tomorrow, so there’s nothing to keep refreshing for.
           </p>
-          <div className="fd-row">
-            <Link href="/dashboard" className="fd-linkbtn is-primary">Back to Home</Link>
-            {savedCount > 0 && <button className="fd-linkbtn" onClick={onSaved}>Review {savedCount} saved</button>}
-            <Link href="/journal" className="fd-linkbtn">Open Journal</Link>
-          </div>
+        </div>
+        <div className="fd-row">
+          <Link href="/dashboard" className="fd-linkbtn is-primary">Back to Home</Link>
+          {savedCount > 0 && <button className="fd-linkbtn" onClick={onSaved}>Review {savedCount} saved</button>}
+          <Link href="/journal" className="fd-linkbtn">Open Journal</Link>
         </div>
       </div>
     </article>
