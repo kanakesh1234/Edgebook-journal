@@ -331,7 +331,20 @@ export default function JournalPage() {
         <div ref={sentinelRef} className="h-px" aria-hidden />
         <div ref={tbRef} className={cn("sticky top-0 z-30 border-b bg-canvas/80 backdrop-blur-xl transition-colors duration-200", scrolled ? "border-line-soft" : "border-transparent")}>
           {inReview ? (
-            <div className="flex items-center gap-0.5 py-2"><IconButton label="Toggle sidebar" icon="sidebar" onClick={toggleSidebar} /><span className="ml-2 text-[14px] font-semibold text-ink">{effLens.kind === "weekly" ? "Weekly review" : "Monthly review"}</span></div>
+            <div className="mx-auto flex w-full max-w-[960px] items-center justify-between gap-2 py-2">
+              <div className="flex items-center gap-0.5">
+                <IconButton label="Toggle sidebar" icon="sidebar" onClick={toggleSidebar} />
+                <span className="ml-2 text-[14px] font-semibold text-ink">{effLens.kind === "weekly" ? "Weekly review" : "Monthly review"}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => { haptic.selection(); setLens({ kind: "all" }); }}
+                className="inline-flex h-8 items-center gap-1 rounded-full bg-ink/[0.055] px-3 text-[13px] font-medium text-muted outline-none transition-colors hover:bg-ink/[0.09] hover:text-ink active:scale-95"
+              >
+                <Sym name="chevronLeft" className="h-3.5 w-3.5" strokeWidth={2} />
+                <span>All trades</span>
+              </button>
+            </div>
           ) : <JournalToolbar
             view={view} onView={setView} crumbs={crumbs} onUp={path ? goUp : undefined} onSidebar={toggleSidebar}
             query={query} onQuery={setQuery} searchRef={searchRef}
