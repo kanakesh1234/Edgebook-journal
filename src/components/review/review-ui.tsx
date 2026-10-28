@@ -326,8 +326,8 @@ export function StripCell({ label, value, sub, valueClass, hint }: { label: stri
 export function Group({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      {title && <p className="mb-2 px-1 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-faint">{title}</p>}
-      <div className="divide-y divide-line-soft overflow-hidden rounded-[20px] border border-line-soft bg-surface shadow-panel">{children}</div>
+      {title && <p className="mb-2.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-faint/70">{title}</p>}
+      <div className="space-y-[3px] overflow-hidden rounded-[18px] bg-ink/[0.025] p-[3px]">{children}</div>
     </div>
   );
 }
@@ -336,14 +336,14 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
   const body = (
     <>
       <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-[13.5px] font-medium text-ink">{label}</span>
-        {sub && <span className="block truncate text-[11.5px] text-faint">{sub}</span>}
+        <span className="block truncate text-[13px] font-medium text-ink">{label}</span>
+        {sub && <span className="block truncate text-[11px] text-faint/70">{sub}</span>}
       </span>
-      <span className={cn("shrink-0 text-[14.5px] font-semibold tracking-[-0.01em] tabular-nums text-ink", valueClass)}>{value}</span>
-      {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
+      <span className={cn("shrink-0 text-[14px] font-semibold tracking-[-0.01em] tabular-nums text-ink", valueClass)}>{value}</span>
+      {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint/50 transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
     </>
   );
-  const cls = "flex min-h-[46px] w-full items-center gap-3 px-4 py-2";
+  const cls = "flex min-h-[42px] w-full items-center gap-3 rounded-[14px] bg-surface px-4 py-2";
   return onClick ? (
     <button
       type="button"
@@ -352,7 +352,7 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
         haptic.selection();
         onClick();
       }}
-      className={cn(cls, "group outline-none transition-colors hover:bg-ink/[0.035] focus-visible:bg-ink/[0.05] active:bg-ink/[0.07]")}
+      className={cn(cls, "group outline-none transition-colors hover:bg-ink/[0.02] focus-visible:bg-ink/[0.04] active:bg-ink/[0.06]")}
     >
       {body}
     </button>
