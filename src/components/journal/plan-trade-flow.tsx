@@ -1204,22 +1204,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                   }
                                   maxLength={280}
                                 />
-                                <div className="mt-1.5 flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => cycleThoughtKind(th.id, vis.kind)}
-                                    className={cn(
-                                      "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-                                      vis.kind === "impulse"
-                                        ? "bg-[#ff9f0a]/15 text-[#d97706] dark:text-[#ffb340]"
-                                        : vis.kind === "idea"
-                                          ? "bg-gold/15 text-gold-deep dark:text-gold"
-                                          : "bg-ink/[0.055] text-muted hover:text-ink",
-                                    )}
-                                  >
-                                    {vis.tag}
-                                  </button>
-                                  {thoughts.length > 1 && (
+                                {thoughts.length > 1 && (
+                                  <div className="mt-1.5">
                                     <button
                                       type="button"
                                       aria-label="Remove line"
@@ -1228,8 +1214,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                     >
                                       <IconMinus />
                                     </button>
-                                  )}
-                                </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </motion.li>
