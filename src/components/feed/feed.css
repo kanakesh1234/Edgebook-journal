@@ -689,6 +689,81 @@
   gap: 0.75rem;
   flex-wrap: wrap;
 }
+/* 2-line mistake recognition strip directly below every trade replay */
+.fd-mistake-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.875rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  flex: none;
+  min-width: 0;
+}
+.fd-mistake-summary[data-tone="loss"] {
+  background: color-mix(in srgb, var(--loss) 7%, var(--raised));
+  border-color: color-mix(in srgb, var(--loss) 28%, var(--line));
+}
+.fd-mistake-summary[data-tone="gold"] {
+  background: color-mix(in srgb, var(--gold-strong) 9%, var(--raised));
+  border-color: color-mix(in srgb, var(--gold-strong) 30%, var(--line));
+}
+.fd-mistake-summary[data-tone="profit"] {
+  background: color-mix(in srgb, var(--profit) 7%, var(--raised));
+  border-color: color-mix(in srgb, var(--profit) 26%, var(--line));
+}
+.fd-mistake-line1 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fd-mistake-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--fd-soft);
+  color: var(--ink);
+}
+.fd-mistake-summary[data-tone="loss"] .fd-mistake-badge {
+  background: color-mix(in srgb, var(--loss) 16%, transparent);
+  color: var(--loss);
+}
+.fd-mistake-summary[data-tone="gold"] .fd-mistake-badge {
+  background: color-mix(in srgb, var(--gold-strong) 18%, transparent);
+  color: var(--nav-active);
+}
+.fd-mistake-summary[data-tone="profit"] .fd-mistake-badge {
+  background: color-mix(in srgb, var(--profit) 16%, transparent);
+  color: var(--profit);
+}
+.fd-mistake-title {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fd-mistake-line2 {
+  font-size: 0.78125rem;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fd-title {
   font-family: var(--font-display);
   font-size: 1.25rem;
@@ -1071,7 +1146,7 @@
   }
   /* 16:9 Landscape Replay stage: expands to fill theater width & height proportionally */
   .fd-stage[data-shape="landscape"] {
-    width: min(100%, calc((100dvh - 11.5rem) * 16 / 9 + 5.5rem));
+    width: min(100%, calc((100dvh - 14.5rem) * 16 / 9 + 5.5rem));
     max-width: 76rem;
     height: auto;
     max-height: 100%;
@@ -1097,7 +1172,7 @@
     padding: 1rem;
   }
   .fd-media.fd-media--16x9 {
-    max-height: calc(100dvh - 12.25rem);
+    max-height: calc(100dvh - 15.25rem);
   }
   .fd-rail {
     flex-direction: column;

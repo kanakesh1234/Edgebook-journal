@@ -14,15 +14,15 @@ const nyFmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US"
 const F = { time: nyFmt({ hour: "2-digit", minute: "2-digit" }), day: nyFmt({ day: "numeric", month: "short" }), full: nyFmt({ weekday: "short", hour: "2-digit", minute: "2-digit" }) };
 const toDate = (t: Time) => new Date(Number(t) * 1000);
 
-/** Focused TradingView-style horizontal window: keeps 11–16 large candles filling the 16:9 stage with 2.2 bars of right breathing room. */
-const MAX_VISIBLE_BARS = 16;
-const MIN_VISIBLE_BARS = 10.5;
-const RIGHT_PAD_BARS = 2.2;
+/** Balanced TradingView-style horizontal window: spans 28–34 bar slots across the 16:9 stage so each candle has sleek, proportional TradingView width (~12–15px). */
+const MAX_VISIBLE_BARS = 34;
+const MIN_VISIBLE_BARS = 28;
+const RIGHT_PAD_BARS = 4.5;
 
 function windowForBar(model: ReplayModel, barIdx: number): { from: number; to: number } {
   const localPos = barIdx - model.viewFrom;
-  const to = Math.max(MIN_VISIBLE_BARS - 0.5, localPos + RIGHT_PAD_BARS);
-  const from = Math.max(-0.6, to - MAX_VISIBLE_BARS);
+  const to = Math.max(MIN_VISIBLE_BARS - 1.5, localPos + RIGHT_PAD_BARS);
+  const from = Math.max(-2.5, to - MAX_VISIBLE_BARS);
   return { from, to };
 }
 
@@ -123,7 +123,7 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
       }
     }
     const span = Math.max(hi - lo, 0.5);
-    const pad = span * 0.04;
+    const pad = span * 0.06;
     return { min: lo - pad, max: hi + pad };
   }, [model]);
   const rangeRef = useRef(range);
@@ -148,16 +148,16 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
       rightPriceScale: {
         borderColor: p.border,
         minimumWidth: 62,
-        scaleMargins: { top: 0.06, bottom: 0.06 },
+        scaleMargins: { top: 0.08, bottom: 0.08 },
       },
       localization: { timeFormatter: (t: Time) => F.full.format(toDate(t)) },
       timeScale: {
         borderColor: p.border,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 2,
-        barSpacing: 18,
-        minBarSpacing: 8,
+        rightOffset: 3,
+        barSpacing: 11,
+        minBarSpacing: 6,
         fixLeftEdge: false,
         fixRightEdge: false,
         tickMarkFormatter: (t: Time, type: TickMarkType) => (type === TickMarkType.DayOfMonth ? F.day : F.time).format(toDate(t)),

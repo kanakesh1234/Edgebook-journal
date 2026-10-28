@@ -397,43 +397,50 @@ async function callOpenRouterWithFallback(
   factsJson: string,
   maxTokens: number,
 ): Promise<string | null> {
-  const models = [config.model, ...(config.fallbackModel ? [config.fallbackModel] : [])];
-  // Real multi-turn context — previously only the single latest message
-  // was sent, so any follow-up like "let's analyse this" or "continue"
-  // arrived with zero memory of what was just discussed. Facts go in as
-  // an early grounding turn, then the actual back-and-forth follows.
-  // A compact history avoids repeatedly shipping a large conversation on
-  // every turn. Facts remain the source of truth for all analytical detail.
+  const models = config.models ?? [config.model, ...(config.fallbackModel ? [config.fallbackModel] : [])];
   const conversation = history.slice(-10).map((m) => ({
     role: m.role === "user" ? ("user" as const) : ("assistant" as const),
     content: m.text,
   }));
-  for (const model of models) {
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: maxTokens,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `DETERMINISTIC FACTS (source of truth for this whole conversation):\n${factsJson}` },
-            { role: "assistant", content: "Understood — I'll treat those facts as ground truth for everything below." },
-            ...conversation,
-          ],
-        }),
-        signal: AbortSignal.timeout(18_000),
-      });
-      if (!res.ok) continue;
-      const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-      const text = json.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
-    } catch {
-      continue;
+  const effectiveTokens = Math.max(maxTokens, 1000);
+  for (const model of models.slice(0, 4)) {
+    for (const plain of [false, true]) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+            "X-Title": "EdgeBook",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: effectiveTokens,
+            ...(plain ? {} : { reasoning: { effort: "low" } }),
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              { role: "user", content: `DETERMINISTIC FACTS (source of truth for this whole conversation):\n${factsJson}` },
+              { role: "assistant", content: "Understood — I'll treat those facts as ground truth for everything below." },
+              ...conversation,
+            ],
+          }),
+          signal: AbortSignal.timeout(16_000),
+        });
+        if (!res.ok) {
+          if ((res.status === 400 || res.status === 422) && !plain) continue;
+          break;
+        }
+        const json = (await res.json()) as {
+          choices?: { message?: { content?: string | null } }[];
+          error?: { message?: string };
+        };
+        if (json.error) break;
+        const text = json.choices?.[0]?.message?.content?.trim();
+        if (text) return text;
+        if (!plain) continue;
+      } catch {
+        break;
+      }
     }
   }
   return null;

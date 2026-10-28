@@ -15,6 +15,7 @@ import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
 import {
   barDelay, endIdx, frameAt, INITIAL_PLAY_DELAY_MS, LOOP_HOLD_MS, progressOf, stepIdx,
 } from "@/lib/feed/replay";
+import { summarizeTradeMistakeForFeed } from "@/lib/ai-brain";
 import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard, VideoCard } from "@/lib/feed/types";
 import { useFeed } from "./feed-store";
 import { useReplayData } from "./replay-chart";
@@ -427,7 +428,13 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const { card, active, near } = props;
   const { entry } = card;
   const currency = useApp((s) => s.settings.currency);
+  const allEntries = useApp((s) => s.entries);
+  const allPlans = useApp((s) => s.plans);
   const money = (n: number) => formatSignedMoney(n, currency);
+  const mistakeSummary = useMemo(
+    () => summarizeTradeMistakeForFeed(entry, allEntries, allPlans),
+    [entry, allEntries, allPlans],
+  );
   const prefs = useFeed((s) => s.state.prefs);
   const reduce = useReducedMotion();
   const docVisible = useDocVisible();
@@ -660,6 +667,15 @@ export function TradeReel(props: ReelProps<TradeCard>) {
         )}
       </div>
 
+      {/* 2-line mistake recognition summary directly below every trade replay */}
+      <div className="fd-mistake-summary" data-tone={mistakeSummary.tone} aria-label="Trade mistake summary">
+        <p className="fd-mistake-line1">
+          <span className="fd-mistake-badge">{mistakeSummary.badge}</span>
+          <strong className="fd-mistake-title">{mistakeSummary.headline}</strong>
+        </p>
+        <p className="fd-mistake-line2">{mistakeSummary.subline}</p>
+      </div>
+
       <div className="fd-info">
         <div className="fd-info-row">
           <div className="min-w-0 flex-1">
@@ -668,7 +684,6 @@ export function TradeReel(props: ReelProps<TradeCard>) {
               <span className={entry.pnl >= 0 ? "fd-up" : "fd-down"}>{money(entry.pnl)}</span>
               {entry.setup ? ` · ${entry.setup}` : ""} · {date}{times ? ` · ${times}` : ""}
             </p>
-            {entry.notes && <p className="fd-sub fd-clamp2">{entry.notes}</p>}
           </div>
           {card.replayable && (
             <button className="fd-linkbtn is-primary shrink-0" onClick={() => void start()} disabled={busy}>{busy ? "Opening…" : "Open full replay"}<ArrowUpRightIcon /></button>

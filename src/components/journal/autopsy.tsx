@@ -163,14 +163,13 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
     tagCache.current = { hash, promise };
     return promise;
   };
-  // Live: re-read a moment after the trader stops typing, so the tags are ready before they press Complete.
+  // Live: re-read a moment after the trader stops typing or picks a mistake, so AI tags are ready right away.
   const liveKey = JSON.stringify([mistake, mistakeOther.trim(), mistakeNote.trim(), lesson.trim(), followedPlan, emotion, goodProcess, blunder, category?.source === "you" ? category.key : null]);
   useEffect(() => {
     if (!active || !entryId) return;
     if (mistake === "" || mistake === "none") { setTagging(null); return; }
-    if (mistake === "other" && !otherDone) return;
-    if (mistakeNote.trim().length < 12 && lesson.trim().length < 8 && mistake !== "other") return;
-    const t = window.setTimeout(() => void runTagging(inputsNow()), 1100);
+    if (mistake === "other" && !otherDone && mistakeOther.trim().length < 3) return;
+    const t = window.setTimeout(() => void runTagging(inputsNow()), 650);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKey, active, entryId, otherDone]);
@@ -576,7 +575,7 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
           )}
 
           {/* 8 — Tags: what the tagger read in everything above, and why. Informational; never blocks Complete. */}
-          {askLesson && !noMistake && a.lesson.trim().length > 0 && (a.tagging || a.tagBusy) && (
+          {!noMistake && a.mistake !== "" && (a.tagging || a.tagBusy) && (
             <Reveal key="tags">
               <div className="mt-6"><TagPanel view={a.tagging} busy={a.tagBusy} onPick={a.pickTag} onDismiss={a.dismissTags} onOpenPicker={() => a.setEditing("category")} /></div>
             </Reveal>

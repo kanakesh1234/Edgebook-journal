@@ -10,16 +10,18 @@ import { dayLimitFor } from "@/lib/risk";
 import { Modal } from "@/components/ui/modal";
 import { ShieldIcon } from "@/components/ui/icons";
 import { cn, uid } from "@/lib/utils";
+import { haptic } from "@/lib/haptics";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import { RiskMeter } from "./risk-meter";
 import { WinOddsCard } from "./win-odds-card";
 import type { PlanDraft } from "@/lib/prediction";
+import { analyzePreTradeThought } from "@/lib/ai-brain";
 import { ruleStats, statFor } from "@/lib/rule-stats";
 import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
 import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
 import {
-  BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
+  BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, FLOW_SMOOTH, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
   Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox, useIsDesktop, type Rail,
   GlyphArrowIn, GlyphArrowOut, GlyphStop, GlyphTarget, GlyphTimer, IconTile,
 } from "./flow-ui";
@@ -27,19 +29,32 @@ import {
 /**
  * PLAN & RECORD — one calm, continuous ritual.
  *
- *   plan → setup (+ its rules) → trade → chart → autopsy → done
+ *   plan → thought → setup (+ its rules) → trade → chart → autopsy → done
  *
- * "setup" is skipped when the trader has no playbook. There is no stepper:
- * each step simply follows the last. Validation is shown as quiet inline
+ * "setup" is skipped when the trader has no playbook. Validation is shown as quiet inline
  * state, and Continue stays disabled until the step's rules are satisfied.
  */
-type StepId = "plan" | "setup" | "trade" | "chart" | "autopsy" | "done";
+type StepId = "plan" | "thought" | "setup" | "trade" | "chart" | "autopsy" | "done";
 type NewsEvent = { id: string; name: string; time: string };
 type ImportRow = { date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null };
+type ConvictionLevel = "crystal" | "solid" | "cautious";
 
-const RAIL_LABEL: Record<StepId, string> = { plan: "Plan", setup: "Setup", trade: "Log trade", chart: "Chart", autopsy: "Review", done: "Done" };
+const RAIL_LABEL: Record<StepId, string> = {
+  plan: "Plan",
+  thought: "Thought",
+  setup: "Setup",
+  trade: "Log trade",
+  chart: "Chart",
+  autopsy: "Review",
+  done: "Done",
+};
+
 const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
 const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
+const DRAW_PRESETS = ["PDH / PDL", "Session High / Low", "Equal Highs / Lows", "HTF FVG / OB", "Weekly Open"] as const;
+const INVAL_PRESETS = ["5m close beyond sweep", "HTF structure break", "SMT fails to hold", "No displacement by 10:15"] as const;
+const BREAK_PRESETS = ["Entering before 5m close", "Chasing an extended candle", "Moving stop to avoid loss", "Trading right after a loss"] as const;
+
 const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
 const IconPlus = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
@@ -47,6 +62,12 @@ const IconPlus = () => (
 const IconMinus = () => (
   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
 );
+const IconSpark = () => (
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="m11 3.5 1.7 5 5 1.7-5 1.7L11 17l-1.7-5.1-5-1.7 5-1.7zM19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+  </svg>
+);
+
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 /** Used whenever the trader leaves the instrument blank. */
 const DEFAULT_INSTRUMENT = "MNQ";
@@ -61,6 +82,35 @@ const minutesBetween = (a: string, b: string): number | null => {
   return s1 === null || s2 === null || s2 < s1 ? null : s2 - s1;
 };
 const fmtHeld = (min: number) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`);
+
+/**
+ * Apple HIG unhurried progressive reveal hook:
+ * Waits until the user has typed at least `minChars` characters AND paused typing for `delayMs`
+ * before latching `true` so the next question never jarringly pops in on the very first keystroke.
+ */
+function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open: boolean, minChars = 3, delayMs = 700): { settled: boolean; typing: boolean } {
+  const [latched, setLatched] = useState(false);
+  useEffect(() => {
+    if (!open) setLatched(false);
+  }, [open]);
+
+  const trimmed = text.trim();
+  useEffect(() => {
+    if (alreadyAnsweredDownstream) {
+      setLatched(true);
+      return;
+    }
+    if (trimmed.length < minChars) return;
+    const timer = window.setTimeout(() => setLatched(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [trimmed, alreadyAnsweredDownstream, minChars, delayMs]);
+
+  return {
+    settled: latched || alreadyAnsweredDownstream,
+    typing: !latched && !alreadyAnsweredDownstream && trimmed.length > 0,
+  };
+}
+
 export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
   const entries = useApp((s) => s.entries);
   const plans = useApp((s) => s.plans);
@@ -79,12 +129,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const today = todayKey();
   const lossesToday = useMemo(() => entries.filter((e) => e.date === today && e.pnl < 0).length, [entries, today]);
   const tradesToday = useMemo(() => entries.filter((e) => e.date === today).length, [entries, today]);
-  const [lockChecked, setLockChecked] = useState(false); // the acknowledgement checkbox
-  const [lockAck, setLockAck] = useState(false); // user chose to proceed
+  const [lockChecked, setLockChecked] = useState(false);
+  const [lockAck, setLockAck] = useState(false);
   const lockOpen = open && step === "plan" && lossesToday >= 1 && !lockAck;
   const thirdTrade = lossesToday >= 2;
 
-  // plan
+  // plan & thought state
   const [thesis, setThesis] = useState("");
   const [emotion, setEmotion] = useState<(typeof PLAN_EMOTIONS)[number] | "">("");
   const [moreEmotions, setMoreEmotions] = useState(false);
@@ -92,10 +142,13 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [newsAnswer, setNewsAnswer] = useState<boolean | null>(null);
   const [newsEvents, setNewsEvents] = useState<NewsEvent[]>([]);
   const [watch, setWatch] = useState<string[]>([]);
+  const [autoWatchApplied, setAutoWatchApplied] = useState(false);
   const [instrument, setInstrument] = useState("");
   const [draw, setDraw] = useState("");
   const [invalidation, setInvalidation] = useState("");
   const [breakPlan, setBreakPlan] = useState("");
+  const [conviction, setConviction] = useState<ConvictionLevel>("solid");
+  const [thoughtNote, setThoughtNote] = useState("");
 
   // setup + rules
   const [playbookId, setPlaybookId] = useState("");
@@ -113,7 +166,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [exitPrice, setExitPrice] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
-  const [levelsOpen, setLevelsOpen] = useState(false); // stop & target question has been revealed
+  const [levelsOpen, setLevelsOpen] = useState(false);
   const [quantity, setQuantity] = useState("1");
   const [pnlDone, setPnlDone] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null);
@@ -133,14 +186,22 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const selectedPlaybook = playbook.find((p) => p.id === playbookId);
   const rules = useMemo(() => setupRules(selectedPlaybook), [selectedPlaybook]);
   const confirmedRules = rules.filter((_, i) => ruleStates[String(i)] === "ready").length;
-  // Rules are OPTIONAL: skipping one never blocks the trader, it is recorded so the journal can show which rules get avoided.
   const skippedRules = rules.length - confirmedRules;
   const history = useMemo(() => ruleStats(plans, entries), [plans, entries]);
-  /** Everything the trader has planned so far, in the shape the outlook reads. */
+
+  const finalInstrument = instrument.trim().toUpperCase() || DEFAULT_INSTRUMENT;
+
+  /** Everything the trader has planned so far, in the shape the outlook & AI Brain read. */
   const draftPlan: PlanDraft = useMemo(() => ({
-    date: todayKey(), setupId: playbookId || undefined, setupName: selectedPlaybook?.name,
-    emotion: emotion || undefined, emotionReason: emotionReason.trim() || undefined,
-    thesis, draw: draw.trim() || undefined, invalidation: invalidation.trim() || undefined, breakPlan: breakPlan.trim() || undefined,
+    date: todayKey(),
+    setupId: playbookId || undefined,
+    setupName: selectedPlaybook?.name,
+    emotion: emotion || undefined,
+    emotionReason: emotionReason.trim() || undefined,
+    thesis,
+    draw: draw.trim() || undefined,
+    invalidation: invalidation.trim() || undefined,
+    breakPlan: breakPlan.trim() || undefined,
     news: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => e.name.trim()) : [],
     maxLoss: dayLimit ?? undefined,
     watch: watch.map((k) => MISTAKE_CATEGORIES.find((c) => c.key === k)?.label ?? k),
@@ -149,7 +210,45 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     ruleTotal: rules.length,
   }), [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, invalidation, breakPlan, newsAnswer, newsEvents, dayLimit, watch, rules, ruleStates]);
 
-  const order: StepId[] = useMemo(() => (playbook.length ? ["plan", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "trade", "chart", "autopsy", "done"]), [playbook.length]);
+  /** Live Adaptive AI Brain synthesis — learns from every trade, plan, and review in the journal. */
+  const brainRead = useMemo(
+    () =>
+      analyzePreTradeThought(
+        {
+          date: today,
+          thesis,
+          emotion: emotion || undefined,
+          emotionReason,
+          newsEvents: newsAnswer ? newsEvents.filter((e) => e.name.trim()) : [],
+          instrument: finalInstrument,
+          draw,
+          invalidation,
+          breakPlan: [breakPlan, thoughtNote].filter(Boolean).join(". "),
+          playbookId: playbookId || undefined,
+          playbookName: selectedPlaybook?.name,
+        },
+        entries,
+        plans,
+        playbook,
+      ),
+    [today, thesis, emotion, emotionReason, newsAnswer, newsEvents, finalInstrument, draw, invalidation, breakPlan, thoughtNote, playbookId, selectedPlaybook?.name, entries, plans, playbook],
+  );
+
+  // Auto-seed top AI-suggested mistake tags once when entering the "thought" step if the trader hasn't manually picked any yet
+  useEffect(() => {
+    if (step === "thought" && !autoWatchApplied && watch.length === 0 && brainRead.suggestedWatch.length > 0) {
+      const topKeys = brainRead.suggestedWatch.filter((s) => s.confidence >= 0.72).slice(0, 2).map((s) => s.key);
+      if (topKeys.length > 0) {
+        setWatch(topKeys);
+        setAutoWatchApplied(true);
+      }
+    }
+  }, [step, autoWatchApplied, watch.length, brainRead.suggestedWatch]);
+
+  const order: StepId[] = useMemo(
+    () => (playbook.length ? ["plan", "thought", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "thought", "trade", "chart", "autopsy", "done"]),
+    [playbook.length],
+  );
   const go = (to: StepId) => {
     setDir(order.indexOf(to) >= order.indexOf(step) ? 1 : -1);
     setSaveError(null);
@@ -169,12 +268,16 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     return seen;
   }, [entries]);
 
-  // Question reveal (same pattern as the Autopsy): only the next unanswered question appears,
-  // answered ones stay put. Once shown, a question is never hidden again by clearing an earlier answer.
-  const showFeeling = thesis.trim().length > 0 || emotion !== "";
+  // Smooth, delayed question reveal in "Plan": waits for a natural 700ms typing pause (after >= 3 chars)
+  // so the next question never jarringly pops in on the very first keystroke.
+  const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, 700);
+  const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, 700);
+
+  const showFeeling = thesisReveal.settled;
   const showReason = emotion !== "" || emotionReason.trim().length > 0;
-  const showNews = emotionReason.trim().length > 0 || newsAnswer !== null;
+  const showNews = reasonReveal.settled;
   const showDetail = newsAnswer !== null;
+
   const chooseNews = (v: boolean) => {
     setNewsAnswer(v);
     if (v && newsEvents.length === 0) setNewsEvents([{ id: uid("ev"), name: "", time: "" }]);
@@ -186,7 +289,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     if (!open) return;
     setStep("plan"); setDir(1); setLockAck(false); setLockChecked(false);
     setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]); setInstrument(""); setDraw("");
-    setWatch([]); setInvalidation(""); setBreakPlan("");
+    setWatch([]); setAutoWatchApplied(false); setInvalidation(""); setBreakPlan(""); setConviction("solid"); setThoughtNote("");
     const only = useApp.getState().settings.playbook ?? [];
     setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
     setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime("09:30"); setExitTime("09:30"); setQuantity("1"); setPnlDone(false);
@@ -195,26 +298,35 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
   }, [open]);
 
-  // Mistakes worth watching today: the ones that keep coming back first, then the rest of the list.
+  // Mistakes worth watching today: AI Brain suggestions first, then recurring weekly mistakes, then the rest of the taxonomy.
+  const aiSuggestedMap = useMemo(() => new Map(brainRead.suggestedWatch.map((s) => [s.key as string, s])), [brainRead.suggestedWatch]);
   const watchOptions = useMemo(() => {
     const rec = new Map(recurringMistakes(entries, thisWeekStart()).map((r) => [r.key as string, r.weeks]));
-    return MISTAKE_CATEGORIES.filter((c) => c.key !== "other").map((c) => ({ ...c, weeks: rec.get(c.key) ?? 0 })).sort((a, b) => b.weeks - a.weeks);
-  }, [entries]);
+    return MISTAKE_CATEGORIES.filter((c) => c.key !== "other")
+      .map((c) => ({
+        ...c,
+        weeks: rec.get(c.key) ?? 0,
+        ai: aiSuggestedMap.get(c.key) ?? null,
+      }))
+      .sort((a, b) => (b.ai?.confidence ?? 0) - (a.ai?.confidence ?? 0) || b.weeks - a.weeks);
+  }, [entries, aiSuggestedMap]);
+
+  const applyAiSuggestedTags = () => {
+    haptic.selection();
+    const aiKeys = brainRead.suggestedWatch.map((s) => s.key);
+    setWatch((prev) => [...new Set([...prev, ...aiKeys])]);
+    setAutoWatchApplied(true);
+  };
 
   /* ---------------- gating + quiet hints per step ---------------- */
   const pnlText = pnl.trim();
   const pnlValue = pnlText === "" ? NaN : Number(pnlText);
   const pnlInvalid = pnlText !== "" && !Number.isFinite(pnlValue);
   const manualReady = Number.isFinite(pnlValue);
-  // Instrument comes from the plan step; the trade step no longer asks for it.
-  // If nothing was chosen (or the field was cleared), default to MNQ.
-  const finalInstrument = instrument.trim().toUpperCase() || DEFAULT_INSTRUMENT;
   const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
   const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
-  // Prices are optional. Blank or half-typed ("." ) counts as "not given" and never blocks saving.
   const entryN = parsePrice(entryPrice), exitN = parsePrice(exitPrice), stopN = parsePrice(stopLoss), targetN = parsePrice(takeProfit);
   const isLong = direction === "long";
-  // Quiet sanity check: a stop belongs on the losing side of the entry, a target on the winning side.
   const levelNote = (() => {
     if (!direction || entryN === null) return null;
     if (stopN !== null && (isLong ? stopN >= entryN : stopN <= entryN)) return `For a ${direction}, the stop sits ${isLong ? "below" : "above"} your entry.`;
@@ -233,11 +345,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     realizedR !== null ? { k: "Realized", v: `${realizedR > 0 ? "+" : realizedR < 0 ? "−" : ""}${Math.abs(realizedR).toFixed(2)}R`, tone: realizedR > 0 ? "profit" as const : realizedR < 0 ? "loss" as const : undefined } : null,
   ].filter((x): x is { k: string; v: string; tone?: "profit" | "loss" } => x !== null);
   const manualR = rr.trim() !== "" && Number.isFinite(Number(rr)) ? Number(rr) : null;
-  // Functional update so press-and-hold repeats never read stale state.
   const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
-  // Latch: once P&L has been entered, Direction stays revealed even if the field is edited again.
   useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
-  // Same latch for the stop & target question: once any price is typed it stays revealed.
   useEffect(() => { if (entryPrice || exitPrice || stopLoss || takeProfit) setLevelsOpen(true); }, [entryPrice, exitPrice, stopLoss, takeProfit]);
 
   const gate: { ok: boolean; hint: string | null } = (() => {
@@ -248,7 +357,14 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         if (!emotionReason.trim()) return { ok: false, hint: "Say what's behind that feeling" };
         if (newsAnswer === null) return { ok: false, hint: "Any news or events today?" };
         if (newsAnswer && !newsEvents.some((e) => e.name.trim())) return { ok: false, hint: "Name the event, or choose No news" };
-        return { ok: true, hint: null };
+        return { ok: true, hint: "Continue to Thought" };
+      case "thought":
+        return {
+          ok: true,
+          hint: watch.length > 0
+            ? `Watching ${watch.length} mistake ${watch.length === 1 ? "trap" : "traps"} · Clarity ${brainRead.clarityScore}%`
+            : `Clarity ${brainRead.clarityScore}% · Ready for setup`,
+        };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
         return { ok: true, hint: skippedRules > 0 ? `${skippedRules} rule${skippedRules === 1 ? "" : "s"} unchecked — fine, it will be recorded` : null };
@@ -278,16 +394,19 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     playbookVersion: selectedPlaybook?.version,
     instrument: finalInstrument || undefined,
     bias: "either",
+    preSessionProcess: [
+      `Conviction: ${conviction}`,
+      thoughtNote.trim() ? thoughtNote.trim() : null,
+    ].filter(Boolean).join(" · ") || undefined,
     thesis: thesis.trim(),
     drawOnLiquidity: draw.trim() || undefined,
     invalidation: invalidation.trim() || undefined,
     expectedSetup: selectedPlaybook?.name,
     emotionalState: emotion || undefined,
-    // "What's behind that feeling?" was asked and then dropped; keep it so the journal can show it next to the trade.
     emotionalNote: emotionReason.trim() || undefined,
     whatCouldBreakPlan: breakPlan.trim() || undefined,
     watchMistakes: watch.length ? watch : undefined,
-    maxLoss: dayLimit ?? undefined, // the limit set on Home, kept with the plan for reviews and audits
+    maxLoss: dayLimit ?? undefined,
     newsEvents: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => ({ name: e.name.trim(), time: e.time || undefined })) : [],
     rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] === "ready" ? "ready" : "skipped", note: r.description })),
     status: "executed",
@@ -302,22 +421,18 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setSaveError(null);
     try {
       const plan = buildPlan();
-      // Local state updates instantly; the Drive sync runs in the background (queued in order, with
-      // its own "Unsaved, Retry" toast on failure) so the next step opens without waiting on the network.
       void useApp.getState().savePlan(plan).catch(() => undefined);
       if (mode === "manual") {
-        // Coming back from the chart step and saving again UPDATES the same trade (never a duplicate).
         const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
         const draft: EntryDraft = {
           date: tradeDate <= todayKey() ? tradeDate : todayKey(),
           pnl: Math.round(pnlValue * 100) / 100,
-          // An R typed by hand wins; otherwise it is worked out from entry, stop and exit.
           rr: manualR ?? (realizedR !== null ? Math.round(realizedR * 100) / 100 : null),
           instrument: finalInstrument,
           direction,
           setup: selectedPlaybook?.name ?? "",
           setupId: playbookId || undefined,
-          notes: live?.notes ?? "",
+          notes: live?.notes || thoughtNote.trim() || "",
           images: live?.images ?? [],
           compareImage: live?.compareImage,
           challengeId: challengeId(),
@@ -335,13 +450,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         } else {
           const before = new Set(useApp.getState().entries.map((e) => e.id));
           const pending = useApp.getState().createEntry(draft);
-          // createEntry adds the entry to the store synchronously, before its network write.
           const fresh = useApp.getState().entries.find((e) => !before.has(e.id));
           if (fresh) {
             setCreatedId(fresh.id);
             void pending.catch(() => setSaveError("Couldn't save — try again."));
           } else {
-            setCreatedId((await pending).id); // rare: surfaces the real error (e.g. signed out)
+            setCreatedId((await pending).id);
           }
         }
       } else if (importRows?.length) {
@@ -380,7 +494,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     }
   };
 
-  /** Persist charts onto the trade, then read it back from the store so every later screen sees them. */
   const saveCharts = async () => {
     const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
     if (!live) { go("autopsy"); return; }
@@ -389,7 +502,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     try {
       const blobs = new Map<string, Blob>();
       for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-      // Fast path: the autopsy opens immediately; uploads + the Drive sync finish in the background.
       await useApp.getState().updateEntryFast(live.id, {
         date: live.date, pnl: live.pnl, rr: live.rr, instrument: live.instrument, direction: live.direction,
         setup: live.setup, setupId: live.setupId, notes: live.notes, images: images.map((i) => i.meta),
@@ -409,7 +521,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   const onContinue = () => {
     if (!gate.ok || saving) return;
-    if (step === "plan" || step === "setup") go(next(step));
+    if (step === "plan" || step === "thought" || step === "setup") go(next(step));
     else if (step === "trade") void saveTrade();
     else if (step === "chart") void saveCharts();
     else if (step === "autopsy") void completeAutopsy();
@@ -417,12 +529,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   };
 
   const continueLabel = step === "trade" ? (mode === "import" && importRows ? `Import ${importRows.length}` : "Save trade") : step === "autopsy" ? "Finish" : step === "done" ? "Done" : "Continue";
-  // Going back is only possible before the trade is saved (never re-creates it) and from autopsy to the chart.
-  // Back works on every step except the first and the final screen. From the chart it returns to the trade
-  // (manual entries only — an imported batch can't be edited in place).
   const back = step === "plan" || step === "done" ? null : step === "chart" ? (mode === "manual" ? "trade" : null) : step === "autopsy" ? "chart" : prev(step);
 
-  // ⌘/Ctrl + Enter continues from anywhere, including inside a text area.
   const continueRef = useRef(onContinue);
   continueRef.current = onContinue;
   useEffect(() => {
@@ -434,7 +542,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     return () => window.removeEventListener("keydown", onKey);
   }, [open, lockOpen]);
 
-  // Desktop progress rail. "done" is not a rail step, so the final screen shows every step complete.
   const rail: Rail = {
     steps: order.filter((s) => s !== "done").map((id) => ({ id, label: RAIL_LABEL[id] })),
     current: step,
@@ -466,115 +573,434 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       >
         <StepTransition stepKey={step} dir={dir}>
           {step === "plan" && (
-            // No space-y here: each revealed question carries its own lead-in spacing, so gaps are even
-            // and animate with the unfold (no doubled margins).
             <div>
               <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
               <div className="space-y-2.5 pt-7">
-                <Label done={thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
-                <TextBlock id="flow-plan" autoFocus value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="Where do you expect price to go, and why?" className="lg:min-h-32" />
+                <div className="flex items-center justify-between">
+                  <Label done={thesisReveal.settled && thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
+                  <AnimatePresence initial={false}>
+                    {thesisReveal.typing && (
+                      <motion.span
+                        initial={{ opacity: 0, y: 2 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-gold"
+                      >
+                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-strong" />
+                        <span>Listening…</span>
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+                <TextBlock
+                  id="flow-plan"
+                  autoFocus
+                  value={thesis}
+                  onChange={(e) => setThesis(e.target.value)}
+                  placeholder="Where do you expect price to go, and why?"
+                  className="lg:min-h-32"
+                />
               </div>
-              {showFeeling && (
-                <Reveal>
-                  <div className="space-y-3">
-                    <Label done={emotion !== ""}>How are you feeling?</Label>
-                    <Stagger className="flex flex-wrap gap-2" delay={0.08}>
-                      {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                      {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                      {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
-                    </Stagger>
-                  </div>
-                </Reveal>
-              )}
-              {showReason && (
-                <Reveal focus>
-                  <div className="space-y-2.5">
-                    <Label done={emotionReason.trim().length > 0} htmlFor="flow-reason">{emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}</Label>
-                    <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
-                  </div>
-                </Reveal>
-              )}
-              {showNews && (
-                <Reveal>
-                  <div className="space-y-3">
-                    <Label done={newsAnswer !== null}>Any news or events today?</Label>
-                    <Stagger className="flex flex-wrap gap-2" delay={0.08}>
-                      <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>Yes</Chip>
-                      <Chip selected={newsAnswer === false} onClick={() => chooseNews(false)}>No news</Chip>
-                    </Stagger>
-                    <AnimatePresence initial={false}>
-                      {newsAnswer && (
-                        <Collapse key="news-list">
-                          {/* Inset-grouped list: one rounded group, hairline dividers, compact time field, "add" row last. */}
-                          <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
-                            <AnimatePresence initial={false}>
-                              {newsEvents.map((ev) => (
-                                <motion.li key={ev.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
-                                  <div className="flex items-center gap-2 px-4 py-2.5 transition-colors focus-within:bg-gold/[0.04]">
-                                    <input
-                                      autoFocus
-                                      aria-label="Event name"
-                                      value={ev.name}
-                                      onChange={(e) => patchEvent(ev.id, { name: e.target.value })}
-                                      placeholder="Event name, e.g. CPI, FOMC"
-                                      maxLength={80}
-                                      className="min-w-0 flex-1 bg-transparent py-1.5 text-[16px] text-ink outline-none placeholder:text-faint"
-                                    />
-                                    <input
-                                      type="time"
-                                      aria-label="Event time"
-                                      value={ev.time}
-                                      onChange={(e) => patchEvent(ev.id, { time: e.target.value })}
-                                      className="shrink-0 rounded-lg bg-ink/[0.05] px-2.5 py-1.5 text-[15px] tabular-nums text-ink outline-none transition-colors hover:bg-ink/[0.08] focus:bg-ink/[0.08]"
-                                    />
-                                    {newsEvents.length > 1 && (
-                                      <button type="button" aria-label="Remove event" onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90">
-                                        <IconMinus />
-                                      </button>
-                                    )}
-                                  </div>
-                                </motion.li>
-                              ))}
-                            </AnimatePresence>
-                            <li>
-                              <button type="button" onClick={() => setNewsEvents((l) => [...l, { id: uid("ev"), name: "", time: "" }])} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]">
-                                <IconPlus /> Add event
-                              </button>
-                            </li>
-                          </ul>
-                        </Collapse>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </Reveal>
-              )}
-              {showDetail && (
-                <Reveal delay={0.12}>
-                  <Disclosure label="Add detail" autoFocusOnOpen>
-                    <div className="space-y-2.5">
-                      <Label hint="defaults to MNQ" htmlFor="flow-instrument">Instrument</Label>
-                      <TextBox id="flow-instrument" value={instrument} onChange={(e) => setInstrument(e.target.value.toUpperCase())} placeholder="MNQ" className="max-w-[12rem] font-mono" />
-                      <Stagger className="flex flex-wrap gap-2" delay={0.05}>
-                        {suggestedInstruments.map((i) => <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>{i}</Chip>)}
+              <AnimatePresence initial={false}>
+                {showFeeling && (
+                  <Reveal key="plan-feeling" delay={0.08}>
+                    <div className="space-y-3">
+                      <Label done={emotion !== ""}>How are you feeling?</Label>
+                      <Stagger className="flex flex-wrap gap-2" delay={0.06}>
+                        {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                        {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
+                        {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
                       </Stagger>
                     </div>
-                    <div className="space-y-2.5"><Label htmlFor="flow-draw">Where is the draw on liquidity?</Label><TextBox id="flow-draw" value={draw} onChange={(e) => setDraw(e.target.value)} /></div>
-                    <div className="space-y-2.5"><Label htmlFor="flow-inval">What would invalidate it?</Label><TextBox id="flow-inval" value={invalidation} onChange={(e) => setInvalidation(e.target.value)} /></div>
-                    <div className="space-y-2.5"><Label htmlFor="flow-break">What could make you break the plan?</Label><TextBox id="flow-break" value={breakPlan} onChange={(e) => setBreakPlan(e.target.value)} /></div>
-                    <div className="space-y-3">
-                      <Label hint="optional — the review checks how you did">Mistakes to watch for today</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {watchOptions.map((o) => (
-                          <Chip key={o.key} tone="gold" selected={watch.includes(o.key)} onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}>
-                            {o.label}{o.weeks >= 2 && <span title={`Seen in ${o.weeks} of the last 5 weeks`} className="ml-1.5 text-[11.5px] font-normal opacity-70">recurring</span>}
-                          </Chip>
-                        ))}
+                  </Reveal>
+                )}
+                {showReason && (
+                  <Reveal key="plan-reason" focus delay={0.08}>
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <Label done={reasonReveal.settled && emotionReason.trim().length > 0} htmlFor="flow-reason">
+                          {emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}
+                        </Label>
+                        <AnimatePresence initial={false}>
+                          {reasonReveal.typing && (
+                            <motion.span
+                              initial={{ opacity: 0, y: 2 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0 }}
+                              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-gold"
+                            >
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-strong" />
+                              <span>Settling…</span>
+                            </motion.span>
+                          )}
+                        </AnimatePresence>
                       </div>
-                      <p className="text-[12.5px] text-faint">You don&apos;t have to tag mistakes after the trade. The AI reads the whole trade — plan, timing, size, your limit and your answers — and flags what it finds.</p>
+                      <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
                     </div>
-                  </Disclosure>
-                </Reveal>
-              )}
+                  </Reveal>
+                )}
+                {showNews && (
+                  <Reveal key="plan-news" delay={0.08}>
+                    <div className="space-y-3">
+                      <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                      <Stagger className="flex flex-wrap gap-2" delay={0.06}>
+                        <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>Yes</Chip>
+                        <Chip selected={newsAnswer === false} onClick={() => chooseNews(false)}>No news</Chip>
+                      </Stagger>
+                      <AnimatePresence initial={false}>
+                        {newsAnswer && (
+                          <Collapse key="news-list">
+                            <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                              <AnimatePresence initial={false}>
+                                {newsEvents.map((ev) => (
+                                  <motion.li key={ev.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
+                                    <div className="flex items-center gap-2 px-4 py-2.5 transition-colors focus-within:bg-gold/[0.04]">
+                                      <input
+                                        autoFocus
+                                        aria-label="Event name"
+                                        value={ev.name}
+                                        onChange={(e) => patchEvent(ev.id, { name: e.target.value })}
+                                        placeholder="Event name, e.g. CPI, FOMC"
+                                        maxLength={80}
+                                        className="min-w-0 flex-1 bg-transparent py-1.5 text-[16px] text-ink outline-none placeholder:text-faint"
+                                      />
+                                      <input
+                                        type="time"
+                                        aria-label="Event time"
+                                        value={ev.time}
+                                        onChange={(e) => patchEvent(ev.id, { time: e.target.value })}
+                                        className="shrink-0 rounded-lg bg-ink/[0.05] px-2.5 py-1.5 text-[15px] tabular-nums text-ink outline-none transition-colors hover:bg-ink/[0.08] focus:bg-ink/[0.08]"
+                                      />
+                                      {newsEvents.length > 1 && (
+                                        <button type="button" aria-label="Remove event" onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90">
+                                          <IconMinus />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </motion.li>
+                                ))}
+                              </AnimatePresence>
+                              <li>
+                                <button type="button" onClick={() => setNewsEvents((l) => [...l, { id: uid("ev"), name: "", time: "" }])} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]">
+                                  <IconPlus /> Add event
+                                </button>
+                              </li>
+                            </ul>
+                          </Collapse>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </Reveal>
+                )}
+                {showDetail && (
+                  <Reveal key="plan-detail" delay={0.14}>
+                    <div className="flex items-center justify-between rounded-2xl border border-line bg-raised px-4 py-3.5">
+                      <div className="min-w-0">
+                        <p className="text-[14px] font-semibold text-ink">Next: Clarify your Thought</p>
+                        <p className="mt-0.5 text-[12.5px] text-muted">Structure your liquidity draw, invalidation, and AI mistake guardrails.</p>
+                      </div>
+                      <span className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5e5ce6]/12 text-[#5e5ce6] dark:text-[#9d9bff]">
+                        <IconSpark />
+                      </span>
+                    </div>
+                  </Reveal>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {step === "thought" && (
+            <div className="space-y-7">
+              <StepTitle
+                title="Clarify your thought"
+                subtitle="Turn your raw read into a structured hypothesis. The AI Brain scans your words and history to flag mistake traps before you enter."
+              />
+
+              {/* Apple Liquid-Glass AI Brain Synthesis Card */}
+              <motion.section
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease: FLOW_SMOOTH }}
+                aria-label="AI Brain pre-trade read"
+                className={cn(
+                  "relative isolate overflow-hidden rounded-[24px] border border-ink/[0.08] p-5 backdrop-blur-xl",
+                  "bg-gradient-to-br from-[#5e5ce6]/[0.08] via-surface/80 to-gold/[0.07]",
+                  "shadow-[inset_0_1px_0_rgb(255_255_255/0.8),0_12px_30px_-18px_rgb(40_35_80/0.22)]",
+                  "dark:border-white/10 dark:from-[#5e5ce6]/[0.14] dark:via-white/[0.04] dark:to-gold/[0.08]",
+                )}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#5e5ce6] text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.55),inset_0_1px_0_rgb(255_255_255/0.3)]">
+                      <IconSpark />
+                    </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">EdgeBook AI Brain</p>
+                        <span className="rounded-full bg-[#5e5ce6]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                          {brainRead.calibration.tier} · {brainRead.calibration.calibrationPct}% calibrated
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[12px] text-muted">
+                        Learned from {brainRead.calibration.totalTrades} trades, {brainRead.calibration.reviewedTrades} reviews &amp; {brainRead.calibration.linkedPlans} plans
+                      </p>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-faint">Clarity</p>
+                    <p className="font-mono text-[18px] font-semibold tabular-nums text-ink">{brainRead.clarityScore}%</p>
+                  </div>
+                </div>
+
+                {/* Live summary of the trader's read + emotion */}
+                <div className="mt-4 rounded-2xl border border-line/70 bg-raised/85 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-muted">
+                    <span className="rounded-full bg-gold/15 px-2.5 py-0.5 font-semibold text-gold">{finalInstrument}</span>
+                    {emotion && <span className="rounded-full bg-ink/[0.06] px-2.5 py-0.5 text-ink">Feeling {label(emotion)}</span>}
+                    {newsAnswer && <span className="rounded-full bg-loss/12 px-2.5 py-0.5 text-loss">News day</span>}
+                  </div>
+                  <p className="mt-2 text-[14px] font-medium leading-snug text-ink">{brainRead.headline}</p>
+                  <p className="mt-1 text-[13px] leading-snug text-muted">{brainRead.subline}</p>
+                </div>
+              </motion.section>
+
+              {/* Instrument + Mental Conviction */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2.5 rounded-[22px] border border-line bg-raised p-4">
+                  <Label hint="defaults to MNQ" htmlFor="flow-instrument">Instrument</Label>
+                  <TextBox
+                    id="flow-instrument"
+                    value={instrument}
+                    onChange={(e) => setInstrument(e.target.value.toUpperCase())}
+                    placeholder="MNQ"
+                    className="font-mono"
+                  />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {suggestedInstruments.map((i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => { haptic.selection(); setInstrument(i); }}
+                        className={cn(
+                          "rounded-full border px-3 py-1 font-mono text-[12.5px] font-semibold transition-all active:scale-95",
+                          finalInstrument === i
+                            ? "border-gold/60 bg-gold/15 text-gold"
+                            : "border-line bg-surface text-muted hover:text-ink",
+                        )}
+                      >
+                        {i}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-between space-y-2.5 rounded-[22px] border border-line bg-raised p-4">
+                  <Label hint="how clear is the tape?">Mental conviction</Label>
+                  <Segmented
+                    fullWidth
+                    compact
+                    layoutId="thought-conviction"
+                    value={conviction}
+                    onChange={setConviction}
+                    options={[
+                      { id: "crystal", label: "A+ Clear" },
+                      { id: "solid", label: "Solid" },
+                      { id: "cautious", label: "Cautious" },
+                    ]}
+                  />
+                  <p className="text-[12px] leading-snug text-faint">
+                    {conviction === "crystal"
+                      ? "Structure, liquidity draw, and timing align cleanly."
+                      : conviction === "solid"
+                        ? "Good read — wait patiently for your setup trigger."
+                        : "Tape is mixed — keep risk tight and don't force an entry."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Structural Thought Cards: Draw on Liquidity, Invalidation, and What Could Break the Plan */}
+              <div className="space-y-4">
+                <div className="space-y-2.5 rounded-[22px] border border-line bg-raised p-4">
+                  <Label done={draw.trim().length > 0} hint="target pool or magnet" htmlFor="flow-draw">
+                    Where is the draw on liquidity?
+                  </Label>
+                  <TextBox
+                    id="flow-draw"
+                    value={draw}
+                    onChange={(e) => setDraw(e.target.value)}
+                    placeholder="e.g. Previous Day High, London Low sweep, Resting 15m FVG"
+                  />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {DRAW_PRESETS.map((preset) => {
+                      const activePreset = draw.toLowerCase().includes(preset.toLowerCase());
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            haptic.selection();
+                            setDraw((cur) => (cur.trim() ? (activePreset ? cur : `${cur.trim()} · ${preset}`) : preset));
+                          }}
+                          className={cn(
+                            "rounded-full border px-3 py-1 text-[12px] font-medium transition-all active:scale-95",
+                            activePreset ? "border-gold/55 bg-gold/12 text-gold" : "border-line bg-surface text-muted hover:text-ink",
+                          )}
+                        >
+                          + {preset}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 rounded-[22px] border border-line bg-raised p-4">
+                  <Label done={invalidation.trim().length > 0} hint="when the idea is wrong" htmlFor="flow-inval">
+                    What would invalidate this thought?
+                  </Label>
+                  <TextBox
+                    id="flow-inval"
+                    value={invalidation}
+                    onChange={(e) => setInvalidation(e.target.value)}
+                    placeholder="e.g. 5m candle closes beyond the sweep high"
+                  />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {INVAL_PRESETS.map((preset) => {
+                      const activePreset = invalidation.toLowerCase().includes(preset.toLowerCase());
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            haptic.selection();
+                            setInvalidation((cur) => (cur.trim() ? (activePreset ? cur : `${cur.trim()} · ${preset}`) : preset));
+                          }}
+                          className={cn(
+                            "rounded-full border px-3 py-1 text-[12px] font-medium transition-all active:scale-95",
+                            activePreset ? "border-gold/55 bg-gold/12 text-gold" : "border-line bg-surface text-muted hover:text-ink",
+                          )}
+                        >
+                          + {preset}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 rounded-[22px] border border-line bg-raised p-4">
+                  <Label done={breakPlan.trim().length > 0} hint="pre-commit against tilt" htmlFor="flow-break">
+                    What could make you break the plan?
+                  </Label>
+                  <TextBox
+                    id="flow-break"
+                    value={breakPlan}
+                    onChange={(e) => setBreakPlan(e.target.value)}
+                    placeholder="e.g. Entering before the 5m candle closes if price moves fast"
+                  />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {BREAK_PRESETS.map((preset) => {
+                      const activePreset = breakPlan.toLowerCase().includes(preset.toLowerCase());
+                      return (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            haptic.selection();
+                            setBreakPlan((cur) => (cur.trim() ? (activePreset ? cur : `${cur.trim()} · ${preset}`) : preset));
+                          }}
+                          className={cn(
+                            "rounded-full border px-3 py-1 text-[12px] font-medium transition-all active:scale-95",
+                            activePreset ? "border-gold/55 bg-gold/12 text-gold" : "border-line bg-surface text-muted hover:text-ink",
+                          )}
+                        >
+                          + {preset}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* AI-Powered Mistakes to Watch Tagging Section */}
+              <div className="space-y-3.5 rounded-[24px] border border-line bg-raised p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <Label done={watch.length > 0} hint="AI-tagged from your read & history">
+                      Mistakes to watch for today
+                    </Label>
+                    <p className="mt-1 text-[12.5px] text-muted">
+                      The AI Brain pre-tags your likeliest mistake traps from what you wrote above and your past reviews.
+                    </p>
+                  </div>
+                  {brainRead.suggestedWatch.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={applyAiSuggestedTags}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6]/12 px-3.5 py-1.5 text-[12.5px] font-semibold text-[#5e5ce6] ring-1 ring-inset ring-[#5e5ce6]/25 transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                    >
+                      <IconSpark />
+                      <span>Auto-tag with AI ({brainRead.suggestedWatch.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Live AI-detected mistake reasons */}
+                {brainRead.suggestedWatch.length > 0 && (
+                  <div className="space-y-1.5 rounded-2xl border border-[#5e5ce6]/20 bg-[#5e5ce6]/[0.05] p-3">
+                    {brainRead.suggestedWatch.slice(0, 3).map((s) => {
+                      const isSelected = watch.includes(s.key);
+                      return (
+                        <div key={s.key} className="flex items-start justify-between gap-2 text-[12.5px]">
+                          <div className="min-w-0">
+                            <span className="font-semibold text-ink">{s.label}: </span>
+                            <span className="text-muted">{s.reason}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              haptic.selection();
+                              setWatch((w) => (w.includes(s.key) ? w.filter((k) => k !== s.key) : [...w, s.key]));
+                            }}
+                            className={cn(
+                              "shrink-0 rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold transition-colors",
+                              isSelected
+                                ? "bg-gold-strong text-on-gold"
+                                : "bg-[#5e5ce6]/15 text-[#5e5ce6] hover:bg-[#5e5ce6]/25 dark:text-[#a5a4ff]",
+                            )}
+                          >
+                            {isSelected ? "Watching ✓" : "Watch"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {watchOptions.map((o) => {
+                    const isSelected = watch.includes(o.key);
+                    return (
+                      <Chip
+                        key={o.key}
+                        tone="gold"
+                        selected={isSelected}
+                        onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}
+                      >
+                        <span>{o.label}</span>
+                        {o.ai && (
+                          <span className="ml-1.5 rounded-full bg-[#5e5ce6]/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                            AI
+                          </span>
+                        )}
+                        {!o.ai && o.weeks >= 2 && (
+                          <span title={`Seen in ${o.weeks} of the last 5 weeks`} className="ml-1.5 text-[11.5px] font-normal opacity-70">
+                            recurring
+                          </span>
+                        )}
+                      </Chip>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
@@ -620,7 +1046,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
               {mode === "manual" && (
                 <div>
-                  {/* The whole card is the input: tap anywhere to type. No inner box — the card itself shows focus. */}
                   <div
                     onClick={() => document.getElementById("flow-pnl")?.focus()}
                     className="cursor-text rounded-[26px] border border-line bg-raised px-6 py-7 text-center transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
@@ -654,7 +1079,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </Reveal>
                   )}
 
-                  {/* 1 · Entry & exit: price and time together, as two tickets side by side. */}
                   {direction !== null && (
                     <Reveal>
                       <div className="space-y-3">
@@ -691,7 +1115,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </Reveal>
                   )}
 
-                  {/* 2 · Stop & target: unfolds once a price is typed (or on request). */}
                   {direction !== null && levelsOpen && (
                     <Reveal>
                       <div className="space-y-3">
@@ -728,7 +1151,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     <Reveal delay={0.12}>
                       <div className="space-y-3">
                         <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">Quantity</Label>
-                        {/* Apple HIG: the stepper (two-segment control) sits next to the field that shows the value. */}
                         <div className="flex items-center gap-3">
                           <div onClick={() => document.getElementById("flow-qty")?.focus()} className="flex h-14 min-w-0 flex-1 cursor-text items-center rounded-2xl border border-line bg-raised px-5 transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10">
                             <input
@@ -874,7 +1296,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 function TicketCard({ id, title, tile, glyph, price, onPrice, foot, invalid, time, onTime, timeId }: {
   id: string; title: string; tile: string; glyph: React.ReactNode;
   price: string; onPrice: (v: string) => void;
-  /** Quiet line under the price. Pass "" to reserve the space without showing anything. */
   foot?: React.ReactNode; invalid?: boolean;
   time?: string; onTime?: (v: string) => void; timeId?: string;
 }) {

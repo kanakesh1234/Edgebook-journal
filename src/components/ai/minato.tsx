@@ -287,7 +287,7 @@ export function Minato() {
         // not respond promptly, the local evidence-based provider answers
         // instead rather than leaving the trader watching a stalled panel.
         const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 7_500);
+        const timeout = window.setTimeout(() => controller.abort(), 28_000);
         const res = await fetch("/api/minato/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

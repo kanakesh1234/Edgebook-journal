@@ -4,8 +4,8 @@
 import type { CandleData } from "../backtesting/data/types";
 import type { ReplayTradeRef } from "../backtesting/types";
 
-/** Bars of setup already drawn on the chart when a replay opens, so candles look large and focused before it plays. */
-export const CONTEXT_BARS = 10;
+/** Bars of setup already drawn on the chart when a replay opens, giving balanced TradingView market-structure context. */
+export const CONTEXT_BARS = 18;
 /** Playback itself starts this many bars before the entry. */
 export const LEAD_BARS = 2;
 export const SPEEDS = [1, 2, 4] as const;
