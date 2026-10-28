@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
-import { addDays, formatDateMedium, weekdayShort } from "@/lib/format";
+import { addDays, weekdayShort } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { Sym } from "@/components/journal/symbols";
 import { EmptyState } from "@/components/ui/misc";
@@ -19,12 +19,10 @@ import {
   CarriedCommitments,
   Card,
   Chip,
-  DirTag,
   DrawCheck,
   EvidenceButton,
   fmtPct,
   fmtR,
-  GradeBadge,
   Kpi,
   LineInput,
   Prompt,
@@ -66,7 +64,6 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
   const topMistake = week.mistakes[0];
 
   const [matrixOpen, setMatrixOpen] = useState(false);
-  const [showAllTrades, setShowAllTrades] = useState(false);
   const [moreCommitments, setMoreCommitments] = useState(false);
 
   const workedVal = notes.text["worked"] ?? notes.text["best-day"] ?? "";
@@ -103,7 +100,6 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
   }
 
   const completedQuestions = [workedVal.trim(), leakVal.trim(), commit0.trim()].filter(Boolean).length;
-  const visibleTrades = showAllTrades ? week.log : week.log.slice(0, 8);
 
   return (
     <div className="space-y-8">
@@ -171,95 +167,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 2 — Session log */}
+      {/* 2 — Edge & Patterns */}
       <SectionReveal index={2}>
-        <Section id="a2" icon="list" title="Session log">
-          {week.log.length === 0 ? (
-            <Card>
-              <p className="text-[14px] text-muted">
-                No trades this week.{week.noSetupDays > 0 ? ` Sat on hands ${week.noSetupDays} ${week.noSetupDays === 1 ? "session" : "sessions"}.` : ""}
-              </p>
-            </Card>
-          ) : (
-            <Card pad={false} className="overflow-hidden">
-              <ul className="divide-y divide-line-soft/80">
-                {visibleTrades.map((r) => (
-                  <li key={r.entry.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic.selection();
-                        actions.openTrade(r.entry.id);
-                      }}
-                      className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
-                    >
-                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
-                        <span className="w-6 shrink-0 text-[12px] tabular-nums text-faint">#{r.n}</span>
-                        <span className="w-28 shrink-0 text-[13.5px] font-medium tabular-nums text-ink">
-                          {weekdayShort(r.entry.date)}, {formatDateMedium(r.entry.date)}
-                        </span>
-                        <DirTag dir={r.entry.direction ?? null} />
-                        {r.entry.instrument && r.entry.instrument !== "—" && (
-                          <span className="text-[13px] font-medium text-ink">{r.entry.instrument}</span>
-                        )}
-                        {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
-                        {r.criteria && <span className="text-[12px] tabular-nums text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
-                        {r.primary !== "—" && (
-                          <span className={cn("hidden items-center gap-1.5 text-[12px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
-                            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-                            {r.primary}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3.5">
-                        {r.entry.rr != null && <span className={cn("hidden text-[12.5px] font-medium tabular-nums sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
-                        <span className={cn("min-w-[68px] text-right text-[14px] font-semibold tabular-nums", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
-                        <GradeBadge grade={r.grade} />
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-
-              {week.log.length > 8 && (
-                <div className="border-t border-line-soft px-5 py-2.5 sm:px-6">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      haptic.selection();
-                      setShowAllTrades((v) => !v);
-                    }}
-                    className="flex w-full items-center justify-between py-0.5 text-left text-[13px] font-medium text-muted outline-none transition-colors hover:text-ink"
-                  >
-                    <span>{showAllTrades ? "Show fewer trades" : `Show all ${week.log.length} trades`}</span>
-                    <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", showAllTrades && "rotate-180")} strokeWidth={2} />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5 border-t border-line-soft bg-ink/[0.02] px-5 py-3 text-[13px] sm:px-6">
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-                  <span className="font-semibold text-ink">Total</span>
-                  <span className="text-muted">
-                    R:R <b className={cn("ml-1 font-semibold tabular-nums", tone(t.avgRR))}>{fmtR(t.avgRR)}</b>
-                  </span>
-                  <span className="text-muted">
-                    P&amp;L <b className={cn("ml-1 font-semibold tabular-nums", tone(t.net))}>{signed(t.net)}</b>
-                  </span>
-                </div>
-                {week.noSetupDays > 0 && (
-                  <span className="text-[12px] font-medium text-muted">
-                    {week.noSetupDays} {week.noSetupDays === 1 ? "day" : "days"} patience
-                  </span>
-                )}
-              </div>
-            </Card>
-          )}
-        </Section>
-      </SectionReveal>
-
-      {/* 3 — Edge & Patterns */}
-      <SectionReveal index={3}>
         <Section id="a3" icon="sparkles" title="Edge &amp; Patterns">
           <Card pad={false} className="overflow-hidden">
             <div className="grid divide-y divide-line-soft sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -294,23 +203,6 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 />
               </div>
             </div>
-
-            {thoughtAnalysis.sampleThoughts.length > 0 && (
-              <div className="border-t border-line-soft bg-ink/[0.015] px-5 py-3.5 sm:px-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-faint">Thoughts</span>
-                  {thoughtAnalysis.sampleThoughts.map((st, idx) => (
-                    <span key={idx} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[12px] text-ink">
-                      <span className="tabular-nums font-medium text-muted">{weekdayShort(st.date)}:</span>
-                      <span className="truncate">{st.text}</span>
-                      {st.pnl != null && (
-                        <span className={cn("font-semibold tabular-nums", tone(st.pnl))}>{signed(st.pnl)}</span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="border-t border-line-soft px-5 py-2.5 sm:px-6">
               <button
@@ -351,8 +243,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                           </tr>
                         </thead>
                         <tbody>
-                          {week.criteria.map((c) => (
-                            <tr key={c.key} className="transition-colors hover:bg-ink/[0.025]">
+                          {week.criteria.map((c, i) => (
+                            <tr key={c.key} className={cn("transition-colors hover:bg-ink/[0.03]", i % 2 === 1 && "bg-ink/[0.018]")}>
                               <Td className="max-w-[260px] pl-4 font-medium">{c.label}</Td>
                               <Td className="text-right tabular-nums">
                                 <EvidenceButton count={c.present} label={`Open ${c.present} trades with ${c.label}`} onClick={() => actions.openIds(c.entryIds, c.label)} />
@@ -370,8 +262,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                       </TableShell>
                     </div>
                   )}
-                  <div className="border-t border-line-soft px-3 pb-3 pt-4">
-                    <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Pattern Matrix</p>
+                  <div className="px-3 pb-3 pt-4">
+                    <p className="mb-3 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Pattern Matrix</p>
                     <TableShell min={540}>
                       <thead>
                         <tr>
@@ -385,10 +277,10 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                         </tr>
                       </thead>
                       <tbody>
-                        {[...week.patterns.rows.filter((r) => PSYCH_PATTERNS.some((p) => p.key === r.key) || r.total > 0), week.patterns.correct].map((r) => {
+                        {[...week.patterns.rows.filter((r) => PSYCH_PATTERNS.some((p) => p.key === r.key) || r.total > 0), week.patterns.correct].map((r, i) => {
                           const good = r.key === "correct";
                           return (
-                            <tr key={r.key} className="transition-colors hover:bg-ink/[0.025]">
+                            <tr key={r.key} className={cn("transition-colors hover:bg-ink/[0.03]", i % 2 === 1 && "bg-ink/[0.018]")}>
                               <Td className="pl-4 font-medium">
                                 {r.label}
                                 {r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}
@@ -451,8 +343,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 4 — Reflection */}
-      <SectionReveal index={4}>
+      {/* 3 — Reflection */}
+      <SectionReveal index={3}>
         <Section
           id="a5"
           icon="target"

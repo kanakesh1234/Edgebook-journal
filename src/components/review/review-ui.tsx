@@ -39,7 +39,6 @@ export const tone = (n: number | null) => (n == null || n === 0 ? "text-ink" : n
 export type SectionDef = { id: string; label: string; icon: SymName };
 export const WEEKLY_SECTIONS: SectionDef[] = [
   { id: "a1", label: "Scorecard", icon: "gauge" },
-  { id: "a2", label: "Session log", icon: "list" },
   { id: "a3", label: "Edge & Patterns", icon: "sparkles" },
   { id: "a5", label: "Reflection", icon: "target" },
 ];
@@ -647,7 +646,7 @@ export const TableShell = ({ children, min = 640 }: { children: ReactNode; min?:
 );
 
 export const Th = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <th scope="col" className={cn("whitespace-nowrap border-b border-line-soft px-3 pb-2.5 pt-1 text-left text-[11.5px] font-medium text-faint", className)}>
+  <th scope="col" className={cn("whitespace-nowrap border-b border-transparent px-3 pb-2.5 pt-1 text-left text-[11.5px] font-medium tracking-wide text-faint", className)}>
     {children}
   </th>
 );
@@ -663,7 +662,7 @@ export const DirTag = ({ dir }: { dir: string | null }) =>
   );
 
 export const Td = ({ children, className, colSpan, rule = true }: { children?: ReactNode; className?: string; colSpan?: number; rule?: boolean }) => (
-  <td colSpan={colSpan} className={cn("px-3 py-3 align-middle text-ink", rule ? "border-b border-line-soft/80" : "border-b border-transparent", className)}>
+  <td colSpan={colSpan} className={cn("px-3 py-3 align-middle text-ink", className)}>
     {children}
   </td>
 );
