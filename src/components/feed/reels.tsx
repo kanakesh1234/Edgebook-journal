@@ -22,11 +22,21 @@ import {
   ArrowUpRightIcon, BookOpenIcon, BookmarkPlusIcon, HeartIcon, PauseIcon, PlayIcon, RestartIcon, SpeakerIcon, StepIcon,
 } from "./feed-icons";
 
+export type CardShape = "portrait" | "landscape" | "editorial" | "card";
+
+export function cardShapeOf(card?: FeedCard): CardShape {
+  if (!card) return "landscape";
+  if (card.kind === "video") return "portrait";
+  if (card.kind === "trade") return card.replayable || card.hasImage || card.videoUrl ? "landscape" : "card";
+  if (card.kind === "lesson") return "editorial";
+  return "card";
+}
+
 export interface ReelProps<T extends FeedCard = FeedCard> {
   card: T;
   index: number;
   total: number;
-  /** The card filling the screen. */
+  /** The card filling the active viewport focal zone. */
   active: boolean;
   /** The active card and its neighbours — the only ones allowed to fetch. */
   near: boolean;
@@ -50,17 +60,45 @@ function useDocVisible(): boolean {
 
 /* ----------------------------- shared frame ----------------------------- */
 
-function Rail({ fav, collected, onFav, onCollect, href, openLabel, onOpen }: Pick<ReelProps, "fav" | "collected" | "onFav" | "onCollect"> & { href?: string; openLabel?: string; onOpen?: () => void }) {
+function CardActions({
+  fav,
+  collected,
+  onFav,
+  onCollect,
+  href,
+  openLabel,
+  onOpen,
+}: Pick<ReelProps, "fav" | "collected" | "onFav" | "onCollect"> & { href?: string; openLabel?: string; onOpen?: () => void }) {
   const haptics = useFeed((s) => s.state.prefs.haptics);
   const [pop, setPop] = useState(false);
   return (
     <div className="fd-rail" role="group" aria-label="Card actions">
-      <button type="button" className="fd-act" data-heart="true" aria-pressed={fav} aria-label={fav ? "Remove from favorites" : "Add to favorites"}
-        onClick={() => { onFav(); if (haptics) haptic.selection(); setPop(true); window.setTimeout(() => setPop(false), 400); }}>
+      <button
+        type="button"
+        className="fd-act"
+        data-heart="true"
+        aria-pressed={fav}
+        aria-label={fav ? "Remove from favorites" : "Add to favorites"}
+        onClick={() => {
+          onFav();
+          if (haptics) haptic.selection();
+          setPop(true);
+          window.setTimeout(() => setPop(false), 400);
+        }}
+      >
         <span className={cn(pop && fav && "fd-pop")}><HeartIcon filled={fav} /></span>
         <span>{fav ? "Saved" : "Favorite"}</span>
       </button>
-      <button type="button" className="fd-act" aria-pressed={collected} aria-label="Add to a collection" onClick={() => { onCollect(); if (haptics) haptic.selection(); }}>
+      <button
+        type="button"
+        className="fd-act"
+        aria-pressed={collected}
+        aria-label="Add to a collection"
+        onClick={() => {
+          onCollect();
+          if (haptics) haptic.selection();
+        }}
+      >
         <span><BookmarkPlusIcon filled={collected} /></span>
         <span>Collect</span>
       </button>
@@ -74,17 +112,52 @@ function Rail({ fav, collected, onFav, onCollect, href, openLabel, onOpen }: Pic
   );
 }
 
-function Frame({ props, rail, kind, children, label, split }: { props: ReelProps; rail: ReactNode; kind: string; children: ReactNode; label: string; split?: boolean }) {
+function Frame({
+  props,
+  actions,
+  kind,
+  shape,
+  children,
+  label,
+  split,
+}: {
+  props: ReelProps;
+  actions: ReactNode;
+  kind: string;
+  shape: CardShape;
+  children: ReactNode;
+  label: string;
+  split?: boolean;
+}) {
   return (
-    <article className="fd-card" data-i={props.index} data-key={props.card.key} data-active={props.active || undefined} role="article" aria-posinset={props.index + 1} aria-setsize={props.total} aria-label={label}>
-      <div className="fd-inner" data-split={split ?? (kind === "Replay" || kind === "Chart" || kind === "Video") ? "" : undefined}>
-        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
-          <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
-          <p className="fd-kind">{kind}</p>
+    <article
+      className="fd-card"
+      data-i={props.index}
+      data-key={props.card.key}
+      data-kind={props.card.kind}
+      data-shape={shape}
+      data-active={props.active || undefined}
+      role="article"
+      aria-posinset={props.index + 1}
+      aria-setsize={props.total}
+      aria-label={label}
+    >
+      <div className="fd-stage" data-shape={shape}>
+        <div
+          className="fd-inner"
+          data-shape={shape}
+          data-split={split ?? (kind === "Replay" || kind === "Chart" || kind === "Video") ? "" : undefined}
+        >
+          <div className="fd-card-head">
+            <div className="fd-card-head-left">
+              <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
+              <p className="fd-kind">{kind}</p>
+            </div>
+            {actions}
+          </div>
+          {children}
         </div>
-        {children}
       </div>
-      {rail}
     </article>
   );
 }
@@ -101,14 +174,16 @@ export function FeedVideoPlayer({
   active,
   near,
   label,
-  aspect = "fill",
+  aspect = "auto",
+  onAspectDetected,
 }: {
   src: string;
   poster?: string | null;
   active: boolean;
   near: boolean;
   label: string;
-  aspect?: "16:9" | "fill";
+  aspect?: "16:9" | "9:16" | "auto";
+  onAspectDetected?: (portrait: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const prefs = useFeed((s) => s.state.prefs);
@@ -122,6 +197,7 @@ export function FeedVideoPlayer({
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [portrait, setPortrait] = useState(aspect === "9:16");
   const [hud, setHud] = useState<"play" | "pause" | null>(null);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userPausedRef = useRef(false);
@@ -229,9 +305,11 @@ export function FeedVideoPlayer({
     if (prefs.haptics) haptic.selection();
   };
 
+  const resolvedAspect = aspect === "auto" ? (portrait ? "9:16" : "16:9") : aspect;
+
   return (
     <div
-      className={cn("fd-video-wrap", aspect === "16:9" && "fd-video-wrap--16x9")}
+      className={cn("fd-video-wrap", resolvedAspect === "16:9" ? "fd-video-wrap--16x9" : "fd-video-wrap--9x16")}
       onClick={togglePlay}
       data-playing={playing || undefined}
     >
@@ -246,6 +324,14 @@ export function FeedVideoPlayer({
           muted={muted}
           preload={active ? "auto" : "metadata"}
           aria-label={label}
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth > 0 && v.videoHeight > 0) {
+              const isPort = v.videoHeight > v.videoWidth;
+              setPortrait(isPort);
+              onAspectDetected?.(isPort);
+            }
+          }}
           onLoadedData={() => setReady(true)}
           onCanPlay={() => setReady(true)}
           onPlay={() => setPlaying(true)}
@@ -297,20 +383,25 @@ export function FeedVideoPlayer({
 
 export function VideoReel(props: ReelProps<VideoCard>) {
   const { card, active, near } = props;
+  const [portrait, setPortrait] = useState(true);
+  const shape: CardShape = portrait ? "portrait" : "landscape";
   return (
     <Frame
       props={props}
       kind="Video"
+      shape={shape}
       label={`Video: ${card.title}`}
-      rail={<Rail {...props} href={card.href} openLabel="Open" />}
+      actions={<CardActions {...props} href={card.href} openLabel="Open" />}
     >
-      <div className="fd-media fd-media--video">
+      <div className={cn("fd-media", portrait ? "fd-media--9x16" : "fd-media--16x9")}>
         <FeedVideoPlayer
           src={card.videoUrl}
           poster={card.poster}
           active={active}
           near={near}
           label={card.title}
+          aspect="auto"
+          onAspectDetected={setPortrait}
         />
       </div>
       <div className="fd-info">
@@ -469,12 +560,19 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   }
 
   const isReplayView = mode === "replay" && card.replayable;
+  const hasVisualMedia = card.replayable || card.hasImage || Boolean(card.videoUrl);
+  const shape: CardShape = hasVisualMedia ? "landscape" : "card";
 
   return (
-    <Frame props={props} kind={card.replayable ? "Replay" : card.videoUrl ? "Video" : card.hasImage ? "Chart" : "Trade"} label={label}
-      rail={<Rail {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}>
+    <Frame
+      props={props}
+      kind={card.replayable ? "Replay" : card.videoUrl ? "Video" : card.hasImage ? "Chart" : "Trade"}
+      shape={shape}
+      label={label}
+      actions={<CardActions {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}
+    >
       {both && (
-        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", paddingRight: "3.5rem" }}>
+        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
           <div className="fd-seg" role="tablist" aria-label="View">
             {(["replay", "chart"] as const).map((m) => (
               <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
@@ -484,7 +582,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       )}
 
       <div
-        className={cn("fd-media", (card.replayable || card.hasImage || card.videoUrl) && "fd-media--16x9")}
+        className={cn("fd-media", hasVisualMedia && "fd-media--16x9")}
         onClick={isReplayView && model ? () => togglePlay(true) : undefined}
         style={isReplayView && model ? { cursor: "pointer" } : undefined}
       >
@@ -516,7 +614,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
           shot ? <img src={shot} alt={`Chart screenshot for ${title}`} draggable={false} />
           : shot === null ? <div className="fd-overlay-msg"><p>This screenshot couldn’t be loaded.</p></div> : <Skeleton text="" />
         ) : (
-          <div className="fd-overlay-msg" style={{ background: "transparent" }}>
+          <div className="fd-overlay-msg" style={{ background: "transparent", position: "static", padding: "2rem 1rem" }}>
             <div>
               <p className={cn("fd-big fd-num", entry.pnl >= 0 ? "fd-up" : "fd-down")}>{money(entry.pnl)}</p>
               {typeof entry.rr === "number" && <p className="mt-1">{sign(entry.rr)}{Math.abs(entry.rr).toFixed(1)}R</p>}
@@ -544,7 +642,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       {live}
 
       {isReplayView && (
-        <>
+        <div className="fd-transport">
           <div className="fd-scrub">
             <input className="fd-range" type="range" min={0} max={1000} value={model ? Math.round(progressOf(model, idx) * 1000) : 0} disabled={!model}
               onChange={(e) => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx(idxFromProgress(model, Number(e.target.value) / 1000)); } }}
@@ -557,21 +655,23 @@ export function TradeReel(props: ReelProps<TradeCard>) {
             <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, 1)); } }} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
             <button className="fd-small" onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])} aria-label={`Speed ${speed}×. Change speed`}>{speed}×</button>
           </div>
-        </>
+        </div>
       )}
 
       <div className="fd-info">
-        <h3 className="fd-title">{title}</h3>
-        <p className="fd-sub fd-num">
-          <span className={entry.pnl >= 0 ? "fd-up" : "fd-down"}>{money(entry.pnl)}</span>
-          {entry.setup ? ` · ${entry.setup}` : ""} · {date}{times ? ` · ${times}` : ""}
-        </p>
-        {entry.notes && <p className="fd-sub fd-clamp2">{entry.notes}</p>}
-        {card.replayable && (
-          <div className="fd-row mt-2">
-            <button className="fd-linkbtn is-primary" onClick={() => void start()} disabled={busy}>{busy ? "Opening…" : "Open full replay"}<ArrowUpRightIcon /></button>
+        <div className="fd-info-row">
+          <div className="min-w-0 flex-1">
+            <h3 className="fd-title">{title}</h3>
+            <p className="fd-sub fd-num">
+              <span className={entry.pnl >= 0 ? "fd-up" : "fd-down"}>{money(entry.pnl)}</span>
+              {entry.setup ? ` · ${entry.setup}` : ""} · {date}{times ? ` · ${times}` : ""}
+            </p>
+            {entry.notes && <p className="fd-sub fd-clamp2">{entry.notes}</p>}
           </div>
-        )}
+          {card.replayable && (
+            <button className="fd-linkbtn is-primary shrink-0" onClick={() => void start()} disabled={busy}>{busy ? "Opening…" : "Open full replay"}<ArrowUpRightIcon /></button>
+          )}
+        </div>
       </div>
     </Frame>
   );
@@ -583,7 +683,13 @@ export function SetupReel(props: ReelProps<SetupCard>) {
   const { setup, stats } = props.card;
   const rules = (setup.rules ?? []).slice(0, 4);
   return (
-    <Frame props={props} kind="Setup" label={`Setup: ${setup.name}`} rail={<Rail {...props} href="/lab#setups" openLabel="Playbook" />}>
+    <Frame
+      props={props}
+      kind="Setup"
+      shape="card"
+      label={`Setup: ${setup.name}`}
+      actions={<CardActions {...props} href="/lab#setups" openLabel="Playbook" />}
+    >
       <div className="fd-hero" data-tone="gold" data-layout="spread">
         {rules.length > 0 ? (
           <div><p className="fd-label" style={{ marginBottom: "0.625rem" }}>Your rules</p><ul className="fd-rules">{rules.map((r) => <li key={r.id}>{r.text}</li>)}</ul></div>
@@ -631,66 +737,77 @@ export function LessonReel(props: ReelProps<LessonCard>) {
   const summaryText = pull && pull !== lesson.subtitle ? pull : lesson.excerpt || lesson.subtitle;
 
   return (
-    <Frame props={props} kind={community ? "Community" : "Lesson"} label={`Lesson: ${lesson.title}`} split={false}
-      rail={<Rail {...props} href={`/lessons/${lesson.id}`} openLabel="Read" onOpen={() => lessonOpened(props.card.key)} />}>
-      <div className="fd-lesson-stage">
-        <div className="fd-lesson-split">
-          {/* Left: 16:9 landscape thumbnail or inline video */}
-          <div className="fd-lesson-thumb" data-empty={!hasCover && !videoUrl ? "true" : undefined}>
-            {videoUrl ? (
-              <FeedVideoPlayer
-                src={videoUrl}
-                poster={hasCover ? lesson.cover : null}
-                active={props.active}
-                near={props.near}
-                label={`Video for ${lesson.title}`}
-                aspect="16:9"
-              />
-            ) : hasCover ? (
-              <>
-                {props.near && (
-                  <img
-                    className="fd-lesson-img"
-                    src={lesson.cover ?? undefined}
-                    alt=""
-                    loading="lazy"
-                    decoding="async"
-                    draggable={false}
-                    onError={() => setBroken(true)}
-                  />
-                )}
-                <div className="fd-lesson-scrim" aria-hidden="true" />
-                <span className="fd-lesson-badge">{lesson.readMins} min read</span>
-              </>
-            ) : (
-              <div className="fd-lesson-poster" aria-hidden="true">
+    <Frame
+      props={props}
+      kind={community ? "Community" : "Lesson"}
+      shape="editorial"
+      label={`Lesson: ${lesson.title}`}
+      split={false}
+      actions={<CardActions {...props} />}
+    >
+      <div className="fd-lesson-split">
+        {/* Left: 16:9 landscape thumbnail or inline video */}
+        <div className="fd-lesson-thumb" data-empty={!hasCover && !videoUrl ? "true" : undefined}>
+          {videoUrl ? (
+            <FeedVideoPlayer
+              src={videoUrl}
+              poster={hasCover ? lesson.cover : null}
+              active={props.active}
+              near={props.near}
+              label={`Video for ${lesson.title}`}
+              aspect="16:9"
+            />
+          ) : hasCover ? (
+            <Link
+              href={`/lessons/${lesson.id}`}
+              onClick={() => lessonOpened(props.card.key)}
+              className="block h-full w-full"
+              tabIndex={-1}
+              aria-hidden="true"
+            >
+              {props.near && (
+                <img
+                  className="fd-lesson-img"
+                  src={lesson.cover ?? undefined}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                  onError={() => setBroken(true)}
+                />
+              )}
+            </Link>
+          ) : (
+            <div className="fd-lesson-poster" aria-hidden="true">
+              <div className="fd-lesson-poster-top">
                 <span className="fd-lesson-poster-icon"><BookOpenIcon /></span>
-                <p className="fd-lesson-poster-kicker">{community ? "Community Note" : "Playbook Lesson"}</p>
-                <span className="fd-lesson-badge">{lesson.readMins} min read</span>
+                <span className="fd-lesson-badge" style={{ position: "static" }}>{lesson.readMins} min read</span>
               </div>
-            )}
-          </div>
-
-          {/* Right: concise scannable summary + clear primary action */}
-          <div className="fd-lesson-summary">
-            <p className="fd-lesson-meta">
-              <span>{community ? lesson.author.name : "You"}</span>
-              <span aria-hidden="true">·</span>
-              <span>{lesson.readMins} min read</span>
-            </p>
-            <h3 className="fd-title fd-lesson-title">{lesson.title}</h3>
-            {lesson.subtitle && <p className="fd-lesson-subtitle">{lesson.subtitle}</p>}
-            {summaryText && summaryText !== lesson.subtitle && (
-              <p className="fd-lesson-excerpt">{summaryText}</p>
-            )}
-            <div className="fd-row fd-lesson-actions">
-              <Link href={`/lessons/${lesson.id}`} onClick={() => lessonOpened(props.card.key)} className="fd-linkbtn is-primary">
-                Read lesson<ArrowUpRightIcon />
-              </Link>
-              <button type="button" className="fd-linkbtn" onClick={() => void like()} aria-pressed={liked} aria-label={liked ? "Unlike lesson" : "Like lesson"}>
-                <HeartIcon filled={liked} />{likes > 0 ? likes : "Like"}
-              </button>
+              <p className="fd-lesson-poster-quote">{(pull || lesson.subtitle || lesson.title).slice(0, 90)}</p>
+              <p className="fd-lesson-poster-kicker">{community ? `By ${lesson.author.name}` : "Playbook Lesson"}</p>
             </div>
+          )}
+        </div>
+
+        {/* Right: concise scannable summary + clear primary action */}
+        <div className="fd-lesson-summary">
+          <p className="fd-lesson-meta">
+            <span>{community ? lesson.author.name : "You"}</span>
+            <span aria-hidden="true">·</span>
+            <span>{lesson.readMins} min read</span>
+          </p>
+          <h3 className="fd-title fd-lesson-title">{lesson.title}</h3>
+          {lesson.subtitle && <p className="fd-lesson-subtitle">{lesson.subtitle}</p>}
+          {summaryText && summaryText !== lesson.subtitle && (
+            <p className="fd-lesson-excerpt">{summaryText}</p>
+          )}
+          <div className="fd-row fd-lesson-actions">
+            <Link href={`/lessons/${lesson.id}`} onClick={() => lessonOpened(props.card.key)} className="fd-linkbtn is-primary">
+              Read lesson<ArrowUpRightIcon />
+            </Link>
+            <button type="button" className="fd-linkbtn" onClick={() => void like()} aria-pressed={liked} aria-label={liked ? "Unlike lesson" : "Like lesson"}>
+              <HeartIcon filled={liked} />{likes > 0 ? likes : "Like"}
+            </button>
           </div>
         </div>
       </div>
@@ -710,7 +827,7 @@ export function StarterReel(props: ReelProps<StarterCard>) {
   const s = STARTERS[props.card.id];
   const openNew = useUi((u) => u.openNewEntry);
   return (
-    <Frame props={props} kind="Get started" label={s.title} rail={null}>
+    <Frame props={props} kind="Get started" shape="card" label={s.title} actions={null}>
       <div className="fd-hero" data-tone="gold">
         <h3 className="fd-big">{s.title}</h3>
         <p className="fd-quote">{s.body}</p>
@@ -727,21 +844,25 @@ export function StarterReel(props: ReelProps<StarterCard>) {
 
 export function EndReel({ card, index, total, active, onSaved, savedCount, minutes, today }: { card: EndCard; index: number; total: number; active: boolean; onSaved: () => void; savedCount: number; minutes: number; today: number }) {
   return (
-    <article className="fd-card" data-i={index} data-key={card.key} data-active={active || undefined} role="article" aria-posinset={index + 1} aria-setsize={total} aria-label="You're all caught up">
-      <div className="fd-inner">
-        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
-          <p className="fd-chip"><span>That’s everything for now</span></p>
-        </div>
-        <div className="fd-hero" data-tone="gold">
-          <h3 className="fd-big">You’re all caught up.</h3>
-          <p className="fd-quote">
-            {today > 0 ? `You looked at ${today} card${today === 1 ? "" : "s"} today` : "Nothing new today"}{minutes > 0 ? ` over ${minutes} min` : ""}. This feed ends on purpose — new cards are ranked fresh tomorrow, so there’s nothing to keep refreshing for.
-          </p>
-        </div>
-        <div className="fd-row">
-          <Link href="/dashboard" className="fd-linkbtn is-primary">Back to Home</Link>
-          {savedCount > 0 && <button className="fd-linkbtn" onClick={onSaved}>Review {savedCount} saved</button>}
-          <Link href="/journal" className="fd-linkbtn">Open Journal</Link>
+    <article className="fd-card" data-i={index} data-key={card.key} data-kind="end" data-shape="card" data-active={active || undefined} role="article" aria-posinset={index + 1} aria-setsize={total} aria-label="You're all caught up">
+      <div className="fd-stage" data-shape="card">
+        <div className="fd-inner" data-shape="card">
+          <div className="fd-card-head">
+            <div className="fd-card-head-left">
+              <p className="fd-chip"><span>That’s everything for now</span></p>
+            </div>
+          </div>
+          <div className="fd-hero" data-tone="gold">
+            <h3 className="fd-big">You’re all caught up.</h3>
+            <p className="fd-quote">
+              {today > 0 ? `You looked at ${today} card${today === 1 ? "" : "s"} today` : "Nothing new today"}{minutes > 0 ? ` over ${minutes} min` : ""}. This feed ends on purpose — new cards are ranked fresh tomorrow, so there’s nothing to keep refreshing for.
+            </p>
+          </div>
+          <div className="fd-row">
+            <Link href="/dashboard" className="fd-linkbtn is-primary">Back to Home</Link>
+            {savedCount > 0 && <button className="fd-linkbtn" onClick={onSaved}>Review {savedCount} saved</button>}
+            <Link href="/journal" className="fd-linkbtn">Open Journal</Link>
+          </div>
         </div>
       </div>
     </article>

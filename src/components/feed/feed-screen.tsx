@@ -15,7 +15,7 @@ import { music } from "@/lib/feed/music";
 import type { FeedCard, FeedCollection, FeedKey } from "@/lib/feed/types";
 import { recentSeen, useFeed, useFeedSync } from "./feed-store";
 import { useSessionClock } from "./use-session-clock";
-import { EndReel, LessonReel, SetupReel, StarterReel, TradeReel, VideoReel, type ReelProps } from "./reels";
+import { cardShapeOf, EndReel, LessonReel, SetupReel, StarterReel, TradeReel, VideoReel, type ReelProps } from "./reels";
 import { BreakPrompt, CollectSheet, ManageCollectionSheet, SettingsSheet } from "./sheets";
 import { CollectionsPanel, ProgressPanel, SidePanel } from "./panels";
 import { SlidersIcon, XIcon } from "./feed-icons";
@@ -133,16 +133,22 @@ export function FeedScreen() {
   const savedSet = useMemo(() => savedKeys(feedState), [feedState]);
 
   /* ------------------------------ navigation ------------------------------ */
+  const pending = useRef<{ idx: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+
   const goto = useCallback((i: number) => {
     const el = scroller.current;
     if (!el) return;
-    const n = Math.max(0, Math.min(i, el.querySelectorAll(".fd-card").length - 1));
-    el.scrollTo({ top: n * el.clientHeight, behavior: reduce ? "auto" : "smooth" });
+    const els = el.querySelectorAll<HTMLElement>(".fd-card");
+    if (!els.length) return;
+    const n = Math.max(0, Math.min(i, els.length - 1));
+    setActive(n);
+    const target = els[n];
+    if (!target) return;
+    const top = n === 0 ? 0 : Math.max(0, target.offsetTop - Math.max(12, (el.clientHeight - target.offsetHeight) / 2));
+    el.scrollTo({ top, behavior: reduce ? "auto" : "smooth" });
   }, [reduce]);
 
-  // Keyboard stepping tracks the *intended* card, not the one the observer last reported: during a smooth scroll the
-  // observer lags, and a quick second press would otherwise aim at the same card as the first.
-  const pending = useRef<{ idx: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  // Keyboard stepping tracks the *intended* card so rapid J/K presses never stall on an in-flight smooth scroll.
   const step = useCallback((dir: 1 | -1) => {
     const base = pending.current ? pending.current.idx : active;
     const total = scroller.current?.querySelectorAll(".fd-card").length ?? 0;
@@ -157,17 +163,56 @@ export function FeedScreen() {
   useEffect(() => { scroller.current?.scrollTo({ top: 0 }); setActive(0); }, [tab, openColId]);
   useEffect(() => { tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ inline: "center", block: "nearest", behavior: "auto" }); }, [tab]);
 
-  // which card fills the screen
+  // Active-card detection across dynamic-height cards (focal-center tracking + IntersectionObserver)
   useEffect(() => {
     const root = scroller.current;
     if (!root || !showReels) return;
     const els = [...root.querySelectorAll<HTMLElement>(".fd-card")];
     if (!els.length) return;
+
+    let raf = 0;
+    const detectActive = () => {
+      raf = 0;
+      if (pending.current) return; // let explicit keyboard/button step complete
+      if (root.scrollTop <= 12) { setActive(0); return; }
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 16) { setActive(els.length - 1); return; }
+      const rRect = root.getBoundingClientRect();
+      const focalY = rRect.top + rRect.height * 0.45;
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < els.length; i++) {
+        const cRect = els[i].getBoundingClientRect();
+        const center = cRect.top + cRect.height / 2;
+        const dist = Math.abs(center - focalY);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+      setActive(bestIdx);
+    };
+
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(detectActive);
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+
     const io = new IntersectionObserver((list) => {
-      for (const e of list) if (e.isIntersecting && e.intersectionRatio >= 0.6) setActive(Number((e.target as HTMLElement).dataset.i ?? 0));
-    }, { root, threshold: [0.6] });
+      if (pending.current) return;
+      for (const e of list) {
+        if (e.isIntersecting && e.intersectionRatio >= 0.65) {
+          onScroll();
+          break;
+        }
+      }
+    }, { root, threshold: [0.65] });
     els.forEach((el) => io.observe(el));
-    return () => io.disconnect();
+
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+      io.disconnect();
+    };
   }, [cards.length, showReels, tab, openColId]);
 
   // count a card as reviewed only after it has been on screen for a moment
@@ -254,11 +299,12 @@ export function FeedScreen() {
   };
 
   const loading = tab === "foryou" && !batch;
+  const activeShape = showReels ? cardShapeOf(activeCard) : "card";
 
   return (
-    <div className="fd-root" data-tab={tab}>
+    <div className="fd-root" data-tab={tab} data-active-shape={activeShape} data-active-kind={activeCard?.kind ?? "none"}>
       <div className="fd-grid">
-        <div className="fd-col">
+        <div className="fd-col" data-shape={activeShape}>
           <header className="fd-top">
             {openCol ? (
               <>
