@@ -13,6 +13,7 @@ import "./backtesting/drawings.test.ts";
 import "./backtesting/order-engine.test.ts";
 import "./backtesting/replay-trading.test.ts";
 import "./backtesting/journal-replay.test.ts";
+import "./backtesting/lse-client.test.ts";
 import "./journal/tagging.test.ts";
 import "./journal/outlook.test.ts";
 import "../src/lib/csv-import.test.ts";

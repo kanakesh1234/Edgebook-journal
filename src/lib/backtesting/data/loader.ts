@@ -9,7 +9,7 @@
 import { instrumentBySymbol } from '../instruments';
 import { aggregateCandles } from '../engine/candle-aggregator';
 import { cacheKey, getCachedCandles, setCachedCandles } from './cache';
-import { lseProvider } from './lse-provider';
+import { MarketDataError, lseProvider } from './lse-provider';
 import { planTimeframe, windowKey } from './timeframes';
 import type { CandleData, CandleFetchMeta } from './types';
 
@@ -46,7 +46,32 @@ function describeEmpty(symbol: string, providerSymbol: string, startUtc: string,
   return `No ${symbol}${via} candles for ${win}. ${hint}`;
 }
 
-export async function loadSymbolCandles(
+/** Waits (ms) before each client-side retry of a rate-limited / provider-error load. */
+const RETRY_DELAYS_MS = [1500, 4000];
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * One load per (symbol, timeframe, window) at a time. React StrictMode runs the session
+ * effect twice in dev and the context-bar fetch can overlap the main one — without this each
+ * of those was a separate burst against the data provider.
+ */
+const inFlight = new Map<string, Promise<LoadResult>>();
+
+export function loadSymbolCandles(
+  symbol: string,
+  timeframe: string,
+  startUtc: string,
+  endUtc: string,
+): Promise<LoadResult> {
+  const key = `${symbol}|${timeframe}|${windowKey(startUtc, endUtc)}`;
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const p = loadOnce(symbol, timeframe, startUtc, endUtc).finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+async function loadOnce(
   symbol: string,
   timeframe: string,
   startUtc: string,
@@ -79,17 +104,26 @@ export async function loadSymbolCandles(
   const cached = await getCachedCandles(key);
   if (cached && cached.length > 0) return finish(cached, true, null);
 
-  try {
-    const { candles, meta } = await lseProvider.getCandlesWithMeta(providerSymbol, plan.fetchTf, startUtc, endUtc);
-    // Don't cache empty or truncated results — they'd be served forever.
-    if (candles.length > 0 && !meta?.truncated) await setCachedCandles(key, candles);
-    return finish(candles, false, meta);
-  } catch (err) {
-    return {
-      ...base,
-      candles: [],
-      error: err instanceof Error ? err.message : 'Failed to load market data.',
-    };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { candles, meta } = await lseProvider.getCandlesWithMeta(providerSymbol, plan.fetchTf, startUtc, endUtc);
+      // Don't cache empty or truncated results — they'd be served forever.
+      if (candles.length > 0 && !meta?.truncated) await setCachedCandles(key, candles);
+      return finish(candles, false, meta);
+    } catch (err) {
+      // Rate limit / provider hiccup: the server already retried; wait and try once or twice more
+      // before surfacing "No data to replay".
+      const retryable = err instanceof MarketDataError && err.retryable;
+      if (retryable && attempt < RETRY_DELAYS_MS.length) {
+        await sleep(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      return {
+        ...base,
+        candles: [],
+        error: err instanceof Error ? err.message : 'Failed to load market data.',
+      };
+    }
   }
 }
 

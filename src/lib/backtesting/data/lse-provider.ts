@@ -8,6 +8,18 @@
 
 import type { CandleData, CandleFetchMeta, DataAvailability, HistoricalDataProvider } from './types';
 
+/** Thrown for any failed /api/market-data call; `retryable` is true for rate limits and provider hiccups. */
+export class MarketDataError extends Error {
+  status: number;
+  retryable: boolean;
+  constructor(message: string, status: number, retryable: boolean) {
+    super(message);
+    this.name = 'MarketDataError';
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
 export class LseProvider implements HistoricalDataProvider {
   readonly name = 'London Strategic Edge';
 
@@ -32,7 +44,11 @@ export class LseProvider implements HistoricalDataProvider {
     if (!res.ok) {
       // The route returns { error, message } — show the human message, not raw JSON.
       const body = (await res.json().catch(() => null)) as { message?: string } | null;
-      throw new Error(body?.message || `Data request failed (${res.status}).`);
+      throw new MarketDataError(
+        body?.message || `Data request failed (${res.status}).`,
+        res.status,
+        res.status === 429 || res.status >= 500,
+      );
     }
     const json = (await res.json()) as { candles: CandleData[]; meta?: CandleFetchMeta };
     return { candles: json.candles ?? [], meta: json.meta ?? null };

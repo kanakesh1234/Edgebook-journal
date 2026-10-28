@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { INSTRUMENTS } from '@/lib/backtesting/instruments';
 import { rateLimited, sessionEmail } from '@/lib/server/auth';
 import { getLseApiKey, LSE_KEY_HELP } from '@/lib/server/lse-key';
+import { UpstreamError, createMemo, lse } from '@/lib/server/lse-client';
 import {
   LSE_NATIVE_TIMEFRAMES,
   isLseNativeTimeframe,
@@ -26,9 +27,17 @@ import {
 /*   • unknown symbols return an error body, not an empty array         */
 /* ------------------------------------------------------------------ */
 
-const LSE_BASE = 'https://api.londonstrategicedge.com/vault';
 const MAX_CHUNKS = 40;
-const CONCURRENCY = 4;
+// Chunks of ONE request run two at a time; lse-client additionally caps the whole
+// server instance at 2 simultaneous LSE calls, so bursts queue instead of getting 429s.
+const CONCURRENCY = 2;
+
+// Retries on 429 can wait a few seconds — give the function room (Vercel default can be as low as 10s).
+export const maxDuration = 30;
+
+/** Identical windows (StrictMode double-fires, Retry clicks, context bars) are served from memory for 10 min. */
+type Payload = { candles: ReturnType<typeof toCandle>[]; count: number; meta: Record<string, unknown> };
+const memo = createMemo<Payload>(10 * 60_000, 30);
 
 interface LseCandle {
   ts?: string; date?: string; datetime?: string;
@@ -68,14 +77,8 @@ function tickSizeFor(providerSymbol: string): number | undefined {
 const SYMBOL_RE = /^[A-Za-z0-9._/-]{1,20}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]{0,20}(Z|[+-]\d{2}:?\d{2})?)?$/;
 
-function fail(error: string, message: string, status: number) {
-  return NextResponse.json({ error, message }, { status });
-}
-
-class UpstreamError extends Error {
-  constructor(public kind: 'unknown_symbol' | 'rate_limited' | 'provider', public status: number) {
-    super(kind);
-  }
+function fail(error: string, message: string, status: number, headers?: Record<string, string>) {
+  return NextResponse.json({ error, message }, { status, headers });
 }
 
 function toCandle(r: LseCandle, tick: number | undefined) {
@@ -94,35 +97,6 @@ function toCandle(r: LseCandle, tick: number | undefined) {
     close: roundToTick(r.c ?? r.close ?? 0, tick),
     volume: Math.round(r.v ?? r.volume ?? 0),
   };
-}
-
-async function fetchChunk(
-  apiKey: string,
-  symbol: string,
-  timeframe: string,
-  chunk: { start: string; end: string; limit: number },
-): Promise<LseCandle[]> {
-  const params = new URLSearchParams({
-    symbol,
-    timeframe,
-    start: chunk.start,
-    end: chunk.end,
-    limit: String(chunk.limit),
-  });
-  const res = await fetch(`${LSE_BASE}/candles?${params}`, {
-    headers: { 'x-api-key': apiKey },
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    // Log status only — never forward the provider body (may contain account/quota details).
-    console.error(`[market-data] LSE ${res.status} for ${symbol} ${timeframe} ${chunk.start}`);
-    if (res.status === 400 || res.status === 404 || res.status === 422) throw new UpstreamError('unknown_symbol', res.status);
-    if (res.status === 429) throw new UpstreamError('rate_limited', 429);
-    throw new UpstreamError('provider', res.status);
-  }
-  const raw = await res.json();
-  const list = Array.isArray(raw) ? raw : (raw?.data || raw?.candles || raw?.results);
-  return Array.isArray(list) ? list : [];
 }
 
 export async function GET(req: NextRequest) {
@@ -171,14 +145,14 @@ export async function GET(req: NextRequest) {
     return fail('window_too_large', 'That window needs too many requests — shorten it.', 400);
   }
 
-  try {
+  const loadWindow = async (): Promise<Payload> => {
     const results: LseCandle[][] = new Array(chunks.length);
     let next = 0;
     let truncated = false;
     const worker = async () => {
       while (next < chunks.length) {
         const i = next++;
-        const rows = await fetchChunk(apiKey, symbol, timeframe, chunks[i]);
+        const rows = (await lse.fetchChunk(apiKey, symbol, timeframe, chunks[i])) as LseCandle[];
         if (rows.length >= chunks[i].limit) truncated = true; // hit our own row cap → data may be cut
         results[i] = rows;
       }
@@ -198,7 +172,7 @@ export async function GET(req: NextRequest) {
     }
     const candles = [...byTime.values()].sort((a, b) => a.time - b.time);
 
-    return NextResponse.json({
+    return {
       candles,
       count: candles.length,
       meta: {
@@ -214,13 +188,22 @@ export async function GET(req: NextRequest) {
         firstTime: candles[0]?.time ?? null,
         lastTime: candles[candles.length - 1]?.time ?? null,
       },
-    });
+    };
+  };
+
+  try {
+    // Same provider symbol + timeframe + window → one upstream fetch, however many callers.
+    const key = `${symbol}|${timeframe}|${startEpoch}|${endEpoch}`;
+    const { value } = await memo.run(key, loadWindow, (p) => p.count > 0 && !(p.meta as { truncated?: boolean }).truncated);
+    return NextResponse.json({ ...value, meta: { ...value.meta, symbol: rawSymbol } });
   } catch (err) {
     if (err instanceof UpstreamError) {
       if (err.kind === 'unknown_symbol') {
         return fail('unknown_symbol', `LSE has no candle data for "${symbol}" at ${timeframe}.`, 404);
       }
-      if (err.kind === 'rate_limited') return fail('provider_rate_limited', 'The data provider is rate-limiting us — try again shortly.', 429);
+      if (err.kind === 'rate_limited') {
+        return fail('provider_rate_limited', 'The data provider is rate-limiting us — try again shortly.', 429, { 'Retry-After': '5' });
+      }
       return fail('provider_error', `Market data provider error (${err.status}).`, 502);
     }
     console.error('[market-data] fetch failed:', err instanceof Error ? err.message : err);

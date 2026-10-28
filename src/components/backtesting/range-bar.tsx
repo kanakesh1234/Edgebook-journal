@@ -71,7 +71,9 @@ export default function RangeBar() {
       <span className="tv-grow" />
       <span className={`tv-status ${statusCls}`}>{statusTxt}</span>
       <span className="tv-clock">
-        {nyDate.format(d)} <b>{nyTime.format(d)}</b> <em>{nyOffsetLabel(currentTime)}</em>
+        {currentTime > 0
+          ? <>{nyDate.format(d)} <b>{nyTime.format(d)}</b> <em>{nyOffsetLabel(currentTime)}</em></>
+          : <b>—</b>}
       </span>
       <i className="tv-sep" />
       <button type="button" className={`tv-tbtn${scale.mode === "percent" ? " is-on" : ""}`} title="Percentage scale (Alt+P)" onClick={() => setScale({ mode: scale.mode === "percent" ? "normal" : "percent" })}>%</button>
