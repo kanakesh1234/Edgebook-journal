@@ -12,14 +12,14 @@ import { useImageUrls } from "@/lib/hooks";
 import { useReplayTrade } from "@/components/journal/replay-trade";
 import { lessonsPost } from "@/components/lessons/api";
 import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
-import { barDelay, endIdx, frameAt, idxFromProgress, progressOf, SPEEDS, stepIdx, type Speed } from "@/lib/feed/replay";
+import { barDelay, endIdx, frameAt, progressOf, stepIdx } from "@/lib/feed/replay";
 import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard, VideoCard } from "@/lib/feed/types";
 import { useFeed } from "./feed-store";
 import { useReplayData } from "./replay-chart";
 
 const ReplayChart = lazy(() => import("./replay-canvas").then((m) => ({ default: m.ReplayChart })));
 import {
-  ArrowUpRightIcon, BookOpenIcon, BookmarkPlusIcon, HeartIcon, PauseIcon, PlayIcon, RestartIcon, SpeakerIcon, StepIcon,
+  ArrowUpRightIcon, BookOpenIcon, BookmarkPlusIcon, HeartIcon, PauseIcon, PlayIcon, SpeakerIcon,
 } from "./feed-icons";
 
 export type CardShape = "portrait" | "landscape" | "editorial" | "card";
@@ -117,6 +117,7 @@ function Frame({
   rail,
   kind,
   shape,
+  headExtra,
   children,
   label,
   split,
@@ -125,6 +126,7 @@ function Frame({
   rail: ReactNode;
   kind: string;
   shape: CardShape;
+  headExtra?: ReactNode;
   children: ReactNode;
   label: string;
   split?: boolean;
@@ -149,8 +151,11 @@ function Frame({
           data-split={split ?? (kind === "Replay" || kind === "Chart" || kind === "Video") ? "" : undefined}
         >
           <div className="fd-card-head">
-            <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
-            <p className="fd-kind">{kind}</p>
+            <div className="fd-card-head-left">
+              <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
+              <p className="fd-kind">{kind}</p>
+            </div>
+            {headExtra}
           </div>
           {children}
         </div>
@@ -203,7 +208,7 @@ export function FeedVideoPlayer({
   const flashHud = useCallback((state: "play" | "pause") => {
     if (hudTimer.current) clearTimeout(hudTimer.current);
     setHud(state);
-    hudTimer.current = setTimeout(() => setHud(null), 650);
+    hudTimer.current = setTimeout(() => setHud(null), 600);
   }, []);
 
   useEffect(() => () => { if (hudTimer.current) clearTimeout(hudTimer.current); }, []);
@@ -349,10 +354,10 @@ export function FeedVideoPlayer({
         </div>
       )}
 
-      {/* Subtle play/pause feedback indicator on tap or when manually paused */}
-      {(hud || (!playing && ready && !failed)) && (
-        <div className={cn("fd-tap-hud", hud && "is-transient")} aria-hidden="true">
-          <span>{(hud ?? "pause") === "play" ? <PlayIcon /> : <PauseIcon />}</span>
+      {/* Transient play/pause feedback indicator on click/tap */}
+      {hud && (
+        <div className="fd-tap-hud is-transient" aria-hidden="true">
+          <span>{hud === "play" ? <PlayIcon /> : <PauseIcon />}</span>
         </div>
       )}
 
@@ -437,11 +442,8 @@ export function TradeReel(props: ReelProps<TradeCard>) {
 
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
   const [hud, setHud] = useState<"play" | "pause" | null>(null);
-  const [controlsPeek, setControlsPeek] = useState(false);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const played = useRef(false);
   const reported = useRef(false);
   const userPausedRef = useRef(false);
@@ -449,18 +451,11 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const flashHud = useCallback((state: "play" | "pause") => {
     if (hudTimer.current) clearTimeout(hudTimer.current);
     setHud(state);
-    hudTimer.current = setTimeout(() => setHud(null), 600);
-  }, []);
-
-  const wakeControls = useCallback(() => {
-    if (peekTimer.current) clearTimeout(peekTimer.current);
-    setControlsPeek(true);
-    peekTimer.current = setTimeout(() => setControlsPeek(false), 2200);
+    hudTimer.current = setTimeout(() => setHud(null), 550);
   }, []);
 
   useEffect(() => () => {
     if (hudTimer.current) clearTimeout(hudTimer.current);
-    if (peekTimer.current) clearTimeout(peekTimer.current);
   }, []);
 
   useEffect(() => {
@@ -473,21 +468,28 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     }
   }, [model]);
 
-  // playback clock
+  // Playback clock — advances bar-by-bar and loops seamlessly like an Instagram Reel / YouTube Short
   useEffect(() => {
     if (!playing || !model) return;
-    const id = window.setInterval(() => setIdx((i) => stepIdx(model, i, 1)), barDelay(speed));
+    const id = window.setInterval(() => {
+      setIdx((cur) => {
+        if (cur >= endIdx(model)) return model.startIdx;
+        return stepIdx(model, cur, 1);
+      });
+    }, barDelay(1));
     return () => window.clearInterval(id);
-  }, [playing, model, speed]);
+  }, [playing, model]);
 
-  // stop at the end; count a replay only if it was actually watched
+  // Count a replay once it reaches the trade's exit bar
   useEffect(() => {
     if (!model) return;
-    if (idx >= endIdx(model)) setPlaying(false);
-    if (played.current && idx >= model.exitIdx && !reported.current) { reported.current = true; replayDone(card.key); }
+    if (played.current && idx >= model.exitIdx && !reported.current) {
+      reported.current = true;
+      replayDone(card.key);
+    }
   }, [idx, model, card.key, replayDone]);
 
-  // leaving the card or hiding the tab pauses it; music follows the active card's playback
+  // Leaving the card or hiding the tab pauses it immediately; music follows the active card's playback
   useEffect(() => {
     if (!active || !docVisible) {
       setPlaying(false);
@@ -501,43 +503,36 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     return () => setReplayPlaying(false);
   }, [active, playing, setReplayPlaying]);
 
-  // Automatic playback when the active replay enters the feed (Instagram Reels / YouTube Shorts behavior)
+  // Automatic playback when the active replay enters the feed (unless manually paused or reduced motion)
   useEffect(() => {
     if (!active || !docVisible || mode !== "replay" || !model || !prefs.autoplayReplay || reduce || userPausedRef.current) return;
     const t = window.setTimeout(() => {
-      setIdx((cur) => {
-        if (cur >= endIdx(model)) {
-          reported.current = false;
-          return model.startIdx;
-        }
-        return cur;
-      });
+      setIdx((cur) => (cur >= endIdx(model) ? model.startIdx : cur));
       played.current = true;
       setPlaying(true);
-    }, 180);
+    }, 150);
     return () => window.clearTimeout(t);
   }, [active, docVisible, mode, model, prefs.autoplayReplay, reduce]);
 
   const frame = model ? frameAt(model, idx) : null;
-  const togglePlay = useCallback((fromSurface = false) => {
+  const togglePlay = useCallback(() => {
     if (!model) return;
-    if (idx >= endIdx(model)) { setIdx(model.startIdx); reported.current = false; }
+    if (idx >= endIdx(model)) setIdx(model.startIdx);
     played.current = true;
     setPlaying((p) => {
       const next = !p;
       userPausedRef.current = !next;
-      if (fromSurface) flashHud(next ? "play" : "pause");
-      if (!next) wakeControls();
+      flashHud(next ? "play" : "pause");
       return next;
     });
     if (prefs.haptics) haptic.selection();
-  }, [model, idx, flashHud, wakeControls, prefs.haptics]);
+  }, [model, idx, flashHud, prefs.haptics]);
 
   const toggleRef = useRef(togglePlay);
   toggleRef.current = togglePlay;
   useEffect(() => {
     if (!active) return;
-    const h = () => toggleRef.current(true);
+    const h = () => toggleRef.current();
     window.addEventListener("fd:toggle-play", h);
     return () => window.removeEventListener("fd:toggle-play", h);
   }, [active]);
@@ -573,7 +568,6 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const hasVisualMedia = card.replayable || card.hasImage || Boolean(card.videoUrl);
   const shape: CardShape = hasVisualMedia ? "landscape" : "card";
   const progressPct = model ? Math.round(progressOf(model, idx) * 1000) / 10 : 0;
-  const showControls = !playing || controlsPeek;
 
   return (
     <Frame
@@ -581,13 +575,20 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       kind={card.replayable ? "Replay" : card.videoUrl ? "Video" : card.hasImage ? "Chart" : "Trade"}
       shape={shape}
       label={label}
+      headExtra={
+        both ? (
+          <div className="fd-seg" role="tablist" aria-label="View">
+            {(["replay", "chart"] as const).map((m) => (
+              <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
+            ))}
+          </div>
+        ) : undefined
+      }
       rail={<Rail {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}
     >
       <div
         className={cn("fd-media", hasVisualMedia && "fd-media--16x9")}
-        data-controls-visible={showControls ? "true" : undefined}
-        onClick={isReplayView && model ? () => togglePlay(true) : undefined}
-        onPointerMove={isReplayView ? wakeControls : undefined}
+        onClick={isReplayView && model ? togglePlay : undefined}
         style={isReplayView && model ? { cursor: "pointer" } : undefined}
       >
         {isReplayView ? (
@@ -596,9 +597,10 @@ export function TradeReel(props: ReelProps<TradeCard>) {
               <Suspense fallback={<Skeleton text="Loading chart…" />}>
                 <ReplayChart model={model} idx={idx} label={`${title} replay chart`} />
               </Suspense>
-              {(hud || (!playing && userPausedRef.current)) && (
-                <div className={cn("fd-tap-hud", hud && "is-transient")} aria-hidden="true">
-                  <span>{(hud ?? "pause") === "play" ? <PlayIcon /> : <PauseIcon />}</span>
+              {/* Transient play/pause feedback HUD when user clicks anywhere on the chart */}
+              {hud && (
+                <div className="fd-tap-hud is-transient" aria-hidden="true">
+                  <span>{hud === "play" ? <PlayIcon /> : <PauseIcon />}</span>
                 </div>
               )}
             </>
@@ -629,17 +631,6 @@ export function TradeReel(props: ReelProps<TradeCard>) {
         {/* Top-left floating live status & P&L pill */}
         {liveBadge}
 
-        {/* Top-left Replay / Screenshot toggle (auto-hidden while playing unless hovered/paused) */}
-        {both && (
-          <div className="fd-mode-pill" onClick={(e) => e.stopPropagation()}>
-            <div className="fd-seg" role="tablist" aria-label="View">
-              {(["replay", "chart"] as const).map((m) => (
-                <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Corner Apple-style speaker/mute icon */}
         {isReplayView && (
           <button
@@ -657,36 +648,10 @@ export function TradeReel(props: ReelProps<TradeCard>) {
           </button>
         )}
 
-        {/* Hidden Reels/Shorts transport controls: hidden during playback, revealed on pause, hover, or focus */}
-        {isReplayView && (
-          <div className="fd-hidden-dock" onClick={(e) => e.stopPropagation()}>
-            <div className="fd-ctl" role="group" aria-label="Replay controls">
-              <button className="fd-small" onClick={() => { if (model) { setIdx(model.startIdx); userPausedRef.current = true; setPlaying(false); reported.current = false; } }} disabled={!model} aria-label="Restart replay"><RestartIcon /></button>
-              <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, -1)); } }} disabled={!model} aria-label="Back one bar"><StepIcon dir={-1} /></button>
-              <button className="fd-play" onClick={() => togglePlay(false)} disabled={!model} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
-              <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, 1)); } }} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
-              <button className="fd-small" onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])} aria-label={`Speed ${speed}×. Change speed`}>{speed}×</button>
-            </div>
-            <div className="fd-scrub">
-              <div className="fd-edge-bar" aria-hidden="true"><i style={{ width: `${progressPct}%` }} /></div>
-              <input
-                className="fd-range"
-                type="range"
-                min={0}
-                max={1000}
-                value={model ? Math.round(progressOf(model, idx) * 1000) : 0}
-                disabled={!model}
-                onChange={(e) => {
-                  if (model) {
-                    userPausedRef.current = true;
-                    setPlaying(false);
-                    setIdx(idxFromProgress(model, Number(e.target.value) / 1000));
-                  }
-                }}
-                aria-label="Replay position"
-                aria-valuetext={frame ? `${frame.phase === "setup" ? "Before entry" : frame.phase === "open" ? "In trade" : "Closed"}` : "Not loaded"}
-              />
-            </div>
+        {/* Whisper-thin bottom-edge progress line (no visible button clutter) */}
+        {isReplayView && model && (
+          <div className="fd-edge-bar" aria-hidden="true">
+            <i style={{ width: `${progressPct}%` }} />
           </div>
         )}
       </div>
@@ -881,7 +846,9 @@ export function EndReel({ card, index, total, active, onSaved, savedCount, minut
       <div className="fd-stage" data-shape="card">
         <div className="fd-inner" data-shape="card">
           <div className="fd-card-head">
-            <p className="fd-chip"><span>That’s everything for now</span></p>
+            <div className="fd-card-head-left">
+              <p className="fd-chip"><span>That’s everything for now</span></p>
+            </div>
           </div>
           <div className="fd-hero" data-tone="gold">
             <h3 className="fd-big">You’re all caught up.</h3>

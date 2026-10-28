@@ -10,14 +10,13 @@ import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import type { LessonView } from "@/components/lessons/types";
 import { useReadProgress } from "@/components/lessons/progress";
 import { buildFeed, cardsForKeys, extractVideoUrl, keyExists, type BuildInput } from "@/lib/feed/build";
-import { savedKeys } from "@/lib/feed/state";
 import { music } from "@/lib/feed/music";
 import type { FeedCard, FeedCollection, FeedKey } from "@/lib/feed/types";
 import { recentSeen, useFeed, useFeedSync } from "./feed-store";
 import { useSessionClock } from "./use-session-clock";
 import { cardShapeOf, EndReel, LessonReel, SetupReel, StarterReel, TradeReel, VideoReel, type ReelProps } from "./reels";
 import { BreakPrompt, CollectSheet, ManageCollectionSheet, SettingsSheet } from "./sheets";
-import { CollectionsPanel, ProgressPanel, SidePanel } from "./panels";
+import { CollectionsPanel, ProgressPanel } from "./panels";
 import { SlidersIcon, XIcon } from "./feed-icons";
 import "./feed.css";
 
@@ -130,7 +129,6 @@ export function FeedScreen() {
   const showReels = tab === "foryou" || tab === "saved" || (tab === "collections" && !!openCol);
 
   const favSet = useMemo(() => new Set(feedState.favorites), [feedState.favorites]);
-  const savedSet = useMemo(() => savedKeys(feedState), [feedState]);
 
   /* ------------------------------ navigation ------------------------------ */
   const goto = useCallback((i: number) => {
@@ -301,7 +299,6 @@ export function FeedScreen() {
             <ProgressPanel minutes={session.minutes} limit={prefs.dailyMinutes} />
           )}
         </div>
-        <SidePanel minutes={session.minutes} limit={prefs.dailyMinutes} saved={savedSet.size} />
       </div>
 
       <CollectSheet itemKey={collectKey} onClose={() => setCollectKey(null)} />
