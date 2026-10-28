@@ -73,9 +73,9 @@ const THEME_LABEL: Record<ThemeChoice, string> = { light: "Light", dark: "Dark",
 export const themeLabel = (c: ThemeChoice) => THEME_LABEL[c];
 
 const REPLY_MIN = 250;
-const REPLY_MAX = 8_000;
-const REPLY_STEP = 250;
-const REPLY_DEFAULT = 900;
+const REPLY_MAX = 32_000;
+const REPLY_STEP = 500;
+const REPLY_DEFAULT = 4_000;
 export const clampReply = (n: number) => Math.min(REPLY_MAX, Math.max(REPLY_MIN, n));
 
 /** The name shown everywhere: Full Name from Settings wins over the auth/Google name. */

@@ -16,7 +16,15 @@ export interface MinatoMessage {
   text: string;
 }
 
-export const QUICK_PROMPTS: readonly string[] = [];
+/** Focused starting points for a deeper conversation. Each remains grounded
+ * in the trader's own journal, rather than asking the model for a signal. */
+export const QUICK_PROMPTS = [
+  "Give me a deep review of my journal.",
+  "What pattern am I repeating in my own words?",
+  "Compare my strongest and weakest setups.",
+  "Where do my notes conflict with my execution?",
+  "What should I practise next?",
+] as const;
 
 function money(n: number): string {
   const abs = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 });

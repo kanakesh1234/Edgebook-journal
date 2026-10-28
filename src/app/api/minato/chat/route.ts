@@ -13,11 +13,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const MIN_REPLY_TOKENS = 250;
-const MAX_REPLY_TOKENS = 8_000;
+// This is deliberately generous. OpenRouter/model context and output limits
+// still apply; pretending an LLM has literally no limit would only create a
+// failed request instead of a better analysis.
+const MAX_REPLY_TOKENS = 32_000;
 
 function replyTokenLimit(value: unknown): number {
   const numberValue = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numberValue)) return 900;
+  if (!Number.isFinite(numberValue)) return 4_000;
   return Math.min(MAX_REPLY_TOKENS, Math.max(MIN_REPLY_TOKENS, Math.round(numberValue)));
 }
 
@@ -38,7 +41,8 @@ const SYSTEM_PROMPT = [
   "- For questions about a SPECIFIC trade (a date, 'my last trade', an instrument on a given day), look in facts.recentTrades — it lists every individual trade in the journal, most recent first. Only say a trade isn't available if it's genuinely absent from that list.",
   "",
   "MENTORSHIP RULE:",
-  "- facts.lessons contains every reflection the user has personally written on past trades, oldest first. When the question is broad ('teach me', 'analyse my trading', 'what should I improve') actively draw on these in your own synthesis — connect a lesson the user wrote weeks ago to a mistake repeating now, rather than only restating aggregate stats. Quote the user's own words briefly when it sharpens the point.",
+  "- facts.traderWords contains every written journal field available for every trade: notes, all reflection answers, and review follow-ups. When the question is broad ('teach me', 'analyse my trading', 'what should I improve') actively draw on these in your own synthesis — connect a lesson the user wrote weeks ago to a mistake repeating now, rather than only restating aggregate stats. Quote the user's own words briefly when it sharpens the point.",
+  "- Treat the trader's words as first-class evidence, not decoration. Reconcile what they wrote with the trade result, execution fields and later reflections; surface contradictions gently and precisely.",
   "",
   "COMPARATIVE ANALYSIS RULE:",
   "- When discussing a trade, actively scan facts.recentTrades for the closest analogous past trade(s) — same instrument, same setup, same day-of-week, or same direction — even from months or years back. If one exists, name its date and outcome explicitly and contrast what differed (entry timing, size, whether the plan was followed, R multiple) rather than only giving a generic probability. E.g. 'You took this same setup on 2025-03-10 (Mon) and won — that time you entered at the retest; today you entered on the breakout, which is the difference worth flagging.'",
@@ -67,13 +71,18 @@ interface RawEntry {
   entryPrice?: number | null; exitPrice?: number | null;
   stopLoss?: number | null; takeProfit?: number | null; notes?: string;
   direction?: string | null; reviewStatus?: string;
-  reflection?: { cause?: string; lesson?: string } | null;
+  reflection?: { wentWell?: string; wentPoorly?: string; cause?: string; lesson?: string } | null;
+  preTradeChecklist?: { label?: string; description?: string; confirmed?: boolean }[];
   review?: {
+    plannedVsActual?: { deviations?: string; notes?: string } | null;
+    concepts?: { used?: string[]; learned?: string; improve?: string } | null;
+    compareInsight?: string | null;
     execution?: { movedStop?: boolean | null; exitedEarly?: boolean | null; chased?: boolean | null };
     outcome?: { followedPlan?: boolean | null; processVerdict?: string } | null;
     psychology?: { emotionBefore?: string; convictionOrUrgency?: string; fomo?: boolean | null; revenge?: boolean | null; fearExit?: boolean | null } | null;
-    concepts?: { used?: string[] } | null;
-    followUp?: { biggestMistake?: string; watchNext?: string } | null;
+    followUp?: { strongestEvidence?: string; biggestMistake?: string; conceptApplied?: string; conceptMisunderstood?: string; watchNext?: string; mistake?: string; mistakeNote?: string; mistakeOther?: string } | null;
+    setup?: { liquiditySwept?: string; sweepTimestamp?: string; smtEvidence?: string; targetDescription?: string; manipulationIdentified?: string } | null;
+    postLossGate?: { immediateThoughts?: string; intendedNextAction?: string } | null;
   } | null;
 }
 
@@ -293,6 +302,53 @@ export async function POST(request: Request) {
         goodProcessTrade: processVerdict === "a-plus" ? true : processVerdict === "process-failure" ? false : null, // Q3
         mistakeOrLesson: e.review?.followUp?.biggestMistake ?? e.reflection?.lesson ?? null, // Q4
         watchNext: e.review?.followUp?.watchNext ?? null, // Q5
+        // Preserve the trader's actual language. This means MINATO can weigh
+        // every written observation against outcomes rather than reducing the
+        // journal to a statistics table.
+        traderWords: {
+          notes: e.notes || null,
+          reflection: {
+            wentWell: e.reflection?.wentWell || null,
+            wentPoorly: e.reflection?.wentPoorly || null,
+            cause: e.reflection?.cause || null,
+            lesson: e.reflection?.lesson || null,
+          },
+          reviewFollowUp: {
+            strongestEvidence: e.review?.followUp?.strongestEvidence || null,
+            biggestMistake: e.review?.followUp?.biggestMistake || null,
+            conceptApplied: e.review?.followUp?.conceptApplied || null,
+            conceptMisunderstood: e.review?.followUp?.conceptMisunderstood || null,
+            watchNext: e.review?.followUp?.watchNext || null,
+            mistake: e.review?.followUp?.mistake || null,
+            mistakeNote: e.review?.followUp?.mistakeNote || null,
+            mistakeOther: e.review?.followUp?.mistakeOther || null,
+          },
+          plannedVsActual: {
+            deviations: e.review?.plannedVsActual?.deviations || null,
+            notes: e.review?.plannedVsActual?.notes || null,
+          },
+          concepts: {
+            learned: e.review?.concepts?.learned || null,
+            improve: e.review?.concepts?.improve || null,
+          },
+          compareInsight: e.review?.compareInsight || null,
+          setupEvidence: {
+            liquiditySwept: e.review?.setup?.liquiditySwept || null,
+            sweepTimestamp: e.review?.setup?.sweepTimestamp || null,
+            smtEvidence: e.review?.setup?.smtEvidence || null,
+            targetDescription: e.review?.setup?.targetDescription || null,
+            manipulationIdentified: e.review?.setup?.manipulationIdentified || null,
+          },
+          postLossReflection: {
+            immediateThoughts: e.review?.postLossGate?.immediateThoughts || null,
+            intendedNextAction: e.review?.postLossGate?.intendedNextAction || null,
+          },
+          preTradeChecklist: (e.preTradeChecklist ?? []).map((item) => ({
+            label: item.label || null,
+            description: item.description || null,
+            confirmed: item.confirmed === true,
+          })),
+        },
       };
     });
 
@@ -304,6 +360,10 @@ export async function POST(request: Request) {
     .filter((t) => (t.mistakeOrLesson && t.mistakeOrLesson.trim().length > 0) || (t.watchNext && t.watchNext.trim().length > 0))
     .reverse()
     .map((t) => ({ date: t.date, instrument: t.instrument, pnl: t.pnl, mistakeOrLesson: t.mistakeOrLesson, watchNext: t.watchNext }));
+  // Keep numerical/execution history separate from the full written record.
+  // That lets the model inspect both without paying for the same note twice.
+  const traderWords = recentTrades.map((trade) => ({ date: trade.date, instrument: trade.instrument, setup: trade.setup, text: trade.traderWords }));
+  const tradeHistory = recentTrades.map(({ traderWords: _traderWords, notes: _notes, ...trade }) => trade);
 
   const now = new Date();
   const facts = {
@@ -354,7 +414,8 @@ export async function POST(request: Request) {
     // first / chronological — this is the user's complete journal, not a
     // sample, so the model can both look up a specific trade and teach
     // from patterns across everything they've reviewed.
-    recentTrades,
+    recentTrades: tradeHistory,
+    traderWords,
     lessons,
   };
 

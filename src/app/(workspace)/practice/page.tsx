@@ -252,11 +252,11 @@ export default function PracticePage() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1120px] pb-28 sm:pb-16">
+    <div className="mx-auto w-full max-w-[1440px] pb-28 sm:pb-16">
       <header className="pr-rise">
         <h1 className="font-display text-[36px] font-semibold leading-none tracking-[-0.04em] text-ink sm:text-[46px]">Practice</h1>
         <p className="mt-2.5 max-w-xl text-[16px] leading-snug text-muted">
-          Five ways to train on your own trades. Clear the gate to level up.
+          Five focused training folders, built from your trades. Clear a gate to level up.
         </p>
       </header>
 

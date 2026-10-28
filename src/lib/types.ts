@@ -553,7 +553,7 @@ export function setupRules(setup: Pick<PlaybookSetup, "rules" | "entryConditions
 export interface AiPrefs {
   /** May the companion read journal notes/reflections when building context? */
   includeNotes: boolean;
-  /** Preferred maximum size for a single MINATO reply. The provider may impose a lower ceiling. */
+  /** Preferred maximum size for a single MINATO reply. The selected provider still enforces its own technical ceiling. */
   responseTokenLimit?: number;
 }
 

@@ -41,7 +41,13 @@ export function SectionCard({ mode, level, recommended, blocked, busy, stats, me
   const locked = !!blocked;
 
   return (
-    <article aria-label={meta.title} className={cn("pr-card", className)} style={{ "--pr-accent": meta.accent } as React.CSSProperties} data-locked={locked ? "true" : undefined}>
+    <article
+      aria-label={meta.title}
+      className={cn("pr-card", className)}
+      style={{ "--pr-accent": meta.accent } as React.CSSProperties}
+      data-mode={mode}
+      data-locked={locked ? "true" : undefined}
+    >
       <div className="pr-stage" aria-hidden="true">
         <span className="pr-stage-mark"><Glyph /></span>
         {level != null && <span className="pr-tag" data-side="left">{locked ? <LockIcon className="mr-1.5 h-3 w-3" /> : null}Level {level}</span>}

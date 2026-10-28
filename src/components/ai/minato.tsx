@@ -108,10 +108,10 @@ export function Minato() {
   // MINATO follows the primary challenge — same source of truth as Home.
   const { entries, settings, challenge } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
   const updateSettings = useApp((s) => s.updateSettings);
-  // Most journal questions need a sharply scoped answer, not a long model
-  // generation. A smaller default makes the companion feel responsive while
-  // leaving the user-controlled budget available for deep reviews.
-  const responseTokenLimit = Math.min(8_000, Math.max(250, settings.aiPrefs?.responseTokenLimit ?? 900));
+  // Prefer a genuinely useful analytical answer by default. This is a request
+  // budget, not a hidden truncation of the journal; the selected model still
+  // has the final technical limit on what it can generate.
+  const responseTokenLimit = Math.min(32_000, Math.max(250, settings.aiPrefs?.responseTokenLimit ?? 4_000));
 
   const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
   const focusEntry = useMemo(
@@ -283,11 +283,10 @@ export function Minato() {
       // (hallucination-proof), then renders via OpenRouter when configured.
       let replyText: string | null = null;
       try {
-        // Keep the interaction quick. If the remote analysis service does
-        // not respond promptly, the local evidence-based provider answers
-        // instead rather than leaving the trader watching a stalled panel.
+        // Deep journal reviews deserve time to finish. The local
+        // evidence-based provider remains available if the service is offline.
         const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 28_000);
+        const timeout = window.setTimeout(() => controller.abort(), 56_000);
         const res = await fetch("/api/minato/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -461,18 +460,18 @@ export function Minato() {
                 </div>
               </div>
               <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
-              <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 8,000 tokens">
+              <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 32,000 tokens. Your selected model may impose a lower technical ceiling.">
                 <span className="hidden sm:inline">Reply</span>
                 <input
                   aria-label="MINATO reply size in tokens"
                   type="number"
                   min={250}
-                  max={8000}
-                  step={250}
+                  max={32000}
+                  step={500}
                   value={replySizeDraft ?? responseTokenLimit}
                   onChange={(e) => setReplySizeDraft(e.target.value)}
                   onBlur={() => {
-                    const nextLimit = Math.min(8_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
+                    const nextLimit = Math.min(32_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
                     setReplySizeDraft(null);
                     if (nextLimit !== responseTokenLimit) {
                       void updateSettings({ aiPrefs: { ...(rawSettings.aiPrefs ?? { includeNotes: true }), responseTokenLimit: nextLimit } });
