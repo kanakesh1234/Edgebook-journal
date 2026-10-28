@@ -4,14 +4,18 @@
 import type { CandleData } from "../backtesting/data/types";
 import type { ReplayTradeRef } from "../backtesting/types";
 
-/** Bars of setup already drawn on the chart when a replay opens, so there is something to read before it plays. */
-export const CONTEXT_BARS = 14;
+/** Bars of setup already drawn on the chart when a replay opens, so candles look large and focused before it plays. */
+export const CONTEXT_BARS = 10;
 /** Playback itself starts this many bars before the entry. */
 export const LEAD_BARS = 2;
 export const SPEEDS = [1, 2, 4] as const;
 export type Speed = (typeof SPEEDS)[number];
-/** Milliseconds per bar at 1×. */
-export const BASE_BAR_MS = 750;
+/** Milliseconds per bar at 1× — deliberate, unhurried Apple-grade cadence for smooth 60fps candle formation. */
+export const BASE_BAR_MS = 1200;
+/** Delay (ms) after a card snaps into the active viewport before playback begins so the scroll transition settles. */
+export const INITIAL_PLAY_DELAY_MS = 600;
+/** Hold duration (ms) on the final bar before seamlessly looping back to the setup. */
+export const LOOP_HOLD_MS = 1600;
 export const barDelay = (speed: Speed) => Math.round(BASE_BAR_MS / speed);
 
 export interface ReplayModel {

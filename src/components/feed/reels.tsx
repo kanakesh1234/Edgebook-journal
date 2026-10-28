@@ -12,7 +12,9 @@ import { useImageUrls } from "@/lib/hooks";
 import { useReplayTrade } from "@/components/journal/replay-trade";
 import { lessonsPost } from "@/components/lessons/api";
 import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
-import { barDelay, endIdx, frameAt, progressOf, stepIdx } from "@/lib/feed/replay";
+import {
+  barDelay, endIdx, frameAt, INITIAL_PLAY_DELAY_MS, LOOP_HOLD_MS, progressOf, stepIdx,
+} from "@/lib/feed/replay";
 import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard, VideoCard } from "@/lib/feed/types";
 import { useFeed } from "./feed-store";
 import { useReplayData } from "./replay-chart";
@@ -468,17 +470,19 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     }
   }, [model]);
 
-  // Playback clock — advances bar-by-bar and loops seamlessly like an Instagram Reel / YouTube Short
+  // Playback clock — advances bar-by-bar with a deliberate hold on the final bar before looping seamlessly
   useEffect(() => {
     if (!playing || !model) return;
-    const id = window.setInterval(() => {
+    const atEnd = idx >= endIdx(model);
+    const delay = atEnd ? LOOP_HOLD_MS : barDelay(1);
+    const id = window.setTimeout(() => {
       setIdx((cur) => {
         if (cur >= endIdx(model)) return model.startIdx;
         return stepIdx(model, cur, 1);
       });
-    }, barDelay(1));
-    return () => window.clearInterval(id);
-  }, [playing, model]);
+    }, delay);
+    return () => window.clearTimeout(id);
+  }, [playing, model, idx]);
 
   // Count a replay once it reaches the trade's exit bar
   useEffect(() => {
@@ -503,14 +507,14 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     return () => setReplayPlaying(false);
   }, [active, playing, setReplayPlaying]);
 
-  // Automatic playback when the active replay enters the feed (unless manually paused or reduced motion)
+  // Automatic playback when the active replay enters the feed, delayed so the scroll-snap transition settles first
   useEffect(() => {
     if (!active || !docVisible || mode !== "replay" || !model || !prefs.autoplayReplay || reduce || userPausedRef.current) return;
     const t = window.setTimeout(() => {
       setIdx((cur) => (cur >= endIdx(model) ? model.startIdx : cur));
       played.current = true;
       setPlaying(true);
-    }, 150);
+    }, INITIAL_PLAY_DELAY_MS);
     return () => window.clearTimeout(t);
   }, [active, docVisible, mode, model, prefs.autoplayReplay, reduce]);
 
