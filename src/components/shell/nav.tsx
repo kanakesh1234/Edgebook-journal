@@ -1,24 +1,12 @@
 "use client";
 
-/**
- * App chrome — three shells, not one shell squeezed.
- *
- *   phone    (< md)     MobileTopBar + BottomTabs + MenuSheet   → thumb-first
- *   tablet   (md – xl)  TabletRail                              → icon rail, labelled, 44px+ targets
- *   desktop  (≥ xl)     Sidebar                                 → full labels, Journey, account
- *
- * Only one of them is visible at a time (CSS), so there is no layout shift and
- * no JS breakpoint logic. Offsets come from the --rail-w / --sidebar-w /
- * --tabbar-h variables in globals.css; keep those in sync with anything here.
- */
-
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useDragControls } from "motion/react";
 import { useApp } from "@/lib/store";
 import { journeyCardData } from "@/lib/challenges";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, todayKey } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { LogoMark, Wordmark } from "@/components/landing/logo";
 import {
@@ -50,28 +38,29 @@ export const NAV_ITEMS = [
 
 type NavItem = (typeof NAV_ITEMS)[number];
 
-/** Phone tab bar shows the four daily destinations; the rest live in the menu sheet. */
 const TAB_HREFS = ["/dashboard", "/feed", "/journal", "/practice"] as const;
 const TAB_ITEMS = TAB_HREFS.map((h) => NAV_ITEMS.find((i) => i.href === h)!);
 const MORE_ITEMS = NAV_ITEMS.filter((i) => !(TAB_HREFS as readonly string[]).includes(i.href));
 
-/** Routes that belong to a nav item without sharing its URL prefix (Backtesting now lives in the Trading Lab). */
 const NAV_ALIASES: Record<string, string[]> = { "/lab": ["/backtesting"] };
 const isActive = (pathname: string, href: string) =>
   pathname.startsWith(href) || (NAV_ALIASES[href] ?? []).some((p) => pathname.startsWith(p));
 
-/* -------------------------------- shared bits -------------------------------- */
-
-/** Name shown across the chrome: the profile's full name wins over the sign-in name. */
 function useDisplayName() {
   const user = useApp((s) => s.user);
   const fullName = useApp((s) => s.settings.fullName);
   return fullName?.trim() || user?.name || "";
 }
 
+function useIsNoSetupToday() {
+  const entries = useApp((s) => s.entries);
+  const dayLogs = useApp((s) => s.dayLogs);
+  const today = todayKey();
+  return useMemo(() => entries.every((e) => e.date !== today) && dayLogs.some((d) => d.date === today), [entries, dayLogs, today]);
+}
+
 function Avatar({ className }: { className?: string }) {
   const name = useDisplayName();
-  // The profile photo (square JPEG data-URL) lives in settings.avatar.
   const photo = useApp((s) => (s.settings as { avatar?: string }).avatar);
   const initials =
     name
@@ -98,7 +87,6 @@ function Avatar({ className }: { className?: string }) {
   );
 }
 
-/** Journey follows the PRIMARY CHALLENGE — same source of truth as the dashboard. */
 function JourneyCard({ className }: { className?: string }) {
   const settings = useApp((s) => s.settings);
   const entries = useApp((s) => s.entries);
@@ -147,17 +135,13 @@ function SignOutButton({ className }: { className?: string }) {
       onClick={() => void useApp.getState().signOut()}
       aria-label="Sign out"
       title="Sign out"
-      className={cn(
-        "grid h-8 w-8 place-items-center rounded-lg text-faint transition-colors hover:bg-loss/10 hover:text-loss",
-        className,
-      )}
+      className={cn("grid h-8 w-8 place-items-center rounded-lg text-faint transition-colors hover:bg-loss/10 hover:text-loss", className)}
     >
       <LogoutIcon className="h-4 w-4" />
     </button>
   );
 }
 
-/** Settings gear — a generous 44px target with a clear focus ring and an active state. */
 function SettingsGear({ onNavigate, className }: { onNavigate?: () => void; className?: string }) {
   const pathname = usePathname();
   const active = pathname.startsWith("/settings");
@@ -216,6 +200,7 @@ export function Sidebar() {
   const user = useApp((s) => s.user);
   const displayName = useDisplayName();
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const isNoSetupToday = useIsNoSetupToday();
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] flex-col border-r border-line bg-surface/80 backdrop-blur xl:flex">
@@ -227,8 +212,10 @@ export function Sidebar() {
 
       <div className="px-4 pt-4">
         <button
+          disabled={isNoSetupToday}
+          title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : undefined}
           onClick={openNewEntry}
-          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gold-strong px-4 py-2.5 text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97]"
+          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gold-strong px-4 py-2.5 text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
         >
           <PlusIcon className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
           Add trade
@@ -292,10 +279,10 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-/** md – xl — a slim, always-labelled icon rail. Keeps the whole canvas for content on iPad portrait & landscape. */
 export function TabletRail() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const isNoSetupToday = useIsNoSetupToday();
 
   return (
     <aside
@@ -307,10 +294,11 @@ export function TabletRail() {
       </Link>
 
       <button
+        disabled={isNoSetupToday}
         onClick={openNewEntry}
         aria-label="Add trade"
-        title="Add trade"
-        className="mt-4 grid h-12 w-12 place-items-center rounded-2xl bg-gold-strong text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-95"
+        title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : "Add trade"}
+        className="mt-4 grid h-12 w-12 place-items-center rounded-2xl bg-gold-strong text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <PlusIcon className="h-5 w-5" />
       </button>
@@ -332,14 +320,12 @@ export function TabletRail() {
 
 /* ================================== PHONE ===================================== */
 
-/** < md — slim top bar: brand + page title on the left, account/menu on the right. */
 export function MobileTopBar({ title }: { title?: string }) {
   const pathname = usePathname();
   const current = NAV_ITEMS.find((i) => isActive(pathname, i.href));
   const heading = title ?? current?.label ?? (pathname.startsWith("/settings") ? "Settings" : "Edgebook");
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Close the sheet whenever the route changes.
   useEffect(() => setMenuOpen(false), [pathname]);
 
   return (
@@ -419,7 +405,6 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             }}
             className="fixed inset-x-0 bottom-0 z-[61] flex max-h-[88dvh] flex-col rounded-t-[22px] border border-b-0 border-line-strong bg-surface shadow-overlay md:hidden"
           >
-            {/* Drag handle — the only drag target, so the list below scrolls freely */}
             <div
               onPointerDown={(e) => controls.start(e)}
               className="flex shrink-0 cursor-grab touch-none justify-center pb-2 pt-3 active:cursor-grabbing"
@@ -518,10 +503,10 @@ function TabLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-/** < md — Home · Feed · ＋ · Journal · Practise. The primary action sits under the thumb. */
 export function BottomTabs() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const isNoSetupToday = useIsNoSetupToday();
   const [home, feed, journal, practice] = TAB_ITEMS;
 
   return (
@@ -534,12 +519,15 @@ export function BottomTabs() {
 
       <div className="relative flex items-start justify-center">
         <button
+          disabled={isNoSetupToday}
+          title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : undefined}
           onClick={() => {
+            if (isNoSetupToday) return;
             haptic.selection();
             openNewEntry();
           }}
           aria-label="Add trade"
-          className="-mt-4 grid h-14 w-14 place-items-center rounded-full border-4 border-canvas bg-gold-strong text-on-gold shadow-lift transition-transform active:scale-90"
+          className="-mt-4 grid h-14 w-14 place-items-center rounded-full border-4 border-canvas bg-gold-strong text-on-gold shadow-lift transition-transform active:scale-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <PlusIcon className="h-6 w-6" />
         </button>
@@ -551,14 +539,16 @@ export function BottomTabs() {
   );
 }
 
-/** Kept for any page that wants its own inline "add" affordance on phones. */
 export function MobileAddButton() {
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const isNoSetupToday = useIsNoSetupToday();
   return (
     <button
+      disabled={isNoSetupToday}
+      title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : undefined}
       onClick={openNewEntry}
       aria-label="Add trade"
-      className="grid h-11 w-11 place-items-center rounded-xl bg-gold-strong text-on-gold shadow-sm active:scale-90"
+      className="grid h-11 w-11 place-items-center rounded-xl bg-gold-strong text-on-gold shadow-sm active:scale-90 disabled:cursor-not-allowed disabled:opacity-40"
     >
       <PlusIcon className="h-5 w-5" />
     </button>

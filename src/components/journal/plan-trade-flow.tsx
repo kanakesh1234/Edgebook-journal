@@ -91,28 +91,24 @@ const THOUGHT_PRESETS = [
     shortLabel: "Sweep → 5m close",
     text: "If manipulation sweeps high/low → wait for 5m body close",
     tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
-    kind: "trigger" as const,
   },
   {
     id: "chop",
     shortLabel: "Chop → Sit on hands",
     text: "If price chops at open → sit on hands until displacement",
     tile: "bg-[#5e5ce6]",
-    kind: "patience" as const,
   },
   {
     id: "cut",
     shortLabel: "Invalidated → Cut fast",
     text: "If key level invalidates → cut immediately, zero revenge",
     tile: "bg-loss",
-    kind: "guard" as const,
   },
   {
     id: "smt",
     shortLabel: "SMT + displacement",
     text: "If HTF SMT aligns with displacement → execute at FVG retest",
     tile: "bg-profit",
-    kind: "target" as const,
   },
 ] as const;
 
@@ -125,11 +121,6 @@ const IconPlus = () => (
 const IconMinus = () => (
   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
     <path d="M6 12h12" />
-  </svg>
-);
-const GlyphSparkle = () => (
-  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="m11 3.5 1.7 5 5 1.7-5 1.7L11 17l-1.7-5.1-5-1.7 5-1.7zM19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
   </svg>
 );
 const GlyphCamera = () => (
@@ -308,7 +299,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, nonEmptyThoughts, combinedThoughtsText, newsAnswer, newsEvents, dayLimit, watch, rules, ruleStates],
   );
 
-  /** Live AI Brain analysis — powers both the AI Thought Read card and mistake chip prioritization. */
+  /** Silent background AI analysis — ranks mistake chips without cluttering the screen. */
   const brainRead = useMemo(
     () =>
       analyzePreTradeThought(
@@ -333,7 +324,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     [today, thesis, emotion, emotionReason, newsAnswer, newsEvents, finalInstrument, draw, nonEmptyThoughts, combinedThoughtsText, playbookId, selectedPlaybook?.name, entries, plans, playbook, settings.aiBrain],
   );
 
-  // Pre-select the #1 highest-confidence mistake trap when entering Thought
+  // Silently pre-select the #1 highest-confidence mistake trap in the background when entering Thought
   useEffect(() => {
     if (step === "thought" && !autoWatchApplied && watch.length === 0 && brainRead.suggestedWatch.length > 0) {
       const topKeys = brainRead.suggestedWatch.filter((s) => s.confidence >= 0.72).slice(0, 2).map((s) => s.key);
@@ -372,12 +363,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   // Smooth delayed question reveals
   const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, 680);
   const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, 680);
-  const thoughtReveal = useSettledReveal(combinedThoughtsText, watch.length > 0, open && step === "thought", 3, 620);
 
   const showFeeling = thesisReveal.settled;
   const showReason = emotion !== "" || emotionReason.trim().length > 0;
   const showNews = reasonReveal.settled;
-  const showMistakesInThought = thoughtReveal.settled || nonEmptyThoughts.length > 0;
 
   const chooseNews = (v: boolean) => {
     setNewsAnswer(v);
@@ -555,7 +544,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     images,
   ]);
 
-  // Mistakes worth watching today: AI Brain suggestions first, then recurring weekly mistakes.
+  // Mistakes worth watching today: AI Brain ranks silently in the background.
   const aiSuggestedMap = useMemo(() => new Map(brainRead.suggestedWatch.map((s) => [s.key as string, s])), [brainRead.suggestedWatch]);
   const watchOptions = useMemo(() => {
     const rec = new Map(recurringMistakes(entries, thisWeekStart()).map((r) => [r.key as string, r.weeks]));
@@ -568,7 +557,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       .sort((a, b) => (b.ai?.confidence ?? 0) - (a.ai?.confidence ?? 0) || b.weeks - a.weeks);
   }, [entries, aiSuggestedMap]);
 
-  // Show only top 4 AI/recurring mistake chips up front (+ any selected ones) so there's never a wall of 14 text chips
   const primaryWatchOptions = useMemo(
     () => watchOptions.filter((o, idx) => idx < 4 || watch.includes(o.key)),
     [watchOptions, watch],
@@ -936,7 +924,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   const hintText = saveError ?? autopsy.error ?? gate.hint;
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
-  const ta = brainRead.thoughtAnalysis;
 
   return (
     <>
@@ -1084,12 +1071,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
             {step === "thought" && (
               <div>
-                <StepTitle title="Pre-trade thoughts" subtitle="Map your If → Then scenarios and attach your pre-entry chart." />
+                <StepTitle title="Any thoughts before entry?" subtitle="Add each scenario as it comes — if this happens, I'll do this." />
 
-                {/* 1 — Apple-style Visual Scenario List with Squircle Icons */}
+                {/* 1 — Clean Apple Scenario List with Squircle Icons */}
                 <div className="space-y-3 pt-6">
                   <div className="flex items-center justify-between">
-                    <Label done={nonEmptyThoughts.length > 0}>Scenarios (If → Then)</Label>
+                    <Label done={nonEmptyThoughts.length > 0}>Your thoughts</Label>
                     <span className="text-[12px] text-faint">Press ↵ to add another</span>
                   </div>
 
@@ -1149,12 +1136,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         onClick={() => addThought()}
                         className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[14.5px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
                       >
-                        <IconPlus /> Add scenario
+                        <IconPlus /> Add thought
                       </button>
                     </li>
                   </ul>
 
-                  {/* Compact visual quick-add pills (short, scannable, icon-paired) */}
+                  {/* Compact visual quick-add pills */}
                   <div className="flex flex-wrap gap-1.5 pt-0.5">
                     {THOUGHT_PRESETS.map((p) => {
                       const alreadyUsed = nonEmptyThoughts.some((t) => t.toLowerCase() === p.text.toLowerCase());
@@ -1179,85 +1166,35 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   </div>
                 </div>
 
-                {/* 2 — Live AI Thought Analysis Card (Apple Intelligence style, compact & visual) */}
-                <div className="mt-5 overflow-hidden rounded-[20px] border border-line bg-raised p-4 shadow-panel">
-                  <div className="flex items-start gap-3">
-                    <IconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]">
-                      <GlyphSparkle />
-                    </IconTile>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">AI Thought Analysis</p>
-                        <span
-                          className={cn(
-                            "rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold",
-                            ta.tone === "good"
-                              ? "bg-profit/12 text-profit"
-                              : ta.tone === "gold"
-                                ? "bg-gold/15 text-gold-deep dark:text-gold"
-                                : "bg-ink/[0.06] text-muted",
-                          )}
-                        >
-                          {ta.badge}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[13px] leading-snug text-muted">{ta.insight}</p>
-
-                      {/* 3 compact visual readiness pills */}
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {([
-                          ["Entry trigger", ta.hasTrigger],
-                          ["Invalidation", ta.hasInvalidation],
-                          ["Patience guard", ta.hasPatienceGuard],
-                        ] as const).map(([pillLabel, ok]) => (
-                          <span
-                            key={pillLabel}
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors",
-                              ok ? "bg-profit/12 text-profit" : "bg-ink/[0.045] text-faint",
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "grid h-3.5 w-3.5 place-items-center rounded-full",
-                                ok ? "bg-profit text-white" : "border border-line-strong",
-                              )}
-                            >
-                              {ok && <IconCheck className="h-2.5 w-2.5" />}
-                            </span>
-                            {pillLabel}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3 — Pre-Trade Visual Snapshot / Chart Attachment (Apple square attachment strip) */}
-                <div className="mt-5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <IconTile tile="bg-gradient-to-b from-[#0ea5e9] to-[#0284c7]" className="h-6 w-6 rounded-[7px]">
-                        <GlyphCamera />
-                      </IconTile>
-                      <Label done={images.length > 0} hint="optional · paste ⌘V">
-                        Pre-trade chart snapshot
-                      </Label>
-                    </div>
-                    {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2 attached</span>}
-                  </div>
-                  <ImageUploader items={images} onChange={updateImagesAndCache} max={2} variant="apple" />
-                </div>
-
-                {/* 4 — Mistakes to watch (Compact top 4 AI picks + More… disclosure) */}
-                <AnimatePresence initial={false}>
-                  {showMistakesInThought && (
-                    <Reveal key="thought-mistakes" delay={0.06}>
+                {/* Collapsible "Add more" section: Pre-trade chart snapshot, Guard against, Instrument & key level */}
+                <div className="pt-6">
+                  <Disclosure
+                    label="Add more"
+                    defaultOpen={images.length > 0 || instrument.trim().length > 0 || draw.trim().length > 0}
+                  >
+                    <div className="space-y-6 pt-1">
+                      {/* 1 — Pre-Trade Chart Snapshot */}
                       <div className="space-y-2.5">
-                        <Label done={watch.length > 0} hint="AI-ranked for today">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <IconTile tile="bg-gradient-to-b from-[#0ea5e9] to-[#0284c7]" className="h-6 w-6 rounded-[7px]">
+                              <GlyphCamera />
+                            </IconTile>
+                            <Label done={images.length > 0} hint="optional · paste ⌘V">
+                              Pre-trade chart snapshot
+                            </Label>
+                          </div>
+                          {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2 attached</span>}
+                        </div>
+                        <ImageUploader items={images} onChange={updateImagesAndCache} max={2} variant="apple" />
+                      </div>
+
+                      {/* 2 — Guard against (AI ranks silently in the background) */}
+                      <div className="space-y-2.5">
+                        <Label done={watch.length > 0} hint="optional">
                           Guard against
                         </Label>
-                        <Stagger className="flex flex-wrap gap-2" delay={0.04}>
+                        <div className="flex flex-wrap gap-2">
                           {primaryWatchOptions.map((o) => {
                             const isSelected = watch.includes(o.key);
                             return (
@@ -1268,11 +1205,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                 onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}
                               >
                                 <span>{o.label}</span>
-                                {o.ai && (
-                                  <span className="ml-1.5 rounded-full bg-gold/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-gold-deep dark:text-gold">
-                                    AI
-                                  </span>
-                                )}
                               </Chip>
                             );
                           })}
@@ -1295,43 +1227,39 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               More…
                             </Chip>
                           )}
-                        </Stagger>
-                      </div>
-                    </Reveal>
-                  )}
-                </AnimatePresence>
-
-                {/* 5 — Quiet progressive disclosure for Instrument & Key Level */}
-                <div className="pt-5">
-                  <Disclosure label="Instrument & key level">
-                    <div className="space-y-4">
-                      <div className="space-y-2.5">
-                        <Label hint="defaults to MNQ" htmlFor="flow-instrument">
-                          Instrument
-                        </Label>
-                        <TextBox
-                          id="flow-instrument"
-                          value={instrument}
-                          onChange={(e) => setInstrument(e.target.value.toUpperCase())}
-                          placeholder="MNQ"
-                          className="font-mono"
-                        />
-                        <div className="flex flex-wrap gap-1.5">
-                          {suggestedInstruments.map((i) => (
-                            <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>
-                              {i}
-                            </Chip>
-                          ))}
                         </div>
                       </div>
-                      <div className="space-y-2.5">
-                        <Label htmlFor="flow-draw">Key level in play</Label>
-                        <TextBox
-                          id="flow-draw"
-                          value={draw}
-                          onChange={(e) => setDraw(e.target.value)}
-                          placeholder="e.g. Yesterday's high, London low, 15m FVG"
-                        />
+
+                      {/* 3 — Instrument & Key Level */}
+                      <div className="space-y-4 border-t border-line-soft pt-4">
+                        <div className="space-y-2.5">
+                          <Label hint="defaults to MNQ" htmlFor="flow-instrument">
+                            Instrument
+                          </Label>
+                          <TextBox
+                            id="flow-instrument"
+                            value={instrument}
+                            onChange={(e) => setInstrument(e.target.value.toUpperCase())}
+                            placeholder="MNQ"
+                            className="font-mono"
+                          />
+                          <div className="flex flex-wrap gap-1.5">
+                            {suggestedInstruments.map((i) => (
+                              <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>
+                                {i}
+                              </Chip>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-2.5">
+                          <Label htmlFor="flow-draw">Key level in play</Label>
+                          <TextBox
+                            id="flow-draw"
+                            value={draw}
+                            onChange={(e) => setDraw(e.target.value)}
+                            placeholder="e.g. Yesterday's high, London low, 15m FVG"
+                          />
+                        </div>
                       </div>
                     </div>
                   </Disclosure>

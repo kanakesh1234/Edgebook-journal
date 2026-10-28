@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
@@ -23,6 +23,17 @@ export default function DashboardPage() {
   const [planOpen, setPlanOpen] = useState(false);
   const dayLogs = useApp((st) => st.dayLogs);
 
+  const today = todayKey();
+  const isNoSetupToday = useMemo(
+    () => allEntries.every((e) => e.date !== today) && dayLogs.some((d) => d.date === today),
+    [allEntries, dayLogs, today],
+  );
+
+  // If the user marks today as a no-setup day while Plan Trade is open, close it cleanly.
+  useEffect(() => {
+    if (isNoSetupToday && planOpen) setPlanOpen(false);
+  }, [isNoSetupToday, planOpen]);
+
   // Primary challenge scoping — one shared source of truth for the whole page.
   const { entries, settings, challenge } = useMemo(
     () => scopeToPrimary(rawSettings, allEntries),
@@ -34,9 +45,11 @@ export default function DashboardPage() {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  // Full Name from Settings wins over the auth/Google name.
   const displayName = settings.fullName?.trim() || user?.name || "";
   const firstName = displayName.split(" ")[0] || "trader";
+
+  const noSetupTitle = isNoSetupToday ? "Disabled — today is marked as a no-setup day" : undefined;
+
   if (allEntries.length === 0) {
     return (
       <div className="space-y-7">
@@ -47,42 +60,48 @@ export default function DashboardPage() {
           body="Add your first session — or load a demo journal with four months of realistic trades to explore every feature instantly."
           action={
             <>
-              <Button variant="gold" onClick={openNewEntry}>
+              <Button variant="gold" disabled={isNoSetupToday} title={noSetupTitle} onClick={openNewEntry}>
                 <PlusIcon className="h-4 w-4" />
                 Log first trade
               </Button>
-              <Button variant="outline" onClick={() => setPlanOpen(true)}>
+              <Button variant="outline" disabled={isNoSetupToday} title={noSetupTitle} onClick={() => setPlanOpen(true)}>
                 Plan a trade
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => void useApp.getState().loadDemoData()}
-              >
+              <Button variant="outline" onClick={() => void useApp.getState().loadDemoData()}>
                 <SparklesIcon className="h-4 w-4" />
                 Load demo data
               </Button>
             </>
           }
         />
-        <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />
+        <PlanTradeFlow open={planOpen && !isNoSetupToday} onClose={() => setPlanOpen(false)} />
       </div>
     );
   }
 
   return (
     <div className="space-y-6 md:space-y-8">
-      <Header
-        greeting={greeting}
-        firstName={firstName}
-        dailyControl={<DailyFocusControl currency={settings.currency} />}
-      >
-        {/* Phone: the centre tab is "Add trade", so the header carries only a compact planning CTA. */}
+      <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
         <div className="flex shrink-0 items-center gap-2.5">
-          <Button variant="outline" size="md" onClick={openNewEntry} className="hidden rounded-full px-5 md:inline-flex">
+          <Button
+            variant="outline"
+            size="md"
+            disabled={isNoSetupToday}
+            title={noSetupTitle}
+            onClick={openNewEntry}
+            className="hidden rounded-full px-5 md:inline-flex"
+          >
             <PlusIcon className="h-4 w-4" />
             Add trade
           </Button>
-          <Button variant="gold" size="md" onClick={() => setPlanOpen(true)} className="rounded-full px-4 sm:px-5">
+          <Button
+            variant="gold"
+            size="md"
+            disabled={isNoSetupToday}
+            title={noSetupTitle}
+            onClick={() => setPlanOpen(true)}
+            className="rounded-full px-4 sm:px-5"
+          >
             <span className="sm:hidden">Plan trade</span>
             <span className="hidden sm:inline">Plan a trade</span>
           </Button>
@@ -115,12 +134,10 @@ export default function DashboardPage() {
         />
       </div>
 
-      <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />
+      <PlanTradeFlow open={planOpen && !isNoSetupToday} onClose={() => setPlanOpen(false)} />
     </div>
   );
 }
-
-/* ------------------------------- pieces -------------------------------- */
 
 function Header({ greeting, firstName, dailyControl, children }: { greeting: string; firstName: string; dailyControl?: React.ReactNode; children?: React.ReactNode }) {
   return (

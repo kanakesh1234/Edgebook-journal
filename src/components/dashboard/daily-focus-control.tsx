@@ -54,8 +54,6 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  // New IST days are eligible again; a manual dismissal stays dismissed for
-  // the rest of that day unless the trader explicitly opens Details.
   useEffect(() => {
     if (dismissedDate && dismissedDate !== today) setDismissedDate(null);
   }, [dismissedDate, today]);
@@ -82,15 +80,21 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
     setLimitOpen(false);
   };
 
-  const markNoSetup = async () => {
+  const toggleNoSetup = async () => {
     if (hasTraded) return;
     try {
-      await useApp.getState().logNoTradeDay(today, "Sitting on hands — no A+ setup.");
-      toast.success("No-setup day logged", "Sitting on hands is part of the plan.");
-      setMenuOpen(false);
-      setLimitOpen(false);
+      if (noSetup) {
+        await useApp.getState().removeNoTradeDay(today);
+        toast.info("No-setup day cleared", "Plan trade and Add trade are re-enabled for today.");
+        setMenuOpen(false);
+      } else {
+        await useApp.getState().logNoTradeDay(today, "Sitting on hands — no A+ setup.");
+        toast.success("No-setup day logged", "Plan trade and Add trade are disabled for the rest of today.");
+        setMenuOpen(false);
+        setLimitOpen(false);
+      }
     } catch {
-      toast.error("Could not log the no-setup day");
+      toast.error("Could not update the no-setup day");
     }
   };
 
@@ -102,9 +106,10 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
           aria-label="Open daily trading details"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
-          className="inline-flex h-8 items-center gap-1 rounded-full border border-line bg-surface px-3 text-[12px] font-medium text-muted shadow-[0_1px_2px_rgb(48_40_24_/_0.04)] transition-colors hover:border-line-strong hover:text-ink active:scale-[0.97]"
+          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-[12px] font-medium text-muted shadow-[0_1px_2px_rgb(48_40_24_/_0.04)] transition-colors hover:border-line-strong hover:text-ink active:scale-[0.97]"
         >
-          <span>Details</span>
+          {noSetup && <span className="h-1.5 w-1.5 rounded-full bg-gold-strong" aria-hidden />}
+          <span>{noSetup ? "Details · No setup" : "Details"}</span>
           <ChevronRightIcon className={`h-3.5 w-3.5 transition-transform duration-200 ${menuOpen ? "-rotate-90" : "rotate-90"}`} />
         </button>
 
@@ -124,20 +129,31 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
               </div>
               <button
                 type="button"
-                disabled={hasTraded || noSetup}
-                onClick={() => void markNoSetup()}
+                disabled={hasTraded}
+                onClick={() => void toggleNoSetup()}
                 className="mt-1.5 flex w-full items-center justify-between rounded-[14px] px-3.5 py-3 text-left transition-colors hover:bg-ink/[0.05] disabled:cursor-default disabled:opacity-50"
               >
                 <span>
-                  <span className="block text-[13px] font-medium text-ink">{noSetup ? "No-setup day recorded" : "Choose no-setup day"}</span>
-                  <span className="mt-0.5 block text-[11.5px] text-muted">{hasTraded ? "A trade is already logged today" : "Record disciplined restraint"}</span>
+                  <span className="block text-[13px] font-medium text-ink">
+                    {noSetup ? "No-setup day recorded" : "Choose no-setup day"}
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] text-muted">
+                    {hasTraded
+                      ? "A trade is already logged today"
+                      : noSetup
+                        ? "Trading locked · tap to re-enable"
+                        : "Disables Plan & Add trade for today"}
+                  </span>
                 </span>
                 <span aria-hidden className="text-[18px] text-gold">›</span>
               </button>
               {!hasLimit && !noSetup && (
                 <button
                   type="button"
-                  onClick={() => { setMenuOpen(false); setLimitOpen(true); }}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLimitOpen(true);
+                  }}
                   className="mt-1 flex w-full items-center justify-between rounded-[14px] px-3.5 py-3 text-left transition-colors hover:bg-ink/[0.05]"
                 >
                   <span>
@@ -154,12 +170,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
 
       <AnimatePresence>
         {limitOpen && (
-          <motion.div
-            className="fixed inset-0 z-[80] grid place-items-center p-4 sm:p-6"
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
-          >
+          <motion.div className="fixed inset-0 z-[80] grid place-items-center p-4 sm:p-6" initial="hidden" animate="visible" exit="hidden">
             <motion.button
               type="button"
               aria-label="Dismiss daily limit"
@@ -173,14 +184,21 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
               role="dialog"
               aria-modal="true"
               aria-label="Set daily loss limit"
-              variants={{ hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.98 }, visible: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 } }}
+              variants={{
+                hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.98 },
+                visible: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 },
+              }}
               transition={{ duration: 0.3, ease: EASE }}
               className="relative w-full max-w-md rounded-[28px] border border-line-strong bg-surface p-5 shadow-overlay sm:p-6"
             >
               <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-gold-deep">Before the session</p>
               <h2 className="mt-1 font-display text-[26px] font-semibold tracking-[-0.03em] text-ink">Set today&apos;s limit</h2>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted">Choose your loss guardrail before trading. Tap anywhere outside this card to close it.</p>
-              <div className="mt-5"><DailyLimit risk={null} currency={currency} /></div>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
+                Choose your loss guardrail before trading. Tap anywhere outside this card to close it.
+              </p>
+              <div className="mt-5">
+                <DailyLimit risk={null} currency={currency} />
+              </div>
             </motion.section>
           </motion.div>
         )}

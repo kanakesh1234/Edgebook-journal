@@ -317,7 +317,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
               <div className="flex items-start gap-3 p-5">
                 <ReviewIconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]" icon="sparkles" />
                 <Kpi
-                  label="AI Thought Analysis"
+                  label="Pre-trade plan"
                   value={
                     thoughtAnalysis.plannedTrades > 0
                       ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades} planned · ${fmtPct(thoughtAnalysis.plannedWinRate)} won`
