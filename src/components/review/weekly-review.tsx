@@ -231,7 +231,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 >
                   {week.criteria.length > 0 && (
                     <div className="px-3 pb-3 pt-4">
-                      <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Criteria Win Rates</p>
+                      <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint/70">Criteria Win Rates</p>
                       <TableShell min={520}>
                         <thead>
                           <tr>
@@ -244,7 +244,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                         </thead>
                         <tbody>
                           {week.criteria.map((c, i) => (
-                            <tr key={c.key} className={cn("transition-colors hover:bg-ink/[0.03]", i % 2 === 1 && "bg-ink/[0.018]")}>
+                            <tr key={c.key} className={cn("rounded-lg transition-colors hover:bg-ink/[0.03]", i % 2 === 0 && "bg-ink/[0.022]")}>
                               <Td className="max-w-[260px] pl-4 font-medium">{c.label}</Td>
                               <Td className="text-right tabular-nums">
                                 <EvidenceButton count={c.present} label={`Open ${c.present} trades with ${c.label}`} onClick={() => actions.openIds(c.entryIds, c.label)} />
@@ -262,8 +262,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                       </TableShell>
                     </div>
                   )}
-                  <div className="px-3 pb-3 pt-4">
-                    <p className="mb-3 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Pattern Matrix</p>
+                  <div className="px-3 pb-4 pt-4">
+                    <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint/70">Pattern Matrix</p>
                     <TableShell min={540}>
                       <thead>
                         <tr>
@@ -280,10 +280,10 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                         {[...week.patterns.rows.filter((r) => PSYCH_PATTERNS.some((p) => p.key === r.key) || r.total > 0), week.patterns.correct].map((r, i) => {
                           const good = r.key === "correct";
                           return (
-                            <tr key={r.key} className={cn("transition-colors hover:bg-ink/[0.03]", i % 2 === 1 && "bg-ink/[0.018]")}>
+                            <tr key={r.key} className={cn("rounded-lg transition-colors", good ? "bg-profit/[0.04]" : i % 2 === 0 ? "bg-ink/[0.022]" : "hover:bg-ink/[0.03]")}>
                               <Td className="pl-4 font-medium">
-                                {r.label}
-                                {r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}
+                                <span className={cn(good && "text-profit")}>{r.label}</span>
+                                {r.manual && <span className="ml-2 text-[10.5px] font-medium text-faint/60">· self-reported</span>}
                               </Td>
                               {week.days.slice(0, 5).map((d) => {
                                 const n = r.perDay[d.date] ?? 0;
@@ -301,8 +301,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                                         disabled={blocked}
                                         onClick={() => (r.key === "skipped" ? void setPass(d.date, !on) : rn.setMark(d.date, { biasLock: !on }))}
                                         className={cn(
-                                          "mx-auto grid h-[24px] w-[24px] place-items-center rounded-[7px] border outline-none transition-[background-color,border-color,transform] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-90 disabled:opacity-30",
-                                          on ? "border-loss bg-loss text-white" : "border-line-strong hover:border-faint hover:bg-ink/[0.04]",
+                                          "mx-auto grid h-[22px] w-[22px] place-items-center rounded-[6px] border outline-none transition-[background-color,border-color,transform] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-90 disabled:opacity-30",
+                                          on ? "border-loss bg-loss text-white" : "border-line-strong/60 hover:border-faint hover:bg-ink/[0.04]",
                                         )}
                                       >
                                         {on && <DrawCheck className="h-3 w-3" />}
@@ -314,8 +314,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                                   <Td key={d.date} className="text-center">
                                     <span
                                       className={cn(
-                                        "inline-grid h-[24px] min-w-[24px] place-items-center rounded-[7px] px-1 text-[12px] font-semibold tabular-nums",
-                                        n === 0 ? "text-faint" : good ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss",
+                                        "inline-grid h-[22px] min-w-[22px] place-items-center rounded-[6px] px-1 text-[12px] font-semibold tabular-nums",
+                                        n === 0 ? "text-faint/40" : good ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss",
                                       )}
                                     >
                                       {n || "·"}
@@ -325,7 +325,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                               })}
                               <Td className="pr-4 text-right">
                                 {r.manual ? (
-                                  <span className={cn("font-semibold tabular-nums", r.total ? "text-loss" : "text-faint")}>{r.total}</span>
+                                  <span className={cn("text-[12.5px] font-semibold tabular-nums", r.total ? "text-loss" : "text-faint/40")}>{r.total}</span>
                                 ) : (
                                   <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />
                                 )}

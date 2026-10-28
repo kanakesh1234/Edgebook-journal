@@ -639,14 +639,14 @@ export function SaveIndicator({ state }: { state: SaveState }) {
 
 export const TableShell = ({ children, min = 640 }: { children: ReactNode; min?: number }) => (
   <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
-    <table className="w-full border-separate border-spacing-0 text-[13.5px]" style={{ minWidth: min }}>
+    <table className="w-full border-separate border-spacing-x-0 border-spacing-y-[3px] text-[13.5px]" style={{ minWidth: min }}>
       {children}
     </table>
   </div>
 );
 
 export const Th = ({ children, className }: { children?: ReactNode; className?: string }) => (
-  <th scope="col" className={cn("whitespace-nowrap border-b border-transparent px-3 pb-2.5 pt-1 text-left text-[11.5px] font-medium tracking-wide text-faint", className)}>
+  <th scope="col" className={cn("whitespace-nowrap px-3 pb-2 pt-0.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-faint/70", className)}>
     {children}
   </th>
 );
@@ -662,7 +662,7 @@ export const DirTag = ({ dir }: { dir: string | null }) =>
   );
 
 export const Td = ({ children, className, colSpan, rule = true }: { children?: ReactNode; className?: string; colSpan?: number; rule?: boolean }) => (
-  <td colSpan={colSpan} className={cn("px-3 py-3 align-middle text-ink", className)}>
+  <td colSpan={colSpan} className={cn("px-3 py-2.5 align-middle text-[13px] text-ink", className)}>
     {children}
   </td>
 );
