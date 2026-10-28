@@ -13,11 +13,10 @@ import { MODE_META } from "@/components/practice/modes";
 import { SectionCard } from "@/components/practice/section-card";
 import { buildWeek, thisWeekStart } from "@/lib/weekly";
 import { PlayerHero, weekStrip } from "@/components/practice/player-hero";
-import { Challenges, TrophyCase } from "@/components/practice/shelf";
 import "@/components/practice/practice.css";
-import { applyRoundToLog, chestClaimed, claim, markAllDone, questStates, allDone } from "@/lib/practice/quests";
-import { recommendMode, overallAccuracy } from "@/lib/practice/coach";
-import { achievementStates, newlyEarned, spanDays, stamp } from "@/lib/practice/achievements";
+import { applyRoundToLog, markAllDone, questStates, allDone } from "@/lib/practice/quests";
+import { overallAccuracy } from "@/lib/practice/coach";
+import { newlyEarned, stamp } from "@/lib/practice/achievements";
 import { updateRecords } from "@/lib/practice/records";
 import { prepareIctRound } from "@/lib/practice/ict-round";
 import { applyCardResults, cardHash } from "@/lib/practice/ict-cards";
@@ -31,7 +30,7 @@ import { addDailyStats } from "@/lib/practice/daily";
 import { nextQuestionBank } from "@/lib/practice/bank";
 import { DAILY_XP_GOAL, xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
-import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode } from "@/lib/practice/arena";
+import { applyOutcome, evaluateRound, failsOf, levelOf, type ArenaMode } from "@/lib/practice/arena";
 import type { GameProgress as PracticeProgress } from "@/lib/practice/progress-ext";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
@@ -74,7 +73,6 @@ export default function PracticePage() {
   const token = useRef(0);
   const deepLink = useRef<ArenaMode | null>(null);
 
-  const levels = arenaLevels(progress);
   const plans = useApp((s) => s.plans);
   const dayLimits = useApp((s) => s.settings.dayLimits);
   const thisWeek = useMemo(() => buildWeek(allEntries, plans, thisWeekStart(), dayLimits), [allEntries, plans, dayLimits]);
@@ -194,62 +192,19 @@ export default function PracticePage() {
     return { outcome, extras };
   };
 
-  const meterFor = (mode: ArenaMode) => {
-    const gate = gateFor(mode, levels[mode]);
-    return { value: Math.min(levelBestOf(progress, mode), gate.correct), goal: gate.correct, label: `${Math.min(levelBestOf(progress, mode), gate.correct)} of ${gate.correct} to reach Level ${levels[mode] + 1}` };
-  };
-
-  const claimQuest = (id: string) => {
-    const state = useApp.getState();
-    const live = (state.settings.practiceProgress ?? EMPTY) as PracticeProgress;
-    const { xp, questLog } = claim(live, today, id);
-    if (!xp) return;
-    const draft: PracticeProgress = { ...live, xp: live.xp + xp, questLog };
-    draft.achievements = stamp(draft, newlyEarned(draft), today);
-    void state.updateSettings({ practiceProgress: draft });
-  };
-
   const busyMode = phase.kind === "preparing" ? phase.mode : null;
   const tmLock = lock("time-machine");
   const matrixLock = lock("matrix");
   const bossLock = lock("boss");
   const duelLock = lock("math-duel");
 
-  const tmCharts = useMemo(() => usable.filter((e) => (e.images?.length ?? 0) > 0).length, [usable]);
-  const tmPerf = progress.modePerformance?.["time-machine"];
-  const matrixPerf = progress.modePerformance?.["matrix"];
-  const duelPerf = progress.modePerformance?.["math-duel"];
-  const bossPerf = progress.modePerformance?.["boss"];
-
   const cards = progress.ictCards ?? [];
-  const asked = cards.reduce((n, c) => n + (c.seen ?? 0), 0);
-  const right = cards.reduce((n, c) => n + (c.correct ?? 0), 0);
   const streak = displayStreak(progress, today);
   const level = xpLevel(progress.xp);
   const accuracy = overallAccuracy(progress);
-  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
 
   const week = useMemo(() => weekStrip(today, progress.completedMissionDates ?? []), [today, progress.completedMissionDates]);
-  const quests = useMemo(() => questStates(progress, today), [progress, today]);
-  const trophies = useMemo(() => achievementStates(progress), [progress]);
-  const trophySpan = useMemo(() => spanDays(progress), [progress]);
   const todayXp = progress.dailyStats?.[today]?.xp ?? 0;
-
-  // Background AI recommendation — highlights the right arena card without text-heavy banners
-  const recommended = useMemo(
-    () =>
-      recommendMode({
-        progress,
-        locked: {
-          matrix: matrixLock,
-          "math-duel": duelLock,
-          boss: bossLock,
-          "time-machine": tmLock,
-          ict: cards.length > 0 ? null : "Add a question first",
-        },
-      }),
-    [progress, matrixLock, duelLock, bossLock, tmLock, cards.length],
-  );
 
   return (
     <div className="mx-auto w-full max-w-[1440px] pb-28 sm:pb-16">
@@ -279,76 +234,39 @@ export default function PracticePage() {
       <div className="pr-grid mt-4">
         <SectionCard
           mode="time-machine"
-          level={levels["time-machine"]}
-          recommended={recommended?.mode === "time-machine"}
           blocked={tmLock}
           busy={busyMode === "time-machine"}
-          stats={[
-            { label: tmCharts === 1 ? "chart" : "charts", value: tmCharts },
-            { label: "accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) },
-          ]}
-          meter={tmLock ? undefined : meterFor("time-machine")}
           primary={{ label: "Start", onClick: () => void start("time-machine") }}
         />
 
         <SectionCard
           mode="matrix"
-          level={levels.matrix}
-          recommended={recommended?.mode === "matrix"}
           blocked={matrixLock}
           busy={busyMode === "matrix"}
-          stats={[
-            { label: usable.length === 1 ? "trade" : "trades", value: usable.length },
-            { label: "accuracy", value: pct(matrixPerf?.correct ?? 0, matrixPerf?.attempts ?? 0) },
-          ]}
-          meter={matrixLock ? undefined : meterFor("matrix")}
           primary={{ label: "Start", onClick: () => void start("matrix") }}
         />
 
         <SectionCard
           mode="ict"
-          level={levels.ict}
-          recommended={recommended?.mode === "ict"}
           busy={busyMode === "ict"}
-          stats={[
-            { label: cards.length === 1 ? "card" : "cards", value: cards.length },
-            { label: "drilled", value: asked },
-            { label: "accuracy", value: pct(right, asked) },
-          ]}
-          meter={cards.length > 0 ? meterFor("ict") : undefined}
           primary={
             cards.length > 0
               ? { label: "Start", onClick: () => void start("ict") }
-              : { label: "Add your first question", href: "/practice/ict" }
+              : { label: "Add question", href: "/practice/ict" }
           }
-          secondary={{ label: cards.length > 0 ? "Manage cards" : "How it works", href: "/practice/ict" }}
         />
 
         <SectionCard
           mode="math-duel"
-          level={levels["math-duel"]}
-          recommended={recommended?.mode === "math-duel"}
           blocked={duelLock}
           busy={busyMode === "math-duel"}
-          stats={[
-            { label: "rounds", value: duelPerf?.attempts ?? 0 },
-            { label: "accuracy", value: pct(duelPerf?.correct ?? 0, duelPerf?.attempts ?? 0) },
-          ]}
-          meter={meterFor("math-duel")}
           primary={{ label: "Start", onClick: () => void start("math-duel") }}
         />
 
         <SectionCard
           mode="boss"
-          level={levels.boss}
-          recommended={recommended?.mode === "boss"}
           blocked={bossLock}
           busy={busyMode === "boss"}
-          stats={[
-            { label: "week trades", value: weekInfo.trades.length },
-            { label: "accuracy", value: pct(bossPerf?.correct ?? 0, bossPerf?.attempts ?? 0) },
-          ]}
-          meter={bossLock ? undefined : meterFor("boss")}
           primary={{ label: "Start", onClick: () => void start("boss") }}
         />
       </div>
@@ -381,12 +299,6 @@ export default function PracticePage() {
         </dl>
         <span aria-hidden className="text-[20px] text-faint transition-transform group-hover:translate-x-0.5">›</span>
       </Link>
-
-      <h2 className="pr-section-title pr-rise mt-14" style={{ ["--i" as string]: 6 }}>Progress</h2>
-      <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start">
-        <Challenges quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
-        <TrophyCase states={trophies} today={today} span={trophySpan} hasStarted={(progress.completedMissionDates?.length ?? 0) > 0} />
-      </div>
 
       {phase.kind === "preparing" && <PreparingScreen mode={phase.mode} onCancel={cancel} />}
 

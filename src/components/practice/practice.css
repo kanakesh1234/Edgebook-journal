@@ -59,7 +59,7 @@
 
 .pr-card {
   --pr-accent: var(--gold-strong);
-  position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  position: relative; display: flex; aspect-ratio: 1 / 1; flex-direction: column; min-width: 0; overflow: hidden;
   border: 1px solid var(--line); border-radius: 26px; background: var(--surface);
   box-shadow: 0 1px 2px rgb(48 40 24 / .04), 0 8px 24px -16px rgb(48 40 24 / .12);
   transition: box-shadow .5s cubic-bezier(.16, 1, .3, 1), transform .5s cubic-bezier(.16, 1, .3, 1);
@@ -81,12 +81,11 @@
 
 /* One saturated moment per card: the mode's colour, a soft light, and its glyph as an app icon. */
 .pr-stage {
-  position: relative; overflow: hidden; isolation: isolate; height: 176px;
+  position: relative; overflow: hidden; isolation: isolate; height: 46%; min-height: 96px;
   background:
     radial-gradient(80% 120% at 12% 0%, rgb(255 255 255 / .26), transparent 58%),
     linear-gradient(155deg, color-mix(in srgb, var(--pr-accent) 88%, #fff), color-mix(in srgb, var(--pr-accent) 64%, #000));
 }
-@media (min-width: 1024px) { .pr-stage { height: 196px; } }
 .pr-stage-mark {
   position: absolute; right: -18px; bottom: -34px; width: 190px; height: 190px; pointer-events: none; color: #fff; opacity: .13;
   transition: transform 1s cubic-bezier(.16, 1, .3, 1);
@@ -106,9 +105,8 @@
 .pr-tag[data-side="left"] { left: 24px; }
 .pr-tag[data-side="right"] { right: 24px; background: rgb(255 255 255 / .92); color: #1d1a14; border-color: transparent; }
 
-.pr-body { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 24px 24px 26px; }
-@media (min-width: 640px) { .pr-body { padding: 26px 28px 28px; } }
-.pr-title { font-size: 28px; font-weight: 660; line-height: 1.08; letter-spacing: -.035em; color: var(--ink); text-wrap: balance; }
+.pr-body { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 18px; }
+.pr-title { font-size: 22px; font-weight: 660; line-height: 1.08; letter-spacing: -.035em; color: var(--ink); text-wrap: balance; }
 .pr-dek { margin-top: 8px; max-width: 42ch; font-size: 15px; line-height: 1.5; color: var(--muted); }
 
 .pr-facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 18px; font-size: 14px; color: var(--muted); }
@@ -120,8 +118,8 @@
 .pr-segs i { flex: 1; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 8%, transparent); transition: background-color .4s ease; }
 .pr-segs i[data-on="true"] { background: var(--pr-accent); }
 
-.pr-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin-top: auto; padding-top: 26px; }
-.pr-note { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.pr-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin-top: auto; padding-top: 14px; }
+.pr-note { margin-top: 9px; font-size: 11px; line-height: 1.35; color: var(--muted); }
 
 /* Apple-style primary: a pill, one per card. */
 .pr-cta {
@@ -138,24 +136,17 @@
 [data-theme="dark"] .pr-link { color: var(--gold); }
 @media (hover: hover) { .pr-link:hover { opacity: .7; } }
 
-/* Keep the existing card identity, but compact it into a small folder on
-   wide displays so the complete five-mode practice system is scannable. */
+/* Keep the existing card identity, but compact it into a small square folder
+   so the complete five-mode practice system is scannable. */
 @media (min-width: 1280px) {
-  .pr-stage { height: 126px; }
+  .pr-stage { height: 46%; min-height: 0; }
   .pr-stage-mark { right: -27px; bottom: -38px; width: 148px; height: 148px; }
   .pr-icon { left: 16px; bottom: 15px; width: 50px; height: 50px; padding: 12px; border-radius: 16px; }
   .pr-tag { top: 14px; height: 22px; padding: 0 9px; font-size: 10px; }
   .pr-tag[data-side="left"] { left: 15px; }
   .pr-tag[data-side="right"] { right: 15px; }
-  .pr-body { min-height: 258px; padding: 18px 17px; }
-  .pr-title { font-size: 21px; }
-  .pr-dek { margin-top: 6px; font-size: 12.5px; line-height: 1.4; }
-  .pr-facts { gap: 4px 12px; margin-top: 14px; font-size: 11.5px; }
-  .pr-facts b { margin-right: 3px; font-size: 14px; }
-  .pr-gate { margin-top: 16px; }
-  .pr-gate-label { min-height: 30px; margin-bottom: 6px; font-size: 11px; line-height: 1.3; }
-  .pr-segs { gap: 3px; }
-  .pr-segs i { height: 4px; }
+  .pr-body { min-height: 0; padding: 15px; }
+  .pr-title { font-size: 18px; }
   .pr-foot { gap: 9px 12px; padding-top: 16px; }
   .pr-cta { height: 38px; padding: 0 18px; font-size: 13px; }
   .pr-link { font-size: 12px; }
