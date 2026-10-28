@@ -5,25 +5,24 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { groupByDay, monthGrid } from "@/lib/stats";
 import type { Challenge, CurrencyCode, JournalEntry, NoTradeLog } from "@/lib/types";
-import { formatDateFull, formatDateMedium, formatMoney, formatPct, formatSignedMoney, monthLabel, parseDateKey, todayKey } from "@/lib/format";
+import { formatDateFull, formatDateMedium, formatMoney, formatSignedMoney, monthLabel, parseDateKey, todayKey } from "@/lib/format";
 import { summarizeTradeMistakeForFeed } from "@/lib/ai-brain";
 import { Modal } from "@/components/ui/modal";
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@/components/ui/icons";
-import { Segmented } from "@/components/journal/flow-ui";
 import { EASE } from "@/components/landing/reveal";
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-type CalendarMode = "standard" | "heatmap" | "cumulative";
 
 /**
- * CalendarView — Upgraded to the Equity Curve (`Performance`) design & interaction benchmark:
- *   1. Editorial top telemetry header with large tabular P&L (`Money` with quiet cents) that
- *      live-scrubs as you hover or focus any calendar day cell.
- *   2. Apple glass `Segmented` view switcher (`Standard` · `Heatmap` · `Cumulative`) + challenge filter + month stepper.
- *   3. Proportional profit/loss cell tinting, bottom micro-bars, R-multiple & review status indicators.
- *   4. 4-column bottom hairline steering strip (`Winning Days`, `Best Session`, `Avg Active Day`, `Review Discipline`).
- *   5. Rich Day Inspector modal with 2-line AI mistake summaries (`summarizeTradeMistakeForFeed`) per trade.
+ * CalendarView — Apple HIG Minimal & Interactive Session Surface (Equity Curve Benchmark):
+ *   1. Clean single-row header: Month Net P&L hero (with quiet cents) that smoothly scrubs
+ *      ONLY when hovering a traded day (never flashes $0.00 on empty days), plus a concise
+ *      1-line summary and a sleek `< Month Year >` pill.
+ *   2. Minimal, breathable day cells: only the day number + 1 subtle status dot at the top,
+ *      and the crisp P&L figure at the bottom with proportional profit/loss surface tinting.
+ *      Zero clutter (no per-cell progress bars, no "Sat on hands" text, no R-multiple noise).
+ *   3. Whisper-quiet hairline summary bar at the bottom.
  */
 export function CalendarView({
   entries,
@@ -31,7 +30,6 @@ export function CalendarView({
   challenges,
   currency,
   defaultChallengeId = null,
-  compact = false,
 }: {
   entries: JournalEntry[];
   dayLogs: NoTradeLog[];
@@ -47,12 +45,10 @@ export function CalendarView({
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const [dir, setDir] = useState(0);
-  const [mode, setMode] = useState<CalendarMode>("standard");
   const [challengeFilter, setChallengeFilter] = useState("all");
   const [scrubDay, setScrubDay] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  // Follow the primary challenge selection without a page reload.
   useEffect(() => {
     setChallengeFilter(defaultChallengeId ?? "all");
   }, [defaultChallengeId]);
@@ -74,8 +70,7 @@ export function CalendarView({
     [filtered, view],
   );
 
-  // Per-day entries map & cumulative P&L map across the active month
-  const monthDayStats = useMemo(() => {
+  const monthStats = useMemo(() => {
     const entriesByDate = new Map<string, JournalEntry[]>();
     for (const e of monthEntries) {
       const list = entriesByDate.get(e.date) ?? [];
@@ -84,60 +79,37 @@ export function CalendarView({
     }
 
     const sortedDates = [...entriesByDate.keys()].sort();
-    const cumByDate = new Map<string, number>();
-    let running = 0;
+    let monthPnl = 0;
     let maxAbsDayPnl = 1;
     let winningDays = 0;
     let losingDays = 0;
-    let flatDays = 0;
     let bestDay: { date: string; pnl: number } | null = null;
-    let worstDay: { date: string; pnl: number } | null = null;
 
     for (const d of sortedDates) {
       const dayPnl = (entriesByDate.get(d) ?? []).reduce((s, e) => s + e.pnl, 0);
-      running += dayPnl;
-      cumByDate.set(d, running);
+      monthPnl += dayPnl;
       maxAbsDayPnl = Math.max(maxAbsDayPnl, Math.abs(dayPnl));
       if (dayPnl > 0) winningDays++;
       else if (dayPnl < 0) losingDays++;
-      else flatDays++;
       if (!bestDay || dayPnl > bestDay.pnl) bestDay = { date: d, pnl: dayPnl };
-      if (!worstDay || dayPnl < worstDay.pnl) worstDay = { date: d, pnl: dayPnl };
     }
 
     const activeDays = sortedDates.length;
-    const monthPnl = running;
     const avgDayPnl = activeDays > 0 ? monthPnl / activeDays : 0;
-    const dayWinRate = winningDays + losingDays > 0 ? winningDays / (winningDays + losingDays) : 0;
-    const reviewedTrades = monthEntries.filter((e) => e.reviewStatus === "reviewed").length;
-    const reviewRate = monthEntries.length > 0 ? reviewedTrades / monthEntries.length : 0;
-
-    // Count no-trade days in this month
-    let monthNoTradeCount = 0;
-    for (const c of cells) {
-      if (c.key && noTradeDays.has(c.key) && !entriesByDate.has(c.key)) {
-        monthNoTradeCount++;
-      }
-    }
+    const dayWinRate = winningDays + losingDays > 0 ? Math.round((winningDays / (winningDays + losingDays)) * 100) : null;
 
     return {
       entriesByDate,
-      cumByDate,
       maxAbsDayPnl,
       winningDays,
       losingDays,
-      flatDays,
       activeDays,
       monthPnl,
       avgDayPnl,
       dayWinRate,
-      reviewedTrades,
-      reviewRate,
       bestDay,
-      worstDay,
-      monthNoTradeCount,
     };
-  }, [monthEntries, cells, noTradeDays]);
+  }, [monthEntries]);
 
   const navigate = (delta: number) => {
     setDir(delta);
@@ -158,14 +130,20 @@ export function CalendarView({
   const now = new Date();
   const isCurrentMonth = view.year === now.getFullYear() && view.month === now.getMonth();
 
-  // Scrubbed day telemetry (follows pointer/focus just like EquityCurve in Performance)
-  const scrubbedEntries = scrubDay ? monthDayStats.entriesByDate.get(scrubDay) ?? [] : [];
-  const scrubbedDayPnl = scrubDay
+  // Only scrub the hero telemetry when hovering a day that has trades (never drop to $0.00 on empty cells)
+  const scrubbedEntries = scrubDay ? monthStats.entriesByDate.get(scrubDay) ?? [] : [];
+  const isScrubbingActiveDay = scrubDay !== null && scrubbedEntries.length > 0;
+  const scrubbedDayPnl = isScrubbingActiveDay
     ? scrubbedEntries.reduce((s, e) => s + e.pnl, 0)
-    : monthDayStats.monthPnl;
-  const scrubbedCumPnl = scrubDay ? monthDayStats.cumByDate.get(scrubDay) ?? null : null;
-  const headlineValue = mode === "cumulative" && scrubbedCumPnl !== null ? scrubbedCumPnl : scrubbedDayPnl;
-  const headlineTone = headlineValue > 0 ? "profit" : headlineValue < 0 ? "loss" : "neutral";
+    : monthStats.monthPnl;
+  const headlineTone = scrubbedDayPnl > 0 ? "profit" : scrubbedDayPnl < 0 ? "loss" : "neutral";
+
+  const scrubbedR = useMemo(() => {
+    if (!isScrubbingActiveDay) return null;
+    const withR = scrubbedEntries.filter((e) => typeof e.rr === "number" && Number.isFinite(e.rr));
+    if (!withR.length) return null;
+    return withR.reduce((s, e) => s + (e.rr ?? 0), 0);
+  }, [isScrubbingActiveDay, scrubbedEntries]);
 
   const selectedEntries = (selectedDay ? filtered.filter((e) => e.date === selectedDay) : []).sort(
     (a, b) => (a.entryTime ?? "99:99").localeCompare(b.entryTime ?? "99:99"),
@@ -179,89 +157,67 @@ export function CalendarView({
       className="panel overflow-hidden"
       aria-label="Trading Calendar"
     >
-      {/* Layer 1: Equity-Curve Benchmark Editorial Header */}
-      <div className="border-b border-line px-5 pb-5 pt-5 sm:px-8 sm:pt-7">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      {/* Clean Single-Row Editorial Header (Benchmark: Equity Curve) */}
+      <div className="px-5 pt-5 sm:px-8 sm:pt-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
-                {scrubDay ? formatDateFull(scrubDay) : `${monthLabel(view.year, view.month)} · Session Calendar`}
-              </p>
-              {scrubDay && (
-                <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-gold">
-                  Inspecting Day
-                </span>
-              )}
-            </div>
+            <p className="truncate text-[11px] font-medium uppercase tracking-[0.1em] text-faint">
+              {isScrubbingActiveDay && scrubDay ? formatDateFull(scrubDay) : `${monthLabel(view.year, view.month)} · Calendar`}
+            </p>
 
             <SignedMoneyHero
-              value={headlineValue}
+              value={scrubbedDayPnl}
               currency={currency}
               tone={headlineTone}
-              className="mt-2 text-[36px] sm:text-[48px]"
+              className="mt-2 text-[36px] sm:text-[46px]"
             />
 
-            <p className="mt-2 min-h-[22px] text-[13.5px] leading-snug text-muted" aria-live="polite">
-              {scrubDay ? (
-                scrubbedEntries.length > 0 ? (
-                  <>
-                    <span className="font-medium text-ink">
-                      {scrubbedEntries.length} {scrubbedEntries.length === 1 ? "trade" : "trades"}
-                    </span>
-                    {scrubbedCumPnl !== null && (
-                      <span className="ml-2 text-muted">
-                        · Cumulative month:{" "}
-                        <b className={cn("num font-semibold", scrubbedCumPnl >= 0 ? "text-profit" : "text-loss")}>
-                          {formatSignedMoney(scrubbedCumPnl, currency)}
-                        </b>
-                      </span>
-                    )}
-                    <span className="ml-2 text-faint">· Click cell to inspect replay &amp; autopsy</span>
-                  </>
-                ) : noTradeDays.has(scrubDay) ? (
-                  <span className="text-gold">Disciplined no-trade session logged · Sat on hands</span>
-                ) : (
-                  <span>No trades logged on {formatDateMedium(scrubDay)} · Click to add or inspect</span>
-                )
-              ) : monthEntries.length > 0 ? (
+            <p className="mt-2 min-h-[20px] text-[13.5px] leading-snug text-muted" aria-live="polite">
+              {isScrubbingActiveDay && scrubDay ? (
                 <>
                   <span className="font-medium text-ink">
-                    {monthDayStats.activeDays} active {monthDayStats.activeDays === 1 ? "session" : "sessions"}
+                    {scrubbedEntries.length} {scrubbedEntries.length === 1 ? "trade" : "trades"}
                   </span>
-                  <span className="ml-2">
-                    ({monthEntries.length} {monthEntries.length === 1 ? "trade" : "trades"})
+                  {scrubbedR !== null && (
+                    <span className={cn("num ml-2 font-medium", scrubbedR > 0 ? "text-profit" : scrubbedR < 0 ? "text-loss" : "text-muted")}>
+                      {scrubbedR > 0 ? "+" : ""}
+                      {scrubbedR.toFixed(1)}R
+                    </span>
+                  )}
+                  <span className="ml-2 text-faint">
+                    · {scrubbedEntries.every((e) => e.reviewStatus === "reviewed") ? "Reviewed" : "Click to inspect"}
                   </span>
-                  <span className="ml-2 text-faint">· Hover any day to scrub session telemetry</span>
+                </>
+              ) : monthStats.activeDays > 0 ? (
+                <>
+                  <span className="font-medium text-ink">
+                    {monthStats.activeDays} {monthStats.activeDays === 1 ? "session" : "sessions"}
+                  </span>
+                  {monthStats.dayWinRate !== null && (
+                    <span className="ml-2">
+                      · <span className="num font-medium text-ink">{monthStats.dayWinRate}%</span> win rate ({monthStats.winningDays}W · {monthStats.losingDays}L)
+                    </span>
+                  )}
+                  {monthStats.bestDay && (
+                    <span className="hidden sm:inline ml-2 text-faint">
+                      · Best {formatSignedMoney(monthStats.bestDay.pnl, currency)}
+                    </span>
+                  )}
                 </>
               ) : (
-                <span>No trades logged in {monthLabel(view.year, view.month)} yet.</span>
+                <span>No sessions logged in {monthLabel(view.year, view.month)}.</span>
               )}
             </p>
           </div>
 
-          {/* Controls: View Mode Segmented + Challenge Filter + Month Stepper */}
-          <div className="flex flex-wrap items-center gap-2.5 self-start lg:justify-end">
-            {!compact && (
-              <Segmented
-                compact
-                label="Calendar view mode"
-                layoutId="cal-view-mode"
-                value={mode}
-                onChange={setMode}
-                options={[
-                  { id: "standard", label: "Standard" },
-                  { id: "heatmap", label: "Heatmap" },
-                  { id: "cumulative", label: "Cumulative" },
-                ]}
-              />
-            )}
-
+          {/* Single-row minimal controls */}
+          <div className="flex shrink-0 items-center gap-2 self-start">
             {challenges.length > 0 && (
               <select
                 aria-label="Filter by challenge"
                 value={challengeFilter}
                 onChange={(e) => setChallengeFilter(e.target.value)}
-                className="h-9 rounded-full border border-line bg-raised px-3.5 text-[12.5px] font-medium text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none"
+                className="h-9 rounded-full border border-line bg-surface px-3.5 text-[12.5px] font-medium text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none"
               >
                 <option value="all">All challenges</option>
                 {challenges.map((c) => (
@@ -272,7 +228,7 @@ export function CalendarView({
               </select>
             )}
 
-            <div className="inline-flex items-center gap-1 rounded-full border border-line bg-ink/[0.03] p-1">
+            <div className="inline-flex h-9 items-center gap-0.5 rounded-full border border-line bg-surface p-1">
               <button
                 type="button"
                 onClick={() => navigate(-1)}
@@ -284,11 +240,11 @@ export function CalendarView({
               <AnimatePresence mode="wait" initial={false}>
                 <motion.span
                   key={`${view.year}-${view.month}`}
-                  initial={{ opacity: 0, y: dir >= 0 ? 5 : -5 }}
+                  initial={{ opacity: 0, y: dir >= 0 ? 4 : -4 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: dir >= 0 ? -5 : 5 }}
-                  transition={{ duration: 0.18 }}
-                  className="min-w-[122px] px-2 text-center font-display text-[13px] font-semibold tracking-[-0.01em] text-ink"
+                  exit={{ opacity: 0, y: dir >= 0 ? -4 : 4 }}
+                  transition={{ duration: 0.16 }}
+                  className="min-w-[116px] px-2 text-center font-display text-[13px] font-semibold tracking-[-0.01em] text-ink"
                   aria-live="polite"
                 >
                   {monthLabel(view.year, view.month)}
@@ -308,7 +264,7 @@ export function CalendarView({
               <button
                 type="button"
                 onClick={jumpToToday}
-                className="h-9 rounded-full border border-line bg-raised px-3.5 text-[12px] font-semibold text-gold transition-all hover:border-gold/50 active:scale-95"
+                className="h-9 rounded-full border border-line bg-surface px-3.5 text-[12px] font-semibold text-gold transition-all hover:border-gold/50 active:scale-95"
               >
                 Today
               </button>
@@ -317,9 +273,9 @@ export function CalendarView({
         </div>
       </div>
 
-      {/* Layer 2: Interactive Calendar Grid */}
+      {/* Minimal Apple HIG Calendar Grid */}
       <div
-        className="px-3 pb-4 pt-4 sm:px-6 sm:pb-6"
+        className="px-4 pb-5 pt-5 sm:px-7 sm:pb-7"
         onPointerLeave={() => setScrubDay(null)}
       >
         <div className="mb-2 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -328,7 +284,7 @@ export function CalendarView({
               key={w}
               className={cn(
                 "pb-1 text-center text-[10.5px] font-semibold uppercase tracking-[0.12em]",
-                idx === 0 || idx === 6 ? "text-faint/65" : "text-faint",
+                idx === 0 || idx === 6 ? "text-faint/60" : "text-faint",
               )}
             >
               <span className="hidden sm:inline">{w}</span>
@@ -339,53 +295,34 @@ export function CalendarView({
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={`${view.year}-${view.month}-${mode}`}
-            initial={{ opacity: 0, x: dir * 16 }}
+            key={`${view.year}-${view.month}`}
+            initial={{ opacity: 0, x: dir * 14 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: dir * -16 }}
-            transition={{ duration: 0.24, ease: EASE }}
+            exit={{ opacity: 0, x: dir * -14 }}
+            transition={{ duration: 0.22, ease: EASE }}
             className="grid grid-cols-7 gap-1.5 sm:gap-2"
           >
             {cells.map((cell, i) => {
               if (!cell.key) {
-                return (
-                  <div
-                    key={`pad-${i}`}
-                    aria-hidden
-                    className="min-h-[68px] rounded-[16px] bg-ink/[0.015] sm:min-h-[96px]"
-                  />
-                );
+                return <div key={`pad-${i}`} aria-hidden className="min-h-[60px] sm:min-h-[82px]" />;
               }
 
               const day = byDay.get(cell.key);
               const pnl = day?.pnl ?? null;
-              const trades = day?.trades ?? 0;
               const isToday = cell.key === todayKey();
-              const isScrubbed = scrubDay === cell.key;
-              const dayEntries = monthDayStats.entriesByDate.get(cell.key) ?? [];
-              const cumPnl = monthDayStats.cumByDate.get(cell.key) ?? null;
-              const allReviewed = dayEntries.length > 0 && dayEntries.every((e) => e.reviewStatus === "reviewed");
-              const anyPending = dayEntries.some((e) => e.reviewStatus !== "reviewed" && e.reviewStatus !== "not_reviewed");
-              const hasMistake = dayEntries.some((e) => !!e.review?.followUp?.mistakeCategory);
-              const isNoTrade = dayEntries.length === 0 && noTradeDays.has(cell.key);
+              const dayEntries = monthStats.entriesByDate.get(cell.key) ?? [];
+              const hasTrades = dayEntries.length > 0;
+              const allReviewed = hasTrades && dayEntries.every((e) => e.reviewStatus === "reviewed");
+              const isNoTrade = !hasTrades && noTradeDays.has(cell.key);
 
-              // Proportional intensity for Heatmap / Standard modes
-              const ratio = pnl !== null && pnl !== 0 ? Math.min(1, Math.abs(pnl) / monthDayStats.maxAbsDayPnl) : 0;
-              const avgR = (() => {
-                const withR = dayEntries.filter((e) => typeof e.rr === "number" && Number.isFinite(e.rr));
-                if (!withR.length) return null;
-                return withR.reduce((s, e) => s + (e.rr ?? 0), 0);
-              })();
-
-              const displayVal = mode === "cumulative" && cumPnl !== null ? cumPnl : pnl;
-
-              const heatStyle: React.CSSProperties | undefined =
+              const ratio = pnl !== null && pnl !== 0 ? Math.min(1, Math.abs(pnl) / monthStats.maxAbsDayPnl) : 0;
+              const tintStyle: React.CSSProperties | undefined =
                 pnl !== null && pnl !== 0
                   ? {
                       backgroundColor:
                         pnl > 0
-                          ? `color-mix(in srgb, var(--profit) ${mode === "heatmap" ? Math.round(12 + ratio * 26) : Math.round(4 + ratio * 10)}%, var(--surface))`
-                          : `color-mix(in srgb, var(--loss) ${mode === "heatmap" ? Math.round(12 + ratio * 26) : Math.round(4 + ratio * 10)}%, var(--surface))`,
+                          ? `color-mix(in srgb, var(--profit) ${Math.round(5 + ratio * 11)}%, var(--surface))`
+                          : `color-mix(in srgb, var(--loss) ${Math.round(5 + ratio * 11)}%, var(--surface))`,
                     }
                   : undefined;
 
@@ -394,183 +331,77 @@ export function CalendarView({
                   key={cell.key}
                   type="button"
                   onClick={() => setSelectedDay(cell.key)}
-                  onPointerEnter={() => setScrubDay(cell.key)}
-                  onFocus={() => setScrubDay(cell.key)}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.22, delay: Math.min(i * 0.006, 0.16), ease: EASE }}
-                  whileHover={{ y: -2 }}
+                  onPointerEnter={() => setScrubDay(hasTrades ? cell.key : null)}
+                  onFocus={() => setScrubDay(hasTrades ? cell.key : null)}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.18, delay: Math.min(i * 0.004, 0.12) }}
+                  whileHover={{ y: -1.5 }}
                   whileTap={{ scale: 0.97 }}
-                  style={heatStyle}
+                  style={tintStyle}
                   aria-label={`${formatDateFull(cell.key)}${pnl !== null ? `, ${formatSignedMoney(pnl, currency)}` : ", no trades"}`}
                   className={cn(
-                    "group relative flex min-h-[68px] flex-col justify-between overflow-hidden rounded-[16px] border p-2 text-left outline-none transition-[border-color,box-shadow,background-color] duration-200 sm:min-h-[96px] sm:rounded-[18px] sm:p-2.5",
+                    "group relative flex min-h-[60px] flex-col justify-between rounded-[14px] border p-2 text-left outline-none transition-[border-color,box-shadow,background-color] duration-200 sm:min-h-[82px] sm:rounded-[16px] sm:p-2.5",
                     isToday
-                      ? "border-gold/70 ring-2 ring-gold/25"
-                      : isScrubbed
-                        ? "border-line-strong shadow-[0_8px_24px_-12px_rgb(0_0_0/0.18)]"
-                        : pnl !== null && pnl > 0
-                          ? "border-profit/25 hover:border-profit/50"
-                          : pnl !== null && pnl < 0
-                            ? "border-loss/25 hover:border-loss/50"
-                            : "border-line-soft bg-surface hover:border-line-strong",
+                      ? "border-gold/70 ring-1 ring-gold/30"
+                      : pnl !== null && pnl > 0
+                        ? "border-profit/25 hover:border-profit/55"
+                        : pnl !== null && pnl < 0
+                          ? "border-loss/25 hover:border-loss/55"
+                          : "border-line-soft bg-surface/75 hover:border-line-strong hover:bg-surface",
                   )}
                 >
-                  {/* Top row: Day number + review/discipline status dots */}
-                  <span className="flex w-full items-center justify-between gap-1">
+                  {/* Top: Day number + single clean status dot */}
+                  <span className="flex w-full items-center justify-between">
                     <span
                       className={cn(
-                        "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-semibold tabular-nums",
+                        "text-[11.5px] font-semibold tabular-nums leading-none",
                         isToday
-                          ? "bg-gold-strong text-on-gold shadow-sm"
-                          : pnl !== null && pnl !== 0
+                          ? "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gold-strong px-1 text-[11px] text-on-gold"
+                          : hasTrades
                             ? "text-ink"
-                            : "text-muted group-hover:text-ink",
+                            : "text-muted/80 group-hover:text-ink",
                       )}
                     >
                       {cell.day}
                     </span>
 
-                    <span className="flex items-center gap-1">
-                      {hasMistake && (
-                        <span
-                          title="Mistake tagged in autopsy"
-                          className="h-1.5 w-1.5 rounded-full bg-[#5e5ce6]"
-                        />
-                      )}
-                      {dayEntries.length > 0 && (
-                        <span
-                          title={allReviewed ? "All trades reviewed" : anyPending ? "Review in progress" : "Not reviewed"}
-                          className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            allReviewed ? "bg-profit" : anyPending ? "bg-gold" : "bg-line-strong",
-                          )}
-                        />
-                      )}
-                      {isNoTrade && (
-                        <span
-                          title="No-trade discipline day"
-                          className="h-2 w-2 rounded-full border border-gold bg-gold/20"
-                        />
-                      )}
-                    </span>
+                    {hasTrades ? (
+                      <span
+                        title={allReviewed ? "Reviewed" : "Pending review"}
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          allReviewed ? "bg-profit" : "bg-gold",
+                        )}
+                      />
+                    ) : isNoTrade ? (
+                      <span
+                        title="No-trade day"
+                        className="h-1.5 w-1.5 rounded-full border border-gold/80"
+                      />
+                    ) : null}
                   </span>
 
-                  {/* Middle row: Trade count & R multiple on desktop */}
-                  {trades > 0 ? (
-                    <span className="my-auto hidden items-center justify-between gap-1 pt-1 text-[10px] font-medium text-muted sm:flex">
-                      <span>
-                        {trades} {trades === 1 ? "tr" : "trs"}
-                      </span>
-                      {avgR !== null && (
-                        <span className={cn("num font-semibold", avgR > 0 ? "text-profit/85" : avgR < 0 ? "text-loss/85" : "text-faint")}>
-                          {avgR > 0 ? "+" : ""}
-                          {avgR.toFixed(1)}R
-                        </span>
+                  {/* Bottom: Single crisp P&L value */}
+                  {pnl !== null && pnl !== 0 && (
+                    <span
+                      className={cn(
+                        "num block truncate font-mono text-[11.5px] font-semibold leading-none tracking-[-0.02em] sm:text-[14.5px]",
+                        pnl > 0 ? "text-profit" : "text-loss",
                       )}
+                    >
+                      {pnl > 0 ? "+" : "−"}$
+                      {Math.abs(pnl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                     </span>
-                  ) : isNoTrade ? (
-                    <span className="my-auto hidden text-[10px] font-medium text-gold sm:block">
-                      Sat on hands
-                    </span>
-                  ) : null}
-
-                  {/* Bottom row: P&L badge + proportional magnitude bar */}
-                  <div className="mt-auto w-full">
-                    {displayVal !== null && displayVal !== 0 && (
-                      <span
-                        className={cn(
-                          "num block truncate font-mono text-[11px] font-bold leading-tight tracking-[-0.02em] sm:text-[14px]",
-                          displayVal > 0 ? "text-profit" : "text-loss",
-                        )}
-                      >
-                        {displayVal > 0 ? "+" : "−"}$
-                        {Math.abs(displayVal).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-                      </span>
-                    )}
-
-                    {pnl !== null && pnl !== 0 && (
-                      <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-full bg-ink/[0.06]" aria-hidden>
-                        <div
-                          className={cn("h-full rounded-full transition-all duration-300", pnl > 0 ? "bg-profit" : "bg-loss")}
-                          style={{ width: `${Math.max(18, Math.round(ratio * 100))}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </motion.button>
               );
             })}
           </motion.div>
         </AnimatePresence>
-
-        {/* Legend bar */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-1 text-[11.5px] text-faint">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-profit" /> Reviewed
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-gold" /> Review pending
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-[#5e5ce6]" /> AI mistake tagged
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full border border-gold bg-gold/20" /> No-setup discipline
-            </span>
-          </div>
-          <span className="text-muted">Click any session to inspect replays &amp; AI mistake summaries</span>
-        </div>
       </div>
 
-      {/* Layer 3: 4-Column Hairline Steering Strip (Benchmark: Performance) */}
-      <dl className="grid grid-cols-2 gap-px border-t border-line bg-line lg:grid-cols-4">
-        <SteeringCell label="Winning days">
-          <SteeringValue className={monthDayStats.dayWinRate >= 0.5 ? "text-profit" : "text-ink"}>
-            {monthDayStats.activeDays > 0 ? `${Math.round(monthDayStats.dayWinRate * 100)}%` : "—"}
-          </SteeringValue>
-          <SteeringSub>
-            {monthDayStats.winningDays}W · {monthDayStats.losingDays}L
-            {monthDayStats.monthNoTradeCount > 0 ? ` · ${monthDayStats.monthNoTradeCount} no-setup` : ""}
-          </SteeringSub>
-          <SteeringMeter pct={monthDayStats.dayWinRate} tone="profit" />
-        </SteeringCell>
-
-        <SteeringCell label="Average active day">
-          <SteeringValue className={monthDayStats.avgDayPnl > 0 ? "text-profit" : monthDayStats.avgDayPnl < 0 ? "text-loss" : "text-ink"}>
-            {monthDayStats.activeDays > 0 ? formatSignedMoney(monthDayStats.avgDayPnl, currency) : "—"}
-          </SteeringValue>
-          <SteeringSub>
-            Across {monthDayStats.activeDays} {monthDayStats.activeDays === 1 ? "session" : "sessions"} ({monthEntries.length} trades)
-          </SteeringSub>
-        </SteeringCell>
-
-        <SteeringCell label="Best &amp; worst day">
-          <SteeringValue className={monthDayStats.bestDay && monthDayStats.bestDay.pnl > 0 ? "text-profit" : "text-ink"}>
-            {monthDayStats.bestDay ? formatSignedMoney(monthDayStats.bestDay.pnl, currency) : "—"}
-          </SteeringValue>
-          <SteeringSub>
-            {monthDayStats.worstDay && monthDayStats.worstDay.pnl < 0
-              ? `Worst day: ${formatSignedMoney(monthDayStats.worstDay.pnl, currency)} (${formatDateMedium(monthDayStats.worstDay.date)})`
-              : monthDayStats.bestDay
-                ? `Best on ${formatDateMedium(monthDayStats.bestDay.date)}`
-                : "Log a session to compare"}
-          </SteeringSub>
-        </SteeringCell>
-
-        <SteeringCell label="Autopsy discipline">
-          <SteeringValue className={monthDayStats.reviewRate >= 0.8 ? "text-profit" : monthEntries.length > 0 ? "text-gold" : "text-ink"}>
-            {monthEntries.length > 0 ? `${Math.round(monthDayStats.reviewRate * 100)}%` : "—"}
-          </SteeringValue>
-          <SteeringSub>
-            {monthDayStats.reviewedTrades} of {monthEntries.length} trades reviewed for AI Brain
-          </SteeringSub>
-          <SteeringMeter pct={monthDayStats.reviewRate} tone="gold" />
-        </SteeringCell>
-      </dl>
-
-      {/* Rich Day Inspector Modal */}
+      {/* Day Inspector Modal */}
       <Modal
         open={!!selectedDay}
         onClose={() => setSelectedDay(null)}
@@ -635,7 +466,6 @@ export function CalendarView({
                   </div>
                 </div>
 
-                {/* 2-Line AI Mistake Recognition Strip */}
                 <div
                   className={cn(
                     "mt-3 rounded-xl border px-3 py-2 text-[12px] leading-snug",
@@ -668,12 +498,12 @@ export function CalendarView({
                       )}
                     />
                     {e.reviewStatus === "reviewed"
-                      ? "Reviewed in Autopsy"
+                      ? "Reviewed"
                       : e.reviewStatus === "incomplete"
                         ? "Review incomplete"
                         : e.reviewStatus === "in_progress"
-                          ? "Review in progress"
-                          : "Not reviewed yet"}
+                          ? "In progress"
+                          : "Not reviewed"}
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -685,7 +515,7 @@ export function CalendarView({
                       }}
                       className="rounded-full bg-ink/[0.06] px-3 py-1 text-[12px] font-medium text-ink transition-colors hover:bg-ink/[0.12]"
                     >
-                      Watch Replay
+                      Replay
                     </button>
                     <button
                       type="button"
@@ -695,7 +525,7 @@ export function CalendarView({
                       }}
                       className="rounded-full bg-gold/15 px-3 py-1 text-[12px] font-semibold text-gold transition-colors hover:bg-gold/25"
                     >
-                      Open Autopsy →
+                      Autopsy →
                     </button>
                   </div>
                 </div>
@@ -735,8 +565,6 @@ export function CalendarView({
   );
 }
 
-/* --------------------------------- pieces -------------------------------- */
-
 function SignedMoneyHero({
   value,
   currency,
@@ -768,36 +596,5 @@ function SignedMoneyHero({
         </span>
       )}
     </p>
-  );
-}
-
-function SteeringCell({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-surface px-5 py-4 sm:px-7 sm:py-5">
-      <dt className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">{label}</dt>
-      <dd className="mt-2">{children}</dd>
-    </div>
-  );
-}
-
-function SteeringValue({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <p className={cn("kpi text-[22px] leading-none sm:text-[24px]", className)}>{children}</p>;
-}
-
-function SteeringSub({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <p className={cn("mt-1.5 text-[12px] leading-snug text-muted", className)}>{children}</p>;
-}
-
-function SteeringMeter({ pct, tone }: { pct: number; tone: "profit" | "gold" | "loss" }) {
-  const fill = tone === "gold" ? "bg-gold-strong" : tone === "loss" ? "bg-loss" : "bg-profit";
-  return (
-    <div className="mt-3 h-[3px] overflow-hidden rounded-full bg-line-soft" aria-hidden>
-      <motion.div
-        className={cn("h-full rounded-full", fill)}
-        initial={{ width: 0 }}
-        animate={{ width: `${Math.min(1, Math.max(0, pct)) * 100}%` }}
-        transition={{ duration: 0.85, delay: 0.2, ease: EASE }}
-      />
-    </div>
   );
 }

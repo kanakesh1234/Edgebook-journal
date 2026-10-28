@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 import { MISTAKE_CATEGORIES, classifyLocal, coerceKey, type MistakeKey } from "@/lib/mistakes";
 
 export const dynamic = "force-dynamic";
@@ -56,8 +55,8 @@ async function askModel(model: string, apiKey: string, text: string, note: strin
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) return NextResponse.json({ error: "Sign in to use AI sorting." }, { status: 401 });
-  if (rateLimited(`classify-mistake:${me ?? "local"}`, 40, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (requiresAuth() && !me) return NextResponse.json({ error: "Sign in to use AI sorting." }, { status: 401 });
+  if (rateLimited(`classify-mistake:${clientKey(request, me)}`, 40, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   const body = (await request.json().catch(() => ({}))) as { text?: unknown; note?: unknown };
   const text = typeof body.text === "string" ? body.text.trim().slice(0, 600) : "";

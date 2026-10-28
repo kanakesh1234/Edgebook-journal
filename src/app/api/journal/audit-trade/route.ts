@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 import { MISTAKE_CATEGORIES, coerceKey } from "@/lib/mistakes";
 
 export const dynamic = "force-dynamic";
@@ -54,8 +53,8 @@ async function ask(model: string, apiKey: string, context: unknown) {
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) return NextResponse.json({ error: "Sign in to use the audit." }, { status: 401 });
-  if (rateLimited(`audit-trade:${me ?? "local"}`, 30, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (requiresAuth() && !me) return NextResponse.json({ error: "Sign in to use the audit." }, { status: 401 });
+  if (rateLimited(`audit-trade:${clientKey(request, me)}`, 30, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
   const body = (await request.json().catch(() => ({}))) as { context?: unknown };
   if (!body.context || typeof body.context !== "object" || JSON.stringify(body.context).length > 6000) return NextResponse.json({ error: "Bad request." }, { status: 400 });
   const config = getOpenRouterConfig();

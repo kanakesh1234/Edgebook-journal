@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
+import { clientKey, rateLimited, sessionEmail } from "@/lib/server/auth";
 import { getAccount, findByHandle } from "@/lib/server/accounts";
-import { friendEmails, findRecord, listFor, respond, sendRequest, terminate } from "@/lib/server/friends";
+import { listFor, respond, sendRequest, terminate } from "@/lib/server/friends";
 import { publicMetricsFor } from "@/lib/server/metrics";
 
 export const dynamic = "force-dynamic";
 
-/** GET — friends list (with competition-safe metrics) + pending requests. */
+/** Safe public display name — NEVER falls back to an email address. */
+function safeDisplayName(name?: string | null, handle?: string | null): string {
+  const first = name?.trim().split(/\s+/)[0] ?? "";
+  if (first && !first.includes("@")) return first.slice(0, 40);
+  return handle || "Trader";
+}
+
+/** GET — friends list (with competition-safe metrics) + pending requests + caller's own handle. */
 export async function GET(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
@@ -14,37 +21,61 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const searchHandle = url.searchParams.get("search");
 
-  // Search by @handle — returns only handle + name, never email.
+  // Search by @handle — returns only handle + safe display name, never email.
   if (searchHandle) {
-    // Stops a script from walking the whole handle directory.
-    if (rateLimited(`friend-search:${me}`, 30, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
-    const target = await findByHandle(searchHandle);
-    if (!target || target.email === me) return NextResponse.json({ results: [] });
-    return NextResponse.json({ results: [{ handle: target.handle, displayName: target.name?.split(" ")[0] ?? target.handle }] });
-  }
-
-  const records = await listFor(me);
-  const pendingIncoming = [];
-  const pendingOutgoing = [];
-  const friends = [];
-
-  for (const r of records) {
-    // The OTHER person: if I sent it, they are `to`; if they sent it, they are `from`.
-    const otherEmail = r.from === me ? r.to : r.from;
-    const direction = r.from === me ? "outgoing" : "incoming";
-    const acct = await getAccount(otherEmail);
-    if (r.status === "pending" && direction === "incoming") {
-      pendingIncoming.push({ id: r.id, handle: acct?.handle, displayName: acct?.name?.split(" ")[0] ?? otherEmail });
-    } else if (r.status === "pending" && direction === "outgoing") {
-      pendingOutgoing.push({ id: r.id, handle: acct?.handle, displayName: acct?.name?.split(" ")[0] ?? otherEmail });
-    } else if (r.status === "accepted") {
-      const metrics = await publicMetricsFor(otherEmail);
-      if (metrics) friends.push({ id: r.id, ...metrics });
+    if (rateLimited(`friend-search:${clientKey(request, me)}`, 30, 60_000)) {
+      return NextResponse.json({ error: "rate_limited" }, { status: 429 });
     }
+    const target = await findByHandle(searchHandle.slice(0, 40));
+    if (!target || target.email.toLowerCase() === me.toLowerCase()) {
+      return NextResponse.json({ results: [] });
+    }
+    return NextResponse.json({
+      results: [{ handle: target.handle, displayName: safeDisplayName(target.name, target.handle) }],
+    });
   }
+
+  if (rateLimited(`friends-list:${clientKey(request, me)}`, 120, 60_000)) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
+  // Fetch records and caller's own account in parallel
+  const [records, myAccount] = await Promise.all([listFor(me), getAccount(me)]);
+
+  const pendingIncoming: { id: string; handle?: string; displayName: string }[] = [];
+  const pendingOutgoing: { id: string; handle?: string; displayName: string }[] = [];
+  const friends: ({ id: string } & NonNullable<Awaited<ReturnType<typeof publicMetricsFor>>>)[] = [];
+
+  // Resolve all friend records in parallel instead of a sequential N+1 loop
+  await Promise.all(
+    records.map(async (r) => {
+      const isOutgoing = r.from.toLowerCase() === me.toLowerCase();
+      const otherEmail = isOutgoing ? r.to : r.from;
+      const direction = isOutgoing ? "outgoing" : "incoming";
+
+      if (r.status === "pending") {
+        const acct = await getAccount(otherEmail);
+        const item = {
+          id: r.id,
+          handle: acct?.handle,
+          displayName: safeDisplayName(acct?.name, acct?.handle),
+        };
+        if (direction === "incoming") pendingIncoming.push(item);
+        else pendingOutgoing.push(item);
+      } else if (r.status === "accepted") {
+        const metrics = await publicMetricsFor(otherEmail);
+        if (metrics) friends.push({ id: r.id, ...metrics });
+      }
+    }),
+  );
 
   friends.sort((a, b) => b.processScore - a.processScore);
-  return NextResponse.json({ friends, pendingIncoming, pendingOutgoing });
+  return NextResponse.json({
+    myHandle: myAccount?.handle ?? null,
+    friends,
+    pendingIncoming,
+    pendingOutgoing,
+  });
 }
 
 /** POST — actions: request | respond | remove | block. */
@@ -52,22 +83,26 @@ export async function POST(request: Request) {
   const me = sessionEmail(request);
   if (!me) return NextResponse.json({ error: "not_logged_in" }, { status: 401 });
 
+  if (rateLimited(`friends:${clientKey(request, me)}`, 60, 60_000)) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
   const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const body = {
     action: typeof raw.action === "string" ? raw.action : "",
-    handle: typeof raw.handle === "string" ? raw.handle.slice(0, 40) : "",
-    recordId: typeof raw.recordId === "string" ? raw.recordId.slice(0, 80) : "",
-    // Only these two answers are valid; blocking has its own action.
-    status: (raw.status === "accepted" ? "accepted" : raw.status === "declined" ? "declined" : null) as "accepted" | "declined" | null,
+    handle: typeof raw.handle === "string" ? raw.handle.trim().slice(0, 40) : "",
+    recordId: typeof raw.recordId === "string" ? raw.recordId.trim().slice(0, 80) : "",
+    status: (raw.status === "accepted" ? "accepted" : raw.status === "declined" ? "declined" : null) as
+      | "accepted"
+      | "declined"
+      | null,
   };
-  if (rateLimited(`friends:${me}`, 60, 60_000)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
   if (body.action === "request") {
     if (!body.handle) return NextResponse.json({ error: "handle_required" }, { status: 400 });
-    // A connection ID is a public handle, not an email address.
     const target = await findByHandle(body.handle);
     if (!target) return NextResponse.json({ error: "not_found" }, { status: 404 });
-    if (target.email === me) return NextResponse.json({ error: "self" }, { status: 400 });
+    if (target.email.toLowerCase() === me.toLowerCase()) return NextResponse.json({ error: "self" }, { status: 400 });
     const record = await sendRequest(me, target.email);
     if (!record) return NextResponse.json({ error: "already_pending_or_friends" }, { status: 409 });
     return NextResponse.json({ ok: true, status: record.status });

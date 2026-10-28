@@ -159,6 +159,7 @@ export default function DashboardPage() {
           intention={futureIntention ? { rule: futureIntention.rule, outcome: futureIntention.outcome } : null}
           recent={recent}
           dayRisk={todayRisk}
+          onPlanTrade={() => setPlanOpen(true)}
         />
 
         <div className="min-w-0 xl:col-start-1 xl:row-start-2">

@@ -13,8 +13,35 @@ export function sessionEmail(request: Request): string | null {
   return sessionOf(request)?.email ?? null;
 }
 
+/**
+ * True when the server is running in production / on Vercel or when Google OAuth is configured.
+ * Ensures that deployed environments NEVER allow unauthenticated access to AI or user endpoints
+ * even if an environment variable is temporarily missing.
+ */
+export function requiresAuth(): boolean {
+  return process.env.NODE_ENV === "production" || !!process.env.VERCEL || !!getGoogleConfig();
+}
+
+/** Extracts a safe client IP identifier from Vercel / reverse-proxy headers for rate-limiting. */
+export function clientIp(request: Request): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first.slice(0, 64);
+  }
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp.slice(0, 64);
+  return "anon";
+}
+
+/** Composite rate-limit key binding both authenticated identity and client IP. */
+export function clientKey(request: Request, email?: string | null): string {
+  const ip = clientIp(request);
+  return email ? `${email.toLowerCase()}:${ip}` : `ip:${ip}`;
+}
+
 /* ---------------------------- rate limiting ---------------------------- */
-/* In-memory sliding window. Per server instance (good enough to stop a script from draining paid APIs). */
+/* In-memory sliding window. Per server instance (stops scripts from draining APIs). */
 const hits = new Map<string, number[]>();
 
 /** Returns true when `key` has used up `max` calls inside `windowMs`. Records the call otherwise. */

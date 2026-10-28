@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { cardFromFact, type FactAtom, type QuestionFormat } from "@/lib/practice/time-machine";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -51,8 +50,8 @@ function locallyValidate(proposals: Proposal[], atoms: FactAtom[], seen: Seen[],
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) return NextResponse.json({ cards: [], source: "local", reason: "Sign in to use AI questions." }, { status: 401 });
-  if (rateLimited(`questions:${me ?? "local"}`, 20, 5 * 60_000)) return NextResponse.json({ cards: [], source: "local", reason: "Too many requests — try again in a few minutes." }, { status: 429 });
+  if (requiresAuth() && !me) return NextResponse.json({ cards: [], source: "local", reason: "Sign in to use AI questions." }, { status: 401 });
+  if (rateLimited(`questions:${clientKey(request, me)}`, 20, 5 * 60_000)) return NextResponse.json({ cards: [], source: "local", reason: "Too many requests — try again in a few minutes." }, { status: 429 });
   const body = await request.json().catch(() => ({})) as { atoms?: unknown[]; doNotRepeat?: Seen[]; count?: number; seed?: string };
   const atoms = (Array.isArray(body.atoms) ? body.atoms : []).filter(validAtom).slice(0, 300);
   const seen = Array.isArray(body.doNotRepeat) ? body.doNotRepeat.slice(-500) : [];

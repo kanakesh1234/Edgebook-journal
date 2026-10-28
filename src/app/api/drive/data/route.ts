@@ -1,45 +1,44 @@
 import { NextResponse } from "next/server";
 import { getAuthedDrive, newRequestId, withDrive } from "@/lib/server/authed-drive";
 import { JOURNAL_FILE, readJournalDoc, writeJournalDoc } from "@/lib/server/drive";
+import { invalidateMetricsCache } from "@/lib/server/metrics";
 import type { DriveError } from "@/lib/server/drive";
 import type { JournalPayload } from "@/lib/services/storage";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Journal persistence over the user's own Google Drive.
- * GET  → read the user's journal.json (404 only when genuinely absent)
- * PUT  → write the user's journal.json + READ-BACK VERIFICATION
- *
- * Isolation: the handler resolves the folder from the caller's own
- * httpOnly session — no parameter can address another user's data.
- *
- * Every request carries a correlation ID traced through:
- * session → account → token → root folder → journal file → Drive op
- */
+/** Cap journal payload size at 8 MB to prevent memory exhaustion on Vercel. */
+const MAX_JOURNAL_BYTES = 8 * 1024 * 1024;
+
 function driveErrorResponse(err: unknown, requestId: string, operation: string): NextResponse | null {
   const de = (err as { driveError?: DriveError }).driveError;
   if (!de) return null;
   console.error(
     `[DRIVE] OP_FAILED requestId=${requestId} operation=${operation} status=${de.status} reason=${de.reason} message="${de.message}"`,
   );
-  // Preserve Google's actual status for the browser's retry policy.  A
-  // network/local parse failure has no HTTP equivalent, so it stays a 502.
   const status = de.status >= 400 && de.status <= 599 ? de.status : 502;
-  return NextResponse.json({
-    error: "drive_write_failed",
-    detail: de.reason,
-    googleStatus: de.status,
-    message: de.message,
-  }, { status });
+  return NextResponse.json(
+    {
+      error: "drive_write_failed",
+      detail: de.reason,
+      googleStatus: de.status,
+      message: de.message,
+    },
+    { status },
+  );
 }
 
 export async function GET() {
   const requestId = newRequestId();
   const authed = await getAuthedDrive();
   if (!authed.ok) {
-    console.log(`[DRIVE] GET_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`);
-    return NextResponse.json({ error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message }, { status: authed.status });
+    console.log(
+      `[DRIVE] GET_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`,
+    );
+    return NextResponse.json(
+      { error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message },
+      { status: authed.status },
+    );
   }
   try {
     const doc = await withDrive(authed.drive, "readJournal", requestId, (t) => readJournalDoc(t, authed.drive.folders));
@@ -53,7 +52,8 @@ export async function GET() {
   } catch (err) {
     const resp = driveErrorResponse(err, requestId, "readJournal");
     if (resp) return resp;
-    throw err;
+    console.error(`[DRIVE] GET_DATA_UNEXPECTED requestId=${requestId}`, err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: "drive_read_failed" }, { status: 502 });
   }
 }
 
@@ -61,18 +61,25 @@ export async function PUT(request: Request) {
   const requestId = newRequestId();
   const authed = await getAuthedDrive();
   if (!authed.ok) {
-    console.log(`[DRIVE] PUT_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`);
-    return NextResponse.json({ error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message }, { status: authed.status });
+    console.log(
+      `[DRIVE] PUT_DATA_BLOCKED requestId=${requestId} error=${authed.error}${authed.detail ? ` reason=${authed.detail.reason}` : ""}`,
+    );
+    return NextResponse.json(
+      { error: authed.error, googleStatus: authed.detail?.status, detail: authed.detail?.reason, message: authed.detail?.message },
+      { status: authed.status },
+    );
   }
+
   let payload: JournalPayload;
   try {
-    payload = (await request.json()) as JournalPayload;
+    const rawText = await request.text();
+    if (Buffer.byteLength(rawText, "utf8") > MAX_JOURNAL_BYTES) {
+      return NextResponse.json({ error: "payload_too_large", message: "Journal payload exceeds 8 MB limit." }, { status: 413 });
+    }
+    payload = JSON.parse(rawText) as JournalPayload;
     if (!Array.isArray(payload?.entries) || !payload.settings || typeof payload.settings !== "object" || Array.isArray(payload.settings)) {
       return NextResponse.json({ error: "invalid_payload", message: "entries must be an array and settings must be an object" }, { status: 400 });
     }
-    // New practice fields intentionally remain forward-compatible: settings
-    // is an object, not a closed allow-list schema. Validate only the stable
-    // envelope so a newly shipped practiceProgress field cannot be rejected.
     if (payload.dayLogs != null && !Array.isArray(payload.dayLogs)) {
       return NextResponse.json({ error: "invalid_payload", message: "dayLogs must be an array when present" }, { status: 400 });
     }
@@ -101,18 +108,29 @@ export async function PUT(request: Request) {
       | { storedAt?: number; entries?: unknown[] }
       | null;
     if (!back || back.storedAt !== storedAt) {
-      console.error(`[DRIVE] WRITE_READBACK_MISMATCH requestId=${requestId} handle=${authed.drive.handle} rootFolderId=${authed.drive.folders.root} expectedStoredAt=${storedAt} gotStoredAt=${back?.storedAt ?? null}`);
-      return NextResponse.json({
-        error: "drive_readback_failed",
-        message: "Google Drive accepted the write but the read-back did not confirm it. Data may not be persisted.",
-      }, { status: 502 });
+      console.error(
+        `[DRIVE] WRITE_READBACK_MISMATCH requestId=${requestId} handle=${authed.drive.handle} rootFolderId=${authed.drive.folders.root} expectedStoredAt=${storedAt} gotStoredAt=${back?.storedAt ?? null}`,
+      );
+      return NextResponse.json(
+        {
+          error: "drive_readback_failed",
+          message: "Google Drive accepted the write but the read-back did not confirm it. Data may not be persisted.",
+        },
+        { status: 502 },
+      );
     }
 
-    console.log(`[DRIVE] PUT_DATA_OK requestId=${requestId} handle=${authed.drive.handle} operation=writeJournal rootFolderId=${authed.drive.folders.root} fileIdResolvedByName=${JOURNAL_FILE} tradeCount=${body.entries.length} readBackConfirmed=true`);
+    // Invalidate cached friend metrics for this user so their leaderboard score updates immediately
+    invalidateMetricsCache(authed.drive.session.email);
+
+    console.log(
+      `[DRIVE] PUT_DATA_OK requestId=${requestId} handle=${authed.drive.handle} operation=writeJournal rootFolderId=${authed.drive.folders.root} fileIdResolvedByName=${JOURNAL_FILE} tradeCount=${body.entries.length} readBackConfirmed=true`,
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
     const resp = driveErrorResponse(err, requestId, "writeJournal");
     if (resp) return resp;
-    throw err;
+    console.error(`[DRIVE] PUT_DATA_UNEXPECTED requestId=${requestId}`, err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: "drive_write_failed" }, { status: 502 });
   }
 }

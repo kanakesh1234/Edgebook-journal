@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { haptic } from "@/lib/haptics";
+import { useApp } from "@/lib/store";
 import {
   cleanName,
   deriveView,
@@ -11,6 +12,7 @@ import {
   parseSnapshot,
   reducer,
   type FriendItem,
+  type FriendsState,
   type Op,
   type RequestItem,
   type Snapshot,
@@ -18,12 +20,58 @@ import {
 
 /**
  * How often to re-check for requests other people sent you.
- * The list endpoint also computes every friend's stats, so this is deliberately
- * unhurried; focus / reconnect / your own actions refresh immediately.
  */
 export const POLL_MS = 20_000;
 const REFOCUS_MIN_MS = 4_000;
 const CHANNEL = "edgebook:friends";
+const CACHE_KEY = "edgebook:friends:snapshot:v1";
+
+/** Module-level SWR cache so navigating between tabs renders Friends in 0ms without skeleton lag. */
+let memorySnapshot: Snapshot | null = null;
+let memoryHandle: string | null = null;
+
+function readCachedSnapshot(): Snapshot | null {
+  if (memorySnapshot) return memorySnapshot;
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { snapshot?: Snapshot; handle?: string | null };
+    if (parsed.handle) memoryHandle = parsed.handle;
+    if (parsed.snapshot && Array.isArray(parsed.snapshot.friends)) {
+      memorySnapshot = parsed.snapshot;
+      return parsed.snapshot;
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return null;
+}
+
+function writeCachedSnapshot(snapshot: Snapshot, handle?: string | null): void {
+  memorySnapshot = snapshot;
+  if (handle !== undefined) memoryHandle = handle;
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ snapshot, handle: memoryHandle }),
+    );
+  } catch {
+    /* quota or private mode */
+  }
+}
+
+function buildInitialState(): FriendsState {
+  const cached = readCachedSnapshot();
+  if (!cached) return initialState;
+  return {
+    ...initialState,
+    snapshot: cached,
+    appliedAt: 1,
+    load: "ready",
+  };
+}
 
 export type MutationResult = { ok: true } | { ok: false; error: string };
 
@@ -53,16 +101,19 @@ export interface MyHandle {
 /**
  * Everything the Friends screen needs, as one reactive source of truth.
  *
+ *  - Hydrates immediately from memory / sessionStorage so opening `/friends` is instantaneous.
  *  - Mutations update the screen on the same frame (optimistic), then reconcile.
- *  - A background poll, tab focus, reconnect, and other open tabs all feed the same state.
- *  - Failures roll back and explain themselves.
+ *  - Background poll, tab focus, reconnect, and other open tabs all feed the same state.
  */
 export function useFriends() {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const [me, setMe] = useState<MyHandle>({ status: "loading", handle: null });
+  const settingsHandle = useApp((s) => s.settings.handle);
+  const [state, dispatch] = useReducer(reducer, undefined, buildInitialState);
+  const [me, setMe] = useState<MyHandle>(() => {
+    const initial = settingsHandle || memoryHandle;
+    return initial ? { status: "ready", handle: initial } : { status: "loading", handle: null };
+  });
 
-  // Logical clock shared by "fetch started" and "op settled" — see friends-state.ts.
-  const clock = useRef(0);
+  const clock = useRef(1);
   const opSeq = useRef(0);
   const inflight = useRef(false);
   const queued = useRef(false);
@@ -74,7 +125,7 @@ export function useFriends() {
   const announceArrivals = useCallback((data: Snapshot) => {
     const prev = seenIncoming.current;
     seenIncoming.current = new Set(data.incoming.map((r) => r.id));
-    if (!prev) return; // first load: nothing is "new"
+    if (!prev) return;
     const fresh = data.incoming.filter((r) => !prev.has(r.id));
     if (fresh.length === 0) return;
     haptic.selection();
@@ -86,8 +137,6 @@ export function useFriends() {
   }, []);
 
   const fetchSnapshot = useCallback(async (): Promise<void> => {
-    // One fetch at a time; a request made meanwhile re-runs right after, so it
-    // always starts AFTER whatever triggered it.
     if (inflight.current) {
       queued.current = true;
       return;
@@ -102,8 +151,14 @@ export function useFriends() {
       } else if (!res.ok) {
         dispatch({ type: "load/fail", reason: "server" });
       } else {
-        const data = parseSnapshot(await res.json());
+        const raw = (await res.json()) as { myHandle?: unknown } & Record<string, unknown>;
         if (!alive.current) return;
+        const data = parseSnapshot(raw);
+        const serverHandle = typeof raw.myHandle === "string" && raw.myHandle ? raw.myHandle : undefined;
+        if (serverHandle) {
+          setMe({ status: "ready", handle: serverHandle });
+        }
+        writeCachedSnapshot(data, serverHandle);
         dispatch({ type: "snapshot", data, startedAt });
         announceArrivals(data);
       }
@@ -157,25 +212,29 @@ export function useFriends() {
     };
   }, [fetchSnapshot]);
 
-  /* ---------- Your own Connection ID ---------- */
+  /* ---------- Fallback handle lookup only if /api/friends didn't already populate it ---------- */
   useEffect(() => {
+    if (me.status === "ready" && me.handle) return;
     let cancelled = false;
     fetch("/api/profile/handle", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("handle"))))
       .then((d: { handle?: unknown }) => {
-        if (!cancelled) setMe({ status: "ready", handle: typeof d.handle === "string" && d.handle ? d.handle : null });
+        if (!cancelled) {
+          const h = typeof d.handle === "string" && d.handle ? d.handle : null;
+          if (h) memoryHandle = h;
+          setMe({ status: "ready", handle: h });
+        }
       })
       .catch(() => {
-        if (!cancelled) setMe({ status: "error", handle: null });
+        if (!cancelled && me.status !== "ready") setMe({ status: "error", handle: null });
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [me.status, me.handle]);
 
   /* ---------- Mutations ---------- */
 
-  /** Show the change now, tell the server, then either reconcile or roll back. */
   const runOp = useCallback(
     async (op: Op, body: Record<string, unknown>): Promise<MutationResult> => {
       dispatch({ type: "op/start", op });
@@ -193,7 +252,6 @@ export function useFriends() {
         const copy = errorCopy(result.error);
         toast.error(copy.title, copy.detail);
         haptic.error();
-        // The screen was wrong about the server — find out how.
         if (result.error === "already_pending_or_friends" || result.error === "not_permitted") void fetchSnapshot();
       }
       return result;
@@ -242,7 +300,6 @@ export function useFriends() {
 
   const cancel = useCallback(
     async (item: RequestItem): Promise<MutationResult> => {
-      // A just-sent request has a temporary id until the server list confirms it.
       if (item.syncing) return { ok: false, error: "unknown" };
       return runOp({ key: nextKey(), kind: "cancel", id: item.id }, { action: "remove", recordId: item.id });
     },

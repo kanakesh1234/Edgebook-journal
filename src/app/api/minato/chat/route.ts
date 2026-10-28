@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGoogleConfig } from "@/lib/server/google-config";
-import { rateLimited, sessionOf } from "@/lib/server/auth";
+import { clientKey, rateLimited, requiresAuth, sessionOf } from "@/lib/server/auth";
 import { computeStats } from "@/lib/stats";
 import { holdTimeStats, formatHold } from "@/lib/holdtime";
 import { detectPatterns, matchPlanToPatterns } from "@/lib/minato/patterns";
@@ -169,11 +168,10 @@ function deepFacts(entries: RawEntry[]) {
 }
 
 export async function POST(request: Request) {
-  // Every question can spend the OpenRouter key, so this needs a signed-in user (only skipped when Google login isn't configured at all, i.e. local dev).
-  const config = getGoogleConfig();
+  // Every question can spend the OpenRouter key, so this needs a signed-in user in production/Vercel or when OAuth is configured.
   const session = sessionOf(request);
-  if (config && !session) return NextResponse.json({ error: "not_logged_in", text: "Please sign in to talk to Minato." }, { status: 401 });
-  if (rateLimited(`minato:${session?.email ?? "local"}`, 30, 5 * 60_000)) {
+  if (requiresAuth() && !session) return NextResponse.json({ error: "not_logged_in", text: "Please sign in to talk to Minato." }, { status: 401 });
+  if (rateLimited(`minato:${clientKey(request, session?.email)}`, 30, 5 * 60_000)) {
     return NextResponse.json({ error: "rate_limited", text: "You're asking too fast — give me a minute and try again." }, { status: 429 });
   }
 

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -50,8 +49,8 @@ async function ask(model: string, apiKey: string, user: string): Promise<string 
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) return NextResponse.json({ error: "Sign in." }, { status: 401 });
-  if (rateLimited(`outlook:${me ?? "local"}`, 40, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (requiresAuth() && !me) return NextResponse.json({ error: "Sign in." }, { status: 401 });
+  if (rateLimited(`outlook:${clientKey(request, me)}`, 40, 5 * 60_000)) return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   const body = (await request.json().catch(() => ({}))) as { draft?: Record<string, unknown>; facts?: unknown };
   const d = body.draft ?? {};

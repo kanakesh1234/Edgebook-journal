@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -38,8 +37,8 @@ function normalize(items: unknown[]) {
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) return NextResponse.json({ items: [] }, { status: 401 });
-  if (rateLimited(`matrix:${me ?? "local"}`, 30, 5 * 60_000)) return NextResponse.json({ items: [] }, { status: 429 });
+  if (requiresAuth() && !me) return NextResponse.json({ items: [] }, { status: 401 });
+  if (rateLimited(`matrix:${clientKey(request, me)}`, 30, 5 * 60_000)) return NextResponse.json({ items: [] }, { status: 429 });
   const body = await request.json().catch(() => ({})) as { action?: unknown; questions?: unknown[]; submittedAnswers?: unknown };
   const action = body.action === "explain" ? "explain" : body.action === "frame" ? "frame" : null;
   const questions = normalize(Array.isArray(body.questions) ? body.questions : []);

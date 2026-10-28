@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOpenRouterConfig } from "@/lib/services/ai";
-import { rateLimited, sessionEmail } from "@/lib/server/auth";
-import { getGoogleConfig } from "@/lib/server/google-config";
+import { clientKey, rateLimited, requiresAuth, sessionEmail } from "@/lib/server/auth";
 import { readModelAnswer, sanitizeBundle, systemPrompt, userPayload, type ModelRun } from "@/lib/tagging/prompt";
 import type { TagBundle } from "@/lib/tagging/evidence";
 import { synthesizeBrainTagRun } from "@/lib/ai-brain";
@@ -102,10 +101,10 @@ async function ask(model: string, apiKey: string, bundle: TagBundle): Promise<{ 
 
 export async function POST(request: Request) {
   const me = sessionEmail(request);
-  if (getGoogleConfig() && !me) {
+  if (requiresAuth() && !me) {
     return NextResponse.json({ error: "Sign in to use AI tagging.", reason: "You are signed out — sign in again to use AI tagging." }, { status: 401 });
   }
-  if (rateLimited(`tag-trade:${me ?? "local"}`, 90, 5 * 60_000)) {
+  if (rateLimited(`tag-trade:${clientKey(request, me)}`, 90, 5 * 60_000)) {
     return NextResponse.json({ error: "Too many requests.", reason: "Too many AI checks in a short time — wait a few minutes." }, { status: 429 });
   }
 

@@ -4,6 +4,8 @@ import { deleteFile, getFile, putFile, screenshotFileName } from "@/lib/server/d
 
 export const dynamic = "force-dynamic";
 
+const IMAGE_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
 /**
  * Screenshot persistence over the user's own Google Drive.
  * GET          → download screenshots/<imageId>.jpg (404 when absent)
@@ -18,7 +20,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ imageId: s
   if (!authed.ok) return NextResponse.json({ error: authed.error }, { status: authed.status });
 
   const { imageId } = await ctx.params;
-  if (!/^[A-Za-z0-9_-]+$/.test(imageId)) {
+  if (!IMAGE_ID_RE.test(imageId)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
 
@@ -31,10 +33,17 @@ export async function GET(_request: Request, ctx: { params: Promise<{ imageId: s
   } catch (err) {
     const de = (err as { driveError?: { status: number } }).driveError;
     if (de) return NextResponse.json({ error: "drive_read_failed", detail: String(de.status) }, { status: 502 });
-    throw err;
+    return NextResponse.json({ error: "drive_read_failed" }, { status: 502 });
   }
   if (!blob) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return new NextResponse(blob, { headers: { "Content-Type": "image/jpeg", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600" } });
+  return new NextResponse(blob, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 }
 
 export async function PUT(request: Request, ctx: { params: Promise<{ imageId: string }> }) {
@@ -42,7 +51,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
   if (!authed.ok) return NextResponse.json({ error: authed.error }, { status: authed.status });
 
   const { imageId } = await ctx.params;
-  if (!/^[A-Za-z0-9_-]+$/.test(imageId)) {
+  if (!IMAGE_ID_RE.test(imageId)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
 
@@ -54,7 +63,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
   try {
     const bytes = Buffer.from(await blob.arrayBuffer());
     // The client always re-encodes screenshots to JPEG, so anything else is not a screenshot.
-    if (!(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) {
+    if (bytes.length < 4 || !(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) {
       return NextResponse.json({ error: "invalid_image" }, { status: 400 });
     }
     await withDrive(authed.drive, "putImage", newRequestId(), (t) =>
@@ -65,9 +74,12 @@ export async function PUT(request: Request, ctx: { params: Promise<{ imageId: st
     const driveErr = err as { driveError?: { status: number; reason: string; message: string } };
     if (driveErr.driveError) {
       console.error(`[Drive] Image write failed: ${driveErr.driveError.status} ${driveErr.driveError.message}`);
-      return NextResponse.json({ error: "drive_write_failed", detail: driveErr.driveError.reason }, { status: driveErr.driveError.status === 401 ? 401 : 502 });
+      return NextResponse.json(
+        { error: "drive_write_failed", detail: driveErr.driveError.reason },
+        { status: driveErr.driveError.status === 401 ? 401 : 502 },
+      );
     }
-    throw err;
+    return NextResponse.json({ error: "drive_write_failed" }, { status: 502 });
   }
 }
 
@@ -76,9 +88,13 @@ export async function DELETE(_request: Request, ctx: { params: Promise<{ imageId
   if (!authed.ok) return NextResponse.json({ error: authed.error }, { status: authed.status });
 
   const { imageId } = await ctx.params;
-  if (!/^[A-Za-z0-9_-]+$/.test(imageId)) {
+  if (!IMAGE_ID_RE.test(imageId)) {
     return NextResponse.json({ error: "invalid_id" }, { status: 400 });
   }
-  await deleteFile(authed.drive.accessToken, authed.drive.folders.screenshots, screenshotFileName(imageId));
-  return NextResponse.json({ ok: true });
+  try {
+    await deleteFile(authed.drive.accessToken, authed.drive.folders.screenshots, screenshotFileName(imageId));
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: "drive_delete_failed" }, { status: 502 });
+  }
 }
