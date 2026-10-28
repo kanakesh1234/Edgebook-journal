@@ -16,6 +16,7 @@ export const LIMITS = {
 export const DEFAULT_PREFS: FeedPrefs = {
   dailyMinutes: 20,
   autoplayReplay: true,
+  autoplayV2: true,
   haptics: true,
   music: { enabled: false, source: "ambient-calm", volume: 0.35 },
 };
@@ -88,9 +89,12 @@ export function normalizeFeedState(raw: unknown): FeedState {
 
   const pr = isObj(raw.prefs) ? raw.prefs : {};
   const m = isObj(pr.music) ? pr.music : {};
+  // Migrate older Drive payloads (which had autoplayReplay: false by default without autoplayV2) to autoplay ON.
+  const autoplayReplay = pr.autoplayV2 === true && typeof pr.autoplayReplay === "boolean" ? pr.autoplayReplay : true;
   const prefs: FeedPrefs = {
     dailyMinutes: num(pr.dailyMinutes, DEFAULT_PREFS.dailyMinutes, 0, 600),
-    autoplayReplay: typeof pr.autoplayReplay === "boolean" ? pr.autoplayReplay : DEFAULT_PREFS.autoplayReplay,
+    autoplayReplay,
+    autoplayV2: true,
     haptics: pr.haptics !== false,
     music: {
       enabled: m.enabled === true,
@@ -206,5 +210,5 @@ export const daysVisited = (s: FeedState) => Object.values(s.progress.day).filte
 
 export const setPrefs = (s: FeedState, patch: Partial<Omit<FeedPrefs, "music">> & { music?: Partial<FeedPrefs["music"]> }): FeedState => {
   const { music, ...rest } = patch;
-  return normalizeFeedState({ ...s, prefs: { ...s.prefs, ...rest, music: { ...s.prefs.music, ...(music ?? {}) } } });
+  return normalizeFeedState({ ...s, prefs: { ...s.prefs, ...rest, autoplayV2: true, music: { ...s.prefs.music, ...(music ?? {}) } } });
 };

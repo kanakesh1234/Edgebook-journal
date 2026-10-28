@@ -34,6 +34,8 @@ export interface FeedPrefs {
   dailyMinutes: number;
   /** Replays and videos start automatically when entering the active viewport unless turned off. */
   autoplayReplay: boolean;
+  /** Marks that the autoplay preference uses the v2 default-on behavior. */
+  autoplayV2?: boolean;
   haptics: boolean;
   music: FeedMusicPrefs;
 }

@@ -36,7 +36,7 @@ export interface ReelProps<T extends FeedCard = FeedCard> {
   card: T;
   index: number;
   total: number;
-  /** The card filling the active viewport focal zone. */
+  /** The card filling the active viewport slot. */
   active: boolean;
   /** The active card and its neighbours — the only ones allowed to fetch. */
   near: boolean;
@@ -60,7 +60,7 @@ function useDocVisible(): boolean {
 
 /* ----------------------------- shared frame ----------------------------- */
 
-function CardActions({
+function Rail({
   fav,
   collected,
   onFav,
@@ -114,7 +114,7 @@ function CardActions({
 
 function Frame({
   props,
-  actions,
+  rail,
   kind,
   shape,
   children,
@@ -122,7 +122,7 @@ function Frame({
   split,
 }: {
   props: ReelProps;
-  actions: ReactNode;
+  rail: ReactNode;
   kind: string;
   shape: CardShape;
   children: ReactNode;
@@ -149,14 +149,12 @@ function Frame({
           data-split={split ?? (kind === "Replay" || kind === "Chart" || kind === "Video") ? "" : undefined}
         >
           <div className="fd-card-head">
-            <div className="fd-card-head-left">
-              <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
-              <p className="fd-kind">{kind}</p>
-            </div>
-            {actions}
+            <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
+            <p className="fd-kind">{kind}</p>
           </div>
           {children}
         </div>
+        {rail}
       </div>
     </article>
   );
@@ -391,7 +389,7 @@ export function VideoReel(props: ReelProps<VideoCard>) {
       kind="Video"
       shape={shape}
       label={`Video: ${card.title}`}
-      actions={<CardActions {...props} href={card.href} openLabel="Open" />}
+      rail={<Rail {...props} href={card.href} openLabel="Open" />}
     >
       <div className={cn("fd-media", portrait ? "fd-media--9x16" : "fd-media--16x9")}>
         <FeedVideoPlayer
@@ -441,7 +439,9 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<Speed>(1);
   const [hud, setHud] = useState<"play" | "pause" | null>(null);
+  const [controlsPeek, setControlsPeek] = useState(false);
   const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const played = useRef(false);
   const reported = useRef(false);
   const userPausedRef = useRef(false);
@@ -452,7 +452,16 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     hudTimer.current = setTimeout(() => setHud(null), 600);
   }, []);
 
-  useEffect(() => () => { if (hudTimer.current) clearTimeout(hudTimer.current); }, []);
+  const wakeControls = useCallback(() => {
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    setControlsPeek(true);
+    peekTimer.current = setTimeout(() => setControlsPeek(false), 2200);
+  }, []);
+
+  useEffect(() => () => {
+    if (hudTimer.current) clearTimeout(hudTimer.current);
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+  }, []);
 
   useEffect(() => {
     if (model) {
@@ -492,7 +501,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     return () => setReplayPlaying(false);
   }, [active, playing, setReplayPlaying]);
 
-  // Automatic playback when the active replay enters the feed (unless disabled or reduced motion)
+  // Automatic playback when the active replay enters the feed (Instagram Reels / YouTube Shorts behavior)
   useEffect(() => {
     if (!active || !docVisible || mode !== "replay" || !model || !prefs.autoplayReplay || reduce || userPausedRef.current) return;
     const t = window.setTimeout(() => {
@@ -505,7 +514,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       });
       played.current = true;
       setPlaying(true);
-    }, 320);
+    }, 180);
     return () => window.clearTimeout(t);
   }, [active, docVisible, mode, model, prefs.autoplayReplay, reduce]);
 
@@ -518,10 +527,11 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       const next = !p;
       userPausedRef.current = !next;
       if (fromSurface) flashHud(next ? "play" : "pause");
+      if (!next) wakeControls();
       return next;
     });
     if (prefs.haptics) haptic.selection();
-  }, [model, idx, flashHud, prefs.haptics]);
+  }, [model, idx, flashHud, wakeControls, prefs.haptics]);
 
   const toggleRef = useRef(togglePlay);
   toggleRef.current = togglePlay;
@@ -543,7 +553,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
   const label = `${title}, ${date}, ${money(entry.pnl)}`;
 
-  let live: ReactNode = null;
+  let liveBadge: ReactNode = null;
   if (mode === "replay" && frame) {
     const r = frame.openR, pts = frame.openPts;
     const val = frame.done
@@ -551,9 +561,9 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       : r != null ? <strong className={cn("fd-num", r >= 0 ? "fd-up" : "fd-down")}>{sign(r)}{Math.abs(r).toFixed(2)}R</strong>
       : pts != null ? <strong className={cn("fd-num", pts >= 0 ? "fd-up" : "fd-down")}>{sign(pts)}{Math.abs(pts).toFixed(2)} pts</strong>
       : null;
-    live = (
-      <div className="fd-live" aria-live="off">
-        <small>{frame.phase === "setup" ? (playing ? "Approaching entry…" : "Entry coming up — tap chart or play") : frame.phase === "open" ? `In the trade · ${long ? "long" : "short"}` : model?.exitEstimated ? "End of window (no exit recorded)" : "Closed"}</small>
+    liveBadge = (
+      <div className="fd-live fd-live-overlay" aria-live="off">
+        <small>{frame.phase === "setup" ? "Setup" : frame.phase === "open" ? (long ? "Long" : "Short") : "Closed"}</small>
         {val}
       </div>
     );
@@ -562,6 +572,8 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const isReplayView = mode === "replay" && card.replayable;
   const hasVisualMedia = card.replayable || card.hasImage || Boolean(card.videoUrl);
   const shape: CardShape = hasVisualMedia ? "landscape" : "card";
+  const progressPct = model ? Math.round(progressOf(model, idx) * 1000) / 10 : 0;
+  const showControls = !playing || controlsPeek;
 
   return (
     <Frame
@@ -569,21 +581,13 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       kind={card.replayable ? "Replay" : card.videoUrl ? "Video" : card.hasImage ? "Chart" : "Trade"}
       shape={shape}
       label={label}
-      actions={<CardActions {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}
+      rail={<Rail {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}
     >
-      {both && (
-        <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
-          <div className="fd-seg" role="tablist" aria-label="View">
-            {(["replay", "chart"] as const).map((m) => (
-              <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div
         className={cn("fd-media", hasVisualMedia && "fd-media--16x9")}
+        data-controls-visible={showControls ? "true" : undefined}
         onClick={isReplayView && model ? () => togglePlay(true) : undefined}
+        onPointerMove={isReplayView ? wakeControls : undefined}
         style={isReplayView && model ? { cursor: "pointer" } : undefined}
       >
         {isReplayView ? (
@@ -622,6 +626,21 @@ export function TradeReel(props: ReelProps<TradeCard>) {
           </div>
         )}
 
+        {/* Top-left floating live status & P&L pill */}
+        {liveBadge}
+
+        {/* Top-left Replay / Screenshot toggle (auto-hidden while playing unless hovered/paused) */}
+        {both && (
+          <div className="fd-mode-pill" onClick={(e) => e.stopPropagation()}>
+            <div className="fd-seg" role="tablist" aria-label="View">
+              {(["replay", "chart"] as const).map((m) => (
+                <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Corner Apple-style speaker/mute icon */}
         {isReplayView && (
           <button
             type="button"
@@ -637,26 +656,40 @@ export function TradeReel(props: ReelProps<TradeCard>) {
             <SpeakerIcon muted={!prefs.music.enabled} />
           </button>
         )}
+
+        {/* Hidden Reels/Shorts transport controls: hidden during playback, revealed on pause, hover, or focus */}
+        {isReplayView && (
+          <div className="fd-hidden-dock" onClick={(e) => e.stopPropagation()}>
+            <div className="fd-ctl" role="group" aria-label="Replay controls">
+              <button className="fd-small" onClick={() => { if (model) { setIdx(model.startIdx); userPausedRef.current = true; setPlaying(false); reported.current = false; } }} disabled={!model} aria-label="Restart replay"><RestartIcon /></button>
+              <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, -1)); } }} disabled={!model} aria-label="Back one bar"><StepIcon dir={-1} /></button>
+              <button className="fd-play" onClick={() => togglePlay(false)} disabled={!model} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
+              <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, 1)); } }} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
+              <button className="fd-small" onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])} aria-label={`Speed ${speed}×. Change speed`}>{speed}×</button>
+            </div>
+            <div className="fd-scrub">
+              <div className="fd-edge-bar" aria-hidden="true"><i style={{ width: `${progressPct}%` }} /></div>
+              <input
+                className="fd-range"
+                type="range"
+                min={0}
+                max={1000}
+                value={model ? Math.round(progressOf(model, idx) * 1000) : 0}
+                disabled={!model}
+                onChange={(e) => {
+                  if (model) {
+                    userPausedRef.current = true;
+                    setPlaying(false);
+                    setIdx(idxFromProgress(model, Number(e.target.value) / 1000));
+                  }
+                }}
+                aria-label="Replay position"
+                aria-valuetext={frame ? `${frame.phase === "setup" ? "Before entry" : frame.phase === "open" ? "In trade" : "Closed"}` : "Not loaded"}
+              />
+            </div>
+          </div>
+        )}
       </div>
-
-      {live}
-
-      {isReplayView && (
-        <div className="fd-transport">
-          <div className="fd-scrub">
-            <input className="fd-range" type="range" min={0} max={1000} value={model ? Math.round(progressOf(model, idx) * 1000) : 0} disabled={!model}
-              onChange={(e) => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx(idxFromProgress(model, Number(e.target.value) / 1000)); } }}
-              aria-label="Replay position" aria-valuetext={frame ? `${frame.phase === "setup" ? "Before entry" : frame.phase === "open" ? "In trade" : "Closed"}` : "Not loaded"} />
-          </div>
-          <div className="fd-ctl" role="group" aria-label="Replay controls">
-            <button className="fd-small" onClick={() => { if (model) { setIdx(model.startIdx); userPausedRef.current = true; setPlaying(false); reported.current = false; } }} disabled={!model} aria-label="Restart replay"><RestartIcon /></button>
-            <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, -1)); } }} disabled={!model} aria-label="Back one bar"><StepIcon dir={-1} /></button>
-            <button className="fd-play" onClick={() => togglePlay(false)} disabled={!model} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
-            <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, 1)); } }} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
-            <button className="fd-small" onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])} aria-label={`Speed ${speed}×. Change speed`}>{speed}×</button>
-          </div>
-        </div>
-      )}
 
       <div className="fd-info">
         <div className="fd-info-row">
@@ -688,7 +721,7 @@ export function SetupReel(props: ReelProps<SetupCard>) {
       kind="Setup"
       shape="card"
       label={`Setup: ${setup.name}`}
-      actions={<CardActions {...props} href="/lab#setups" openLabel="Playbook" />}
+      rail={<Rail {...props} href="/lab#setups" openLabel="Playbook" />}
     >
       <div className="fd-hero" data-tone="gold" data-layout="spread">
         {rules.length > 0 ? (
@@ -743,7 +776,7 @@ export function LessonReel(props: ReelProps<LessonCard>) {
       shape="editorial"
       label={`Lesson: ${lesson.title}`}
       split={false}
-      actions={<CardActions {...props} />}
+      rail={<Rail {...props} href={`/lessons/${lesson.id}`} openLabel="Read" onOpen={() => lessonOpened(props.card.key)} />}
     >
       <div className="fd-lesson-split">
         {/* Left: 16:9 landscape thumbnail or inline video */}
@@ -827,7 +860,7 @@ export function StarterReel(props: ReelProps<StarterCard>) {
   const s = STARTERS[props.card.id];
   const openNew = useUi((u) => u.openNewEntry);
   return (
-    <Frame props={props} kind="Get started" shape="card" label={s.title} actions={null}>
+    <Frame props={props} kind="Get started" shape="card" label={s.title} rail={null}>
       <div className="fd-hero" data-tone="gold">
         <h3 className="fd-big">{s.title}</h3>
         <p className="fd-quote">{s.body}</p>
@@ -848,9 +881,7 @@ export function EndReel({ card, index, total, active, onSaved, savedCount, minut
       <div className="fd-stage" data-shape="card">
         <div className="fd-inner" data-shape="card">
           <div className="fd-card-head">
-            <div className="fd-card-head-left">
-              <p className="fd-chip"><span>That’s everything for now</span></p>
-            </div>
+            <p className="fd-chip"><span>That’s everything for now</span></p>
           </div>
           <div className="fd-hero" data-tone="gold">
             <h3 className="fd-big">You’re all caught up.</h3>

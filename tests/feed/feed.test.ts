@@ -20,8 +20,12 @@ t("normalize: garbage in → valid empty state with autoplay ON and music OFF", 
     assert.equal(s.prefs.music.enabled, false, "music must default OFF");
     assert.equal(s.prefs.autoplayReplay, true, "autoplay must default ON for active feed items");
   }
-  const explicitOff = normalizeFeedState({ prefs: { autoplayReplay: false } });
-  assert.equal(explicitOff.prefs.autoplayReplay, false, "explicitly disabled autoplay is preserved");
+  const legacyDrive = normalizeFeedState({ v: 1, prefs: { autoplayReplay: false } });
+  assert.equal(legacyDrive.prefs.autoplayReplay, true, "legacy v1 Drive state without autoplayV2 upgrades to autoplay ON");
+  const explicitOff = normalizeFeedState({ prefs: { autoplayReplay: false, autoplayV2: true } });
+  assert.equal(explicitOff.prefs.autoplayReplay, false, "explicitly disabled v2 autoplay is preserved");
+  const viaSetPrefs = setPrefs(emptyFeedState(), { autoplayReplay: false });
+  assert.equal(viaSetPrefs.prefs.autoplayReplay, false, "setPrefs can turn autoplay OFF");
 });
 t("normalize: dedupes, caps and drops malformed items", () => {
   const favorites = [...Array(LIMITS.favorites + 50).keys()].map((i) => `trade:${i}`).concat(["trade:1", 5 as never, "", "x".repeat(200)]);
