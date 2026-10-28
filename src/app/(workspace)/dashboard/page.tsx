@@ -10,7 +10,7 @@ import { CalendarView } from "@/components/calendar/calendar-view";
 import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
-import { DailyFocusControl } from "@/components/dashboard/daily-focus-control";
+import { DailyFocusControl, NoSetupDayButton } from "@/components/dashboard/daily-focus-control";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { BookOpenIcon, PlusIcon, SparklesIcon } from "@/components/ui/icons";
@@ -53,7 +53,9 @@ export default function DashboardPage() {
   if (allEntries.length === 0) {
     return (
       <div className="space-y-7">
-        <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />} />
+        <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
+          <NoSetupDayButton />
+        </Header>
         <EmptyState
           icon={<BookOpenIcon className="h-7 w-7" />}
           title="Your dashboard is waiting for data"
@@ -82,7 +84,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 md:space-y-8">
       <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
-        <div className="flex shrink-0 items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+          <NoSetupDayButton />
           <Button
             variant="outline"
             size="md"
@@ -141,7 +144,7 @@ export default function DashboardPage() {
 
 function Header({ greeting, firstName, dailyControl, children }: { greeting: string; firstName: string; dailyControl?: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <header className="flex items-end justify-between gap-3 sm:gap-4">
+    <header className="flex flex-wrap items-end justify-between gap-3 sm:gap-4">
       <div>
         <motion.h1
           initial={{ opacity: 0, y: 10 }}
@@ -151,7 +154,7 @@ function Header({ greeting, firstName, dailyControl, children }: { greeting: str
         >
           {greeting}, <span className="text-gold">{firstName}</span>.
         </motion.h1>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted sm:text-sm">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-2 text-[13px] text-muted sm:text-sm">
           <span className="capitalize">{formatDateFull(todayKey())}</span>
           {dailyControl}
         </div>

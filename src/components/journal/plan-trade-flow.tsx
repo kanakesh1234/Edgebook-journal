@@ -68,7 +68,8 @@ import {
  */
 type StepId = "plan" | "thought" | "setup" | "trade" | "chart" | "autopsy" | "done";
 type NewsEvent = { id: string; name: string; time: string };
-type ThoughtItem = { id: string; text: string };
+type ThoughtKind = "thought" | "idea" | "impulse";
+type ThoughtItem = { id: string; text: string; kind?: ThoughtKind };
 type ImportRow = { date: string; pnl: number; rr: number | null; instrument: string; direction: TradeDirection | null; setup: string; notes: string; entryTime: string | null };
 
 const RAIL_LABEL: Record<StepId, string> = {
@@ -83,34 +84,6 @@ const RAIL_LABEL: Record<StepId, string> = {
 
 const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
 const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
-
-/** Compact visual scenario starters — short label on the pill, full structured If → Then inserted on tap. */
-const THOUGHT_PRESETS = [
-  {
-    id: "sweep",
-    shortLabel: "Sweep → 5m close",
-    text: "If manipulation sweeps high/low → wait for 5m body close",
-    tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
-  },
-  {
-    id: "chop",
-    shortLabel: "Chop → Sit on hands",
-    text: "If price chops at open → sit on hands until displacement",
-    tile: "bg-[#5e5ce6]",
-  },
-  {
-    id: "cut",
-    shortLabel: "Invalidated → Cut fast",
-    text: "If key level invalidates → cut immediately, zero revenge",
-    tile: "bg-loss",
-  },
-  {
-    id: "smt",
-    shortLabel: "SMT + displacement",
-    text: "If HTF SMT aligns with displacement → execute at FVG retest",
-    tile: "bg-profit",
-  },
-] as const;
 
 const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
 const IconPlus = () => (
@@ -129,23 +102,64 @@ const GlyphCamera = () => (
     <circle cx="12" cy="12.5" r="3.2" />
   </svg>
 );
+const GlyphBolt = () => (
+  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M13 3 5.5 13.5h5.5L10 21l8.5-11.5H13L13 3Z" />
+  </svg>
+);
+const GlyphSparkBulb = () => (
+  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.8 10.6c.6.5 1.1 1.3 1.3 2.1h5c.2-.8.7-1.6 1.3-2.1A6 6 0 0 0 12 3Z" />
+  </svg>
+);
 
-/** Infers the Apple squircle icon tile & glyph for a thought line from its keywords. */
-function thoughtVisual(text: string): { tile: string; glyph: React.ReactNode; tag: string } {
+const NEXT_KIND: Record<ThoughtKind, ThoughtKind> = {
+  thought: "impulse",
+  impulse: "idea",
+  idea: "thought",
+};
+
+/** Infers the Apple squircle icon tile & tag for a thought, idea, or impulse line. */
+function thoughtVisual(text: string, manualKind?: ThoughtKind): { kind: ThoughtKind; tile: string; glyph: React.ReactNode; tag: string } {
   const t = text.toLowerCase();
-  if (/\b(invalid|cut|stop|sl|wrong|revenge|abort|loss)\b/.test(t)) {
-    return { tile: "bg-loss", glyph: <GlyphStop />, tag: "Guard" };
+  const detected: ThoughtKind =
+    manualKind ??
+    (/\b(fomo|urge|impulse|rush|chase|early|revenge|hesitat|fear|greed|anxious|tempt|force)\b/.test(t)
+      ? "impulse"
+      : /\b(idea|if|sweep|fvg|smt|target|retest|setup|displacement|level|draw)\b/.test(t)
+        ? "idea"
+        : "thought");
+
+  if (detected === "impulse") {
+    return {
+      kind: "impulse",
+      tile: "bg-gradient-to-b from-[#ff9f0a] to-[#d97706]",
+      glyph: <GlyphBolt />,
+      tag: "Impulse",
+    };
   }
-  if (/\b(chop|wait|sit|hands|patience|open|avoid)\b/.test(t)) {
-    return { tile: "bg-[#5e5ce6]", glyph: <GlyphTimer />, tag: "Patience" };
-  }
-  if (/\b(target|tp|high|low|draw|runner|liquidity)\b/.test(t) && !/\bsweep\b/.test(t)) {
-    return { tile: "bg-profit", glyph: <GlyphFlag />, tag: "Target" };
+  if (detected === "idea") {
+    if (/\b(invalid|cut|stop|sl|abort)\b/.test(t)) {
+      return { kind: "idea", tile: "bg-loss", glyph: <GlyphStop />, tag: "Guard" };
+    }
+    if (/\b(wait|sit|hands|patience|chop)\b/.test(t)) {
+      return { kind: "idea", tile: "bg-[#5e5ce6]", glyph: <GlyphTimer />, tag: "Patience" };
+    }
+    if (/\b(target|tp|runner|high|low)\b/.test(t) && !/\bsweep\b/.test(t)) {
+      return { kind: "idea", tile: "bg-profit", glyph: <GlyphFlag />, tag: "Target" };
+    }
+    return {
+      kind: "idea",
+      tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
+      glyph: <GlyphSparkBulb />,
+      tag: "Idea",
+    };
   }
   return {
-    tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
+    kind: "thought",
+    tile: "bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]",
     glyph: <GlyphTarget />,
-    tag: "Trigger",
+    tag: "Thought",
   };
 }
 
@@ -210,6 +224,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [step, setStep] = useState<StepId>("plan");
   const [dir, setDir] = useState<1 | -1>(1);
   const [restoredFromCache, setRestoredFromCache] = useState(false);
+  const discardingRef = useRef(false);
 
   // Discipline gate: planning a 2nd (or later) trade after a loss stops at the plan until it is acknowledged.
   const today = todayKey();
@@ -375,6 +390,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const patchEvent = (id: string, patch: Partial<NewsEvent>) => setNewsEvents((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 
   const patchThought = (id: string, text: string) => setThoughts((list) => list.map((t) => (t.id === id ? { ...t, text } : t)));
+  const cycleThoughtKind = (id: string, currentKind: ThoughtKind) => {
+    haptic.selection();
+    setThoughts((list) => list.map((t) => (t.id === id ? { ...t, kind: NEXT_KIND[currentKind] } : t)));
+  };
   const addThought = (initialText = "") => setThoughts((list) => [...list, { id: uid("th"), text: initialText }]);
   const removeThought = (id: string) =>
     setThoughts((list) => (list.length > 1 ? list.filter((t) => t.id !== id) : [{ id: list[0]!.id, text: "" }]));
@@ -425,9 +444,43 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     planIdRef.current = null;
   };
 
+  /**
+   * When the user clicks the top-right close (×) button at any point before finishing (`step !== "done"`),
+   * auto-delete everything cached in the browser and stored in Google Drive for this in-progress session,
+   * and reset completely fresh.
+   */
+  const handleAbortAndClose = () => {
+    haptic.selection();
+    discardingRef.current = true;
+
+    if (step !== "done") {
+      // 1. Clear browser draft cache
+      clearPlanDraftCache();
+
+      // 2. Delete any uploaded images from IndexedDB & Drive
+      for (const item of images) {
+        void dataStore.deleteImage(item.meta.id).catch(() => undefined);
+      }
+
+      // 3. Delete any trade entry created during this unfinished flow (syncs to Drive & local mirror)
+      if (createdId) {
+        void useApp.getState().deleteEntry(createdId).catch(() => undefined);
+      }
+
+      // 4. Delete any TradePlan saved during this unfinished flow (syncs to Drive & local mirror)
+      if (planIdRef.current) {
+        void useApp.getState().deletePlan(planIdRef.current).catch(() => undefined);
+      }
+    }
+
+    resetFresh();
+    onClose();
+  };
+
   // Initialize or restore unfinished draft from browser cache when modal opens
   useEffect(() => {
     if (!open) return;
+    discardingRef.current = false;
     const cached = loadPlanDraftCache(todayKey());
     if (cached) {
       setStep(cached.step);
@@ -483,8 +536,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   };
 
   useEffect(() => {
-    if (!open || createdId || step === "autopsy" || step === "done") return;
+    if (!open || discardingRef.current || createdId || step === "autopsy" || step === "done") return;
     const timer = window.setTimeout(() => {
+      if (discardingRef.current) return;
       savePlanDraftCache({
         date: todayKey(),
         updatedAt: Date.now(),
@@ -629,8 +683,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           ok: true,
           hint:
             nonEmptyThoughts.length > 0
-              ? `${nonEmptyThoughts.length} ${nonEmptyThoughts.length === 1 ? "thought" : "thoughts"} noted${images.length ? ` · ${images.length} chart` : ""}`
-              : "Add a thought or continue",
+              ? `${nonEmptyThoughts.length} ${nonEmptyThoughts.length === 1 ? "note" : "notes"} recorded${images.length ? ` · ${images.length} chart` : ""}`
+              : "Write a thought or continue",
         };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
@@ -856,7 +910,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     else if (step === "trade") void saveTrade();
     else if (step === "chart") void saveCharts();
     else if (step === "autopsy") void completeAutopsy();
-    else onClose();
+    else handleAbortAndClose();
   };
 
   const continueLabel =
@@ -913,7 +967,16 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         {restoredFromCache && !createdId && (
           <div className="flex items-center justify-between text-[11.5px] text-muted">
             <span>Draft restored</span>
-            <button type="button" onClick={resetFresh} className="font-medium text-gold hover:underline">
+            <button
+              type="button"
+              onClick={() => {
+                for (const item of images) {
+                  void dataStore.deleteImage(item.meta.id).catch(() => undefined);
+                }
+                resetFresh();
+              }}
+              className="font-medium text-gold hover:underline"
+            >
               Reset
             </button>
           </div>
@@ -927,10 +990,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <>
-      <Modal open={open} onClose={onClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
+      <Modal open={open} onClose={handleAbortAndClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
         <SheetFrame
           rail={rail}
-          onClose={onClose}
+          onClose={handleAbortAndClose}
           onBack={back ? () => go(back) : undefined}
           hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
           actions={
@@ -1071,19 +1134,22 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
             {step === "thought" && (
               <div>
-                <StepTitle title="Any thoughts before entry?" subtitle="Add each scenario as it comes — if this happens, I'll do this." />
+                <StepTitle
+                  title="Thoughts & impulses"
+                  subtitle="Write what you are thinking or any impulse you feel before entry."
+                />
 
-                {/* 1 — Clean Apple Scenario List with Squircle Icons */}
-                <div className="space-y-3 pt-6">
-                  <div className="flex items-center justify-between">
-                    <Label done={nonEmptyThoughts.length > 0}>Your thoughts</Label>
-                    <span className="text-[12px] text-faint">Press ↵ to add another</span>
+                {/* Clean Apple List for Thoughts, Ideas & Impulses (zero auto-fillers) */}
+                <div className="space-y-2.5 pt-6">
+                  <div className="flex items-center justify-between px-0.5">
+                    <Label done={nonEmptyThoughts.length > 0}>Your mind right now</Label>
+                    <span className="text-[12px] text-faint">Tap icon to switch · ↵ to add</span>
                   </div>
 
                   <ul className="divide-y divide-line-soft overflow-hidden rounded-[22px] border border-line bg-raised shadow-panel">
                     <AnimatePresence initial={false}>
                       {thoughts.map((th, idx) => {
-                        const vis = thoughtVisual(th.text);
+                        const vis = thoughtVisual(th.text, th.kind);
                         return (
                           <motion.li
                             key={th.id}
@@ -1094,10 +1160,17 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             className="overflow-hidden"
                           >
                             <div className="flex items-center gap-3 px-4 py-3 transition-colors focus-within:bg-gold/[0.04]">
-                              <IconTile tile={vis.tile}>{vis.glyph}</IconTile>
+                              <button
+                                type="button"
+                                onClick={() => cycleThoughtKind(th.id, vis.kind)}
+                                title={`Tagged as ${vis.tag} — tap to switch between Thought, Impulse, and Idea`}
+                                className="shrink-0 rounded-[9px] outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-gold-strong/50"
+                              >
+                                <IconTile tile={vis.tile}>{vis.glyph}</IconTile>
+                              </button>
                               <input
                                 autoFocus={idx === thoughts.length - 1}
-                                aria-label={`Thought ${idx + 1}`}
+                                aria-label={`Thought or impulse ${idx + 1}`}
                                 value={th.text}
                                 onChange={(e) => patchThought(th.id, e.target.value)}
                                 onKeyDown={(e) => {
@@ -1106,19 +1179,32 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                     addThought();
                                   }
                                 }}
-                                placeholder={idx === 0 ? "If sweep + 5m close → enter at FVG" : "If this happens → I will do this…"}
+                                placeholder={
+                                  idx === 0
+                                    ? "What are you thinking, or what impulse do you feel?"
+                                    : "Add another thought, idea, or impulse…"
+                                }
                                 maxLength={220}
                                 className="min-w-0 flex-1 bg-transparent py-1 text-[15.5px] text-ink outline-none placeholder:text-faint"
                               />
-                              {th.text.trim() && (
-                                <span className="hidden rounded-full bg-ink/[0.05] px-2 py-0.5 text-[11px] font-medium text-muted sm:inline">
-                                  {vis.tag}
-                                </span>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => cycleThoughtKind(th.id, vis.kind)}
+                                className={cn(
+                                  "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                                  vis.kind === "impulse"
+                                    ? "bg-[#ff9f0a]/15 text-[#d97706] dark:text-[#ffb340]"
+                                    : vis.kind === "idea"
+                                      ? "bg-gold/15 text-gold-deep dark:text-gold"
+                                      : "bg-ink/[0.055] text-muted hover:text-ink",
+                                )}
+                              >
+                                {vis.tag}
+                              </button>
                               {thoughts.length > 1 && (
                                 <button
                                   type="button"
-                                  aria-label="Remove thought"
+                                  aria-label="Remove line"
                                   onClick={() => removeThought(th.id)}
                                   className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
                                 >
@@ -1136,61 +1222,37 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         onClick={() => addThought()}
                         className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[14.5px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
                       >
-                        <IconPlus /> Add thought
+                        <IconPlus /> Add another
                       </button>
                     </li>
                   </ul>
-
-                  {/* Compact visual quick-add pills */}
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {THOUGHT_PRESETS.map((p) => {
-                      const alreadyUsed = nonEmptyThoughts.some((t) => t.toLowerCase() === p.text.toLowerCase());
-                      if (alreadyUsed) return null;
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            haptic.selection();
-                            const emptyIdx = thoughts.findIndex((t) => !t.text.trim());
-                            if (emptyIdx >= 0) patchThought(thoughts[emptyIdx]!.id, p.text);
-                            else addThought(p.text);
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-raised px-3 py-1.5 text-[12.5px] font-medium text-muted transition-all hover:border-line-strong hover:text-ink active:scale-95"
-                        >
-                          <span className={cn("h-2 w-2 rounded-full", p.tile)} aria-hidden />
-                          <span>+ {p.shortLabel}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
 
-                {/* Collapsible "Add more" section: Pre-trade chart snapshot, Guard against, Instrument & key level */}
-                <div className="pt-6">
+                {/* Collapsible "Add more" section — minimal, compact Apple layout */}
+                <div className="pt-5">
                   <Disclosure
                     label="Add more"
                     defaultOpen={images.length > 0 || instrument.trim().length > 0 || draw.trim().length > 0}
                   >
-                    <div className="space-y-6 pt-1">
+                    <div className="space-y-5 pt-1">
                       {/* 1 — Pre-Trade Chart Snapshot */}
-                      <div className="space-y-2.5">
+                      <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <IconTile tile="bg-gradient-to-b from-[#0ea5e9] to-[#0284c7]" className="h-6 w-6 rounded-[7px]">
                               <GlyphCamera />
                             </IconTile>
-                            <Label done={images.length > 0} hint="optional · paste ⌘V">
-                              Pre-trade chart snapshot
+                            <Label done={images.length > 0} hint="optional · ⌘V">
+                              Pre-trade chart
                             </Label>
                           </div>
-                          {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2 attached</span>}
+                          {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2</span>}
                         </div>
                         <ImageUploader items={images} onChange={updateImagesAndCache} max={2} variant="apple" />
                       </div>
 
-                      {/* 2 — Guard against (AI ranks silently in the background) */}
-                      <div className="space-y-2.5">
+                      {/* 2 — Guard against */}
+                      <div className="space-y-2">
                         <Label done={watch.length > 0} hint="optional">
                           Guard against
                         </Label>
@@ -1230,12 +1292,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         </div>
                       </div>
 
-                      {/* 3 — Instrument & Key Level */}
-                      <div className="space-y-4 border-t border-line-soft pt-4">
-                        <div className="space-y-2.5">
-                          <Label hint="defaults to MNQ" htmlFor="flow-instrument">
-                            Instrument
-                          </Label>
+                      {/* 3 — Instrument & Key Level in a compact 2-column row */}
+                      <div className="grid gap-3 border-t border-line-soft pt-4 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="flow-instrument">Instrument</Label>
                           <TextBox
                             id="flow-instrument"
                             value={instrument}
@@ -1243,21 +1303,36 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             placeholder="MNQ"
                             className="font-mono"
                           />
-                          <div className="flex flex-wrap gap-1.5">
-                            {suggestedInstruments.map((i) => (
-                              <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>
-                                {i}
-                              </Chip>
-                            ))}
-                          </div>
+                          {suggestedInstruments.length > 1 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {suggestedInstruments.map((i) => (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onClick={() => {
+                                    haptic.selection();
+                                    setInstrument(i);
+                                  }}
+                                  className={cn(
+                                    "rounded-full border px-2.5 py-0.5 font-mono text-[11.5px] font-medium transition-colors",
+                                    finalInstrument === i
+                                      ? "border-gold/55 bg-gold/12 text-gold-deep dark:text-gold"
+                                      : "border-line bg-raised text-muted hover:text-ink",
+                                  )}
+                                >
+                                  {i}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div className="space-y-2.5">
-                          <Label htmlFor="flow-draw">Key level in play</Label>
+                        <div className="space-y-2">
+                          <Label htmlFor="flow-draw">Key level</Label>
                           <TextBox
                             id="flow-draw"
                             value={draw}
                             onChange={(e) => setDraw(e.target.value)}
-                            placeholder="e.g. Yesterday's high, London low, 15m FVG"
+                            placeholder="e.g. London low, 15m FVG"
                           />
                         </div>
                       </div>
@@ -1703,7 +1778,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       </Modal>
 
       {/* Stop at the plan: a 2nd trade after a loss needs a pause; a 3rd needs a lockout. */}
-      <Modal open={lockOpen} onClose={onClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>
+      <Modal open={lockOpen} onClose={handleAbortAndClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>
         <div className="px-6 py-6 sm:px-8">
           <div className="flex items-start gap-3.5">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
@@ -1740,7 +1815,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
             />
           </div>
           <div className="mt-6 flex items-center justify-end gap-2">
-            <QuietButton onClick={onClose}>Close — I&apos;m done for today</QuietButton>
+            <QuietButton onClick={handleAbortAndClose}>Close — I&apos;m done for today</QuietButton>
             <PrimaryButton disabled={!lockChecked} onClick={() => setLockAck(true)}>
               {thirdTrade ? "Proceed anyway" : "Continue to plan"}
             </PrimaryButton>
