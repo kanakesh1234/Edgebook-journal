@@ -1,11 +1,12 @@
 "use client";
 
-import { Children, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Children, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { Sym, type SymName } from "@/components/journal/symbols";
 import { EASE, SPRING } from "@/components/journal/journal-ui";
 import { formatMoney, formatSignedMoney } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
+import { getSyncState, subscribeSyncState } from "@/lib/services/storage";
 import { useApp } from "@/lib/store";
 import type { ProcessGrade } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -39,12 +40,12 @@ export type SectionDef = { id: string; label: string; icon: SymName };
 export const WEEKLY_SECTIONS: SectionDef[] = [
   { id: "a1", label: "Scorecard", icon: "gauge" },
   { id: "a2", label: "Daily log", icon: "list" },
-  { id: "a3", label: "Edge & Patterns", icon: "sparkles" },
+  { id: "a3", label: "Edge & Thoughts", icon: "sparkles" },
   { id: "a5", label: "3-Min Ritual", icon: "target" },
 ];
 export const MONTHLY_SECTIONS: SectionDef[] = [
   { id: "b1", label: "Scorecard", icon: "gauge" },
-  { id: "b4", label: "Edge & Prop", icon: "shield" },
+  { id: "b4", label: "Edge & Thoughts", icon: "shield" },
   { id: "b2", label: "Session log", icon: "list" },
   { id: "b6", label: "3-Min Ritual", icon: "target" },
 ];
@@ -98,9 +99,6 @@ export function useReviewSettledReveal(
    Motion Primitives
 ───────────────────────────────────────────────────────────── */
 
-/**
- * Staggered section wrapper so each review block glides into place with a calm delayed transition.
- */
 export function SectionReveal({ index = 0, children, className }: { index?: number; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
   return (
@@ -115,10 +113,6 @@ export function SectionReveal({ index = 0, children, className }: { index?: numb
   );
 }
 
-/**
- * Unfolds a review question smoothly in place using the iOS sheet curve (`REVIEW_SMOOTH`),
- * clipping only while animating so focus rings and shadows are never cut off at rest.
- */
 export function QuestionReveal({ children, delay = 0.04, className }: { children: ReactNode; delay?: number; className?: string }) {
   const reduce = useReducedMotion();
   const [clip, setClip] = useState(true);
@@ -167,9 +161,6 @@ export function QuestionReveal({ children, delay = 0.04, className }: { children
   );
 }
 
-/**
- * Staggers quick-pick chips one after another so options arrive with a soft delayed ripple.
- */
 export function ChipStagger({ children, className, baseDelay = 0.14, stepDelay = 0.045 }: { children: ReactNode; className?: string; baseDelay?: number; stepDelay?: number }) {
   const reduce = useReducedMotion();
   return (
@@ -189,9 +180,6 @@ export function ChipStagger({ children, className, baseDelay = 0.14, stepDelay =
   );
 }
 
-/**
- * A number that rolls to its value. Written straight to the DOM so a 60fps tween never re-renders React.
- */
 export function AnimatedNumber({ value, format, decimals, className, delay = 0.12 }: { value: number; format: (n: number) => string; decimals?: number; className?: string; delay?: number }) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLSpanElement>(null);
@@ -232,7 +220,6 @@ export function AnimatedNumber({ value, format, decimals, className, delay = 0.1
   );
 }
 
-/** A check that draws itself. */
 export function DrawCheck({ className, strokeWidth = 3 }: { className?: string; strokeWidth?: number }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden className={cn("h-3 w-3", className)}>
@@ -242,10 +229,18 @@ export function DrawCheck({ className, strokeWidth = 3 }: { className?: string; 
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Structure
+   Structure & Apple Squircle Icon Tiles
 ───────────────────────────────────────────────────────────── */
 
-/** A calm editorial section header: title, optional 1-line subtitle, and optional right-side accessory. */
+/** Apple iOS Settings-style colored squircle icon tile. */
+export function ReviewIconTile({ tile, icon, className }: { tile: string; icon: SymName; className?: string }) {
+  return (
+    <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-[10px] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]", tile, className)}>
+      <Sym name={icon} className="h-4 w-4" strokeWidth={2.1} />
+    </span>
+  );
+}
+
 export function Section({
   id,
   icon,
@@ -264,13 +259,13 @@ export function Section({
 }) {
   return (
     <section id={id} aria-labelledby={id ? `${id}-h` : undefined} className="scroll-mt-24">
-      <div className="mb-3.5 flex items-end justify-between gap-4 px-0.5">
+      <div className="mb-3 flex items-end justify-between gap-4 px-0.5">
         <div className="min-w-0">
-          <h2 id={id ? `${id}-h` : undefined} className="flex items-center gap-2 font-display text-[20px] font-semibold leading-tight tracking-[-0.022em] text-ink sm:text-[21px]">
-            {icon && <Sym name={icon} className="h-[18px] w-[18px] text-gold" strokeWidth={1.8} />}
+          <h2 id={id ? `${id}-h` : undefined} className="flex items-center gap-2 font-display text-[19px] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[20px]">
+            {icon && <Sym name={icon} className="h-[17px] w-[17px] text-gold" strokeWidth={1.8} />}
             {title}
           </h2>
-          {hint && <p className="mt-1 max-w-[68ch] text-pretty text-[13.5px] leading-snug text-muted">{hint}</p>}
+          {hint && <p className="mt-0.5 max-w-[68ch] text-pretty text-[13px] leading-snug text-muted">{hint}</p>}
         </div>
         {aside && <div className="shrink-0 pb-0.5">{aside}</div>}
       </div>
@@ -283,21 +278,16 @@ export const Card = ({ children, className, pad = true }: { children: ReactNode;
   <div className={cn("rounded-[24px] border border-line-soft bg-surface shadow-panel", pad && "p-5 sm:p-6", className)}>{children}</div>
 );
 
-/** A figure with its label. Unboxed — the surface around it provides the structure. */
 export function Kpi({ label, value, sub, valueClass, hint, className }: { label: string; value: ReactNode; sub?: string; valueClass?: string; hint?: string; className?: string }) {
   return (
     <div className={cn("min-w-0", className)} title={hint}>
-      <p className="truncate text-[12.5px] font-medium text-muted">{label}</p>
-      <p className={cn("num mt-1 truncate text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink", valueClass)}>{value}</p>
-      {sub && <p className="mt-1 truncate text-[12.5px] text-faint">{sub}</p>}
+      <p className="truncate text-[12px] font-medium text-muted">{label}</p>
+      <p className={cn("num mt-0.5 truncate text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink", valueClass)}>{value}</p>
+      {sub && <p className="mt-0.5 truncate text-[12px] text-faint">{sub}</p>}
     </div>
   );
 }
 
-/**
- * A row of figures divided by hairlines. On phones each figure becomes a list row (label left, value right);
- * from `sm`/`lg` up they sit side by side, label above value.
- */
 export function StatStrip({ children, count, className }: { children: ReactNode; count: number; className?: string }) {
   return (
     <div
@@ -311,19 +301,18 @@ export function StatStrip({ children, count, className }: { children: ReactNode;
 
 export function StripCell({ label, value, sub, valueClass, hint }: { label: string; value: ReactNode; sub?: string; valueClass?: string; hint?: string }) {
   return (
-    <div title={hint} className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-4 px-5 py-3.5 sm:flex sm:flex-col sm:items-stretch sm:gap-0 sm:px-5 sm:py-4 lg:px-6 lg:py-5">
-      <p className="col-start-1 row-start-1 truncate text-[12.5px] font-medium text-muted sm:order-1">{label}</p>
-      <p className={cn("num col-start-2 row-span-2 row-start-1 truncate text-[19px] font-semibold leading-none tracking-[-0.02em] text-ink sm:order-2 sm:mt-2 sm:text-[22px]", valueClass)}>{value}</p>
-      {sub && <p className="col-start-1 row-start-2 mt-0.5 truncate text-[12px] text-faint sm:order-3 sm:mt-1.5">{sub}</p>}
+    <div title={hint} className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-4 px-5 py-3 sm:flex sm:flex-col sm:items-stretch sm:gap-0 sm:px-5 sm:py-4">
+      <p className="col-start-1 row-start-1 truncate text-[12px] font-medium text-muted sm:order-1">{label}</p>
+      <p className={cn("num col-start-2 row-span-2 row-start-1 truncate text-[18px] font-semibold leading-none tracking-[-0.02em] text-ink sm:order-2 sm:mt-1.5 sm:text-[21px]", valueClass)}>{value}</p>
+      {sub && <p className="col-start-1 row-start-2 mt-0.5 truncate text-[11.5px] text-faint sm:order-3 sm:mt-1">{sub}</p>}
     </div>
   );
 }
 
-/** An inset list, like iOS Settings: rows on one soft surface, hairlines between. */
 export function Group({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      {title && <p className="mb-2 px-1 text-[12.5px] font-semibold uppercase tracking-[0.06em] text-faint">{title}</p>}
+      {title && <p className="mb-2 px-1 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-faint">{title}</p>}
       <div className="divide-y divide-line-soft overflow-hidden rounded-[20px] border border-line-soft bg-surface shadow-panel">{children}</div>
     </div>
   );
@@ -333,14 +322,14 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
   const body = (
     <>
       <span className="min-w-0 flex-1 text-left">
-        <span className="block truncate text-[14px] font-medium text-ink">{label}</span>
-        {sub && <span className="block truncate text-[12px] text-faint">{sub}</span>}
+        <span className="block truncate text-[13.5px] font-medium text-ink">{label}</span>
+        {sub && <span className="block truncate text-[11.5px] text-faint">{sub}</span>}
       </span>
-      <span className={cn("num shrink-0 text-[15px] font-semibold tracking-[-0.01em] text-ink", valueClass)}>{value}</span>
+      <span className={cn("num shrink-0 text-[14.5px] font-semibold tracking-[-0.01em] text-ink", valueClass)}>{value}</span>
       {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
     </>
   );
-  const cls = "flex min-h-[48px] w-full items-center gap-3 px-4 py-2.5";
+  const cls = "flex min-h-[46px] w-full items-center gap-3 px-4 py-2";
   return onClick ? (
     <button
       type="button"
@@ -441,8 +430,8 @@ export const Prompt = ({
           </span>
         )}
         <div className="min-w-0">
-          <p className="text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink">{q}</p>
-          {hint && <p className="mt-0.5 text-[12.5px] text-faint">{hint}</p>}
+          <p className="text-[15.5px] font-semibold leading-snug tracking-[-0.015em] text-ink">{q}</p>
+          {hint && <p className="mt-0.5 text-[12px] text-faint">{hint}</p>}
         </div>
       </div>
       <AnimatePresence initial={false}>
@@ -469,12 +458,6 @@ export type SmartChipOption = {
   tone?: "good" | "bad" | "gold" | "ai";
 };
 
-/**
- * Low-friction Apple-style reflection field:
- * - Presents staggered one-tap pills up top so the user can answer in a single tap without typing.
- * - Tapping a selected pill toggles it off; tapping an unselected pill appends it cleanly and triggers the delayed settle reveal.
- * - Includes a quiet auto-growing note surface below for optional custom reflection.
- */
 export function AutoText({
   value,
   onChange,
@@ -642,18 +625,29 @@ export function GradeBadge({ grade }: { grade: ProcessGrade | null }) {
 }
 
 export function SaveIndicator({ state }: { state: SaveState }) {
+  const syncState = useSyncExternalStore(subscribeSyncState, getSyncState, () => "synced");
+  const isOffline = syncState === "offline-cached";
+
   const map: Record<SaveState, { t: string; icon: SymName; c: string }> = {
-    idle: { t: "Auto-saves to Drive", icon: "shield", c: "text-faint" },
+    idle: {
+      t: isOffline ? "Cached offline · Syncs when online" : "Synced with Drive",
+      icon: isOffline ? "shield" : "check",
+      c: isOffline ? "text-gold-deep dark:text-gold" : "text-faint",
+    },
     dirty: { t: "Editing…", icon: "pencil", c: "text-muted" },
-    saving: { t: "Saving…", icon: "repeat", c: "text-muted" },
-    saved: { t: "Saved to Drive", icon: "check", c: "text-profit" },
-    error: { t: "Not saved — retrying on next edit", icon: "xmark", c: "text-loss" },
+    saving: { t: isOffline ? "Caching locally…" : "Saving…", icon: "repeat", c: "text-muted" },
+    saved: {
+      t: isOffline ? "Saved in browser cache" : "Saved to Drive",
+      icon: "check",
+      c: isOffline ? "text-gold-deep dark:text-gold" : "text-profit",
+    },
+    error: { t: "Cached locally — retrying Drive", icon: "shield", c: "text-gold-deep dark:text-gold" },
   };
   const s = map[state];
   return (
-    <span role="status" aria-live="polite" className={cn("inline-flex items-center gap-1.5 text-[12.5px] font-medium transition-colors duration-300", s.c)}>
+    <span role="status" aria-live="polite" className={cn("inline-flex items-center gap-1.5 text-[12px] font-medium transition-colors duration-300", s.c)}>
       <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span key={state} initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} transition={SPRING} className="flex">
+        <motion.span key={`${state}-${isOffline}`} initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.5 }} transition={SPRING} className="flex">
           <Sym name={s.icon} className={cn("h-3.5 w-3.5", state === "saving" && "animate-spin")} strokeWidth={2} />
         </motion.span>
       </AnimatePresence>
@@ -713,7 +707,6 @@ export const EvidenceButton = ({ count, onClick, label }: { count: number; onCli
   </button>
 );
 
-/** Last period's commitments, shown at the top of this review to tick off honestly. */
 export function CarriedCommitments({ title, items, done, onToggle }: { title: string; items: string[]; done: Record<string, boolean>; onToggle: (i: number, v: boolean) => void }) {
   if (items.length === 0) return null;
   const kept = items.filter((_, i) => done[`prev:${i}`]).length;
@@ -721,7 +714,7 @@ export function CarriedCommitments({ title, items, done, onToggle }: { title: st
     <Card pad={false} className="overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-4 sm:px-6">
         <p className="flex min-w-0 items-center gap-2 text-[14.5px] font-semibold tracking-[-0.01em] text-ink">
-          <Sym name="flag" className="h-[16px] w-[16px] text-gold" />
+          <ReviewIconTile tile="bg-gradient-to-b from-gold-strong to-gold-deep" icon="flag" className="h-6 w-6 rounded-[7px]" />
           {title}
         </p>
         <span className="num shrink-0 whitespace-nowrap text-[12.5px] font-medium text-muted" aria-live="polite">

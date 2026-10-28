@@ -7,6 +7,7 @@ import { formatDateMedium } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { Sym } from "@/components/journal/symbols";
 import { EmptyState } from "@/components/ui/misc";
+import { analyzePeriodThoughts } from "@/lib/ai-brain";
 import { buildMonth, type ReviewContext } from "@/lib/review/metrics";
 import { addMonths, monthTitle, weekLabel } from "@/lib/review/period";
 import { PSYCH_PATTERNS } from "@/lib/review/mistakes";
@@ -30,6 +31,7 @@ import {
   Prompt,
   QuestionReveal,
   REVIEW_EXPAND,
+  ReviewIconTile,
   SaveIndicator,
   Section,
   SectionReveal,
@@ -53,9 +55,14 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const reduce = useReducedMotion();
   const rn = useReviewNotes("monthly", month);
   const { notes } = rn;
+  const plans = useApp((s) => s.plans);
   const weekly = useApp((s) => s.settings.reviews?.weekly);
   const prevCommit = useApp((s) => s.settings.reviews?.monthly?.[addMonths(month, -1)]?.lists.commitments)?.filter((c) => c.trim()) ?? [];
   const m = useMemo(() => buildMonth(ctx, month, (mon) => weekly?.[mon]?.dayMarks), [ctx, month, weekly]);
+  const thoughtAnalysis = useMemo(
+    () => analyzePeriodThoughts(ctx.entries, plans, `${month}-01`, `${month}-31`),
+    [ctx.entries, plans, month],
+  );
   const t = m.totals;
 
   const [matrixOpen, setMatrixOpen] = useState(false);
@@ -68,7 +75,6 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const commit1 = notes.lists["commitments"]?.[1] ?? "";
   const commit2 = notes.lists["commitments"]?.[2] ?? "";
 
-  // Delayed progressive reveal: tapping a chip settles for 360ms before unfolding; typing settles after 680ms pause
   const q1Reveal = useReviewSettledReveal(wonVal, lostVal.trim().length > 0 || commit0.trim().length > 0, month, 3, 680);
   const q2Reveal = useReviewSettledReveal(lostVal, commit0.trim().length > 0, month, 3, 680);
 
@@ -99,9 +105,18 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
     ...(topCrit
       ? [
           {
-            label: `Confirmed ${topCrit.label} (${fmtPct(topCrit.winRate)})`,
+            label: `${topCrit.label} (${fmtPct(topCrit.winRate)})`,
             text: `Strongest edge was confirming “${topCrit.label}” — ${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present}).`,
             tone: "good" as const,
+          },
+        ]
+      : []),
+    ...(thoughtAnalysis.plannedTrades > 0
+      ? [
+          {
+            label: `Pre-trade thoughts (${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades})`,
+            text: thoughtAnalysis.chipText,
+            tone: "ai" as const,
           },
         ]
       : []),
@@ -114,9 +129,8 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           },
         ]
       : []),
-    ...(bestDay && bestDay.pnl > 0 ? [{ label: `Best session (${formatDateMedium(bestDay.date)})`, text: dayText(bestDay, "Best session"), tone: "good" as const }] : []),
+    ...(bestDay && bestDay.pnl > 0 ? [{ label: `Best day · ${formatDateMedium(bestDay.date)}`, text: dayText(bestDay, "Best session"), tone: "good" as const }] : []),
     { label: "Consistent risk sizing", text: "Kept risk per trade consistent and protected my downside.", tone: "gold" as const },
-    { label: "Patience on no-setup days", text: `Sat on hands across ${m.noSetupDays} sessions when criteria were absent.`, tone: "gold" as const },
   ];
 
   const lostChips: SmartChipOption[] = [
@@ -132,7 +146,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
     ...(maxDrawdown
       ? [
           {
-            label: `Deepest drawdown (${signed(-maxDrawdown.depth)})`,
+            label: `Max drawdown (${signed(-maxDrawdown.depth)})`,
             text: `Deepest drawdown was ${signed(-maxDrawdown.depth)} on ${formatDateMedium(maxDrawdown.date)}.`,
             tone: "bad" as const,
           },
@@ -147,16 +161,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           },
         ]
       : []),
-    ...(worstDay && worstDay.pnl < 0 ? [{ label: `Hardest session (${formatDateMedium(worstDay.date)})`, text: dayText(worstDay, "Hardest session"), tone: "bad" as const }] : []),
-    { label: "Overtrading after a loss", text: "Tried to make back losses instead of stepping away after 2 red trades.", tone: "bad" as const },
-    { label: "No major leak — disciplined month", text: "Executed my plan cleanly; drawdowns were within normal rules.", tone: "good" as const },
+    ...(worstDay && worstDay.pnl < 0 ? [{ label: `Hardest day · ${formatDateMedium(worstDay.date)}`, text: dayText(worstDay, "Hardest session"), tone: "bad" as const }] : []),
+    { label: "Clean process month", text: "Executed my plan cleanly; drawdowns were within normal rules.", tone: "good" as const },
   ];
 
   const nextMonthRuleChips: SmartChipOption[] = [
     ...(costly
       ? [
           {
-            label: `Eliminate ${costly.label}`,
+            label: `Cut ${costly.label}`,
             text: `Never enter a trade without checking for ${costly.label.toLowerCase()} in pre-trade Thought.`,
             tone: "ai" as const,
           },
@@ -171,8 +184,8 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           },
         ]
       : []),
-    { label: "Cap daily risk at 1R after a loss", text: "Cap daily risk strictly at 1R after a losing trade so drawdown never compounds.", tone: "gold" as const },
-    { label: "Only trade A+ checklist setups", text: "Pass on every trade that has fewer than 3 pre-trade checklist rules confirmed.", tone: "gold" as const },
+    { label: "Log If → Then thoughts daily", text: "Write at least one If → Then scenario in Pre-trade Thought before every trade.", tone: "ai" as const },
+    { label: "Cap risk at 1R after a loss", text: "Cap daily risk strictly at 1R after a losing trade so drawdown never compounds.", tone: "gold" as const },
   ];
 
   const completedQuestions = [wonVal.trim(), lostVal.trim(), commit0.trim()].filter(Boolean).length;
@@ -186,7 +199,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </SectionReveal>
       )}
 
-      {/* 1 — Scorecard (Clean, chart-free Apple summary card + structured inset groups) */}
+      {/* 1 — Scorecard */}
       <SectionReveal index={1}>
         <Section
           id="b1"
@@ -207,8 +220,8 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           <Card pad={false} className="overflow-hidden">
             <div className="flex flex-wrap items-end justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6">
               <div>
-                <p className="text-[13px] font-medium text-muted">Net monthly P&amp;L</p>
-                <p className={cn("num mt-1 text-[44px] font-semibold leading-none tracking-[-0.04em] sm:text-[52px]", tone(t.net))}>
+                <p className="text-[12.5px] font-medium text-muted">Net monthly P&amp;L</p>
+                <p className={cn("num mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] sm:text-[50px]", tone(t.net))}>
                   <AnimatedNumber value={t.net} format={signed} />
                 </p>
               </div>
@@ -315,14 +328,13 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 2 — Edge & Checkpoint */}
+      {/* 2 — Edge, Thoughts & Checkpoint */}
       <SectionReveal index={2}>
         <Section
           id="b4"
           code="B.4"
           icon="shield"
-          title="Edge &amp; Checkpoint"
-          hint={ctx.challenge ? `Measured against “${ctx.challenge.name}” and your recorded checklist rules.` : "Measured against your Settings targets and recorded checklist rules."}
+          title="Edge, Thoughts &amp; Checkpoint"
           aside={
             <Chip tone={p.status === "pass" ? "good" : p.status === "fail" ? "bad" : "gold"}>
               {{ pass: "Passed", fail: "Failed", "in-progress": "In progress", none: "No target set" }[p.status]}
@@ -330,43 +342,50 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           }
         >
           <Card pad={false} className="overflow-hidden">
-            <div className="grid divide-y divide-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-              <div className="flex items-start gap-3.5 p-5 sm:p-6">
-                <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-profit/15 text-profit">
-                  <Sym name="arrowUpRight" className="h-4 w-4" strokeWidth={2.2} />
-                </span>
+            <div className="grid divide-y divide-line-soft sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              <div className="flex items-start gap-3 p-5">
+                <ReviewIconTile tile="bg-profit" icon="arrowUpRight" />
                 <Kpi
-                  label="Strongest setup criterion"
-                  value={<span className="text-[17px] leading-tight tracking-[-0.015em]">{topCrit?.label ?? "Confirm checklist rules in Plan"}</span>}
-                  sub={topCrit ? `${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present} trades)` : "Log pre-trade checklist rules to track edge"}
+                  label="Strongest edge"
+                  value={topCrit?.label ?? "Confirm checklist rules"}
+                  sub={topCrit ? `${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present})` : "Log pre-trade rules"}
                 />
               </div>
-              <div className="flex items-start gap-3.5 p-5 sm:p-6">
-                <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-loss/15 text-loss">
-                  <Sym name="heart" className="h-4 w-4" strokeWidth={2} />
-                </span>
+
+              <div className="flex items-start gap-3 p-5">
+                <ReviewIconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]" icon="sparkles" />
+                <Kpi
+                  label="AI Thought Analysis"
+                  value={
+                    thoughtAnalysis.plannedTrades > 0
+                      ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades} planned · ${fmtPct(thoughtAnalysis.plannedWinRate)} won`
+                      : thoughtAnalysis.topTheme ?? "Log If → Then thoughts"
+                  }
+                  sub={thoughtAnalysis.topTheme ? `Focus: ${thoughtAnalysis.topTheme}` : thoughtAnalysis.subline}
+                />
+              </div>
+
+              <div className="flex items-start gap-3 p-5">
+                <ReviewIconTile tile={costly ? "bg-loss" : "bg-gradient-to-b from-gold-strong to-gold-deep"} icon="shield" />
                 <Kpi
                   label="Costliest leak"
-                  value={<span className="text-[17px] leading-tight tracking-[-0.015em]">{costly ? costly.label : "Clean execution"}</span>}
-                  sub={costly ? `${costly.count}× this month${costly.lost > 0 ? ` · ${signed(-costly.lost)} impact` : ""}` : "No recurring mistake tags triggered"}
+                  value={costly ? costly.label : "Clean execution"}
+                  sub={costly ? `${costly.count}×${costly.lost > 0 ? ` · ${signed(-costly.lost)}` : ""}` : "Zero recurring mistakes"}
                 />
               </div>
             </div>
 
             {m.decisions.length > 0 && (
-              <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+              <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 lg:grid-cols-4 sm:divide-x sm:divide-y-0">
                 {m.decisions.map((d) => (
-                  <div key={d.id} className="p-5 sm:p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="text-[14.5px] font-semibold leading-snug text-ink">{d.label}</p>
+                  <div key={d.id} className="p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[13px] font-medium text-muted">{d.label}</p>
                       <Chip tone={d.yes == null ? "neutral" : d.yes ? "good" : "bad"} className="shrink-0">
-                        {d.yes == null ? "No data" : d.yes ? "Yes" : "No"}
+                        {d.yes == null ? "—" : d.yes ? "Yes" : "No"}
                       </Chip>
                     </div>
-                    <p className="num mt-1 text-[12.5px] text-muted">{d.detail}</p>
-                    <p className="mt-2.5 rounded-[12px] bg-ink/[0.035] px-3 py-2 text-[13px] leading-snug text-ink/90">
-                      {d.yes === false ? d.ifNo : d.ifYes}
-                    </p>
+                    <p className="num mt-1 text-[14.5px] font-semibold text-ink">{d.detail}</p>
                   </div>
                 ))}
               </div>
@@ -477,7 +496,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 3 — Session Log (Clean, compact trade list) */}
+      {/* 3 — Session Log */}
       <SectionReveal index={3}>
         <Section id="b2" code="B.2" icon="list" title="Session log" hint="Every trade this month. Tap any row to open its full journal entry.">
           {m.log.length === 0 ? (
@@ -495,7 +514,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                         haptic.selection();
                         actions.openTrade(r.entry.id);
                       }}
-                      className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
+                      className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
                     >
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
                         <span className="num w-6 shrink-0 text-[12px] text-faint">#{r.n}</span>
@@ -504,15 +523,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                         {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
                         {r.criteria && <span className="num text-[12px] text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
                         {r.primary !== "—" && (
-                          <span className={cn("hidden items-center gap-1.5 text-[12.5px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
+                          <span className={cn("hidden items-center gap-1.5 text-[12px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
                             <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                             {r.primary}
                           </span>
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-3.5">
-                        {r.entry.rr != null && <span className={cn("num hidden text-[13px] font-medium sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
-                        <span className={cn("num min-w-[68px] text-right text-[14.5px] font-semibold", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
+                        {r.entry.rr != null && <span className={cn("num hidden text-[12.5px] font-medium sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
+                        <span className={cn("num min-w-[68px] text-right text-[14px] font-semibold", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
                         <GradeBadge grade={r.grade} />
                       </div>
                     </button>
@@ -539,14 +558,13 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 4 — 3-Minute Monthly Check-In (Delayed progressive reveal + 1-tap chips) */}
+      {/* 4 — 3-Minute Monthly Check-In */}
       <SectionReveal index={4}>
         <Section
           id="b6"
           code="B.6"
           icon="target"
           title="3-Minute Monthly Check-In"
-          hint="Tap a chip to answer in one click or write a quick note. Each question unfolds smoothly as you go."
           aside={
             <Chip tone={completedQuestions === 3 ? "good" : "gold"}>
               {completedQuestions === 3 ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3" />}
@@ -555,7 +573,6 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           }
         >
           <Card className="p-5 sm:p-7">
-            {/* Question 1 */}
             <Prompt
               step={1}
               done={q1Reveal.settled && wonVal.trim().length > 0}
@@ -574,7 +591,6 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               />
             </Prompt>
 
-            {/* Question 2 — Unfolds smoothly with iOS curve + delayed de-blur */}
             <AnimatePresence initial={false}>
               {q1Reveal.settled && (
                 <QuestionReveal key="mo-q2">
@@ -599,7 +615,6 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               )}
             </AnimatePresence>
 
-            {/* Question 3 — Unfolds smoothly after Q2 settles */}
             <AnimatePresence initial={false}>
               {q2Reveal.settled && (
                 <QuestionReveal key="mo-q3">

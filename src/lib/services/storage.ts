@@ -1,13 +1,13 @@
 import { get, set, del } from "idb-keyval";
-import type { JournalEntry, JournalSettings, NoTradeLog, TradePlan } from "../types";
+import type { EntryImage, JournalEntry, JournalSettings, NoTradeLog, PlanRuleState, TradeDirection, TradePlan } from "../types";
 
 /* ------------------------------------------------------------------ */
-/*  Persistence layer                                                  */
+/*  Persistence layer (Offline-First + Google Drive Auto-Sync)         */
 /*                                                                      */
-/*  The app talks only to the `DataStore` interface below.              */
-/*  Today: IndexedDB via idb-keyval (offline-first).                    */
-/*  Tomorrow: swap `resolveStore()` to return a cloud-backed adapter    */
-/*  (Google Drive, Supabase, your API…) without touching UI code.       */
+/*  Every write is saved immediately to browser storage (IndexedDB +    */
+/*  localStorage mirror) before syncing to Google Drive. If internet    */
+/*  drops while planning or logging a trade, all text and chart blobs   */
+/*  stay safe in the browser cache and auto-sync when back online.      */
 /* ------------------------------------------------------------------ */
 
 export interface JournalPayload {
@@ -39,6 +39,7 @@ export interface DataStore {
 
 const journalKey = (userId: string) => `journal:${userId}`;
 const imageKey = (imageId: string) => `img:${imageId}`;
+const pendingImagesKey = "edgebook:pending-drive-images";
 
 export class IdbDataStore implements DataStore {
   readonly kind = "local" as const;
@@ -76,19 +77,109 @@ export class IdbDataStore implements DataStore {
   }
 }
 
-/* -------------------- Cloud persistence (Google Drive) -------------------- */
+/* -------------------- Live Sync & Offline State -------------------- */
 
-/**
- * Bootstrap used to run strictly one after the other: session check → THEN journal download.
- * The journal request is independent (the server validates the cookie itself and answers 401 for
- * guests), so it is started alongside the session check and consumed by loadJournal().
- */
+export type SyncConnectionState = "synced" | "syncing" | "offline-cached";
+
+let _syncState: SyncConnectionState =
+  typeof navigator !== "undefined" && navigator.onLine === false ? "offline-cached" : "synced";
+const _syncListeners = new Set<() => void>();
+
+function setSyncState(next: SyncConnectionState) {
+  if (_syncState === next) return;
+  _syncState = next;
+  _syncListeners.forEach((fn) => fn());
+}
+
+export function getSyncState(): SyncConnectionState {
+  return _syncState;
+}
+
+export function subscribeSyncState(fn: () => void): () => void {
+  _syncListeners.add(fn);
+  return () => {
+    _syncListeners.delete(fn);
+  };
+}
+
+/* -------------------- In-Progress Plan Trade Draft Cache -------------------- */
+
+export interface CachedPlanDraft {
+  date: string;
+  updatedAt: number;
+  step: "plan" | "thought" | "setup" | "trade" | "chart";
+  thesis: string;
+  emotion: string;
+  emotionReason: string;
+  newsAnswer: boolean | null;
+  newsEvents: { id: string; name: string; time: string }[];
+  thoughts: { id: string; text: string }[];
+  watch: string[];
+  instrument: string;
+  draw: string;
+  playbookId: string;
+  ruleStates: Record<string, PlanRuleState>;
+  pnl: string;
+  direction: TradeDirection | null;
+  tradeDate: string;
+  rr: string;
+  entryTime: string;
+  exitTime: string;
+  entryPrice: string;
+  exitPrice: string;
+  stopLoss: string;
+  takeProfit: string;
+  quantity: string;
+  images: EntryImage[];
+}
+
+const PLAN_DRAFT_KEY = "edgebook:active-plan-draft:v1";
+
+export function savePlanDraftCache(draft: CachedPlanDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PLAN_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+export function loadPlanDraftCache(today: string): CachedPlanDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PLAN_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedPlanDraft;
+    if (!parsed || parsed.date !== today) return null;
+    const hasContent =
+      Boolean(parsed.thesis?.trim()) ||
+      Boolean(parsed.emotion) ||
+      Boolean(parsed.thoughts?.some((t) => t.text?.trim())) ||
+      Boolean(parsed.pnl?.trim()) ||
+      Boolean(parsed.images?.length);
+    return hasContent ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPlanDraftCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PLAN_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/* -------------------- Cloud persistence (Google Drive + Offline Queue) -------------------- */
+
 let _prefetchedJournal: { at: number; promise: Promise<Response> } | null = null;
 
 export function prefetchJournal(): void {
   if (typeof window === "undefined" || _prefetchedJournal) return;
   const promise = fetch("/api/drive/data", { cache: "no-store" });
-  promise.catch(() => undefined); // never an unhandled rejection if it ends up unused
+  promise.catch(() => undefined);
   _prefetchedJournal = { at: Date.now(), promise };
 }
 
@@ -98,45 +189,147 @@ function takePrefetchedJournal(): Promise<Response> | null {
   return p && Date.now() - p.at < 20_000 ? p.promise : null;
 }
 
-/**
- * Drive-backed DataStore — talks exclusively to this app's own server
- * route handlers. The browser never sees tokens; the server resolves the
- * caller's session-bound EdgeBook folder, so user isolation is enforced
- * server-side. When no Drive session exists the routes return 401 and the
- * bootstrap falls back to the local IndexedDB store.
- */
+const PENDING_SYNC_PREFIX = "edgebook:pending-drive-sync:";
+function pendingSyncKey(userId: string) {
+  return `${PENDING_SYNC_PREFIX}${userId}`;
+}
+
+export function markPendingDriveSync(userId: string, pending: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (pending) {
+      window.localStorage.setItem(pendingSyncKey(userId), String(Date.now()));
+      setSyncState("offline-cached");
+    } else {
+      window.localStorage.removeItem(pendingSyncKey(userId));
+      setSyncState(navigator.onLine === false ? "offline-cached" : "synced");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function hasPendingDriveSync(userId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return Boolean(window.localStorage.getItem(pendingSyncKey(userId)));
+  } catch {
+    return false;
+  }
+}
+
+async function queueOfflineImage(imageId: string): Promise<void> {
+  try {
+    const existing = (await get<string[]>(pendingImagesKey)) ?? [];
+    if (!existing.includes(imageId)) {
+      await set(pendingImagesKey, [...existing, imageId]);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function flushOfflineImages(): Promise<void> {
+  try {
+    const pending = (await get<string[]>(pendingImagesKey)) ?? [];
+    if (pending.length === 0) return;
+    const remaining: string[] = [];
+    for (const imageId of pending) {
+      const blob = await get<Blob>(imageKey(imageId));
+      if (!blob) continue;
+      try {
+        const res = await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          body: blob,
+        });
+        if (!res.ok && RETRYABLE_STATUSES.has(res.status)) {
+          remaining.push(imageId);
+        }
+      } catch {
+        remaining.push(imageId);
+      }
+    }
+    await set(pendingImagesKey, remaining);
+  } catch {
+    /* ignore */
+  }
+}
+
 export class GoogleDriveDataStore implements DataStore {
   readonly kind = "cloud" as const;
 
-  async loadJournal(_userId: string): Promise<JournalPayload | null> {
-    // Use the speculative request started at bootstrap (runs in parallel with the session check)
-    // when it is fresh and succeeded; otherwise do a normal, bounded fetch.
+  async loadJournal(userId: string): Promise<JournalPayload | null> {
+    // If we have unsynced offline edits in browser cache, load them first and sync in background
+    const localMirror = loadJournalMirror(userId) ?? (await get<JournalPayload>(journalKey(userId))) ?? null;
+    if (hasPendingDriveSync(userId) && localMirror) {
+      void this.saveJournal(userId, localMirror).catch(() => undefined);
+      return localMirror;
+    }
+
     let res: Response | null = null;
     const early = takePrefetchedJournal();
     if (early) {
-      try { const r = await early; if (r.ok || r.status === 404) res = r; } catch { /* fall through to a fresh fetch */ }
+      try {
+        const r = await early;
+        if (r.ok || r.status === 404) res = r;
+      } catch {
+        /* fall through */
+      }
     }
     if (!res) res = await fetchWithTimeout("/api/drive/data", { cache: "no-store" });
-    // 200 = file found (or new user with no file) — safe to proceed
     if (res.ok) {
       const json = (await res.json()) as { payload: JournalPayload | null };
-      return json.payload ?? null;
+      const payload = json.payload ?? null;
+      if (payload) {
+        saveJournalMirror(userId, payload);
+        void set(journalKey(userId), payload).catch(() => undefined);
+      }
+      setSyncState("synced");
+      return payload;
     }
-    // 404 = file doesn't exist yet (new user) — same as null
     if (res.status === 404) return null;
-    // Any other error (401, 502, network) = failed to read — DO NOT return null
-    // (that would cause the store to initialize with empty data and overwrite Drive)
     throw new Error(`drive_read_failed:${res.status}`);
   }
 
-  async saveJournal(_userId: string, payload: JournalPayload): Promise<void> {
+  async saveJournal(userId: string, payload: JournalPayload): Promise<void> {
     assertJsonSafe(payload);
-    saveJournalMirror(_userId, payload);
-    await journalWriteQueue.enqueue(_userId, payload);
+    // 1. Always save immediately to browser cache (localStorage + IndexedDB)
+    saveJournalMirror(userId, payload);
+    void set(journalKey(userId), payload).catch(() => undefined);
+
+    // 2. If offline, mark pending sync and return cleanly so the user's flow is never interrupted
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      markPendingDriveSync(userId, true);
+      return;
+    }
+
+    setSyncState("syncing");
+    try {
+      await flushOfflineImages();
+      await journalWriteQueue.enqueue(userId, payload);
+      markPendingDriveSync(userId, false);
+    } catch (err) {
+      const syncErr = err instanceof DriveSyncError ? err : null;
+      if (!syncErr || syncErr.status === 0 || RETRYABLE_STATUSES.has(syncErr.status)) {
+        // Network drop or transient server error: keep safe in browser cache and auto-sync when online
+        markPendingDriveSync(userId, true);
+        return;
+      }
+      throw err;
+    }
   }
 
   async putImage(imageId: string, blob: Blob): Promise<void> {
-    // Drive occasionally answers 429/5xx (or the network blips) — retry a couple of times before giving up.
+    // 1. Always store image binary in local IndexedDB first so it is safe offline and renders immediately
+    await set(imageKey(imageId), blob).catch(() => undefined);
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      await queueOfflineImage(imageId);
+      setSyncState("offline-cached");
+      return;
+    }
+
     let lastStatus = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 600 * attempt));
@@ -148,26 +341,45 @@ export class GoogleDriveDataStore implements DataStore {
         });
         if (res.ok) return;
         lastStatus = res.status;
-        if (!RETRYABLE_STATUSES.has(res.status)) break; // 400 / 401 won't improve by retrying
+        if (!RETRYABLE_STATUSES.has(res.status)) break;
       } catch {
-        lastStatus = 0; // network error — retry
+        lastStatus = 0;
       }
+    }
+
+    if (lastStatus === 0 || RETRYABLE_STATUSES.has(lastStatus)) {
+      // Network unavailable — keep in IndexedDB and queue for background upload when internet returns
+      await queueOfflineImage(imageId);
+      setSyncState("offline-cached");
+      return;
     }
     throw new Error(`drive_image_write_failed:${lastStatus}`);
   }
 
   async getImage(imageId: string): Promise<Blob | undefined> {
+    // 1. Serve from local IndexedDB cache first (instant & works offline)
+    try {
+      const cached = await get<Blob>(imageKey(imageId));
+      if (cached) return cached;
+    } catch {
+      /* fall through */
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return undefined;
     const res = await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, { cache: "no-store" });
     if (!res.ok) return undefined;
-    return await res.blob();
+    const blob = await res.blob();
+    void set(imageKey(imageId), blob).catch(() => undefined);
+    return blob;
   }
 
   async deleteImage(imageId: string): Promise<void> {
-    await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, { method: "DELETE" });
+    await del(imageKey(imageId)).catch(() => undefined);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    await fetchWithTimeout(`/api/drive/image/${encodeURIComponent(imageId)}`, { method: "DELETE" }).catch(() => undefined);
   }
 
   async estimateUsage(): Promise<number | null> {
-    return null; // Drive quota is not surfaced per-app; the Settings meter stays local.
+    return null;
   }
 }
 
@@ -177,10 +389,8 @@ const MIRROR_PREFIX = "edgebook:drive-journal:";
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
 const RETRYABLE_STATUSES = new Set([403, 429, 500, 501, 502, 503, 504]);
 const DRIVE_REQUEST_TIMEOUT_MS = 30_000;
-/** Short debounce: coalesces same-tick saves without making Continue feel slow. */
 const JOURNAL_FLUSH_DELAY_MS = 300;
 
-/** Never leave a save UI pending indefinitely when a browser request stalls. */
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -211,7 +421,9 @@ type PendingWrite = {
   waiters: Array<{ resolve: () => void; reject: (error: unknown) => void }>;
 };
 
-function mirrorKey(userId: string) { return `${MIRROR_PREFIX}${userId}`; }
+function mirrorKey(userId: string) {
+  return `${MIRROR_PREFIX}${userId}`;
+}
 
 /** A browser-only safety copy. It is written before every network attempt. */
 export function saveJournalMirror(userId: string, payload: JournalPayload): void {
@@ -223,7 +435,7 @@ export function saveJournalMirror(userId: string, payload: JournalPayload): void
   }
 }
 
-/** Used only for a safe, read-only recovery view when Drive cannot be loaded. */
+/** Used for safe offline recovery when Drive cannot be reached. */
 export function loadJournalMirror(userId: string): JournalPayload | null {
   if (typeof window === "undefined") return null;
   try {
@@ -271,8 +483,6 @@ class JournalWriteQueue {
         this.pending.payload = payload;
         this.pending.waiters.push({ resolve, reject });
       } else {
-        // A signed-in browser has one journal. Flush a previous account before
-        // accepting a different one, rather than allowing concurrent writes.
         if (this.pending) {
           this.pending.waiters.forEach((w) => w.reject(new Error("Superseded by a different user write")));
         }
@@ -280,7 +490,9 @@ class JournalWriteQueue {
       }
       if (!this.writing) {
         if (this.timer) clearTimeout(this.timer);
-        this.timer = setTimeout(() => { void this.flush(); }, JOURNAL_FLUSH_DELAY_MS);
+        this.timer = setTimeout(() => {
+          void this.flush();
+        }, JOURNAL_FLUSH_DELAY_MS);
       }
     });
   }
@@ -298,20 +510,24 @@ class JournalWriteQueue {
       job.waiters.forEach(({ reject }) => reject(err));
     } finally {
       this.writing = false;
-      if (this.pending && !this.timer) this.timer = setTimeout(() => { void this.flush(); }, JOURNAL_FLUSH_DELAY_MS);
+      if (this.pending && !this.timer)
+        this.timer = setTimeout(() => {
+          void this.flush();
+        }, JOURNAL_FLUSH_DELAY_MS);
     }
   }
 
   private async writeWithRetry(payload: JournalPayload): Promise<void> {
     const body = JSON.stringify(payload);
     const bytes = new TextEncoder().encode(body).byteLength;
-    if (bytes > MAX_JOURNAL_BYTES) throw new DriveSyncError(413, `Journal payload is ${(bytes / 1024 / 1024).toFixed(2)} MB; the 4 MB sync limit was exceeded`, "payload_too_large");
+    if (bytes > MAX_JOURNAL_BYTES)
+      throw new DriveSyncError(413, `Journal payload is ${(bytes / 1024 / 1024).toFixed(2)} MB; the 4 MB sync limit was exceeded`, "payload_too_large");
     let last: DriveSyncError | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const res = await fetchWithTimeout("/api/drive/data", { method: "PUT", headers: { "Content-Type": "application/json" }, body });
         if (res.ok) return;
-        const detail = await res.json().catch(() => ({})) as { message?: string; detail?: string; googleStatus?: number };
+        const detail = (await res.json().catch(() => ({}))) as { message?: string; detail?: string; googleStatus?: number };
         const status = detail.googleStatus ?? res.status;
         last = new DriveSyncError(status, detail.message ?? `Drive write failed (${status})`, detail.detail);
       } catch (err) {
@@ -329,11 +545,6 @@ const journalWriteQueue = new JournalWriteQueue();
 
 /* ------------------------------ store switch ------------------------------ */
 
-/**
- * Active store with a contract-preserving delegate. Defaults to local
- * IndexedDB; the bootstrap switches to the Drive store when a Google
- * session is present. All existing `dataStore.*` call sites keep working.
- */
 let impl: DataStore = new IdbDataStore();
 
 export function setActiveStore(store: DataStore): void {
@@ -344,10 +555,7 @@ export function getActiveStore(): DataStore {
   return impl;
 }
 
-/** Single switch point between backends. */
 export function resolveStore(): DataStore {
-  // const backend = process.env.NEXT_PUBLIC_STORAGE_BACKEND;
-  // if (backend === "gdrive") return new GoogleDriveDataStore(getTokenFromSession);
   return new IdbDataStore();
 }
 

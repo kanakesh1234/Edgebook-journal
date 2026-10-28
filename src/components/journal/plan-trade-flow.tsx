@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp, type EntryDraft } from "@/lib/store";
 import { useUi } from "@/lib/ui-store";
 import { PLAN_EMOTIONS, setupRules, type JournalEntry, type PlanRuleState, type TradeDirection, type TradePlan } from "@/lib/types";
+import {
+  clearPlanDraftCache,
+  dataStore,
+  getSyncState,
+  loadPlanDraftCache,
+  savePlanDraftCache,
+  subscribeSyncState,
+} from "@/lib/services/storage";
 import { currencySymbol, formatDateMedium, todayKey, weekdayLong } from "@/lib/format";
 import { dayLimitFor } from "@/lib/risk";
 import { Modal } from "@/components/ui/modal";
@@ -21,18 +29,42 @@ import { ruleStats, statFor } from "@/lib/rule-stats";
 import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
 import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
 import {
-  BinaryChoice, CheckRow, Collapse, Stepper, ChoiceCard, Chip, Disclosure, FLOW_EXPAND, Hint, IconCheck, Label, PrimaryButton, QuietButton, Segmented,
-  Reveal, SheetFrame, Stagger, StepTitle, StepTransition, TextBlock, TextBox, useIsDesktop, type Rail,
-  GlyphArrowIn, GlyphArrowOut, GlyphStop, GlyphTarget, GlyphTimer, IconTile,
+  BinaryChoice,
+  CheckRow,
+  Collapse,
+  Stepper,
+  ChoiceCard,
+  Chip,
+  Disclosure,
+  FLOW_EXPAND,
+  Hint,
+  IconCheck,
+  Label,
+  PrimaryButton,
+  QuietButton,
+  Segmented,
+  Reveal,
+  SheetFrame,
+  Stagger,
+  StepTitle,
+  StepTransition,
+  TextBlock,
+  TextBox,
+  useIsDesktop,
+  type Rail,
+  GlyphArrowIn,
+  GlyphArrowOut,
+  GlyphFlag,
+  GlyphStop,
+  GlyphTarget,
+  GlyphTimer,
+  IconTile,
 } from "./flow-ui";
 
 /**
- * PLAN & RECORD — one calm, continuous ritual.
+ * PLAN & RECORD — one calm, continuous ritual with offline-first browser caching.
  *
  *   plan → thought → setup (+ its rules) → trade → chart → autopsy → done
- *
- * "setup" is skipped when the trader has no playbook. Validation is shown as quiet inline
- * state, and Continue stays disabled until the step's rules are satisfied.
  */
 type StepId = "plan" | "thought" | "setup" | "trade" | "chart" | "autopsy" | "done";
 type NewsEvent = { id: string; name: string; time: string };
@@ -52,41 +84,106 @@ const RAIL_LABEL: Record<StepId, string> = {
 const PRIMARY_EMOTIONS = PLAN_EMOTIONS.slice(0, 6);
 const MORE_EMOTIONS = PLAN_EMOTIONS.slice(6);
 
-const THOUGHT_TEMPLATES = [
-  "If manipulation sweeps high/low → wait for 5m body close",
-  "If price chops at open → sit on hands until displacement",
-  "If level invalidates → cut immediately, zero revenge",
+/** Compact visual scenario starters — short label on the pill, full structured If → Then inserted on tap. */
+const THOUGHT_PRESETS = [
+  {
+    id: "sweep",
+    shortLabel: "Sweep → 5m close",
+    text: "If manipulation sweeps high/low → wait for 5m body close",
+    tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
+    kind: "trigger" as const,
+  },
+  {
+    id: "chop",
+    shortLabel: "Chop → Sit on hands",
+    text: "If price chops at open → sit on hands until displacement",
+    tile: "bg-[#5e5ce6]",
+    kind: "patience" as const,
+  },
+  {
+    id: "cut",
+    shortLabel: "Invalidated → Cut fast",
+    text: "If key level invalidates → cut immediately, zero revenge",
+    tile: "bg-loss",
+    kind: "guard" as const,
+  },
+  {
+    id: "smt",
+    shortLabel: "SMT + displacement",
+    text: "If HTF SMT aligns with displacement → execute at FVG retest",
+    tile: "bg-profit",
+    kind: "target" as const,
+  },
 ] as const;
 
 const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
 const IconPlus = () => (
-  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
 );
 const IconMinus = () => (
-  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 12h12" /></svg>
+  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
+    <path d="M6 12h12" />
+  </svg>
+);
+const GlyphSparkle = () => (
+  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="m11 3.5 1.7 5 5 1.7-5 1.7L11 17l-1.7-5.1-5-1.7 5-1.7zM19 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+  </svg>
+);
+const GlyphCamera = () => (
+  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h2l1.3-1.8a1.5 1.5 0 0 1 1.2-.6h2a1.5 1.5 0 0 1 1.2.6L15.5 6h2A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-9Z" />
+    <circle cx="12" cy="12.5" r="3.2" />
+  </svg>
 );
 
+/** Infers the Apple squircle icon tile & glyph for a thought line from its keywords. */
+function thoughtVisual(text: string): { tile: string; glyph: React.ReactNode; tag: string } {
+  const t = text.toLowerCase();
+  if (/\b(invalid|cut|stop|sl|wrong|revenge|abort|loss)\b/.test(t)) {
+    return { tile: "bg-loss", glyph: <GlyphStop />, tag: "Guard" };
+  }
+  if (/\b(chop|wait|sit|hands|patience|open|avoid)\b/.test(t)) {
+    return { tile: "bg-[#5e5ce6]", glyph: <GlyphTimer />, tag: "Patience" };
+  }
+  if (/\b(target|tp|high|low|draw|runner|liquidity)\b/.test(t) && !/\bsweep\b/.test(t)) {
+    return { tile: "bg-profit", glyph: <GlyphFlag />, tag: "Target" };
+  }
+  return {
+    tile: "bg-gradient-to-b from-gold-strong to-gold-deep",
+    glyph: <GlyphTarget />,
+    tag: "Trigger",
+  };
+}
+
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
-/** Used whenever the trader leaves the instrument blank. */
 const DEFAULT_INSTRUMENT = "MNQ";
-/** Prices: digits and one decimal point (up to 5 places, so forex quotes fit too). Commas from a paste are dropped. */
-const cleanPrice = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [a = "", ...rest] = t.split("."); return rest.length ? `${a}.${rest.join("").slice(0, 5)}` : a; };
-const parsePrice = (v: string): number | null => { const t = v.trim(); if (t === "") return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
-/** 12.5 → "12.5", 12 → "12", 12.3333 → "12.33" */
+const cleanPrice = (v: string) => {
+  const t = v.replace(/[^\d.]/g, "");
+  const [a = "", ...rest] = t.split(".");
+  return rest.length ? `${a}.${rest.join("").slice(0, 5)}` : a;
+};
+const parsePrice = (v: string): number | null => {
+  const t = v.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
 const fmtPts = (n: number) => String(Math.round(n * 100) / 100);
 const minutesBetween = (a: string, b: string): number | null => {
-  const m = (t: string) => { const x = /^(\d{2}):(\d{2})/.exec(t); return x ? Number(x[1]) * 60 + Number(x[2]) : null; };
-  const s1 = m(a), s2 = m(b);
+  const m = (t: string) => {
+    const x = /^(\d{2}):(\d{2})/.exec(t);
+    return x ? Number(x[1]) * 60 + Number(x[2]) : null;
+  };
+  const s1 = m(a),
+    s2 = m(b);
   return s1 === null || s2 === null || s2 < s1 ? null : s2 - s1;
 };
 const fmtHeld = (min: number) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`);
 
-/**
- * Apple HIG unhurried progressive reveal hook:
- * Waits until the user has typed at least `minChars` characters AND paused typing for `delayMs`
- * before latching `true` so the next question never jarringly pops in on the very first keystroke.
- */
-function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open: boolean, minChars = 3, delayMs = 700): { settled: boolean } {
+function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open: boolean, minChars = 3, delayMs = 680): { settled: boolean } {
   const [latched, setLatched] = useState(false);
   useEffect(() => {
     if (!open) setLatched(false);
@@ -116,10 +213,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const playbook = settings.playbook ?? [];
   const challenges = settings.challenges ?? [];
   const sym = currencySymbol(settings.currency);
+  const syncState = useSyncExternalStore(subscribeSyncState, getSyncState, () => "synced");
 
   const desktop = useIsDesktop();
   const [step, setStep] = useState<StepId>("plan");
   const [dir, setDir] = useState<1 | -1>(1);
+  const [restoredFromCache, setRestoredFromCache] = useState(false);
 
   // Discipline gate: planning a 2nd (or later) trade after a loss stops at the plan until it is acknowledged.
   const today = todayKey();
@@ -139,6 +238,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [newsEvents, setNewsEvents] = useState<NewsEvent[]>([]);
   const [thoughts, setThoughts] = useState<ThoughtItem[]>([{ id: "th-1", text: "" }]);
   const [watch, setWatch] = useState<string[]>([]);
+  const [moreWatch, setMoreWatch] = useState(false);
   const [autoWatchApplied, setAutoWatchApplied] = useState(false);
   const [instrument, setInstrument] = useState("");
   const [draw, setDraw] = useState("");
@@ -146,6 +246,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   // setup + rules
   const [playbookId, setPlaybookId] = useState("");
   const [ruleStates, setRuleStates] = useState<Record<string, PlanRuleState>>({});
+  const [pickingSetup, setPickingSetup] = useState(false);
 
   // trade
   const [mode, setMode] = useState<"manual" | "import">("manual");
@@ -186,25 +287,28 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const combinedThoughtsText = useMemo(() => nonEmptyThoughts.join(" · "), [nonEmptyThoughts]);
 
   /** Everything the trader has planned so far, in the shape the outlook & AI Brain read. */
-  const draftPlan: PlanDraft = useMemo(() => ({
-    date: todayKey(),
-    setupId: playbookId || undefined,
-    setupName: selectedPlaybook?.name,
-    emotion: emotion || undefined,
-    emotionReason: emotionReason.trim() || undefined,
-    thesis,
-    draw: draw.trim() || nonEmptyThoughts[0] || undefined,
-    invalidation: nonEmptyThoughts[1] || undefined,
-    breakPlan: combinedThoughtsText || undefined,
-    news: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => e.name.trim()) : [],
-    maxLoss: dayLimit ?? undefined,
-    watch: watch.map((k) => MISTAKE_CATEGORIES.find((c) => c.key === k)?.label ?? k),
-    confirmedRules: rules.filter((_, i) => ruleStates[String(i)] === "ready").map((r) => r.text || ""),
-    skippedRules: rules.filter((_, i) => ruleStates[String(i)] !== "ready").map((r) => r.text || ""),
-    ruleTotal: rules.length,
-  }), [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, nonEmptyThoughts, combinedThoughtsText, newsAnswer, newsEvents, dayLimit, watch, rules, ruleStates]);
+  const draftPlan: PlanDraft = useMemo(
+    () => ({
+      date: todayKey(),
+      setupId: playbookId || undefined,
+      setupName: selectedPlaybook?.name,
+      emotion: emotion || undefined,
+      emotionReason: emotionReason.trim() || undefined,
+      thesis,
+      draw: draw.trim() || nonEmptyThoughts[0] || undefined,
+      invalidation: nonEmptyThoughts[1] || undefined,
+      breakPlan: combinedThoughtsText || undefined,
+      news: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => e.name.trim()) : [],
+      maxLoss: dayLimit ?? undefined,
+      watch: watch.map((k) => MISTAKE_CATEGORIES.find((c) => c.key === k)?.label ?? k),
+      confirmedRules: rules.filter((_, i) => ruleStates[String(i)] === "ready").map((r) => r.text || ""),
+      skippedRules: rules.filter((_, i) => ruleStates[String(i)] !== "ready").map((r) => r.text || ""),
+      ruleTotal: rules.length,
+    }),
+    [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, nonEmptyThoughts, combinedThoughtsText, newsAnswer, newsEvents, dayLimit, watch, rules, ruleStates],
+  );
 
-  /** Silent background AI Brain analysis — powers mistake chip ranking & pre-selection without screen clutter. */
+  /** Live AI Brain analysis — powers both the AI Thought Read card and mistake chip prioritization. */
   const brainRead = useMemo(
     () =>
       analyzePreTradeThought(
@@ -229,7 +333,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     [today, thesis, emotion, emotionReason, newsAnswer, newsEvents, finalInstrument, draw, nonEmptyThoughts, combinedThoughtsText, playbookId, selectedPlaybook?.name, entries, plans, playbook, settings.aiBrain],
   );
 
-  // Silently pre-select the #1 highest-confidence mistake trap in the background when entering Thought
+  // Pre-select the #1 highest-confidence mistake trap when entering Thought
   useEffect(() => {
     if (step === "thought" && !autoWatchApplied && watch.length === 0 && brainRead.suggestedWatch.length > 0) {
       const topKeys = brainRead.suggestedWatch.filter((s) => s.confidence >= 0.72).slice(0, 2).map((s) => s.key);
@@ -249,7 +353,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setSaveError(null);
     setStep(to);
   };
-  const prev = (s: StepId): StepId | null => { const i = order.indexOf(s); return i > 0 ? order[i - 1]! : null; };
+  const prev = (s: StepId): StepId | null => {
+    const i = order.indexOf(s);
+    return i > 0 ? order[i - 1]! : null;
+  };
   const next = (s: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(s) + 1)]!;
 
   const suggestedInstruments = useMemo(() => {
@@ -262,10 +369,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     return seen;
   }, [entries]);
 
-  // Smooth, delayed question reveal in "Plan" and "Thought" (700ms after typing settles)
-  const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, 700);
-  const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, 700);
-  const thoughtReveal = useSettledReveal(combinedThoughtsText, watch.length > 0, open && step === "thought", 3, 650);
+  // Smooth delayed question reveals
+  const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, 680);
+  const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, 680);
+  const thoughtReveal = useSettledReveal(combinedThoughtsText, watch.length > 0, open && step === "thought", 3, 620);
 
   const showFeeling = thesisReveal.settled;
   const showReason = emotion !== "" || emotionReason.trim().length > 0;
@@ -278,30 +385,177 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   };
   const patchEvent = (id: string, patch: Partial<NewsEvent>) => setNewsEvents((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 
-  const patchThought = (id: string, text: string) =>
-    setThoughts((list) => list.map((t) => (t.id === id ? { ...t, text } : t)));
-  const addThought = (initialText = "") =>
-    setThoughts((list) => [...list, { id: uid("th"), text: initialText }]);
+  const patchThought = (id: string, text: string) => setThoughts((list) => list.map((t) => (t.id === id ? { ...t, text } : t)));
+  const addThought = (initialText = "") => setThoughts((list) => [...list, { id: uid("th"), text: initialText }]);
   const removeThought = (id: string) =>
     setThoughts((list) => (list.length > 1 ? list.filter((t) => t.id !== id) : [{ id: list[0]!.id, text: "" }]));
 
-  // Fresh start every time the flow opens.
+  const resetFresh = () => {
+    clearPlanDraftCache();
+    setRestoredFromCache(false);
+    setStep("plan");
+    setDir(1);
+    setLockAck(false);
+    setLockChecked(false);
+    setThesis("");
+    setEmotion("");
+    setMoreEmotions(false);
+    setEmotionReason("");
+    setNewsAnswer(null);
+    setNewsEvents([]);
+    setThoughts([{ id: uid("th"), text: "" }]);
+    setInstrument("");
+    setDraw("");
+    setWatch([]);
+    setMoreWatch(false);
+    setAutoWatchApplied(false);
+    const only = useApp.getState().settings.playbook ?? [];
+    setPlaybookId(only.length === 1 ? only[0]!.id : "");
+    setRuleStates({});
+    setPickingSetup(false);
+    setMode("manual");
+    setPnl("");
+    setDirection(null);
+    setTradeDate(todayKey());
+    setRr("");
+    setEntryTime("09:30");
+    setExitTime("09:30");
+    setQuantity("1");
+    setPnlDone(false);
+    setEntryPrice("");
+    setExitPrice("");
+    setStopLoss("");
+    setTakeProfit("");
+    setLevelsOpen(false);
+    setImportRows(null);
+    setImportError(null);
+    setCreatedId(null);
+    setImages([]);
+    setSaving(false);
+    setSaveError(null);
+    planIdRef.current = null;
+  };
+
+  // Initialize or restore unfinished draft from browser cache when modal opens
   useEffect(() => {
     if (!open) return;
-    setStep("plan"); setDir(1); setLockAck(false); setLockChecked(false);
-    setThesis(""); setEmotion(""); setMoreEmotions(false); setEmotionReason(""); setNewsAnswer(null); setNewsEvents([]);
-    setThoughts([{ id: uid("th"), text: "" }]);
-    setInstrument(""); setDraw("");
-    setWatch([]); setAutoWatchApplied(false);
-    const only = useApp.getState().settings.playbook ?? [];
-    setPlaybookId(only.length === 1 ? only[0]!.id : ""); setRuleStates({});
-    setMode("manual"); setPnl(""); setDirection(null); setTradeDate(todayKey()); setRr(""); setEntryTime("09:30"); setExitTime("09:30"); setQuantity("1"); setPnlDone(false);
-    setEntryPrice(""); setExitPrice(""); setStopLoss(""); setTakeProfit(""); setLevelsOpen(false);
-    setImportRows(null); setImportError(null);
-    setCreatedId(null); setImages([]); setSaving(false); setSaveError(null); planIdRef.current = null;
+    const cached = loadPlanDraftCache(todayKey());
+    if (cached) {
+      setStep(cached.step);
+      setDir(1);
+      setThesis(cached.thesis ?? "");
+      setEmotion((cached.emotion as (typeof PLAN_EMOTIONS)[number]) || "");
+      setMoreEmotions(false);
+      setEmotionReason(cached.emotionReason ?? "");
+      setNewsAnswer(cached.newsAnswer ?? null);
+      setNewsEvents(cached.newsEvents ?? []);
+      setThoughts(cached.thoughts?.length ? cached.thoughts : [{ id: uid("th"), text: "" }]);
+      setWatch(cached.watch ?? []);
+      setMoreWatch(false);
+      setAutoWatchApplied(Boolean(cached.watch?.length));
+      setInstrument(cached.instrument ?? "");
+      setDraw(cached.draw ?? "");
+      const only = useApp.getState().settings.playbook ?? [];
+      setPlaybookId(cached.playbookId || (only.length === 1 ? only[0]!.id : ""));
+      setRuleStates(cached.ruleStates ?? {});
+      setPickingSetup(false);
+      setMode("manual");
+      setPnl(cached.pnl ?? "");
+      setDirection(cached.direction ?? null);
+      setTradeDate(cached.tradeDate || todayKey());
+      setRr(cached.rr ?? "");
+      setEntryTime(cached.entryTime || "09:30");
+      setExitTime(cached.exitTime || "09:30");
+      setEntryPrice(cached.entryPrice ?? "");
+      setExitPrice(cached.exitPrice ?? "");
+      setStopLoss(cached.stopLoss ?? "");
+      setTakeProfit(cached.takeProfit ?? "");
+      setLevelsOpen(Boolean(cached.entryPrice || cached.exitPrice || cached.stopLoss || cached.takeProfit));
+      setQuantity(cached.quantity || "1");
+      setPnlDone(Boolean(cached.pnl));
+      setImages((cached.images ?? []).map((meta) => ({ meta, blob: null })));
+      setCreatedId(null);
+      setSaving(false);
+      setSaveError(null);
+      setRestoredFromCache(true);
+      return;
+    }
+    resetFresh();
   }, [open]);
 
-  // Mistakes worth watching today: AI Brain suggestions first, then recurring weekly mistakes, then the rest of the taxonomy.
+  // Persist every change of an in-progress plan & images to browser cache (IndexedDB + localStorage) so offline drops never lose data
+  const updateImagesAndCache = (nextImages: UploadItem[]) => {
+    setImages(nextImages);
+    for (const item of nextImages) {
+      if (item.blob) {
+        void dataStore.putImage(item.meta.id, item.blob).catch(() => undefined);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!open || createdId || step === "autopsy" || step === "done") return;
+    const timer = window.setTimeout(() => {
+      savePlanDraftCache({
+        date: todayKey(),
+        updatedAt: Date.now(),
+        step: step === "plan" || step === "thought" || step === "setup" || step === "trade" || step === "chart" ? step : "plan",
+        thesis,
+        emotion,
+        emotionReason,
+        newsAnswer,
+        newsEvents,
+        thoughts,
+        watch,
+        instrument,
+        draw,
+        playbookId,
+        ruleStates,
+        pnl,
+        direction,
+        tradeDate,
+        rr,
+        entryTime,
+        exitTime,
+        entryPrice,
+        exitPrice,
+        stopLoss,
+        takeProfit,
+        quantity,
+        images: images.map((i) => i.meta),
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    createdId,
+    step,
+    thesis,
+    emotion,
+    emotionReason,
+    newsAnswer,
+    newsEvents,
+    thoughts,
+    watch,
+    instrument,
+    draw,
+    playbookId,
+    ruleStates,
+    pnl,
+    direction,
+    tradeDate,
+    rr,
+    entryTime,
+    exitTime,
+    entryPrice,
+    exitPrice,
+    stopLoss,
+    takeProfit,
+    quantity,
+    images,
+  ]);
+
+  // Mistakes worth watching today: AI Brain suggestions first, then recurring weekly mistakes.
   const aiSuggestedMap = useMemo(() => new Map(brainRead.suggestedWatch.map((s) => [s.key as string, s])), [brainRead.suggestedWatch]);
   const watchOptions = useMemo(() => {
     const rec = new Map(recurringMistakes(entries, thisWeekStart()).map((r) => [r.key as string, r.weeks]));
@@ -314,6 +568,16 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       .sort((a, b) => (b.ai?.confidence ?? 0) - (a.ai?.confidence ?? 0) || b.weeks - a.weeks);
   }, [entries, aiSuggestedMap]);
 
+  // Show only top 4 AI/recurring mistake chips up front (+ any selected ones) so there's never a wall of 14 text chips
+  const primaryWatchOptions = useMemo(
+    () => watchOptions.filter((o, idx) => idx < 4 || watch.includes(o.key)),
+    [watchOptions, watch],
+  );
+  const extraWatchOptions = useMemo(
+    () => watchOptions.filter((o, idx) => idx >= 4 && !watch.includes(o.key)),
+    [watchOptions, watch],
+  );
+
   /* ---------------- gating + quiet hints per step ---------------- */
   const pnlText = pnl.trim();
   const pnlValue = pnlText === "" ? NaN : Number(pnlText);
@@ -321,7 +585,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const manualReady = Number.isFinite(pnlValue);
   const quantityValue = quantity.trim() === "" ? NaN : Number(quantity);
   const quantityOk = Number.isFinite(quantityValue) && quantityValue > 0;
-  const entryN = parsePrice(entryPrice), exitN = parsePrice(exitPrice), stopN = parsePrice(stopLoss), targetN = parsePrice(takeProfit);
+  const entryN = parsePrice(entryPrice),
+    exitN = parsePrice(exitPrice),
+    stopN = parsePrice(stopLoss),
+    targetN = parsePrice(takeProfit);
   const isLong = direction === "long";
   const levelNote = (() => {
     if (!direction || entryN === null) return null;
@@ -338,12 +605,27 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     riskPts !== null ? { k: "Risk", v: `${fmtPts(riskPts)} pts` } : null,
     rewardPts !== null ? { k: "Reward", v: `${fmtPts(rewardPts)} pts` } : null,
     riskPts !== null && riskPts > 0 && rewardPts !== null ? { k: "R : R", v: `1 : ${(rewardPts / riskPts).toFixed(1)}` } : null,
-    realizedR !== null ? { k: "Realized", v: `${realizedR > 0 ? "+" : realizedR < 0 ? "−" : ""}${Math.abs(realizedR).toFixed(2)}R`, tone: realizedR > 0 ? "profit" as const : realizedR < 0 ? "loss" as const : undefined } : null,
+    realizedR !== null
+      ? {
+          k: "Realized",
+          v: `${realizedR > 0 ? "+" : realizedR < 0 ? "−" : ""}${Math.abs(realizedR).toFixed(2)}R`,
+          tone: realizedR > 0 ? ("profit" as const) : realizedR < 0 ? ("loss" as const) : undefined,
+        }
+      : null,
   ].filter((x): x is { k: string; v: string; tone?: "profit" | "loss" } => x !== null);
   const manualR = rr.trim() !== "" && Number.isFinite(Number(rr)) ? Number(rr) : null;
-  const stepQuantity = (delta: number) => setQuantity((prev) => { const n = Number(prev); const base = Number.isFinite(n) ? n : 0; return String(Math.max(1, Math.round((base + delta) * 100) / 100)); });
-  useEffect(() => { if (manualReady) setPnlDone(true); }, [manualReady]);
-  useEffect(() => { if (entryPrice || exitPrice || stopLoss || takeProfit) setLevelsOpen(true); }, [entryPrice, exitPrice, stopLoss, takeProfit]);
+  const stepQuantity = (delta: number) =>
+    setQuantity((prev) => {
+      const n = Number(prev);
+      const base = Number.isFinite(n) ? n : 0;
+      return String(Math.max(1, Math.round((base + delta) * 100) / 100));
+    });
+  useEffect(() => {
+    if (manualReady) setPnlDone(true);
+  }, [manualReady]);
+  useEffect(() => {
+    if (entryPrice || exitPrice || stopLoss || takeProfit) setLevelsOpen(true);
+  }, [entryPrice, exitPrice, stopLoss, takeProfit]);
 
   const gate: { ok: boolean; hint: string | null } = (() => {
     switch (step) {
@@ -357,13 +639,14 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       case "thought":
         return {
           ok: true,
-          hint: nonEmptyThoughts.length > 0
-            ? `${nonEmptyThoughts.length} ${nonEmptyThoughts.length === 1 ? "thought" : "thoughts"} noted${watch.length ? ` · watching ${watch.length}` : ""}`
-            : "Add a thought or continue",
+          hint:
+            nonEmptyThoughts.length > 0
+              ? `${nonEmptyThoughts.length} ${nonEmptyThoughts.length === 1 ? "thought" : "thoughts"} noted${images.length ? ` · ${images.length} chart` : ""}`
+              : "Add a thought or continue",
         };
       case "setup":
         if (!playbookId) return { ok: false, hint: "Choose a setup" };
-        return { ok: true, hint: skippedRules > 0 ? `${skippedRules} rule${skippedRules === 1 ? "" : "s"} unchecked — fine, it will be recorded` : null };
+        return { ok: true, hint: skippedRules > 0 ? `${skippedRules} rule${skippedRules === 1 ? "" : "s"} unchecked — recorded as-is` : "All setup rules confirmed" };
       case "trade":
         if (mode === "import") return importRows?.length ? { ok: true, hint: null } : { ok: false, hint: "Choose a file to import" };
         if (!pnlText) return { ok: false, hint: "Enter the net P&L" };
@@ -401,7 +684,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     watchMistakes: watch.length ? watch : undefined,
     maxLoss: dayLimit ?? undefined,
     newsEvents: newsAnswer ? newsEvents.filter((e) => e.name.trim()).map((e) => ({ name: e.name.trim(), time: e.time || undefined })) : [],
-    rules: rules.map((r, i) => ({ label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`, state: ruleStates[String(i)] === "ready" ? "ready" : "skipped", note: r.description })),
+    rules: rules.map((r, i) => ({
+      label: r.text ? `Rule ${i + 1}: ${r.text}` : `Rule ${i + 1}`,
+      state: ruleStates[String(i)] === "ready" ? "ready" : "skipped",
+      note: r.description,
+    })),
+    preTradeScreenshotIds: images.map((i) => i.meta.id),
     status: "executed",
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -417,6 +705,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       void useApp.getState().savePlan(plan).catch(() => undefined);
       if (mode === "manual") {
         const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
+        const blobs = new Map<string, Blob>();
+        for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
         const draft: EntryDraft = {
           date: tradeDate <= todayKey() ? tradeDate : todayKey(),
           pnl: Math.round(pnlValue * 100) / 100,
@@ -426,7 +716,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           setup: selectedPlaybook?.name ?? "",
           setupId: playbookId || undefined,
           notes: live?.notes || combinedThoughtsText || "",
-          images: live?.images ?? [],
+          images: images.length ? images.map((i) => i.meta) : (live?.images ?? []),
           compareImage: live?.compareImage,
           challengeId: challengeId(),
           planId: plan.id,
@@ -437,12 +727,19 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           stopLoss: stopN,
           takeProfit: targetN,
           quantity: quantityValue,
+          preTradeChecklist: rules.length
+            ? rules.map((r, i) => ({
+                label: r.text || `Rule ${i + 1}`,
+                description: r.description,
+                confirmed: ruleStates[String(i)] === "ready",
+              }))
+            : undefined,
         };
         if (live) {
-          void useApp.getState().updateEntry(live.id, draft).catch(() => setSaveError("Couldn't save — try again."));
+          void useApp.getState().updateEntry(live.id, draft, blobs).catch(() => setSaveError("Couldn't save — try again."));
         } else {
           const before = new Set(useApp.getState().entries.map((e) => e.id));
-          const pending = useApp.getState().createEntry(draft);
+          const pending = useApp.getState().createEntry(draft, blobs);
           const fresh = useApp.getState().entries.find((e) => !before.has(e.id));
           if (fresh) {
             setCreatedId(fresh.id);
@@ -452,18 +749,27 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
           }
         }
       } else if (importRows?.length) {
-        const created = await useApp.getState().createEntries(importRows.map((row, i) => ({
-          date: row.date, pnl: row.pnl, rr: row.rr, instrument: row.instrument?.trim() && row.instrument.trim() !== "—" ? row.instrument : DEFAULT_INSTRUMENT, direction: row.direction,
-          setup: row.setup || selectedPlaybook?.name || "",
-          setupId: row.setup ? undefined : playbookId || undefined,
-          notes: row.notes, entryTime: row.entryTime ?? undefined,
-          images: [] as JournalEntry["images"],
-          challengeId: challengeId(),
-          planId: i === 0 ? plan.id : undefined,
-          reviewStatus: "not_reviewed" as const,
-        })));
+        const created = await useApp.getState().createEntries(
+          importRows.map((row, i) => ({
+            date: row.date,
+            pnl: row.pnl,
+            rr: row.rr,
+            instrument: row.instrument?.trim() && row.instrument.trim() !== "—" ? row.instrument : DEFAULT_INSTRUMENT,
+            direction: row.direction,
+            setup: row.setup || selectedPlaybook?.name || "",
+            setupId: row.setup ? undefined : playbookId || undefined,
+            notes: row.notes,
+            entryTime: row.entryTime ?? undefined,
+            images: [] as JournalEntry["images"],
+            challengeId: challengeId(),
+            planId: i === 0 ? plan.id : undefined,
+            reviewStatus: "not_reviewed" as const,
+          })),
+        );
         setCreatedId(created[0]?.id ?? null);
       }
+      clearPlanDraftCache();
+      setRestoredFromCache(false);
       go("chart");
     } catch {
       setSaveError("Couldn't save — try again.");
@@ -479,9 +785,27 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const { parseTradesCsv } = await import("@/lib/csv-import");
       const result = parseTradesCsv(text);
-      if (result.error) { setImportError(result.error); setImportRows(null); return; }
-      if (result.rows.length === 0) { setImportError("No valid rows found in that file."); return; }
-      setImportRows(result.rows.map((r) => ({ date: r.date, pnl: r.pnl, rr: r.rr, instrument: r.instrument, direction: r.direction, setup: r.setup, notes: r.notes, entryTime: r.entryTime })));
+      if (result.error) {
+        setImportError(result.error);
+        setImportRows(null);
+        return;
+      }
+      if (result.rows.length === 0) {
+        setImportError("No valid rows found in that file.");
+        return;
+      }
+      setImportRows(
+        result.rows.map((r) => ({
+          date: r.date,
+          pnl: r.pnl,
+          rr: r.rr,
+          instrument: r.instrument,
+          direction: r.direction,
+          setup: r.setup,
+          notes: r.notes,
+          entryTime: r.entryTime,
+        })),
+      );
     } catch {
       setImportError("Couldn't read that file — try re-exporting it.");
     }
@@ -489,19 +813,40 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
   const saveCharts = async () => {
     const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
-    if (!live) { go("autopsy"); return; }
+    if (!live) {
+      go("autopsy");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
       const blobs = new Map<string, Blob>();
       for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-      await useApp.getState().updateEntryFast(live.id, {
-        date: live.date, pnl: live.pnl, rr: live.rr, instrument: live.instrument, direction: live.direction,
-        setup: live.setup, setupId: live.setupId, notes: live.notes, images: images.map((i) => i.meta),
-        compareImage: live.compareImage, challengeId: live.challengeId, tradeNumber: live.tradeNumber ?? null,
-        entryTime: live.entryTime, exitTime: live.exitTime, entryPrice: live.entryPrice, exitPrice: live.exitPrice,
-        stopLoss: live.stopLoss, takeProfit: live.takeProfit, quantity: live.quantity,
-      }, blobs);
+      await useApp.getState().updateEntryFast(
+        live.id,
+        {
+          date: live.date,
+          pnl: live.pnl,
+          rr: live.rr,
+          instrument: live.instrument,
+          direction: live.direction,
+          setup: live.setup,
+          setupId: live.setupId,
+          notes: live.notes,
+          images: images.map((i) => i.meta),
+          compareImage: live.compareImage,
+          challengeId: live.challengeId,
+          tradeNumber: live.tradeNumber ?? null,
+          entryTime: live.entryTime,
+          exitTime: live.exitTime,
+          entryPrice: live.entryPrice,
+          exitPrice: live.exitPrice,
+          stopLoss: live.stopLoss,
+          takeProfit: live.takeProfit,
+          quantity: live.quantity,
+        },
+        blobs,
+      );
       go("autopsy");
     } catch {
       setSaveError("Couldn't save the chart — try again.");
@@ -510,7 +855,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     }
   };
 
-  const completeAutopsy = async () => { if (await autopsy.submit()) go("done"); };
+  const completeAutopsy = async () => {
+    if (await autopsy.submit()) {
+      clearPlanDraftCache();
+      go("done");
+    }
+  };
 
   const onContinue = () => {
     if (!gate.ok || saving) return;
@@ -521,7 +871,16 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     else onClose();
   };
 
-  const continueLabel = step === "trade" ? (mode === "import" && importRows ? `Import ${importRows.length}` : "Save trade") : step === "autopsy" ? "Finish" : step === "done" ? "Done" : "Continue";
+  const continueLabel =
+    step === "trade"
+      ? mode === "import" && importRows
+        ? `Import ${importRows.length}`
+        : "Save trade"
+      : step === "autopsy"
+        ? "Finish"
+        : step === "done"
+          ? "Done"
+          : "Continue";
   const back = step === "plan" || step === "done" ? null : step === "chart" ? (mode === "manual" ? "trade" : null) : step === "autopsy" ? "chart" : prev(step);
 
   const continueRef = useRef(onContinue);
@@ -529,602 +888,979 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   useEffect(() => {
     if (!open || lockOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); continueRef.current(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        continueRef.current();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, lockOpen]);
 
+  const isOffline = syncState === "offline-cached";
+
   const rail: Rail = {
     steps: order.filter((s) => s !== "done").map((id) => ({ id, label: RAIL_LABEL[id] })),
     current: step,
     aside: (
-      <>
-        <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">{weekdayLong(today)}</p>
-        <p className="mt-0.5 text-[12.5px] text-faint">{formatDateMedium(today)}</p>
-      </>
+      <div className="space-y-2.5">
+        <div>
+          <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">{weekdayLong(today)}</p>
+          <p className="mt-0.5 text-[12.5px] text-faint">{formatDateMedium(today)}</p>
+        </div>
+        <div
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+            isOffline ? "bg-gold/15 text-gold-deep dark:text-gold" : "bg-profit/12 text-profit",
+          )}
+          title={
+            isOffline
+              ? "Offline mode: your plan and charts are saved in browser cache and will sync to Google Drive automatically when internet returns."
+              : "Every step is cached locally and synced with Google Drive."
+          }
+        >
+          <span className={cn("h-1.5 w-1.5 rounded-full", isOffline ? "animate-pulse bg-gold-strong" : "bg-profit")} aria-hidden />
+          <span>{isOffline ? "Offline · Cached locally" : "Drive + local cache"}</span>
+        </div>
+        {restoredFromCache && !createdId && (
+          <div className="flex items-center justify-between text-[11.5px] text-muted">
+            <span>Draft restored</span>
+            <button type="button" onClick={resetFresh} className="font-medium text-gold hover:underline">
+              Reset
+            </button>
+          </div>
+        )}
+      </div>
     ),
   };
 
   const hintText = saveError ?? autopsy.error ?? gate.hint;
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
+  const ta = brainRead.thoughtAnalysis;
 
   return (
     <>
-    <Modal open={open} onClose={onClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
-      <SheetFrame
-        rail={rail}
-        onClose={onClose}
-        onBack={back ? () => go(back) : undefined}
-        hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
-        actions={
-          <>
-            {step === "chart" && <QuietButton disabled={saving} onClick={() => go("autopsy")}>Skip for now</QuietButton>}
-            <PrimaryButton shortcut disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>{continueLabel}</PrimaryButton>
-          </>
-        }
-      >
-        <StepTransition stepKey={step} dir={dir}>
-          {step === "plan" && (
-            <div>
-              <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
-              <div className="space-y-2.5 pt-7">
-                <Label done={thesisReveal.settled && thesis.trim().length > 0} htmlFor="flow-plan">Your read</Label>
-                <TextBlock
-                  id="flow-plan"
-                  autoFocus
-                  value={thesis}
-                  onChange={(e) => setThesis(e.target.value)}
-                  placeholder="Where do you expect price to go, and why?"
-                  className="lg:min-h-32"
-                />
-              </div>
-              <AnimatePresence initial={false}>
-                {showFeeling && (
-                  <Reveal key="plan-feeling" delay={0.08}>
-                    <div className="space-y-3">
-                      <Label done={emotion !== ""}>How are you feeling?</Label>
-                      <Stagger className="flex flex-wrap gap-2" delay={0.06}>
-                        {PRIMARY_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                        {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) && MORE_EMOTIONS.map((e) => <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>{label(e)}</Chip>)}
-                        {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && <Chip selected={false} onClick={() => setMoreEmotions(true)}>More…</Chip>}
-                      </Stagger>
-                    </div>
-                  </Reveal>
-                )}
-                {showReason && (
-                  <Reveal key="plan-reason" focus delay={0.08}>
-                    <div className="space-y-2.5">
-                      <Label done={reasonReveal.settled && emotionReason.trim().length > 0} htmlFor="flow-reason">
-                        {emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}
-                      </Label>
-                      <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
-                    </div>
-                  </Reveal>
-                )}
-                {showNews && (
-                  <Reveal key="plan-news" delay={0.08}>
-                    <div className="space-y-3">
-                      <Label done={newsAnswer !== null}>Any news or events today?</Label>
-                      <Stagger className="flex flex-wrap gap-2" delay={0.06}>
-                        <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>Yes</Chip>
-                        <Chip selected={newsAnswer === false} onClick={() => chooseNews(false)}>No news</Chip>
-                      </Stagger>
-                      <AnimatePresence initial={false}>
-                        {newsAnswer && (
-                          <Collapse key="news-list">
-                            <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
-                              <AnimatePresence initial={false}>
-                                {newsEvents.map((ev) => (
-                                  <motion.li key={ev.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
-                                    <div className="flex items-center gap-2 px-4 py-2.5 transition-colors focus-within:bg-gold/[0.04]">
-                                      <input
-                                        autoFocus
-                                        aria-label="Event name"
-                                        value={ev.name}
-                                        onChange={(e) => patchEvent(ev.id, { name: e.target.value })}
-                                        placeholder="Event name, e.g. CPI, FOMC"
-                                        maxLength={80}
-                                        className="min-w-0 flex-1 bg-transparent py-1.5 text-[16px] text-ink outline-none placeholder:text-faint"
-                                      />
-                                      <input
-                                        type="time"
-                                        aria-label="Event time"
-                                        value={ev.time}
-                                        onChange={(e) => patchEvent(ev.id, { time: e.target.value })}
-                                        className="shrink-0 rounded-lg bg-ink/[0.05] px-2.5 py-1.5 text-[15px] tabular-nums text-ink outline-none transition-colors hover:bg-ink/[0.08] focus:bg-ink/[0.08]"
-                                      />
-                                      {newsEvents.length > 1 && (
-                                        <button type="button" aria-label="Remove event" onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90">
-                                          <IconMinus />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </motion.li>
-                                ))}
-                              </AnimatePresence>
-                              <li>
-                                <button type="button" onClick={() => setNewsEvents((l) => [...l, { id: uid("ev"), name: "", time: "" }])} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]">
-                                  <IconPlus /> Add event
-                                </button>
-                              </li>
-                            </ul>
-                          </Collapse>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </Reveal>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
-
-          {step === "thought" && (
-            <div>
-              <StepTitle
-                title="Any thoughts before entry?"
-                subtitle="Add each scenario as it comes — if this happens, I'll do this."
-              />
-
-              {/* Stream-of-Consciousness If -> Then Thought List */}
-              <div className="space-y-3 pt-7">
-                <Label done={nonEmptyThoughts.length > 0}>Your thoughts</Label>
-                <ul className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
-                  <AnimatePresence initial={false}>
-                    {thoughts.map((th, idx) => (
-                      <motion.li
-                        key={th.id}
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={FLOW_EXPAND}
-                        className="overflow-hidden"
-                      >
-                        <div className="flex items-center gap-3 px-4 py-3 transition-colors focus-within:bg-gold/[0.04]">
-                          <span className="num grid h-5 w-5 shrink-0 place-items-center rounded-full bg-gold/15 text-[11px] font-semibold text-gold">
-                            {idx + 1}
-                          </span>
-                          <input
-                            autoFocus={idx === thoughts.length - 1}
-                            aria-label={`Thought ${idx + 1}`}
-                            value={th.text}
-                            onChange={(e) => patchThought(th.id, e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && th.text.trim()) {
-                                e.preventDefault();
-                                addThought();
-                              }
-                            }}
-                            placeholder={
-                              idx === 0
-                                ? "e.g. If manipulation sweeps high → wait for 5m close"
-                                : "If this happens → I will do this…"
-                            }
-                            maxLength={220}
-                            className="min-w-0 flex-1 bg-transparent py-1 text-[16px] text-ink outline-none placeholder:text-faint"
-                          />
-                          {thoughts.length > 1 && (
-                            <button
-                              type="button"
-                              aria-label="Remove thought"
-                              onClick={() => removeThought(th.id)}
-                              className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
-                            >
-                              <IconMinus />
-                            </button>
-                          )}
-                        </div>
-                      </motion.li>
-                    ))}
-                  </AnimatePresence>
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => addThought()}
-                      className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
-                    >
-                      <IconPlus /> Add thought
-                    </button>
-                  </li>
-                </ul>
-
-                {/* Quiet 1-tap scenario starters */}
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {THOUGHT_TEMPLATES.map((tpl) => {
-                    const alreadyUsed = nonEmptyThoughts.some((t) => t.toLowerCase() === tpl.toLowerCase());
-                    if (alreadyUsed) return null;
-                    return (
-                      <button
-                        key={tpl}
-                        type="button"
-                        onClick={() => {
-                          haptic.selection();
-                          const emptyIdx = thoughts.findIndex((t) => !t.text.trim());
-                          if (emptyIdx >= 0) patchThought(thoughts[emptyIdx]!.id, tpl);
-                          else addThought(tpl);
-                        }}
-                        className="rounded-full border border-line bg-surface px-3 py-1 text-[12px] text-muted transition-colors hover:border-line-strong hover:text-ink active:scale-95"
-                      >
-                        + {tpl}
-                      </button>
-                    );
-                  })}
+      <Modal open={open} onClose={onClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
+        <SheetFrame
+          rail={rail}
+          onClose={onClose}
+          onBack={back ? () => go(back) : undefined}
+          hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
+          actions={
+            <>
+              {step === "chart" && (
+                <QuietButton disabled={saving} onClick={() => go("autopsy")}>
+                  Skip for now
+                </QuietButton>
+              )}
+              <PrimaryButton shortcut disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>
+                {continueLabel}
+              </PrimaryButton>
+            </>
+          }
+        >
+          <StepTransition stepKey={step} dir={dir}>
+            {step === "plan" && (
+              <div>
+                <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
+                <div className="space-y-2.5 pt-7">
+                  <Label done={thesisReveal.settled && thesis.trim().length > 0} htmlFor="flow-plan">
+                    Your read
+                  </Label>
+                  <TextBlock
+                    id="flow-plan"
+                    autoFocus
+                    value={thesis}
+                    onChange={(e) => setThesis(e.target.value)}
+                    placeholder="Where do you expect price to go, and why?"
+                    className="lg:min-h-32"
+                  />
                 </div>
-              </div>
-
-              {/* Delayed smooth unfold: Mistakes to watch (AI ranked silently in background) */}
-              <AnimatePresence initial={false}>
-                {showMistakesInThought && (
-                  <Reveal key="thought-mistakes" delay={0.08}>
-                    <div className="space-y-3">
-                      <Label done={watch.length > 0} hint="optional">Mistakes to watch</Label>
-                      <Stagger className="flex flex-wrap gap-2" delay={0.04}>
-                        {watchOptions.map((o) => {
-                          const isSelected = watch.includes(o.key);
-                          return (
-                            <Chip
-                              key={o.key}
-                              tone="gold"
-                              selected={isSelected}
-                              onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}
-                            >
-                              <span>{o.label}</span>
-                              {o.ai && (
-                                <span className="ml-1.5 rounded-full bg-gold/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-gold-deep dark:text-gold">
-                                  AI
-                                </span>
-                              )}
-                              {!o.ai && o.weeks >= 2 && (
-                                <span title={`Seen in ${o.weeks} of the last 5 weeks`} className="ml-1.5 text-[11.5px] font-normal opacity-70">
-                                  recurring
-                                </span>
-                              )}
-                            </Chip>
-                          );
-                        })}
-                      </Stagger>
-                    </div>
-                  </Reveal>
-                )}
-              </AnimatePresence>
-
-              {/* Quiet progressive disclosure for Instrument & Key Level */}
-              <div className="pt-7">
-                <Disclosure label="Instrument & key level">
-                  <div className="space-y-4">
-                    <div className="space-y-2.5">
-                      <Label hint="defaults to MNQ" htmlFor="flow-instrument">Instrument</Label>
-                      <TextBox
-                        id="flow-instrument"
-                        value={instrument}
-                        onChange={(e) => setInstrument(e.target.value.toUpperCase())}
-                        placeholder="MNQ"
-                        className="font-mono"
-                      />
-                      <div className="flex flex-wrap gap-1.5">
-                        {suggestedInstruments.map((i) => (
-                          <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>
-                            {i}
-                          </Chip>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2.5">
-                      <Label htmlFor="flow-draw">Key level in play</Label>
-                      <TextBox
-                        id="flow-draw"
-                        value={draw}
-                        onChange={(e) => setDraw(e.target.value)}
-                        placeholder="e.g. Yesterday's high, London low, 15m FVG"
-                      />
-                    </div>
-                  </div>
-                </Disclosure>
-              </div>
-            </div>
-          )}
-
-          {step === "setup" && (
-            <div className="space-y-8">
-              <StepTitle title="Pick your setup" />
-              <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Setup">
-                {playbook.map((p) => {
-                  const n = setupRules(p).length;
-                  return <ChoiceCard key={p.id} selected={playbookId === p.id} title={p.name} meta={`${n} ${n === 1 ? "rule" : "rules"}`} onClick={() => { setPlaybookId(p.id); setRuleStates({}); }} />;
-                })}
-              </div>
-              <AnimatePresence initial={false}>
-                {selectedPlaybook && rules.length > 0 && (
-                  <Collapse key={selectedPlaybook.id}>
-                    <div className="space-y-3 pb-1">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[13px] font-medium text-muted">Tick the rules you've confirmed <span className="text-faint">· optional</span></p>
-                        <p className="text-[12px] tabular-nums text-faint">{confirmedRules}/{rules.length}</p>
-                      </div>
-                      <div className="h-[3px] overflow-hidden rounded-full bg-line-soft"><div className="h-full rounded-full bg-profit transition-[width] duration-300" style={{ width: `${(confirmedRules / rules.length) * 100}%` }} /></div>
-                      <div className="space-y-2">
-                        {rules.map((r, i) => {
-                          const checked = ruleStates[String(i)] === "ready";
-                          const h = statFor(history, playbookId, r.text || `Rule ${i + 1}`);
-                          const hint = h && h.skipped > 0 ? `Skipped ${h.skipped} of ${h.planned} times${h.skippedAvgPnl != null ? ` · avg ${h.skippedAvgPnl < 0 ? "−" : "+"}$${Math.abs(Math.round(h.skippedAvgPnl))} when skipped` : ""}` : undefined;
-                          return <CheckRow key={i} checked={checked} title={r.text || `Rule ${i + 1}`} note={[r.description, hint].filter(Boolean).join(" · ") || undefined} onClick={() => setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" })} />;
-                        })}
-                      </div>
-                    </div>
-                  </Collapse>
-                )}
-              </AnimatePresence>
-              <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />
-            </div>
-          )}
-
-          {step === "trade" && (
-            <div className="space-y-8">
-              <StepTitle title="Log the trade" subtitle={`Logging ${finalInstrument}`} />
-              {playbook.length === 0 && !createdId && <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />}
-              {!createdId && <Segmented value={mode} onChange={(m) => { setMode(m); setSaveError(null); }} options={[{ id: "manual", label: "Manual" }, { id: "import", label: "Import CSV" }]} />}
-
-              {mode === "manual" && (
-                <div>
-                  <div
-                    onClick={() => document.getElementById("flow-pnl")?.focus()}
-                    className="cursor-text rounded-[26px] border border-line bg-raised px-6 py-7 text-center transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
-                  >
-                    <Label htmlFor="flow-pnl">Net P&amp;L</Label>
-                    <div className="mt-3 flex items-baseline justify-center gap-1.5">
-                      <span className="text-[28px] text-faint">{sym}</span>
-                      <input
-                        id="flow-pnl"
-                        autoFocus
-                        inputMode="decimal"
-                        enterKeyHint="next"
-                        autoComplete="off"
-                        value={pnl}
-                        onChange={(e) => setPnl(cleanNumber(e.target.value))}
-                        placeholder="0.00"
-                        aria-invalid={pnlInvalid || undefined}
-                        style={{ width: `${Math.max(pnl.length, 4)}ch` }}
-                        className={cn("max-w-full border-0 bg-transparent p-0 text-center font-mono text-[44px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/60", pnlValue > 0 && "text-profit", pnlValue < 0 && "text-loss", pnlInvalid && "text-loss")}
-                      />
-                    </div>
-                    <p className="mt-2 min-h-5 text-[12.5px] text-faint">{pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}</p>
-                  </div>
-
-                  {(pnlDone || direction !== null) && (
-                    <Reveal>
+                <AnimatePresence initial={false}>
+                  {showFeeling && (
+                    <Reveal key="plan-feeling" delay={0.08}>
                       <div className="space-y-3">
-                        <Label done={direction !== null}>Direction</Label>
-                        <BinaryChoice value={direction === null ? null : direction === "long"} onChange={(v) => setDirection(v ? "long" : "short")} options={["Long", "Short"]} />
+                        <Label done={emotion !== ""}>How are you feeling?</Label>
+                        <Stagger className="flex flex-wrap gap-2" delay={0.05}>
+                          {PRIMARY_EMOTIONS.map((e) => (
+                            <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>
+                              {label(e)}
+                            </Chip>
+                          ))}
+                          {(moreEmotions || MORE_EMOTIONS.includes(emotion as never)) &&
+                            MORE_EMOTIONS.map((e) => (
+                              <Chip key={e} selected={emotion === e} onClick={() => setEmotion(emotion === e ? "" : e)}>
+                                {label(e)}
+                              </Chip>
+                            ))}
+                          {!moreEmotions && !MORE_EMOTIONS.includes(emotion as never) && (
+                            <Chip selected={false} onClick={() => setMoreEmotions(true)}>
+                              More…
+                            </Chip>
+                          )}
+                        </Stagger>
                       </div>
                     </Reveal>
                   )}
-
-                  {direction !== null && (
-                    <Reveal>
+                  {showReason && (
+                    <Reveal key="plan-reason" focus delay={0.08}>
+                      <div className="space-y-2.5">
+                        <Label done={reasonReveal.settled && emotionReason.trim().length > 0} htmlFor="flow-reason">
+                          {emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}
+                        </Label>
+                        <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
+                      </div>
+                    </Reveal>
+                  )}
+                  {showNews && (
+                    <Reveal key="plan-news" delay={0.08}>
                       <div className="space-y-3">
-                        <Label hint="price & time · optional" done={entryN !== null && exitN !== null}>Entry &amp; exit</Label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <TicketCard
-                            id="flow-entry-price" title="Entry" tile="bg-gradient-to-b from-gold-strong to-gold-deep" glyph={<GlyphArrowIn />}
-                            price={entryPrice} onPrice={(v) => setEntryPrice(cleanPrice(v))}
-                            time={entryTime} onTime={setEntryTime} timeId="flow-in"
-                          />
-                          <TicketCard
-                            id="flow-exit-price" title="Exit" tile="bg-gradient-to-b from-[#8f99a8] to-[#667085]" glyph={<GlyphArrowOut />}
-                            price={exitPrice} onPrice={(v) => setExitPrice(cleanPrice(v))}
-                            time={exitTime} onTime={setExitTime} timeId="flow-out"
-                            foot={movePts !== null || heldMin !== null ? (
-                              <>
-                                {movePts !== null && <span className={cn("font-medium", movePts > 0 && "text-profit", movePts < 0 && "text-loss")}>{movePts > 0 ? "+" : movePts < 0 ? "−" : ""}{fmtPts(Math.abs(movePts))} pts</span>}
-                                {movePts !== null && heldMin !== null && " · "}
-                                {heldMin !== null && `held ${fmtHeld(heldMin)}`}
-                              </>
-                            ) : undefined}
-                          />
-                        </div>
+                        <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                        <Stagger className="flex flex-wrap gap-2" delay={0.05}>
+                          <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>
+                            Yes
+                          </Chip>
+                          <Chip selected={newsAnswer === false} onClick={() => chooseNews(false)}>
+                            No news
+                          </Chip>
+                        </Stagger>
                         <AnimatePresence initial={false}>
-                          {!levelsOpen && (
-                            <Collapse key="add-levels">
-                              <button type="button" onClick={() => setLevelsOpen(true)} className="flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-gold transition-opacity hover:opacity-80">
-                                <IconPlus /> Add stop loss &amp; take profit
-                              </button>
+                          {newsAnswer && (
+                            <Collapse key="news-list">
+                              <ul className="mt-1 divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                                <AnimatePresence initial={false}>
+                                  {newsEvents.map((ev) => (
+                                    <motion.li key={ev.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden">
+                                      <div className="flex items-center gap-2 px-4 py-2.5 transition-colors focus-within:bg-gold/[0.04]">
+                                        <input
+                                          autoFocus
+                                          aria-label="Event name"
+                                          value={ev.name}
+                                          onChange={(e) => patchEvent(ev.id, { name: e.target.value })}
+                                          placeholder="Event name, e.g. CPI, FOMC"
+                                          maxLength={80}
+                                          className="min-w-0 flex-1 bg-transparent py-1.5 text-[16px] text-ink outline-none placeholder:text-faint"
+                                        />
+                                        <input
+                                          type="time"
+                                          aria-label="Event time"
+                                          value={ev.time}
+                                          onChange={(e) => patchEvent(ev.id, { time: e.target.value })}
+                                          className="shrink-0 rounded-lg bg-ink/[0.05] px-2.5 py-1.5 text-[15px] tabular-nums text-ink outline-none transition-colors hover:bg-ink/[0.08] focus:bg-ink/[0.08]"
+                                        />
+                                        {newsEvents.length > 1 && (
+                                          <button
+                                            type="button"
+                                            aria-label="Remove event"
+                                            onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))}
+                                            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
+                                          >
+                                            <IconMinus />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </motion.li>
+                                  ))}
+                                </AnimatePresence>
+                                <li>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewsEvents((l) => [...l, { id: uid("ev"), name: "", time: "" }])}
+                                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
+                                  >
+                                    <IconPlus /> Add event
+                                  </button>
+                                </li>
+                              </ul>
                             </Collapse>
                           )}
                         </AnimatePresence>
                       </div>
                     </Reveal>
                   )}
+                </AnimatePresence>
+              </div>
+            )}
 
-                  {direction !== null && levelsOpen && (
-                    <Reveal>
-                      <div className="space-y-3">
-                        <Label hint="optional" done={stopN !== null && targetN !== null}>Stop loss &amp; take profit</Label>
-                        <div className="grid grid-cols-2 gap-3">
-                          <TicketCard
-                            id="flow-sl" title="Stop loss" tile="bg-loss" glyph={<GlyphStop />}
-                            price={stopLoss} onPrice={(v) => setStopLoss(cleanPrice(v))}
-                            invalid={levelNote !== null && stopN !== null && entryN !== null && (isLong ? stopN >= entryN : stopN <= entryN)}
-                            foot={riskPts !== null ? `${fmtPts(riskPts)} pts from entry` : ""}
-                          />
-                          <TicketCard
-                            id="flow-tp" title="Take profit" tile="bg-profit" glyph={<GlyphTarget />}
-                            price={takeProfit} onPrice={(v) => setTakeProfit(cleanPrice(v))}
-                            invalid={levelNote !== null && targetN !== null && entryN !== null && (isLong ? targetN <= entryN : targetN >= entryN)}
-                            foot={rewardPts !== null ? `${fmtPts(rewardPts)} pts from entry` : ""}
-                          />
-                        </div>
-                        <AnimatePresence initial={false}>
-                          {levelNote && (
-                            <Collapse key="level-note"><p role="status" className="px-1 text-[13px] text-loss">{levelNote}</p></Collapse>
-                          )}
-                        </AnimatePresence>
-                        <AnimatePresence initial={false}>
-                          {levelStats.length > 0 && (
-                            <Collapse key="level-stats"><StatStrip stats={levelStats} /></Collapse>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </Reveal>
-                  )}
+            {step === "thought" && (
+              <div>
+                <StepTitle title="Pre-trade thoughts" subtitle="Map your If → Then scenarios and attach your pre-entry chart." />
 
-                  {direction !== null && (
-                    <Reveal delay={0.12}>
-                      <div className="space-y-3">
-                        <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">Quantity</Label>
-                        <div className="flex items-center gap-3">
-                          <div onClick={() => document.getElementById("flow-qty")?.focus()} className="flex h-14 min-w-0 flex-1 cursor-text items-center rounded-2xl border border-line bg-raised px-5 transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10">
-                            <input
-                              id="flow-qty"
-                              inputMode="decimal"
-                              enterKeyHint="done"
-                              autoComplete="off"
-                              value={quantity}
-                              onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))}
-                              placeholder="1"
-                              className="w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
-                            />
-                          </div>
-                          <Stepper label="Quantity" onStep={stepQuantity} canDecrement={!(quantityValue <= 1)} />
-                        </div>
-                      </div>
-                    </Reveal>
-                  )}
+                {/* 1 — Apple-style Visual Scenario List with Squircle Icons */}
+                <div className="space-y-3 pt-6">
+                  <div className="flex items-center justify-between">
+                    <Label done={nonEmptyThoughts.length > 0}>Scenarios (If → Then)</Label>
+                    <span className="text-[12px] text-faint">Press ↵ to add another</span>
+                  </div>
 
-                  <div className="pt-7">
-                    <Disclosure label="More detail">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2.5"><Label htmlFor="flow-date">Day</Label><TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} /></div>
-                        <div className="space-y-2.5"><Label htmlFor="flow-rr" hint={manualR === null && realizedR !== null ? "auto from your prices" : undefined}>R multiple</Label><TextBox id="flow-rr" inputMode="decimal" placeholder={realizedR !== null ? realizedR.toFixed(2) : "2.5"} value={rr} onChange={(e) => setRr(cleanNumber(e.target.value))} className="font-mono" /></div>
-                      </div>
-                    </Disclosure>
+                  <ul className="divide-y divide-line-soft overflow-hidden rounded-[22px] border border-line bg-raised shadow-panel">
+                    <AnimatePresence initial={false}>
+                      {thoughts.map((th, idx) => {
+                        const vis = thoughtVisual(th.text);
+                        return (
+                          <motion.li
+                            key={th.id}
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={FLOW_EXPAND}
+                            className="overflow-hidden"
+                          >
+                            <div className="flex items-center gap-3 px-4 py-3 transition-colors focus-within:bg-gold/[0.04]">
+                              <IconTile tile={vis.tile}>{vis.glyph}</IconTile>
+                              <input
+                                autoFocus={idx === thoughts.length - 1}
+                                aria-label={`Thought ${idx + 1}`}
+                                value={th.text}
+                                onChange={(e) => patchThought(th.id, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && th.text.trim()) {
+                                    e.preventDefault();
+                                    addThought();
+                                  }
+                                }}
+                                placeholder={idx === 0 ? "If sweep + 5m close → enter at FVG" : "If this happens → I will do this…"}
+                                maxLength={220}
+                                className="min-w-0 flex-1 bg-transparent py-1 text-[15.5px] text-ink outline-none placeholder:text-faint"
+                              />
+                              {th.text.trim() && (
+                                <span className="hidden rounded-full bg-ink/[0.05] px-2 py-0.5 text-[11px] font-medium text-muted sm:inline">
+                                  {vis.tag}
+                                </span>
+                              )}
+                              {thoughts.length > 1 && (
+                                <button
+                                  type="button"
+                                  aria-label="Remove thought"
+                                  onClick={() => removeThought(th.id)}
+                                  className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
+                                >
+                                  <IconMinus />
+                                </button>
+                              )}
+                            </div>
+                          </motion.li>
+                        );
+                      })}
+                    </AnimatePresence>
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => addThought()}
+                        className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[14.5px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
+                      >
+                        <IconPlus /> Add scenario
+                      </button>
+                    </li>
+                  </ul>
+
+                  {/* Compact visual quick-add pills (short, scannable, icon-paired) */}
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {THOUGHT_PRESETS.map((p) => {
+                      const alreadyUsed = nonEmptyThoughts.some((t) => t.toLowerCase() === p.text.toLowerCase());
+                      if (alreadyUsed) return null;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            haptic.selection();
+                            const emptyIdx = thoughts.findIndex((t) => !t.text.trim());
+                            if (emptyIdx >= 0) patchThought(thoughts[emptyIdx]!.id, p.text);
+                            else addThought(p.text);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-raised px-3 py-1.5 text-[12.5px] font-medium text-muted transition-all hover:border-line-strong hover:text-ink active:scale-95"
+                        >
+                          <span className={cn("h-2 w-2 rounded-full", p.tile)} aria-hidden />
+                          <span>+ {p.shortLabel}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              )}
 
-              {mode === "import" && (
-                <div className="space-y-4">
-                  <input ref={importRef} type="file" accept=".csv,.txt,.tsv,text/csv,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadImportFile(f); e.target.value = ""; }} />
-                  {!importRows ? (
-                    <>
-                      <button type="button" onClick={() => importRef.current?.click()} className="flex w-full flex-col items-center gap-1.5 rounded-[26px] border border-dashed border-line-strong bg-raised px-6 py-12 transition-colors hover:border-gold/60">
-                        <span className="text-[16px] font-semibold text-ink">Choose a CSV</span>
-                        <span className="text-[13px] text-muted">Broker or spreadsheet export</span>
-                      </button>
-                      {importError && <p className="px-1 text-[13px] text-loss">{importError}</p>}
-                    </>
-                  ) : (
-                    <div className="space-y-3">
-                      <p className="flex items-center gap-2 text-[14px] text-ink">
-                        <span className="grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-profit"><IconCheck className="h-3 w-3" /></span>
-                        {importRows.length} {importRows.length === 1 ? "trade" : "trades"} ready
-                        <button type="button" onClick={() => { setImportRows(null); setImportError(null); }} className="ml-auto text-[13px] font-medium text-gold hover:underline">Change file</button>
-                      </p>
-                      <ul className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
-                        {importRows.slice(0, 4).map((r, i) => (
-                          <li key={i} className="flex items-center justify-between px-4 py-2.5 text-[14px]">
-                            <span className="text-muted">{r.date} · <span className="text-ink">{r.instrument}</span></span>
-                            <span className={cn("font-mono tabular-nums", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>{r.pnl}</span>
-                          </li>
+                {/* 2 — Live AI Thought Analysis Card (Apple Intelligence style, compact & visual) */}
+                <div className="mt-5 overflow-hidden rounded-[20px] border border-line bg-raised p-4 shadow-panel">
+                  <div className="flex items-start gap-3">
+                    <IconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]">
+                      <GlyphSparkle />
+                    </IconTile>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">AI Thought Analysis</p>
+                        <span
+                          className={cn(
+                            "rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold",
+                            ta.tone === "good"
+                              ? "bg-profit/12 text-profit"
+                              : ta.tone === "gold"
+                                ? "bg-gold/15 text-gold-deep dark:text-gold"
+                                : "bg-ink/[0.06] text-muted",
+                          )}
+                        >
+                          {ta.badge}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[13px] leading-snug text-muted">{ta.insight}</p>
+
+                      {/* 3 compact visual readiness pills */}
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {([
+                          ["Entry trigger", ta.hasTrigger],
+                          ["Invalidation", ta.hasInvalidation],
+                          ["Patience guard", ta.hasPatienceGuard],
+                        ] as const).map(([pillLabel, ok]) => (
+                          <span
+                            key={pillLabel}
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+                              ok ? "bg-profit/12 text-profit" : "bg-ink/[0.045] text-faint",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "grid h-3.5 w-3.5 place-items-center rounded-full",
+                                ok ? "bg-profit text-white" : "border border-line-strong",
+                              )}
+                            >
+                              {ok && <IconCheck className="h-2.5 w-2.5" />}
+                            </span>
+                            {pillLabel}
+                          </span>
                         ))}
-                        {importRows.length > 4 && <li className="px-4 py-2.5 text-[13px] text-faint">+{importRows.length - 4} more</li>}
-                      </ul>
+                      </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* 3 — Pre-Trade Visual Snapshot / Chart Attachment (Apple square attachment strip) */}
+                <div className="mt-5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <IconTile tile="bg-gradient-to-b from-[#0ea5e9] to-[#0284c7]" className="h-6 w-6 rounded-[7px]">
+                        <GlyphCamera />
+                      </IconTile>
+                      <Label done={images.length > 0} hint="optional · paste ⌘V">
+                        Pre-trade chart snapshot
+                      </Label>
+                    </div>
+                    {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2 attached</span>}
+                  </div>
+                  <ImageUploader items={images} onChange={updateImagesAndCache} max={2} variant="apple" />
+                </div>
+
+                {/* 4 — Mistakes to watch (Compact top 4 AI picks + More… disclosure) */}
+                <AnimatePresence initial={false}>
+                  {showMistakesInThought && (
+                    <Reveal key="thought-mistakes" delay={0.06}>
+                      <div className="space-y-2.5">
+                        <Label done={watch.length > 0} hint="AI-ranked for today">
+                          Guard against
+                        </Label>
+                        <Stagger className="flex flex-wrap gap-2" delay={0.04}>
+                          {primaryWatchOptions.map((o) => {
+                            const isSelected = watch.includes(o.key);
+                            return (
+                              <Chip
+                                key={o.key}
+                                tone="gold"
+                                selected={isSelected}
+                                onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}
+                              >
+                                <span>{o.label}</span>
+                                {o.ai && (
+                                  <span className="ml-1.5 rounded-full bg-gold/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-gold-deep dark:text-gold">
+                                    AI
+                                  </span>
+                                )}
+                              </Chip>
+                            );
+                          })}
+                          {moreWatch &&
+                            extraWatchOptions.map((o) => {
+                              const isSelected = watch.includes(o.key);
+                              return (
+                                <Chip
+                                  key={o.key}
+                                  tone="gold"
+                                  selected={isSelected}
+                                  onClick={() => setWatch((w) => (w.includes(o.key) ? w.filter((k) => k !== o.key) : [...w, o.key]))}
+                                >
+                                  <span>{o.label}</span>
+                                </Chip>
+                              );
+                            })}
+                          {!moreWatch && extraWatchOptions.length > 0 && (
+                            <Chip selected={false} onClick={() => setMoreWatch(true)}>
+                              More…
+                            </Chip>
+                          )}
+                        </Stagger>
+                      </div>
+                    </Reveal>
+                  )}
+                </AnimatePresence>
+
+                {/* 5 — Quiet progressive disclosure for Instrument & Key Level */}
+                <div className="pt-5">
+                  <Disclosure label="Instrument & key level">
+                    <div className="space-y-4">
+                      <div className="space-y-2.5">
+                        <Label hint="defaults to MNQ" htmlFor="flow-instrument">
+                          Instrument
+                        </Label>
+                        <TextBox
+                          id="flow-instrument"
+                          value={instrument}
+                          onChange={(e) => setInstrument(e.target.value.toUpperCase())}
+                          placeholder="MNQ"
+                          className="font-mono"
+                        />
+                        <div className="flex flex-wrap gap-1.5">
+                          {suggestedInstruments.map((i) => (
+                            <Chip key={i} selected={finalInstrument === i} onClick={() => setInstrument(i)}>
+                              {i}
+                            </Chip>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2.5">
+                        <Label htmlFor="flow-draw">Key level in play</Label>
+                        <TextBox
+                          id="flow-draw"
+                          value={draw}
+                          onChange={(e) => setDraw(e.target.value)}
+                          placeholder="e.g. Yesterday's high, London low, 15m FVG"
+                        />
+                      </div>
+                    </div>
+                  </Disclosure>
+                </div>
+              </div>
+            )}
+
+            {step === "setup" && (
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <StepTitle title={selectedPlaybook ? selectedPlaybook.name : "Pick your setup"} subtitle={selectedPlaybook ? `${confirmedRules} of ${rules.length} rules confirmed` : "Select the playbook setup you are trading."} />
+                  {playbook.length > 1 && selectedPlaybook && !pickingSetup && (
+                    <button
+                      type="button"
+                      onClick={() => setPickingSetup(true)}
+                      className="rounded-full border border-line bg-raised px-3.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
+                    >
+                      Change setup
+                    </button>
                   )}
                 </div>
-              )}
-            </div>
-          )}
 
-          {step === "chart" && (
-            <div className="space-y-8">
-              <StepTitle title="Add your chart" subtitle={importRows && importRows.length > 1 ? "Up to two screenshots, attached to the first trade." : "Up to two screenshots."} />
-              <ImageUploader items={images} onChange={setImages} max={2} />
-            </div>
-          )}
+                {(!selectedPlaybook || pickingSetup) && (
+                  <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Setup">
+                    {playbook.map((p) => {
+                      const n = setupRules(p).length;
+                      return (
+                        <ChoiceCard
+                          key={p.id}
+                          selected={playbookId === p.id}
+                          title={p.name}
+                          meta={`${n} ${n === 1 ? "rule" : "rules"}`}
+                          onClick={() => {
+                            setPlaybookId(p.id);
+                            setRuleStates({});
+                            setPickingSetup(false);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
 
-          {step === "autopsy" && <AutopsyBody a={autopsy} onAddChart={() => go("chart")} />}
+                <AnimatePresence initial={false}>
+                  {selectedPlaybook && rules.length > 0 && (
+                    <Collapse key={selectedPlaybook.id}>
+                      <div className="space-y-2.5 pb-1">
+                        <div className="h-[3px] overflow-hidden rounded-full bg-line-soft">
+                          <div className="h-full rounded-full bg-profit transition-[width] duration-300" style={{ width: `${(confirmedRules / rules.length) * 100}%` }} />
+                        </div>
+                        <div className="divide-y divide-line-soft overflow-hidden rounded-[22px] border border-line bg-raised shadow-panel">
+                          {rules.map((r, i) => {
+                            const checked = ruleStates[String(i)] === "ready";
+                            const h = statFor(history, playbookId, r.text || `Rule ${i + 1}`);
+                            const keptPct = h && h.planned >= 3 ? Math.round(((h.planned - h.skipped) / h.planned) * 100) : null;
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                role="checkbox"
+                                aria-checked={checked}
+                                onClick={() => {
+                                  haptic.selection();
+                                  setRuleStates({ ...ruleStates, [String(i)]: checked ? "waiting" : "ready" });
+                                }}
+                                className={cn(
+                                  "flex w-full items-center justify-between gap-3.5 px-4 py-3.5 text-left transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05]",
+                                  checked && "bg-profit/[0.05]",
+                                )}
+                              >
+                                <div className="flex min-w-0 items-center gap-3.5">
+                                  <span
+                                    className={cn(
+                                      "grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-200",
+                                      checked ? "border-profit bg-profit text-canvas" : "border-line-strong text-transparent",
+                                    )}
+                                  >
+                                    <IconCheck className="h-3 w-3" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className={cn("block truncate text-[15px] font-medium", checked ? "text-ink" : "text-ink/90")}>
+                                      {r.text || `Rule ${i + 1}`}
+                                    </span>
+                                    {r.description && <span className="block truncate text-[12.5px] text-muted">{r.description}</span>}
+                                  </span>
+                                </div>
+                                {keptPct !== null && (
+                                  <span className="shrink-0 rounded-full bg-ink/[0.05] px-2.5 py-0.5 text-[11.5px] font-medium tabular-nums text-faint">
+                                    {keptPct}% kept
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </Collapse>
+                  )}
+                </AnimatePresence>
 
-          {step === "done" && (
-            <div className="flex min-h-[20rem] flex-col items-center justify-center text-center">
-              <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 380, damping: 22 }} className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_12px_28px_-10px_var(--gold-strong)]">
-                <IconCheck className="h-7 w-7" />
-              </motion.div>
-              <h2 className="mt-7 text-[32px] font-semibold tracking-[-0.025em] text-ink">Logged.</h2>
-              <p className="mt-2 max-w-[22rem] text-[15px] leading-snug text-muted">Process noted — the outcome is just data.</p>
-              {autopsy.risk && (
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.15 }} className="mt-6 w-full max-w-[24rem] text-left">
-                  <RiskMeter risk={autopsy.risk} currency={settings.currency} label="Today vs your limit" />
-                </motion.div>
-              )}
-              {createdId && <button type="button" onClick={() => { useUi.getState().openMinatoWithTrade(createdId); onClose(); }} className="mt-6 text-[14px] font-medium text-gold hover:underline">Talk it through with MINATO</button>}
-            </div>
-          )}
-        </StepTransition>
-      </SheetFrame>
-    </Modal>
-
-    {/* Stop at the plan: a 2nd trade after a loss needs a pause; a 3rd needs a lockout. */}
-    <Modal open={lockOpen} onClose={onClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>
-      <div className="px-6 py-6 sm:px-8">
-        <div className="flex items-start gap-3.5">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
-            <ShieldIcon className="h-5 w-5" />
-          </span>
-          <div>
-            <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">
-              {thirdTrade ? "Manual lockout required in Tradovate right now" : "Pause before trade #2"}
-            </h2>
-            {thirdTrade ? (
-              <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                You already have <strong className="text-loss">{lossesToday} losses</strong> today
-                {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a
-                3rd trade winning is only <strong className="text-ink">4%–5%</strong>, whereas
-                tomorrow&apos;s fresh A+ setup holds a <strong className="text-profit">40%–50%</strong> probability.
-                Lock out immediately — preserving mental capital is today&apos;s final win.
-              </p>
-            ) : (
-              <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                You already have <strong className="text-loss">1 loss</strong> today. A 2nd trade straight after a loss is where
-                revenge and tilt creep in. Reset, review that trade, and only continue if this is a fresh, planned A+ setup.
-              </p>
+                <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />
+              </div>
             )}
+
+            {step === "trade" && (
+              <div className="space-y-8">
+                <StepTitle title="Log the trade" subtitle={`Logging ${finalInstrument}`} />
+                {playbook.length === 0 && !createdId && <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />}
+                {!createdId && (
+                  <Segmented
+                    value={mode}
+                    onChange={(m) => {
+                      setMode(m);
+                      setSaveError(null);
+                    }}
+                    options={[
+                      { id: "manual", label: "Manual" },
+                      { id: "import", label: "Import CSV" },
+                    ]}
+                  />
+                )}
+
+                {mode === "manual" && (
+                  <div>
+                    <div
+                      onClick={() => document.getElementById("flow-pnl")?.focus()}
+                      className="cursor-text rounded-[26px] border border-line bg-raised px-6 py-7 text-center transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
+                    >
+                      <Label htmlFor="flow-pnl">Net P&amp;L</Label>
+                      <div className="mt-3 flex items-baseline justify-center gap-1.5">
+                        <span className="text-[28px] text-faint">{sym}</span>
+                        <input
+                          id="flow-pnl"
+                          autoFocus
+                          inputMode="decimal"
+                          enterKeyHint="next"
+                          autoComplete="off"
+                          value={pnl}
+                          onChange={(e) => setPnl(cleanNumber(e.target.value))}
+                          placeholder="0.00"
+                          aria-invalid={pnlInvalid || undefined}
+                          style={{ width: `${Math.max(pnl.length, 4)}ch` }}
+                          className={cn(
+                            "max-w-full border-0 bg-transparent p-0 text-center font-mono text-[44px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/60",
+                            pnlValue > 0 && "text-profit",
+                            pnlValue < 0 && "text-loss",
+                            pnlInvalid && "text-loss",
+                          )}
+                        />
+                      </div>
+                      <p className="mt-2 min-h-5 text-[12.5px] text-faint">
+                        {pnlInvalid ? <span className="text-loss">Numbers only — negative for a loss</span> : "Negative for a loss"}
+                      </p>
+                    </div>
+
+                    {(pnlDone || direction !== null) && (
+                      <Reveal>
+                        <div className="space-y-3">
+                          <Label done={direction !== null}>Direction</Label>
+                          <BinaryChoice value={direction === null ? null : direction === "long"} onChange={(v) => setDirection(v ? "long" : "short")} options={["Long", "Short"]} />
+                        </div>
+                      </Reveal>
+                    )}
+
+                    {direction !== null && (
+                      <Reveal>
+                        <div className="space-y-3">
+                          <Label hint="price & time · optional" done={entryN !== null && exitN !== null}>
+                            Entry &amp; exit
+                          </Label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <TicketCard
+                              id="flow-entry-price"
+                              title="Entry"
+                              tile="bg-gradient-to-b from-gold-strong to-gold-deep"
+                              glyph={<GlyphArrowIn />}
+                              price={entryPrice}
+                              onPrice={(v) => setEntryPrice(cleanPrice(v))}
+                              time={entryTime}
+                              onTime={setEntryTime}
+                              timeId="flow-in"
+                            />
+                            <TicketCard
+                              id="flow-exit-price"
+                              title="Exit"
+                              tile="bg-gradient-to-b from-[#8f99a8] to-[#667085]"
+                              glyph={<GlyphArrowOut />}
+                              price={exitPrice}
+                              onPrice={(v) => setExitPrice(cleanPrice(v))}
+                              time={exitTime}
+                              onTime={setExitTime}
+                              timeId="flow-out"
+                              foot={
+                                movePts !== null || heldMin !== null ? (
+                                  <>
+                                    {movePts !== null && (
+                                      <span className={cn("font-medium", movePts > 0 && "text-profit", movePts < 0 && "text-loss")}>
+                                        {movePts > 0 ? "+" : movePts < 0 ? "−" : ""}
+                                        {fmtPts(Math.abs(movePts))} pts
+                                      </span>
+                                    )}
+                                    {movePts !== null && heldMin !== null && " · "}
+                                    {heldMin !== null && `held ${fmtHeld(heldMin)}`}
+                                  </>
+                                ) : undefined
+                              }
+                            />
+                          </div>
+                          <AnimatePresence initial={false}>
+                            {!levelsOpen && (
+                              <Collapse key="add-levels">
+                                <button type="button" onClick={() => setLevelsOpen(true)} className="flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-gold transition-opacity hover:opacity-80">
+                                  <IconPlus /> Add stop loss &amp; take profit
+                                </button>
+                              </Collapse>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </Reveal>
+                    )}
+
+                    {direction !== null && levelsOpen && (
+                      <Reveal>
+                        <div className="space-y-3">
+                          <Label hint="optional" done={stopN !== null && targetN !== null}>
+                            Stop loss &amp; take profit
+                          </Label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <TicketCard
+                              id="flow-sl"
+                              title="Stop loss"
+                              tile="bg-loss"
+                              glyph={<GlyphStop />}
+                              price={stopLoss}
+                              onPrice={(v) => setStopLoss(cleanPrice(v))}
+                              invalid={levelNote !== null && stopN !== null && entryN !== null && (isLong ? stopN >= entryN : stopN <= entryN)}
+                              foot={riskPts !== null ? `${fmtPts(riskPts)} pts from entry` : ""}
+                            />
+                            <TicketCard
+                              id="flow-tp"
+                              title="Take profit"
+                              tile="bg-profit"
+                              glyph={<GlyphTarget />}
+                              price={takeProfit}
+                              onPrice={(v) => setTakeProfit(cleanPrice(v))}
+                              invalid={levelNote !== null && targetN !== null && entryN !== null && (isLong ? targetN <= entryN : targetN >= entryN)}
+                              foot={rewardPts !== null ? `${fmtPts(rewardPts)} pts from entry` : ""}
+                            />
+                          </div>
+                          <AnimatePresence initial={false}>
+                            {levelNote && (
+                              <Collapse key="level-note">
+                                <p role="status" className="px-1 text-[13px] text-loss">
+                                  {levelNote}
+                                </p>
+                              </Collapse>
+                            )}
+                          </AnimatePresence>
+                          <AnimatePresence initial={false}>
+                            {levelStats.length > 0 && (
+                              <Collapse key="level-stats">
+                                <StatStrip stats={levelStats} />
+                              </Collapse>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </Reveal>
+                    )}
+
+                    {direction !== null && (
+                      <Reveal delay={0.12}>
+                        <div className="space-y-3">
+                          <Label done={quantityOk} hint="contracts, shares or lots" htmlFor="flow-qty">
+                            Quantity
+                          </Label>
+                          <div className="flex items-center gap-3">
+                            <div
+                              onClick={() => document.getElementById("flow-qty")?.focus()}
+                              className="flex h-14 min-w-0 flex-1 cursor-text items-center rounded-2xl border border-line bg-raised px-5 transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10"
+                            >
+                              <input
+                                id="flow-qty"
+                                inputMode="decimal"
+                                enterKeyHint="done"
+                                autoComplete="off"
+                                value={quantity}
+                                onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))}
+                                placeholder="1"
+                                className="w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
+                              />
+                            </div>
+                            <Stepper label="Quantity" onStep={stepQuantity} canDecrement={!(quantityValue <= 1)} />
+                          </div>
+                        </div>
+                      </Reveal>
+                    )}
+
+                    <div className="pt-7">
+                      <Disclosure label="More detail">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2.5">
+                            <Label htmlFor="flow-date">Day</Label>
+                            <TextBox id="flow-date" type="date" max={todayKey()} value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} />
+                          </div>
+                          <div className="space-y-2.5">
+                            <Label htmlFor="flow-rr" hint={manualR === null && realizedR !== null ? "auto from your prices" : undefined}>
+                              R multiple
+                            </Label>
+                            <TextBox
+                              id="flow-rr"
+                              inputMode="decimal"
+                              placeholder={realizedR !== null ? realizedR.toFixed(2) : "2.5"}
+                              value={rr}
+                              onChange={(e) => setRr(cleanNumber(e.target.value))}
+                              className="font-mono"
+                            />
+                          </div>
+                        </div>
+                      </Disclosure>
+                    </div>
+                  </div>
+                )}
+
+                {mode === "import" && (
+                  <div className="space-y-4">
+                    <input
+                      ref={importRef}
+                      type="file"
+                      accept=".csv,.txt,.tsv,text/csv,text/plain"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void loadImportFile(f);
+                        e.target.value = "";
+                      }}
+                    />
+                    {!importRows ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => importRef.current?.click()}
+                          className="flex w-full flex-col items-center gap-1.5 rounded-[26px] border border-dashed border-line-strong bg-raised px-6 py-12 transition-colors hover:border-gold/60"
+                        >
+                          <span className="text-[16px] font-semibold text-ink">Choose a CSV</span>
+                          <span className="text-[13px] text-muted">Broker or spreadsheet export</span>
+                        </button>
+                        {importError && <p className="px-1 text-[13px] text-loss">{importError}</p>}
+                      </>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="flex items-center gap-2 text-[14px] text-ink">
+                          <span className="grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-profit">
+                            <IconCheck className="h-3 w-3" />
+                          </span>
+                          {importRows.length} {importRows.length === 1 ? "trade" : "trades"} ready
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setImportRows(null);
+                              setImportError(null);
+                            }}
+                            className="ml-auto text-[13px] font-medium text-gold hover:underline"
+                          >
+                            Change file
+                          </button>
+                        </p>
+                        <ul className="divide-y divide-line-soft overflow-hidden rounded-2xl border border-line bg-raised">
+                          {importRows.slice(0, 4).map((r, i) => (
+                            <li key={i} className="flex items-center justify-between px-4 py-2.5 text-[14px]">
+                              <span className="text-muted">
+                                {r.date} · <span className="text-ink">{r.instrument}</span>
+                              </span>
+                              <span className={cn("font-mono tabular-nums", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>
+                                {r.pnl}
+                              </span>
+                            </li>
+                          ))}
+                          {importRows.length > 4 && <li className="px-4 py-2.5 text-[13px] text-faint">+{importRows.length - 4} more</li>}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step === "chart" && (
+              <div className="space-y-8">
+                <StepTitle
+                  title="Add your chart"
+                  subtitle={importRows && importRows.length > 1 ? "Up to two screenshots, attached to the first trade." : "Up to two screenshots."}
+                />
+                <ImageUploader items={images} onChange={updateImagesAndCache} max={2} />
+              </div>
+            )}
+
+            {step === "autopsy" && <AutopsyBody a={autopsy} onAddChart={() => go("chart")} />}
+
+            {step === "done" && (
+              <div className="flex min-h-[20rem] flex-col items-center justify-center text-center">
+                <motion.div
+                  initial={{ scale: 0.6, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 380, damping: 22 }}
+                  className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold shadow-[0_12px_28px_-10px_var(--gold-strong)]"
+                >
+                  <IconCheck className="h-7 w-7" />
+                </motion.div>
+                <h2 className="mt-7 text-[32px] font-semibold tracking-[-0.025em] text-ink">Logged.</h2>
+                <p className="mt-2 max-w-[22rem] text-[15px] leading-snug text-muted">
+                  {isOffline
+                    ? "Saved safely in your browser cache — will sync to Google Drive automatically when internet returns."
+                    : "Process noted — the outcome is just data."}
+                </p>
+                {autopsy.risk && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+                    className="mt-6 w-full max-w-[24rem] text-left"
+                  >
+                    <RiskMeter risk={autopsy.risk} currency={settings.currency} label="Today vs your limit" />
+                  </motion.div>
+                )}
+                {createdId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      useUi.getState().openMinatoWithTrade(createdId);
+                      onClose();
+                    }}
+                    className="mt-6 text-[14px] font-medium text-gold hover:underline"
+                  >
+                    Talk it through with MINATO
+                  </button>
+                )}
+              </div>
+            )}
+          </StepTransition>
+        </SheetFrame>
+      </Modal>
+
+      {/* Stop at the plan: a 2nd trade after a loss needs a pause; a 3rd needs a lockout. */}
+      <Modal open={lockOpen} onClose={onClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>
+        <div className="px-6 py-6 sm:px-8">
+          <div className="flex items-start gap-3.5">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-loss/30 bg-loss/[0.08] text-loss">
+              <ShieldIcon className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">
+                {thirdTrade ? "Manual lockout required in Tradovate right now" : "Pause before trade #2"}
+              </h2>
+              {thirdTrade ? (
+                <p className="mt-2 text-[15px] leading-relaxed text-muted">
+                  You already have <strong className="text-loss">{lossesToday} losses</strong> today
+                  {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a 3rd trade winning is only{" "}
+                  <strong className="text-ink">4%–5%</strong>, whereas tomorrow&apos;s fresh A+ setup holds a{" "}
+                  <strong className="text-profit">40%–50%</strong> probability. Lock out immediately — preserving mental capital is today&apos;s final win.
+                </p>
+              ) : (
+                <p className="mt-2 text-[15px] leading-relaxed text-muted">
+                  You already have <strong className="text-loss">1 loss</strong> today. A 2nd trade straight after a loss is where revenge and tilt creep in.
+                  Reset, review that trade, and only continue if this is a fresh, planned A+ setup.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="mt-6">
+            <CheckRow
+              checked={lockChecked}
+              onClick={() => setLockChecked((v) => !v)}
+              title={
+                thirdTrade
+                  ? "I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan, and I accept full responsibility for breaking my own rule."
+                  : "I've reset, I'm not trying to win the loss back, and this trade follows my plan."
+              }
+            />
+          </div>
+          <div className="mt-6 flex items-center justify-end gap-2">
+            <QuietButton onClick={onClose}>Close — I&apos;m done for today</QuietButton>
+            <PrimaryButton disabled={!lockChecked} onClick={() => setLockAck(true)}>
+              {thirdTrade ? "Proceed anyway" : "Continue to plan"}
+            </PrimaryButton>
           </div>
         </div>
-        <div className="mt-6">
-          <CheckRow
-            checked={lockChecked}
-            onClick={() => setLockChecked((v) => !v)}
-            title={thirdTrade
-              ? "I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan, and I accept full responsibility for breaking my own rule."
-              : "I've reset, I'm not trying to win the loss back, and this trade follows my plan."}
-          />
-        </div>
-        <div className="mt-6 flex items-center justify-end gap-2">
-          <QuietButton onClick={onClose}>Close — I&apos;m done for today</QuietButton>
-          <PrimaryButton disabled={!lockChecked} onClick={() => setLockAck(true)}>{thirdTrade ? "Proceed anyway" : "Continue to plan"}</PrimaryButton>
-        </div>
-      </div>
-    </Modal>
+      </Modal>
     </>
   );
 }
 
-/**
- * One "ticket": an iOS-Settings-style icon tile and title, a large monospaced price that is the input itself
- * (tap anywhere on the card to type, the card shows focus), an optional one-line footnote, and an optional time row.
- */
-function TicketCard({ id, title, tile, glyph, price, onPrice, foot, invalid, time, onTime, timeId }: {
-  id: string; title: string; tile: string; glyph: React.ReactNode;
-  price: string; onPrice: (v: string) => void;
-  foot?: React.ReactNode; invalid?: boolean;
-  time?: string; onTime?: (v: string) => void; timeId?: string;
+function TicketCard({
+  id,
+  title,
+  tile,
+  glyph,
+  price,
+  onPrice,
+  foot,
+  invalid,
+  time,
+  onTime,
+  timeId,
+}: {
+  id: string;
+  title: string;
+  tile: string;
+  glyph: React.ReactNode;
+  price: string;
+  onPrice: (v: string) => void;
+  foot?: React.ReactNode;
+  invalid?: boolean;
+  time?: string;
+  onTime?: (v: string) => void;
+  timeId?: string;
 }) {
   return (
-    <div className={cn("flex flex-col overflow-hidden rounded-[22px] border bg-raised transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10", invalid ? "border-loss/45" : "border-line")}>
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden rounded-[22px] border bg-raised transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10",
+        invalid ? "border-loss/45" : "border-line",
+      )}
+    >
       <div onClick={() => document.getElementById(id)?.focus()} className="cursor-text px-4 pb-3.5 pt-3.5">
         <div className="flex items-center gap-2.5">
           <IconTile tile={tile}>{glyph}</IconTile>
-          <label htmlFor={id} className="text-[14px] font-medium tracking-[-0.01em] text-ink">{title}</label>
+          <label htmlFor={id} className="text-[14px] font-medium tracking-[-0.01em] text-ink">
+            {title}
+          </label>
         </div>
         <input
           id={id}
@@ -1135,27 +1871,39 @@ function TicketCard({ id, title, tile, glyph, price, onPrice, foot, invalid, tim
           onChange={(e) => onPrice(e.target.value)}
           placeholder="0.00"
           aria-invalid={invalid || undefined}
-          className={cn("mt-3.5 w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[22px] tracking-tight sm:text-[26px] !shadow-none !outline-none !ring-0 placeholder:text-faint/50", invalid ? "text-loss" : "text-ink")}
+          className={cn(
+            "mt-3.5 w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[22px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/50 sm:text-[26px]",
+            invalid ? "text-loss" : "text-ink",
+          )}
         />
         {foot !== undefined && <p className="mt-1.5 min-h-4 text-[12px] leading-4 text-faint">{foot}</p>}
       </div>
-      {onTime && timeId && <div className="mt-auto border-t border-line-soft"><TimeField id={timeId} label={title} value={time ?? ""} onChange={onTime} /></div>}
+      {onTime && timeId && (
+        <div className="mt-auto border-t border-line-soft">
+          <TimeField id={timeId} label={title} value={time ?? ""} onChange={onTime} />
+        </div>
+      )}
     </div>
   );
 }
 
-/** Compact time row inside a ticket: clock glyph, native time input, tap anywhere to edit, clearable. */
 function TimeField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const open = (e: React.MouseEvent) => {
     const el = ref.current;
     if (!el || e.target === el) return;
     el.focus();
-    try { el.showPicker?.(); } catch { /* picker needs a user gesture; focus is enough */ }
+    try {
+      el.showPicker?.();
+    } catch {
+      /* ignore */
+    }
   };
   return (
     <div onClick={open} className="flex h-11 cursor-pointer items-center gap-1.5 px-3.5 transition-colors hover:bg-ink/[0.03]">
-      <span className="shrink-0 text-faint"><GlyphTimer /></span>
+      <span className="shrink-0 text-faint">
+        <GlyphTimer />
+      </span>
       <input
         ref={ref}
         id={id}
@@ -1163,30 +1911,42 @@ function TimeField({ id, label, value, onChange }: { id: string; label: string; 
         aria-label={`${label} time`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={cn("min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-[14px] !shadow-none !outline-none !ring-0 sm:text-[15px]", value ? "text-ink" : "text-faint")}
+        className={cn(
+          "min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-[14px] !shadow-none !outline-none !ring-0 sm:text-[15px]",
+          value ? "text-ink" : "text-faint",
+        )}
       />
       {value && (
         <button
           type="button"
           aria-label={`Clear ${label.toLowerCase()} time`}
-          onClick={(e) => { e.stopPropagation(); onChange(""); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange("");
+          }}
           className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
         >
-          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M3 3l6 6M9 3l-6 6" /></svg>
+          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+            <path d="M3 3l6 6M9 3l-6 6" />
+          </svg>
         </button>
       )}
     </div>
   );
 }
 
-/** A quiet row of live numbers (risk, reward, R : R, realized R) separated by hairlines. */
 function StatStrip({ stats }: { stats: { k: string; v: string; tone?: "profit" | "loss" }[] }) {
   return (
-    <div className="mt-0.5 grid divide-x divide-line-soft overflow-hidden rounded-2xl border border-line-soft bg-ink/[0.03]" style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}>
+    <div
+      className="mt-0.5 grid divide-x divide-line-soft overflow-hidden rounded-2xl border border-line-soft bg-ink/[0.03]"
+      style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
+    >
       {stats.map((x) => (
         <div key={x.k} className="px-2 py-2.5 text-center">
           <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-faint">{x.k}</p>
-          <p className={cn("mt-0.5 font-mono text-[14px] tabular-nums sm:text-[15px]", x.tone === "profit" ? "text-profit" : x.tone === "loss" ? "text-loss" : "text-ink")}>{x.v}</p>
+          <p className={cn("mt-0.5 font-mono text-[14px] tabular-nums sm:text-[15px]", x.tone === "profit" ? "text-profit" : x.tone === "loss" ? "text-loss" : "text-ink")}>
+            {x.v}
+          </p>
         </div>
       ))}
     </div>

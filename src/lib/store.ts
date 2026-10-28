@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, PlaybookSetup, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
-import { dataStore, DriveSyncError, loadJournalMirror, type JournalPayload } from "./services/storage";
+import { dataStore, DriveSyncError, hasPendingDriveSync, loadJournalMirror, saveJournalMirror, type JournalPayload } from "./services/storage";
 import { snapshotToWorkingMemory, markSnapshotFailed } from "./supabase-integration";
 import { clearWorkingMemory } from "./services/supabase-memory";
 import { auth, AuthError, type User } from "./services/auth";
@@ -67,20 +67,15 @@ interface AppState {
   updateEntry(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   /**
    * Same as updateEntry, but returns as soon as the trade is updated on screen. Screenshots upload and the journal syncs in
-   * the background (with a toast if an upload fails, and the failed screenshot is removed so nothing dangles).
+   * the background (and stay safe in IndexedDB if offline until connectivity returns).
    */
   updateEntryFast(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   deleteEntry(id: string): Promise<void>;
-  /** Delete many trades in ONE save (screenshots, plan links and practice history included). Returns how many were removed. */
   deleteEntries(ids: string[]): Promise<number>;
 
-  /** Attach or update the post-trade reflection on an entry. */
   saveReflection(entryId: string, reflection: TradeReflection): Promise<void>;
-  /** Replace the lessons linked to one trade. Empty list removes the field entirely. */
   setEntryLessons(entryId: string, lessonIds: string[]): Promise<void>;
-  /** Make exactly these trades the ones linked to a lesson — one save, however many trades change. */
   setLessonTrades(lessonId: string, tradeIds: string[]): Promise<void>;
-  /** Record a trading weekday without trades. */
   logNoTradeDay(date: string, reason?: string): Promise<void>;
   removeNoTradeDay(date: string): Promise<void>;
 
@@ -88,32 +83,17 @@ interface AppState {
   deletePlan(id: string): Promise<void>;
   linkPlanToTrade(planId: string, tradeId: string): Promise<void>;
   saveChallenge(challenge: Challenge): Promise<void>;
-  /** Deletes the challenge AND every trade, screenshot, plan and practice record tied to it. Returns the number of trades wiped. */
   deleteChallenge(id: string): Promise<number>;
-  /** Select the challenge the whole app (Home, calendar, MINATO) is scoped to. */
   setPrimaryChallenge(id: string | null): Promise<void>;
-  /** Create or update a playbook setup (canonical setup entity). */
   saveSetup(setup: PlaybookSetup): Promise<void>;
-  /** Delete a playbook setup. Trades keep their historical setup labels. */
   deleteSetup(id: string): Promise<void>;
-  /** Bulk insert for CSV import — one persist instead of one per row. */
   createEntries(drafts: EntryDraft[]): Promise<JournalEntry[]>;
-  /** Persist structured review data for an entry and refresh its review status. */
   saveTradeReview(entryId: string, patch: { review?: JournalEntry["review"]; checklist?: JournalEntry["checklist"]; reflection?: JournalEntry["reflection"]; reviewStatus?: JournalEntry["reviewStatus"] }): Promise<void>;
   updateSettings(patch: Partial<JournalSettings>): Promise<void>;
-  /** Sets the day's loss limit. One per day: returns false (and changes nothing) if that day already has one. */
   setDayLimit(date: string, amount: number): Promise<boolean>;
   replaceJournal(payload: JournalPayload): Promise<void>;
   exportPayload(): JournalPayload;
   loadDemoData(): Promise<void>;
-  /**
-   * Recover entryTime for trades imported before the CSV-import fix.
-   * The old importer buried the correct NY entry time inside the notes
-   * text (e.g. "entry 9:35 AM NY") instead of the structured entryTime
-   * field. This re-extracts it from notes for any entry that's still
-   * missing entryTime — no re-import or original file needed. Returns
-   * the number of trades updated.
-   */
   backfillEntryTimesFromNotes(): Promise<number>;
 }
 
@@ -131,26 +111,12 @@ export function persistFailedSince(since: number): boolean {
 }
 
 /**
- * True while the cloud journal could not be loaded. While set, ALL
- * persistence is blocked — otherwise an empty in-memory state could
- * overwrite good Drive data (the classic "refresh loses my trades" bug).
+ * True while the cloud journal could not be loaded AND no local browser cache mirror exists.
  */
 export function hasLoadFailed(): boolean {
   return _loadFailed;
 }
 
-/**
- * Writes are serialized AND coalesced, without ever waiting on themselves.
- *
- * At most ONE write runs at a time. Calls that arrive while a write is running (or queued) share a
- * single pending slot that always holds the NEWEST snapshot, so rapid back-to-back saves collapse
- * into one or two uploads and a slow earlier snapshot can never land after a newer one. Every caller
- * is resolved/rejected with the real result of the write that carried its change.
- *
- * (The previous version let a superseded job `return _latestWrite`, while that newest job was itself
- * chained behind the superseded one — a circular wait. Two saves in the same tick, e.g. savePlan()
- * + createEntry(), froze the whole queue forever and every later "Continue" spun indefinitely.)
- */
 type PersistArgs = [userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]];
 type PersistWaiter = { resolve: () => void; reject: (err: unknown) => void };
 let _writeChain: Promise<void> = Promise.resolve();
@@ -158,7 +124,7 @@ let _pendingWrite: { args: PersistArgs; waiters: PersistWaiter[] } | null = null
 
 async function runPendingWrite(): Promise<void> {
   const job = _pendingWrite;
-  _pendingWrite = null; // anything arriving from now on gets the NEXT write
+  _pendingWrite = null;
   if (!job) return;
   try {
     await persistNow(...job.args);
@@ -172,7 +138,7 @@ function persist(userId: string, entries: JournalEntry[], settings: JournalSetti
   return new Promise<void>((resolve, reject) => {
     const args: PersistArgs = [userId, entries, settings, dayLogs, plans];
     if (_pendingWrite) {
-      _pendingWrite.args = args; // newest snapshot wins
+      _pendingWrite.args = args;
       _pendingWrite.waiters.push({ resolve, reject });
       return;
     }
@@ -183,8 +149,6 @@ function persist(userId: string, entries: JournalEntry[], settings: JournalSetti
 
 async function persistNow(userId: string, entries: JournalEntry[], settings: JournalSettings, dayLogs: NoTradeLog[], plans: TradePlan[]) {
   if (_loadFailed && dataStore.kind === "cloud") {
-    // The authoritative cloud data was never loaded — saving now could
-    // destroy it. Refuse honestly instead of pretending.
     if (!onAuthScreen()) {
       toast.error(
         "Save blocked — journal not loaded",
@@ -207,35 +171,30 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
   const payload: JournalPayload = { entries, settings: syncedSettings, dayLogs, plans, version: 2 };
   const snapshotKey = `${Date.now()}`;
 
-  // Supabase working memory is an advisory crash-recovery copy. It starts at the same moment as the
-  // Drive write but NEVER delays it (it used to be awaited first: token fetch + full-journal upsert
-  // added 1-3s to every Plan / Add trade save).
+  // Always save immediately to local mirror so browser cache is up-to-date even before network calls start
+  saveJournalMirror(userId, payload);
+
   const snapshot: Promise<() => void> = snapshotToWorkingMemory(userId, snapshotKey, payload).catch(() => () => undefined);
 
   try {
     await dataStore.saveJournal(userId, payload);
     _persistFailedAt = 0;
-    // Drive confirmed — remove the Supabase working copy (in the background).
     void snapshot.then((cleanup) => cleanup());
   } catch (err) {
-    // Drive write failed — keep the Supabase snapshot for recovery.
-    void snapshot.then(() => markSnapshotFailed(userId, snapshotKey)); // only after the snapshot row exists
-
+    void snapshot.then(() => markSnapshotFailed(userId, snapshotKey));
     _persistFailedAt = Date.now();
     const syncError = err instanceof DriveSyncError ? err : null;
     const status = syncError?.status || (err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "");
     toast.error(
-      "Unsaved, Retry",
+      "Saved in browser cache",
       status
-        ? `${syncError?.message ?? `Drive error ${status}`}. Your change is stored locally; retry when Drive is available.`
-        : "Your change is stored locally but was not confirmed on Drive. Retry when your connection is back.",
-      { label: "Retry", onClick: () => { void persist(userId, entries, syncedSettings, dayLogs, plans); } },
+        ? `${syncError?.message ?? `Drive error ${status}`}. Your data is safe in local cache and will sync when Drive is available.`
+        : "Your data is safely stored in browser cache and will sync automatically when your connection is back.",
+      { label: "Retry now", onClick: () => { void persist(userId, entries, syncedSettings, dayLogs, plans); } },
     );
   }
 }
 
-
-/** Remove image binaries for entries (best effort — one failure never blocks the rest). */
 async function dropEntryImages(list: JournalEntry[]) {
   const imgs = list.flatMap((e) => [...e.images, ...(e.compareImage ? [e.compareImage] : [])]);
   await Promise.all(
@@ -261,30 +220,33 @@ export const useApp = create<AppState>((set, get) => ({
       return;
     }
     let payload: { entries?: JournalEntry[]; settings?: JournalSettings; dayLogs?: NoTradeLog[]; plans?: TradePlan[] } | null = null;
-    let loadError = false;
     try {
       payload = await dataStore.loadJournal(user.id);
       _loadFailed = false;
     } catch {
-      // Drive read failed. Do NOT initialize with empty data as "usable":
-      // persistence is now BLOCKED until a load succeeds, so the empty
-      // view can never overwrite the cloud journal.
-      loadError = true;
-      _loadFailed = true;
-      const mirror = dataStore.kind === "cloud" ? loadJournalMirror(user.id) : null;
-      if (mirror) payload = mirror;
-      if (!onAuthScreen()) {
-        toast.error(
-          "Google Drive could not be read",
-          "Showing an empty view for safety — changes are disabled until your journal loads. Reload to retry.",
-        );
+      const mirror = loadJournalMirror(user.id);
+      if (mirror) {
+        // Offline or Drive temporarily unreachable, but we have the browser cache mirror!
+        // Allow full offline operation using the local cache mirror and auto-sync when online.
+        payload = mirror;
+        _loadFailed = false;
+        if (!onAuthScreen()) {
+          toast.info(
+            "Working offline from browser cache",
+            "Your journal is loaded from local cache. Any new plans or trades will sync to Google Drive automatically when internet returns.",
+          );
+        }
+      } else {
+        _loadFailed = true;
+        if (!onAuthScreen()) {
+          toast.error(
+            "Google Drive could not be read",
+            "Showing an empty view for safety — changes are disabled until your journal loads. Reload to retry.",
+          );
+        }
       }
     }
-    // On load error the view initializes empty BUT every save stays blocked
-    // by _loadFailed until a successful reload — no silent data loss.
-    // IMPORTANT: Always set status to "authenticated" so the user isn't stuck
-    // on the splash screen forever — they see the app (with the error toast)
-    // and can reload to retry.
+
     const loadedEntries = payload?.entries ?? [];
     const loadedPlans = payload?.plans ?? [];
     const baseSettings = { ...defaultSettings(), ...(payload?.settings ?? {}) };
@@ -330,18 +292,15 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async signOut() {
-    // End any Google app session (server-side Drive authorization is
-    // intentionally preserved and restored on next Google sign-in).
     try {
       await fetch("/api/auth/google/signout", { method: "POST" });
     } catch {
-      /* offline dev — local signout still applies */
+      /* offline */
     }
     await auth.signOut();
     try {
       await fetch("/api/auth/google/signout", { method: "POST" });
     } catch { /* offline */ }
-    // Clear Supabase working memory for this session.
     clearWorkingMemory();
     set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
   },
@@ -360,7 +319,6 @@ export const useApp = create<AppState>((set, get) => ({
     };
     const next = [...entries, entry];
     set({ entries: next });
-    // Link the executed plan (plan ↔ trade, no duplication).
     let plansNext = plans;
     if (draft.planId) {
       plansNext = plans.map((p) =>
@@ -369,7 +327,6 @@ export const useApp = create<AppState>((set, get) => ({
       if (plansNext !== plans) set({ plans: plansNext });
     }
 
-    // A traded day supersedes an explicit no-trade record.
     const nextDayLogs = dayLogs.some((d) => d.date === draft.date)
       ? dayLogs.filter((d) => d.date !== draft.date)
       : dayLogs;
@@ -385,19 +342,15 @@ export const useApp = create<AppState>((set, get) => ({
     const before = get().entries.find((e) => e.id === id);
     if (!before) throw new Error("Entry not found");
 
-    // New binaries go up in parallel; the journal is only updated once every upload succeeded.
     if (blobs) await Promise.all([...blobs].map(([imgId, blob]) => dataStore.putImage(imgId, blob)));
 
-    // Images detached during editing are removed best-effort — a failed delete must never block saving.
     const detached = [...before.images, ...(before.compareImage ? [before.compareImage] : [])]
       .filter((img) => !draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id);
     await Promise.all(detached.map(async (img) => {
-      try { await dataStore.deleteImage(img.id); } catch { /* orphaned blob is harmless */ }
+      try { await dataStore.deleteImage(img.id); } catch { /* ignore */ }
       dropImageUrl(img.id);
     }));
 
-    // Re-read the store AFTER the awaits: anything saved while the uploads ran (plan, autopsy, another
-    // edit) must not be overwritten by a stale snapshot taken before them.
     const { entries, settings, dayLogs, plans } = get();
     const prev = entries.find((e) => e.id === id);
     if (!prev) throw new Error("Entry not found");
@@ -414,26 +367,23 @@ export const useApp = create<AppState>((set, get) => ({
     const before = get().entries.find((e) => e.id === id);
     if (!before) throw new Error("Entry not found");
 
-    // 1. Show it NOW: previews come from memory, the entry updates in the store, the caller can move on.
     if (blobs) for (const [imgId, blob] of blobs) primeImageUrl(imgId, blob);
     const apply = (e: JournalEntry): JournalEntry => ({ ...e, ...draft, updatedAt: Date.now() });
     const updated = apply(before);
     set({ entries: get().entries.map((e) => (e.id === id ? apply(e) : e)) });
 
-    // 2. Everything slow happens behind the scenes: uploads in parallel, then ONE journal write.
     void (async () => {
       const failed = new Set<string>();
       if (blobs) await Promise.all([...blobs].map(async ([imgId, blob]) => { try { await dataStore.putImage(imgId, blob); } catch { failed.add(imgId); } }));
       const detached = [...before.images, ...(before.compareImage ? [before.compareImage] : [])]
         .filter((img) => !draft.images.some((i) => i.id === img.id) && draft.compareImage?.id !== img.id);
-      await Promise.all(detached.map(async (img) => { try { await dataStore.deleteImage(img.id); } catch { /* orphaned blob is harmless */ } dropImageUrl(img.id); }));
+      await Promise.all(detached.map(async (img) => { try { await dataStore.deleteImage(img.id); } catch { /* ignore */ } dropImageUrl(img.id); }));
       if (failed.size > 0) {
-        // Never keep a reference to a screenshot that did not reach Drive.
         set({ entries: get().entries.map((e) => (e.id === id ? { ...e, images: e.images.filter((i) => !failed.has(i.id)) } : e)) });
         toast.error("A chart didn't upload", "It was removed from the trade — add it again from the trade's Overview.");
       }
       const { entries, settings, dayLogs, plans } = get();
-      try { await persist(user.id, entries, settings, dayLogs, plans); } catch { /* persist() already shows its own "Unsaved, Retry" toast */ }
+      try { await persist(user.id, entries, settings, dayLogs, plans); } catch { /* handled */ }
     })();
     return updated;
   },
@@ -504,7 +454,7 @@ export const useApp = create<AppState>((set, get) => ({
   async logNoTradeDay(date, reason) {
     const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    if (entries.some((e) => e.date === date)) return; // traded days are already journaled
+    if (entries.some((e) => e.date === date)) return;
     if (dayLogs.some((d) => d.date === date)) return;
     const next = [...dayLogs, { date, reason: reason?.trim() || undefined, createdAt: Date.now() }];
     set({ dayLogs: next });
@@ -555,7 +505,6 @@ export const useApp = create<AppState>((set, get) => ({
     const { user, entries, settings, dayLogs } = get();
     if (!user) throw new Error("Not signed in");
     const existing = settings.challenges ?? [];
-    // Edit in place so the card keeps its position; append only when new.
     const challenges = existing.some((c) => c.id === challenge.id)
       ? existing.map((c) => (c.id === challenge.id ? challenge : c))
       : [...existing, challenge];
@@ -567,8 +516,6 @@ export const useApp = create<AppState>((set, get) => ({
   async deleteChallenge(id) {
     const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    // Cascade: the challenge, every trade tagged to it, those trades'
-    // screenshots, plans made for it, and their Matrix / Practise history.
     const doomed = entries.filter((e) => e.challengeId === id);
     const doomedIds = new Set(doomed.map((e) => e.id));
     await dropEntryImages(doomed);
@@ -632,7 +579,6 @@ export const useApp = create<AppState>((set, get) => ({
       updatedAt: now + i,
     }));
     const next = [...entries, ...created];
-    // A traded day supersedes an explicit no-trade record.
     const tradedDays = new Set(created.map((c) => c.date));
     const nextDayLogs = dayLogs.some((d) => tradedDays.has(d.date))
       ? dayLogs.filter((d) => !tradedDays.has(d.date))
@@ -645,9 +591,6 @@ export const useApp = create<AppState>((set, get) => ({
   async backfillEntryTimesFromNotes() {
     const { user, entries, settings, dayLogs, plans } = get();
     if (!user) throw new Error("Not signed in");
-    // Matches the exact text the old importer wrote: "entry 9:35 AM NY"
-    // (12-hour, no leading zero, from formatNyTime) — convert to the
-    // zero-padded 24-hour "HH:MM" that entryTime everywhere else expects.
     const pattern = /entry\s+(\d{1,2}):(\d{2})\s*(AM|PM)\s*NY/i;
     let changed = 0;
     const next = entries.map((e) => {
@@ -695,7 +638,7 @@ export const useApp = create<AppState>((set, get) => ({
   async setDayLimit(date, amount) {
     const { user, entries, settings, dayLogs } = get();
     if (!user || !(Number.isFinite(amount) && amount > 0)) return false;
-    if (settings.dayLimits?.[date]) return false; // locked for the day
+    if (settings.dayLimits?.[date]) return false;
     const next = { ...settings, dayLimits: { ...(settings.dayLimits ?? {}), [date]: Math.round(amount * 100) / 100 } };
     set({ settings: next });
     await persist(user.id, entries, next, dayLogs, get().plans);
@@ -732,13 +675,30 @@ export const useApp = create<AppState>((set, get) => ({
     set({ entries: demo, settings: { ...settings, startingEquity: 10000, targetEquity: 20000, maxDrawdown: 1500 } });
     await persist(user.id, demo, get().settings, dayLogs, get().plans);
   },
-
 }));
+
+/* -------------------- Auto-Resync on Internet Reconnect -------------------- */
+
+if (typeof window !== "undefined") {
+  const flushWhenOnline = () => {
+    if (navigator.onLine === false) return;
+    const { user, entries, settings, dayLogs, plans, status } = useApp.getState();
+    if (status !== "authenticated" || !user) return;
+    if (!hasPendingDriveSync(user.id) && _persistFailedAt === 0) return;
+    void persist(user.id, entries, settings, dayLogs, plans).then(() => {
+      if (!hasPendingDriveSync(user.id) && !onAuthScreen()) {
+        toast.success("Synced to Google Drive", "Your offline changes have been backed up.");
+      }
+    });
+  };
+  window.addEventListener("online", flushWhenOnline);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") flushWhenOnline();
+  });
+}
 
 /* ------------------------------ helpers ------------------------------ */
 
-/** Sort entries newest-first (call inside useMemo — never as a zustand selector,
- *  since returning a fresh array per call would loop useSyncExternalStore). */
 export function sortEntriesNewestFirst(entries: JournalEntry[]): JournalEntry[] {
   return [...entries].sort(
     (a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt,

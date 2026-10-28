@@ -10,12 +10,6 @@ import { groundRun, type ModelRun } from "./tagging/prompt";
  *
  * Learns continuously from the trader's recorded entries, plans, playbook rules, and autopsy reflections,
  * and persists its cumulative understanding in Google Drive (`settings.aiBrain` in `journal.json`).
- * As the journal grows:
- *   1. Personal phrase -> mistake log-likelihood weights sharpen from the trader's own vocabulary.
- *   2. Conditional mistake probabilities (Emotion x Mistake, Setup x Mistake, After-Loss x Mistake, Plan -> Autopsy alignment)
- *      shift from Laplace-smoothed priors to empirical personal frequencies.
- *   3. Powers live pre-trade mistake tagging in Plan & Record ("Thought" & "Mistakes to watch"),
- *      guaranteed grounded tagging in /api/journal/tag-trade, Weekly/Monthly AI briefs, Practice studio, and Minato.
  */
 
 export interface LearnedTagSuggestion {
@@ -31,9 +25,17 @@ export interface BrainCalibration {
   reviewedTrades: number;
   linkedPlans: number;
   learnedTokens: number;
-  /** 0-100 accuracy/calibration score that grows as more trades & reviews are logged. */
   calibrationPct: number;
   tier: "Seed" | "Calibrating" | "Calibrated" | "High-Precision";
+}
+
+export interface PreTradeThoughtAnalysis {
+  hasTrigger: boolean;
+  hasInvalidation: boolean;
+  hasPatienceGuard: boolean;
+  badge: "Ready to execute" | "Sharp If → Then" | "Add invalidation" | "Define trigger";
+  tone: "good" | "gold" | "info";
+  insight: string;
 }
 
 export interface PreTradeBrainRead {
@@ -44,6 +46,22 @@ export interface PreTradeBrainRead {
   setupInsight: string | null;
   emotionInsight: string | null;
   clarityScore: number;
+  thoughtAnalysis: PreTradeThoughtAnalysis;
+}
+
+export interface PeriodThoughtAnalysis {
+  totalTrades: number;
+  plannedTrades: number;
+  unplannedTrades: number;
+  plannedWinRate: number | null;
+  unplannedWinRate: number | null;
+  ifThenCount: number;
+  watchPreventedCount: number;
+  topTheme: string | null;
+  sampleThoughts: { date: string; text: string; pnl: number | null }[];
+  headline: string;
+  subline: string;
+  chipText: string;
 }
 
 const STOP_WORDS = new Set([
@@ -68,7 +86,6 @@ export function computeBrainCalibration(
   const totalTrades = entries.length;
   const reviewedTrades = entries.filter((e) => e.reviewStatus === "reviewed" || !!e.review?.followUp?.mistake).length;
   const linkedPlans = plans.length;
-  // Effective evidence units: reviewed trades carry 2x weight, plans 1x, raw trades 0.6x
   const units = reviewedTrades * 2 + linkedPlans * 1 + Math.max(0, totalTrades - reviewedTrades) * 0.6;
   const calibrationPct = totalTrades === 0 && linkedPlans === 0
     ? 35
@@ -85,10 +102,6 @@ export function computeBrainCalibration(
   };
 }
 
-/**
- * Builds an empirical Naive-Bayes + conditional frequency model from the trader's own journal,
- * merging any prior persisted Drive memory (`prevMemory`) so learned vocabulary survives even if old trades are pruned.
- */
 export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[], prevMemory?: AiBrainMemory | null) {
   const planById = new Map(plans.map((p) => [p.id, p]));
   const planOf = (e: JournalEntry) =>
@@ -99,7 +112,6 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[], 
   const tagCounts = new Map<MistakeKey, number>();
   const tokenTagCounts = new Map<string, Map<MistakeKey, number>>();
 
-  // Seed with persisted Drive vocabulary if available (weighted lightly so fresh live entries dominate)
   if (prevMemory?.learnedVocabulary) {
     for (const [word, mapObj] of Object.entries(prevMemory.learnedVocabulary)) {
       const m = new Map<MistakeKey, number>();
@@ -123,7 +135,6 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[], 
   let watchPreventedCount = 0;
   let watchRepeatedCount = 0;
 
-  // Group by day to detect post-loss trades and build daily understandings
   const byDay = new Map<string, JournalEntry[]>();
   for (const e of entries) {
     const list = byDay.get(e.date);
@@ -262,10 +273,6 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[], 
   };
 }
 
-/**
- * Synthesizes the complete Plan -> Thought -> Setup -> Trade -> Autopsy history into a compact,
- * serializable `AiBrainMemory` object saved directly in Google Drive (`settings.aiBrain` in `journal.json`).
- */
 export function syncAiBrainMemory(
   entries: JournalEntry[],
   plans: TradePlan[],
@@ -274,7 +281,6 @@ export function syncAiBrainMemory(
 ): AiBrainMemory {
   const b = buildPersonalBrain(entries, plans, prevMemory);
 
-  // Keep top 120 most informative tokens to keep the Drive JSON payload compact and fast
   const vocabEntries = [...b.tokenTagCounts.entries()]
     .map(([word, map]) => {
       const total = [...map.values()].reduce((s, n) => s + n, 0);
@@ -332,8 +338,7 @@ export function syncAiBrainMemory(
 }
 
 /**
- * Live pre-trade analysis for Plan & Record ("Plan", "Thought", and "Mistakes to watch for today").
- * Combines what the trader just typed with their growing historical journal brain in Google Drive.
+ * Live pre-trade analysis for Plan & Record ("Plan", "Thought", and "Mistakes to watch").
  */
 export function analyzePreTradeThought(
   draft: {
@@ -364,7 +369,6 @@ export function analyzePreTradeThought(
     }
   };
 
-  // 1. Scan what the trader wrote in their read, feeling reason, invalidation, and breakPlan
   const writtenSources: ScanSource[] = [
     { id: "s1", role: "psych-note" as const, text: draft.emotionReason ?? "" },
     { id: "s2", role: "watch-next" as const, text: draft.breakPlan ?? "" },
@@ -387,7 +391,6 @@ export function analyzePreTradeThought(
       }
     }
 
-    // Check personal vocabulary learned from past reviewed trades
     const draftTokens = tokenize(writtenSources.map((s) => s.text).join(" "));
     const vocabScores = new Map<MistakeKey, { score: number; matchedWord: string }>();
     for (const tok of draftTokens) {
@@ -413,7 +416,6 @@ export function analyzePreTradeThought(
     }
   }
 
-  // 2. Emotional state priors + personal emotional history
   const emo = (draft.emotion ?? "").toUpperCase();
   const emoMap: Partial<Record<string, { key: MistakeKey; why: string }>> = {
     FOMO: { key: "fomo", why: "You marked feeling FOMO — watch for chasing extended candles or entering before candle closure." },
@@ -453,7 +455,6 @@ export function analyzePreTradeThought(
     }
   }
 
-  // 3. Today's session state (after a loss today, or multiple trades today, or scheduled news)
   const todayList = dayTrades(draft.date, entries);
   const lossesToday = todayList.filter((e) => e.pnl < 0).length;
   if (lossesToday > 0) {
@@ -487,7 +488,6 @@ export function analyzePreTradeThought(
     });
   }
 
-  // 4. Setup-specific historical mistake patterns
   let setupInsight: string | null = null;
   const setupLookup = (draft.playbookId || draft.playbookName || "").trim().toLowerCase();
   const setupByName = (draft.playbookName || "").trim().toLowerCase();
@@ -507,7 +507,6 @@ export function analyzePreTradeThought(
     }
   }
 
-  // 5. Global recurring mistakes from journal history if we still have room
   const topGlobal = [...brain.tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
   for (const [k, count] of topGlobal) {
     if (!suggestions.has(k) && count >= 1) {
@@ -521,22 +520,49 @@ export function analyzePreTradeThought(
     }
   }
 
+  // Analyze the quality & structure of the trader's pre-trade thoughts
+  const allThoughtText = [draft.breakPlan, draft.draw, draft.invalidation, draft.thesis].filter(Boolean).join(" ");
+  const hasTrigger = /\b(if|when|sweep|sweeps|close|closes|smt|fvg|displacement|break|reclaim|tap|trigger|→|->)\b/i.test(allThoughtText);
+  const hasInvalidation = /\b(invalid|invalidates|cut|stop|sl|below|above|lose|loses|wrong|abort|cancel)\b/i.test(allThoughtText);
+  const hasPatienceGuard = /\b(wait|sit|hands|chop|patience|no\s+revenge|zero\s+revenge|confirm|body\s+close)\b/i.test(allThoughtText);
+
   let clarityScore = 25;
-  if (draft.thesis.trim().length >= 15) clarityScore += 25;
+  if (draft.thesis.trim().length >= 15) clarityScore += 20;
   if (draft.emotion) clarityScore += 15;
-  if ((draft.draw ?? "").trim().length >= 3) clarityScore += 15;
-  if ((draft.invalidation ?? "").trim().length >= 3) clarityScore += 12;
-  if ((draft.breakPlan ?? "").trim().length >= 3) clarityScore += 8;
+  if (hasTrigger) clarityScore += 18;
+  if (hasInvalidation) clarityScore += 12;
+  if (hasPatienceGuard) clarityScore += 10;
   clarityScore = Math.min(100, clarityScore);
 
+  const badge: PreTradeThoughtAnalysis["badge"] =
+    hasTrigger && hasInvalidation
+      ? "Ready to execute"
+      : hasTrigger
+        ? "Sharp If → Then"
+        : (draft.breakPlan ?? "").trim().length > 0
+          ? "Add invalidation"
+          : "Define trigger";
+
+  const tone: PreTradeThoughtAnalysis["tone"] =
+    hasTrigger && hasInvalidation ? "good" : hasTrigger ? "gold" : "info";
+
   const sortedSuggestions = [...suggestions.values()].sort((a, b) => b.confidence - a.confidence).slice(0, 5);
+
+  const thoughtInsight =
+    hasTrigger && hasInvalidation
+      ? emotionInsight ?? setupInsight ?? "Trigger and invalidation are locked — execute without hesitation."
+      : hasTrigger
+        ? "Clear entry trigger defined — add where the setup invalidates so exits stay objective."
+        : sortedSuggestions[0]
+          ? `Watch for ${sortedSuggestions[0].label.toLowerCase()} today — add an If → Then rule above.`
+          : "Add an If → Then scenario so your entry and invalidation are decided before the candle forms.";
 
   const headline =
     setupInsight ??
     emotionInsight ??
     (brain.calibration.totalTrades > 0
-      ? `AI Brain synced in Drive across ${brain.calibration.totalTrades} trades (${brain.calibration.reviewedTrades} autopsies).`
-      : "AI Brain is active in Drive — every plan and autopsy you log sharpens its personal accuracy.");
+      ? `AI Brain synced across ${brain.calibration.totalTrades} trades (${brain.calibration.reviewedTrades} autopsies).`
+      : "AI Brain is active — every plan and autopsy sharpens its personal accuracy.");
 
   const subline =
     sortedSuggestions.length > 0
@@ -551,13 +577,136 @@ export function analyzePreTradeThought(
     setupInsight,
     emotionInsight,
     clarityScore,
+    thoughtAnalysis: {
+      hasTrigger,
+      hasInvalidation,
+      hasPatienceGuard,
+      badge,
+      tone,
+      insight: thoughtInsight,
+    },
+  };
+}
+
+/**
+ * Analyzes pre-trade thoughts (`plans` + `entry.notes`) across a Weekly or Monthly review window
+ * so Weekly and Monthly Reviews surface AI Thought insights alongside setup & mistake metrics.
+ */
+export function analyzePeriodThoughts(
+  entries: JournalEntry[],
+  plans: TradePlan[],
+  startDate: string,
+  endDate: string,
+): PeriodThoughtAnalysis {
+  const periodEntries = entries.filter((e) => e.date >= startDate && e.date <= endDate);
+  const periodPlans = plans.filter((p) => p.date >= startDate && p.date <= endDate);
+  const planById = new Map(plans.map((p) => [p.id, p]));
+
+  const planForEntry = (e: JournalEntry): TradePlan | undefined =>
+    (e.planId ? planById.get(e.planId) : undefined) ??
+    periodPlans.find((p) => p.linkedTradeId === e.id) ??
+    periodPlans.find((p) => p.date === e.date);
+
+  const plannedList: JournalEntry[] = [];
+  const unplannedList: JournalEntry[] = [];
+  let ifThenCount = 0;
+  let watchPreventedCount = 0;
+
+  const themeCounts = new Map<string, number>([
+    ["Liquidity sweep & 5m close", 0],
+    ["SMT divergence confirmation", 0],
+    ["Patience in chop / open", 0],
+    ["Strict invalidation & stop respect", 0],
+  ]);
+
+  const sampleThoughts: { date: string; text: string; pnl: number | null }[] = [];
+
+  for (const p of periodPlans) {
+    const raw = [p.whatCouldBreakPlan, p.preSessionProcess, p.drawOnLiquidity, p.invalidation, p.thesis]
+      .filter(Boolean)
+      .join(" · ")
+      .trim();
+    if (!raw) continue;
+    if (/\b(if|when|→|->)\b/i.test(raw)) ifThenCount++;
+    if (/\b(sweep|liquidity|5m|close)\b/i.test(raw)) themeCounts.set("Liquidity sweep & 5m close", (themeCounts.get("Liquidity sweep & 5m close") ?? 0) + 1);
+    if (/\b(smt|divergence)\b/i.test(raw)) themeCounts.set("SMT divergence confirmation", (themeCounts.get("SMT divergence confirmation") ?? 0) + 1);
+    if (/\b(chop|sit\s+on\s+hands|wait|patience)\b/i.test(raw)) themeCounts.set("Patience in chop / open", (themeCounts.get("Patience in chop / open") ?? 0) + 1);
+    if (/\b(invalid|cut|stop|sl|revenge)\b/i.test(raw)) themeCounts.set("Strict invalidation & stop respect", (themeCounts.get("Strict invalidation & stop respect") ?? 0) + 1);
+
+    const linked = periodEntries.find((e) => e.planId === p.id || e.id === p.linkedTradeId || e.date === p.date);
+    const snippet = (p.whatCouldBreakPlan || p.preSessionProcess || p.thesis || "").trim();
+    if (snippet && sampleThoughts.length < 3) {
+      sampleThoughts.push({ date: p.date, text: snippet, pnl: linked ? linked.pnl : null });
+    }
+  }
+
+  for (const e of periodEntries) {
+    const pl = planForEntry(e);
+    const hasThought = Boolean(pl && (pl.whatCouldBreakPlan?.trim() || pl.preSessionProcess?.trim() || pl.thesis?.trim()));
+    if (hasThought) {
+      plannedList.push(e);
+      const watched = pl?.watchMistakes ?? [];
+      if (watched.length > 0) {
+        const entryMistakes = new Set(mistakeTagsOf(e).map((t) => t.key));
+        const repeated = watched.some((w) => isMistakeKey(w) && entryMistakes.has(w));
+        if (!repeated) watchPreventedCount++;
+      }
+    } else {
+      unplannedList.push(e);
+    }
+  }
+
+  const plannedWinRate = plannedList.length > 0 ? plannedList.filter((e) => e.pnl > 0).length / plannedList.length : null;
+  const unplannedWinRate = unplannedList.length > 0 ? unplannedList.filter((e) => e.pnl > 0).length / unplannedList.length : null;
+  const topThemeEntry = [...themeCounts.entries()].filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])[0];
+  const topTheme = topThemeEntry ? topThemeEntry[0] : null;
+
+  let headline = "Log pre-trade thoughts in Plan & Record";
+  let subline = "Writing one If → Then thought before entry lets the AI compare your pre-trade read against actual execution.";
+  let chipText = "Write a clear If → Then thought before every entry.";
+
+  if (plannedList.length > 0) {
+    const pWr = Math.round((plannedWinRate ?? 0) * 100);
+    if (unplannedList.length > 0 && unplannedWinRate != null) {
+      const uWr = Math.round(unplannedWinRate * 100);
+      headline = `${pWr}% win rate when pre-trade thoughts were logged (${plannedList.length}/${periodEntries.length} trades)`;
+      subline =
+        pWr >= uWr
+          ? `Planned trades outperformed unplanned trades (${pWr}% vs ${uWr}%)${topTheme ? ` · top focus: ${topTheme.toLowerCase()}` : ""}.`
+          : `Logged pre-trade thoughts on ${plannedList.length} trades (${pWr}% won)${watchPreventedCount > 0 ? ` and avoided flagged mistake traps ${watchPreventedCount}×` : ""}.`;
+      chipText = `Logged pre-trade thoughts on ${plannedList.length}/${periodEntries.length} trades (${pWr}% win rate vs ${uWr}% unplanned).`;
+    } else {
+      headline = `${plannedList.length} of ${periodEntries.length} trades backed by pre-trade thoughts (${pWr}% win rate)`;
+      subline = topTheme
+        ? `Primary pre-trade thought focus: ${topTheme}${watchPreventedCount > 0 ? ` · ${watchPreventedCount} flagged mistake traps avoided` : ""}.`
+        : `Consistent pre-trade planning across ${plannedList.length} ${plannedList.length === 1 ? "session" : "sessions"}.`;
+      chipText = `Backed ${plannedList.length}/${periodEntries.length} trades with pre-trade If → Then thoughts (${pWr}% win rate).`;
+    }
+  } else if (periodPlans.length > 0) {
+    headline = `${periodPlans.length} pre-trade ${periodPlans.length === 1 ? "thought" : "thoughts"} logged · no trades triggered`;
+    subline = topTheme ? `Focused on ${topTheme.toLowerCase()} and stayed disciplined.` : "Planned ahead and waited for A+ confirmation.";
+    chipText = `Logged ${periodPlans.length} pre-trade ${periodPlans.length === 1 ? "plan" : "plans"} and stayed patient when setups didn't trigger.`;
+  }
+
+  return {
+    totalTrades: periodEntries.length,
+    plannedTrades: plannedList.length,
+    unplannedTrades: unplannedList.length,
+    plannedWinRate,
+    unplannedWinRate,
+    ifThenCount,
+    watchPreventedCount,
+    topTheme,
+    sampleThoughts,
+    headline,
+    subline,
+    chipText,
   };
 }
 
 /**
  * Guaranteed server/local AI tagging voter (`edgebook-brain-v2`) when external LLM providers
  * are rate-limited, offline, or fail to return valid JSON.
- * Strictly grounded: only emits tags backed by verbatim quotes in `bundle.sources` or `bundle.facts`.
  */
 export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
   const scan = scanSources(bundle.sources.map((s) => ({ id: s.id, role: s.role, text: s.text })));
@@ -610,9 +759,6 @@ export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
   return groundRun("edgebook-brain-v2", { tags: rawTags.slice(0, 3), unclear: rawTags.length === 0 ? "No clear process mistake quote found." : "" }, bundle);
 }
 
-/**
- * Generates a concise 2-line mistake & recognition summary for any trade card in the Feed.
- */
 export function summarizeTradeMistakeForFeed(
   entry: JournalEntry,
   _allEntries: JournalEntry[],
