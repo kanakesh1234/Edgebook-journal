@@ -40,14 +40,14 @@ export type SectionDef = { id: string; label: string; icon: SymName };
 export const WEEKLY_SECTIONS: SectionDef[] = [
   { id: "a1", label: "Scorecard", icon: "gauge" },
   { id: "a2", label: "Session log", icon: "list" },
-  { id: "a3", label: "Edge & Thoughts", icon: "sparkles" },
-  { id: "a5", label: "3-Min Ritual", icon: "target" },
+  { id: "a3", label: "Edge & Patterns", icon: "sparkles" },
+  { id: "a5", label: "Reflection", icon: "target" },
 ];
 export const MONTHLY_SECTIONS: SectionDef[] = [
   { id: "b1", label: "Scorecard", icon: "gauge" },
-  { id: "b4", label: "Edge & Thoughts", icon: "shield" },
+  { id: "b4", label: "Edge & Checkpoint", icon: "shield" },
   { id: "b2", label: "Session log", icon: "list" },
-  { id: "b6", label: "3-Min Ritual", icon: "target" },
+  { id: "b6", label: "Reflection", icon: "target" },
 ];
 
 /**
@@ -297,7 +297,7 @@ export function Kpi({ label, value, sub, valueClass, hint, className }: { label:
   return (
     <div className={cn("min-w-0", className)} title={hint}>
       <p className="truncate text-[12px] font-medium text-muted">{label}</p>
-      <p className={cn("num mt-0.5 truncate text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink", valueClass)}>{value}</p>
+      <p className={cn("mt-0.5 truncate text-[16px] font-semibold leading-snug tracking-[-0.015em] tabular-nums text-ink", valueClass)}>{value}</p>
       {sub && <p className="mt-0.5 truncate text-[12px] text-faint">{sub}</p>}
     </div>
   );
@@ -318,7 +318,7 @@ export function StripCell({ label, value, sub, valueClass, hint }: { label: stri
   return (
     <div title={hint} className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-4 px-5 py-3 sm:flex sm:flex-col sm:items-stretch sm:gap-0 sm:px-5 sm:py-4">
       <p className="col-start-1 row-start-1 truncate text-[12px] font-medium text-muted sm:order-1">{label}</p>
-      <p className={cn("num col-start-2 row-span-2 row-start-1 truncate text-[18px] font-semibold leading-none tracking-[-0.02em] text-ink sm:order-2 sm:mt-1.5 sm:text-[21px]", valueClass)}>{value}</p>
+      <p className={cn("col-start-2 row-span-2 row-start-1 truncate text-[18px] font-semibold leading-none tracking-[-0.02em] tabular-nums text-ink sm:order-2 sm:mt-1.5 sm:text-[21px]", valueClass)}>{value}</p>
       {sub && <p className="col-start-1 row-start-2 mt-0.5 truncate text-[11.5px] text-faint sm:order-3 sm:mt-1">{sub}</p>}
     </div>
   );
@@ -340,7 +340,7 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
         <span className="block truncate text-[13.5px] font-medium text-ink">{label}</span>
         {sub && <span className="block truncate text-[11.5px] text-faint">{sub}</span>}
       </span>
-      <span className={cn("num shrink-0 text-[14.5px] font-semibold tracking-[-0.01em] text-ink", valueClass)}>{value}</span>
+      <span className={cn("shrink-0 text-[14.5px] font-semibold tracking-[-0.01em] tabular-nums text-ink", valueClass)}>{value}</span>
       {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
     </>
   );
@@ -435,7 +435,7 @@ export const Prompt = ({
         {step != null && (
           <span
             className={cn(
-              "num grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold transition-all duration-300",
+              "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold tabular-nums transition-all duration-300",
               done
                 ? "bg-profit text-white shadow-[0_4px_10px_-2px_rgb(22_163_74/0.4)]"
                 : "bg-gold/[0.15] text-gold-deep dark:text-gold",
@@ -539,7 +539,7 @@ export function LineInput({ value, onChange, placeholder, label, index }: { valu
   return (
     <label className="flex items-center gap-3 rounded-[16px] border border-line-soft bg-ink/[0.03] px-3.5 transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.045] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)]">
       {index != null && (
-        <span className="num grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-gold/[0.15] text-[12px] font-semibold text-gold-deep dark:text-gold">
+        <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-gold/[0.15] text-[12px] font-semibold tabular-nums text-gold-deep dark:text-gold">
           {index}
         </span>
       )}
@@ -674,7 +674,7 @@ export const EvidenceButton = ({ count, onClick, label }: { count: number; onCli
     onClick={onClick}
     aria-label={label}
     disabled={count === 0}
-    className="num group inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full px-2.5 text-[13px] font-semibold text-gold-deep outline-none transition-[background-color,transform] hover:bg-gold/[0.14] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-95 disabled:pointer-events-none disabled:text-faint dark:text-gold"
+    className="group inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full px-2.5 text-[13px] font-semibold tabular-nums text-gold-deep outline-none transition-[background-color,transform] hover:bg-gold/[0.14] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-95 disabled:pointer-events-none disabled:text-faint dark:text-gold"
   >
     {count}
     {count > 0 && <Sym name="arrowUpRight" className="h-3 w-3 transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px" strokeWidth={2.2} />}
@@ -691,7 +691,7 @@ export function CarriedCommitments({ title, items, done, onToggle }: { title: st
           <ReviewIconTile tile="bg-gradient-to-b from-gold-strong to-gold-deep" icon="flag" className="h-6 w-6 rounded-[7px]" />
           {title}
         </p>
-        <span className="num shrink-0 whitespace-nowrap text-[12.5px] font-medium text-muted" aria-live="polite">
+        <span className="shrink-0 whitespace-nowrap text-[12.5px] font-medium tabular-nums text-muted" aria-live="polite">
           {kept} of {items.length} kept
         </span>
       </div>

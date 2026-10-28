@@ -84,6 +84,8 @@ export function useReviewNotes(kind: ReviewKind, key: string) {
   const dirty = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const target = useRef({ kind, key });
+  /** Timestamp of the last save we initiated (so we can ignore our own write echoing back from Drive). */
+  const lastSavedAt = useRef(0);
   target.current = { kind, key };
 
   const flush = useCallback(async () => {
@@ -91,7 +93,9 @@ export function useReviewNotes(kind: ReviewKind, key: string) {
     if (!dirty.current) return;
     dirty.current = false;
     const { kind: k, key: kk } = target.current;
-    const snapshot = { ...latest.current, updatedAt: Date.now() };
+    const now = Date.now();
+    const snapshot = { ...latest.current, updatedAt: now };
+    lastSavedAt.current = now;
     const cur: ReviewStore = useApp.getState().settings.reviews ?? { weekly: {}, monthly: {} };
     const next: ReviewStore = { ...cur, [k]: { ...cur[k], [kk]: snapshot } };
     setState("saving");
@@ -105,12 +109,21 @@ export function useReviewNotes(kind: ReviewKind, key: string) {
   // Load the period's saved notes when it changes (flushing the previous period first).
   useEffect(() => {
     const fresh = norm(useApp.getState().settings.reviews?.[kind]?.[key]);
-    latest.current = fresh; dirty.current = false; setNotes(fresh); setState("idle");
+    latest.current = fresh; dirty.current = false; lastSavedAt.current = 0; setNotes(fresh); setState("idle");
     return () => { void flush(); };
   }, [kind, key, flush]);
 
-  // Another surface changed this period's notes and we have nothing unsaved — adopt them.
-  useEffect(() => { if (!dirty.current && stored) { const n = norm(stored); latest.current = n; setNotes(n); } }, [stored]);
+  // Another surface changed this period's notes and we have nothing unsaved — adopt them,
+  // but only if the incoming data is actually newer than what we last saved. This prevents
+  // Drive read-back from overwriting the user's local edits after a save completes.
+  useEffect(() => {
+    if (dirty.current || !stored) return;
+    const incomingTs = stored.updatedAt ?? 0;
+    if (incomingTs <= lastSavedAt.current) return; // Our own write echoing back — ignore
+    const n = norm(stored);
+    latest.current = n;
+    setNotes(n);
+  }, [stored]);
 
   useEffect(() => {
     const hide = () => { if (document.visibilityState === "hidden") void flush(); };

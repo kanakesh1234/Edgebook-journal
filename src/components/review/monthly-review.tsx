@@ -108,14 +108,13 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
       <SectionReveal index={1}>
         <Section
           id="b1"
-          code="B.1"
           icon="gauge"
           title="Scorecard"
           aside={
             <div className="flex items-center gap-2.5">
               {m.balance != null && (
                 <Chip>
-                  Balance <b className="num font-semibold text-ink">{money(m.balance)}</b>
+                  Balance <b className="font-semibold tabular-nums text-ink">{money(m.balance)}</b>
                 </Chip>
               )}
               <SaveIndicator state={rn.state} />
@@ -125,30 +124,28 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           <Card pad={false} className="overflow-hidden">
             <div className="flex flex-wrap items-end justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6">
               <div>
-                <p className="text-[12.5px] font-medium text-muted">Net monthly P&amp;L</p>
-                <p className={cn("num mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] sm:text-[50px]", tone(t.net))}>
+                <p className="text-[12.5px] font-medium text-muted">Net P&amp;L</p>
+                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[50px]", tone(t.net))}>
                   <AnimatedNumber value={t.net} format={signed} />
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
-                  {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L` : "No trades logged"}
+                  {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L` : "No trades"}
                 </Chip>
               </div>
             </div>
 
             <StatStrip count={5} className="border-t border-line-soft">
-              <StripCell label="Win rate" value={fmtPct(t.winRate)} sub={t.trades ? `${t.winners} of ${t.trades} won` : "No trades"} />
+              <StripCell label="Win rate" value={fmtPct(t.winRate)} sub={t.trades ? `${t.winners}/${t.trades}` : "—"} />
               <StripCell
                 label="Profit factor"
                 value={t.profitFactor == null ? "—" : t.profitFactor.toFixed(2)}
                 valueClass={t.profitFactor == null ? undefined : t.profitFactor >= 1 ? "text-profit" : "text-loss"}
-                sub={t.profitFactor == null ? (t.trades ? "No losing trades" : "No trades") : "Gross win ÷ loss"}
               />
               <StripCell
                 label="Avg R:R"
                 value={t.realizedRR == null ? fmtR(t.avgRR) : `${t.realizedRR.toFixed(2)}R`}
-                sub={t.realizedRR != null ? "Realized avg" : t.avgRR != null ? "Recorded avg" : "None recorded"}
               />
               <StripCell
                 label="Sessions"
@@ -158,73 +155,70 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                     <span className="text-[0.72em] font-medium text-faint"> / {m.tradingDays}</span>
                   </>
                 }
-                sub={`${m.noSetupDays} sat on hands`}
+                sub={m.noSetupDays ? `${m.noSetupDays} patience` : undefined}
               />
-              <StripCell label="Process grade" value={m.avgGrade ?? "—"} sub={m.avgGrade ? "Month average" : "No grades yet"} />
+              <StripCell label="Grade" value={m.avgGrade ?? "—"} sub={m.avgGrade ? "Avg" : undefined} />
             </StatStrip>
           </Card>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <Group title="Trade extremes">
-              <StatRow label="Avg winning trade" value={t.avgWin == null ? "—" : signed(t.avgWin)} valueClass={t.avgWin ? "text-profit" : undefined} />
-              <StatRow label="Avg losing trade" value={t.avgLoss == null ? "—" : signed(-t.avgLoss)} valueClass={t.avgLoss ? "text-loss" : undefined} />
-              <StatRow label="Largest win" value={t.largestWin == null ? "—" : signed(t.largestWin)} valueClass={t.largestWin ? "text-profit" : undefined} />
-              <StatRow label="Largest loss" value={t.largestLoss == null ? "—" : signed(t.largestLoss)} valueClass={t.largestLoss ? "text-loss" : undefined} />
+            <Group title="Extremes">
+              <StatRow label="Avg win" value={t.avgWin == null ? "—" : signed(t.avgWin)} valueClass={t.avgWin ? "text-profit" : undefined} />
+              <StatRow label="Avg loss" value={t.avgLoss == null ? "—" : signed(-t.avgLoss)} valueClass={t.avgLoss ? "text-loss" : undefined} />
+              <StatRow label="Best trade" value={t.largestWin == null ? "—" : signed(t.largestWin)} valueClass={t.largestWin ? "text-profit" : undefined} />
+              <StatRow label="Worst trade" value={t.largestLoss == null ? "—" : signed(t.largestLoss)} valueClass={t.largestLoss ? "text-loss" : undefined} />
             </Group>
 
             <Group title="Weeks & streaks">
               <StatRow
                 label="Best week"
-                sub={m.bestWeek ? `Wk ${m.bestWeek.label} · ${weekLabel(m.bestWeek.monday)}` : undefined}
+                sub={m.bestWeek ? weekLabel(m.bestWeek.monday) : undefined}
                 value={m.bestWeek ? signed(m.bestWeek.net) : "—"}
                 valueClass={m.bestWeek ? tone(m.bestWeek.net) : undefined}
                 onClick={m.bestWeek && actions.openWeek ? () => actions.openWeek!(m.bestWeek!.monday) : undefined}
-                hint="Open this week's review"
               />
               <StatRow
                 label="Hardest week"
-                sub={hardest ? `Wk ${hardest.label} · ${weekLabel(hardest.monday)}` : undefined}
+                sub={hardest ? weekLabel(hardest.monday) : undefined}
                 value={hardest ? signed(hardest.net) : "—"}
                 valueClass={hardest ? tone(hardest.net) : undefined}
                 onClick={hardest && actions.openWeek ? () => actions.openWeek!(hardest.monday) : undefined}
-                hint="Open this week's review"
               />
               <StatRow
-                label="Best winning streak"
+                label="Best streak"
                 sub={bestStreak ? `${bestStreak.length} sessions` : undefined}
                 value={bestStreak ? signed(bestStreak.pnl) : "—"}
                 valueClass={bestStreak ? "text-profit" : undefined}
               />
               <StatRow
-                label="Deepest drawdown"
+                label="Max drawdown"
                 sub={maxDrawdown ? formatDateMedium(maxDrawdown.date) : undefined}
                 value={maxDrawdown ? signed(-maxDrawdown.depth) : "—"}
                 valueClass={maxDrawdown ? "text-loss" : undefined}
               />
             </Group>
 
-            <Group title="Prop & discipline">
+            <Group title="Discipline">
               <StatRow
                 label="Profit target"
-                sub={p.target != null ? `Target ${money(p.target)}` : "No target set"}
+                sub={p.target != null ? `Target ${money(p.target)}` : undefined}
                 value={p.achieved == null ? "—" : money(p.achieved)}
                 valueClass={p.target != null && p.achieved != null && p.achieved >= p.target ? "text-profit" : undefined}
               />
               <StatRow
-                label="Max drawdown used"
-                sub={p.maxDrawdown != null ? `Allowance ${money(p.maxDrawdown)}` : "No limit set"}
+                label="Drawdown used"
+                sub={p.maxDrawdown != null ? `Max ${money(p.maxDrawdown)}` : undefined}
                 value={p.drawdownUsed == null ? "—" : money(p.drawdownUsed)}
                 valueClass={p.drawdownBreached ? "text-loss" : undefined}
               />
               <StatRow
-                label="Daily loss breaches"
-                sub={p.dailyLossLimit != null ? `Limit ${money(p.dailyLossLimit)}/day` : "No daily limit"}
+                label="Daily breaches"
+                sub={p.dailyLossLimit != null ? `${money(p.dailyLossLimit)}/day` : undefined}
                 value={p.dailyLossBreaches == null ? "—" : `${p.dailyLossBreaches}×`}
                 valueClass={p.dailyLossBreaches ? "text-loss" : p.dailyLossBreaches === 0 ? "text-profit" : undefined}
               />
               <StatRow
                 label="Forced trades"
-                sub="Over daily limit or flagged"
                 value={m.forcedTrades}
                 valueClass={m.forcedTrades ? "text-loss" : undefined}
               />
@@ -233,13 +227,12 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 2 — Edge, Thoughts & Checkpoint */}
+      {/* 2 — Edge & Checkpoint */}
       <SectionReveal index={2}>
         <Section
           id="b4"
-          code="B.4"
           icon="shield"
-          title="Edge, Thoughts &amp; Checkpoint"
+          title="Edge &amp; Checkpoint"
           aside={
             <Chip tone={p.status === "pass" ? "good" : p.status === "fail" ? "bad" : "gold"}>
               {{ pass: "Passed", fail: "Failed", "in-progress": "In progress", none: "No target set" }[p.status]}
@@ -290,7 +283,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                         {d.yes == null ? "—" : d.yes ? "Yes" : "No"}
                       </Chip>
                     </div>
-                    <p className="num mt-1 text-[14.5px] font-semibold text-ink">{d.detail}</p>
+                    <p className="mt-1 text-[14.5px] font-semibold tabular-nums text-ink">{d.detail}</p>
                   </div>
                 ))}
               </div>
@@ -306,7 +299,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                 }}
                 className="flex w-full items-center justify-between py-0.5 text-left text-[13px] font-medium text-muted outline-none transition-colors hover:text-ink"
               >
-                <span>{matrixOpen ? "Hide criteria & mistake breakdown" : "Show criteria & mistake breakdown"}</span>
+                <span>{matrixOpen ? "Hide breakdown" : "Show breakdown"}</span>
                 <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", matrixOpen && "rotate-180")} strokeWidth={2} />
               </button>
             </div>
@@ -323,7 +316,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                 >
                   {m.heatmap.length > 0 && (
                     <div className="px-3 pb-3 pt-4">
-                      <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Setup Criteria by Week</p>
+                      <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Criteria by Week</p>
                       <TableShell min={Math.max(520, 240 + m.weeks.length * 88)}>
                         <thead>
                           <tr>
@@ -363,7 +356,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                   )}
 
                   <div className="border-t border-line-soft px-3 pb-3 pt-4">
-                    <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Psychological Patterns &amp; Cost</p>
+                    <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Patterns &amp; Cost</p>
                     <TableShell min={520}>
                       <thead>
                         <tr>
@@ -381,12 +374,12 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                             </Td>
                             <Td className="text-right">
                               {r.manual ? (
-                                <span className="num font-semibold text-ink">{r.total}</span>
+                            <span className="font-semibold tabular-nums text-ink">{r.total}</span>
                               ) : (
                                 <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />
                               )}
                             </Td>
-                            <Td className={cn("num pr-4 text-right font-semibold", r.lost ? "text-loss" : "text-faint")}>
+                            <Td className={cn("pr-4 text-right font-semibold tabular-nums", r.lost ? "text-loss" : "text-faint")}>
                               {r.key === "correct" || r.manual ? "—" : r.lost ? signed(-r.lost) : "—"}
                             </Td>
                           </tr>
@@ -403,10 +396,10 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
 
       {/* 3 — Session Log */}
       <SectionReveal index={3}>
-        <Section id="b2" code="B.2" icon="list" title="Session log" hint="Every trade this month. Tap any row to open its full journal entry.">
+        <Section id="b2" icon="list" title="Session log">
           {m.log.length === 0 ? (
             <Card>
-              <p className="text-[14px] text-muted">No trades logged in {monthTitle(month)}.</p>
+              <p className="text-[14px] text-muted">No trades in {monthTitle(month)}.</p>
             </Card>
           ) : (
             <Card pad={false} className="overflow-hidden">
@@ -422,14 +415,14 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                       className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
                     >
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
-                        <span className="num w-6 shrink-0 text-[12px] text-faint">#{r.n}</span>
-                        <span className="num w-24 shrink-0 text-[13.5px] font-medium text-ink">{formatDateMedium(r.entry.date)}</span>
+                        <span className="w-6 shrink-0 text-[12px] tabular-nums text-faint">#{r.n}</span>
+                        <span className="w-24 shrink-0 text-[13.5px] font-medium tabular-nums text-ink">{formatDateMedium(r.entry.date)}</span>
                         <DirTag dir={r.entry.direction ?? null} />
                         {r.entry.instrument && r.entry.instrument !== "—" && (
                           <span className="text-[13px] font-medium text-ink">{r.entry.instrument}</span>
                         )}
                         {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
-                        {r.criteria && <span className="num text-[12px] text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
+                        {r.criteria && <span className="text-[12px] tabular-nums text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
                         {r.primary !== "—" && (
                           <span className={cn("hidden items-center gap-1.5 text-[12px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
                             <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
@@ -438,8 +431,8 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-3.5">
-                        {r.entry.rr != null && <span className={cn("num hidden text-[12.5px] font-medium sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
-                        <span className={cn("num min-w-[68px] text-right text-[14px] font-semibold", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
+                        {r.entry.rr != null && <span className={cn("hidden text-[12.5px] font-medium tabular-nums sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
+                        <span className={cn("min-w-[68px] text-right text-[14px] font-semibold tabular-nums", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
                         <GradeBadge grade={r.grade} />
                       </div>
                     </button>
@@ -466,17 +459,16 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 4 — 3-Minute Monthly Check-In (Pure active recall, revealed one by one with delayed smooth animations) */}
+      {/* 4 — Reflection */}
       <SectionReveal index={4}>
         <Section
           id="b6"
-          code="B.6"
           icon="target"
-          title="3-Minute Monthly Check-In"
+          title="Reflection"
           aside={
             <Chip tone={completedQuestions === 3 ? "good" : "gold"}>
               {completedQuestions === 3 ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3" />}
-              {completedQuestions}/3 complete
+              {completedQuestions}/3
             </Chip>
           }
         >
@@ -485,16 +477,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               step={1}
               done={q1Reveal.settled && wonVal.trim().length > 0}
               typing={q1Reveal.typing}
-              q="What was your #1 A+ edge this month?"
-              hint="Write in your own words the setup or habit worth repeating."
+              q="What was your #1 edge?"
             >
               <AutoText
-                label="Biggest reason I won"
+                label="Biggest edge"
                 minRows={2}
                 value={wonVal}
                 onChange={(v) => rn.setText("won", v)}
                 onChipSelect={q1Reveal.triggerChipSettle}
-                placeholder="Write the setup, criterion, or habit that paid you most…"
+                placeholder="The setup or habit worth repeating…"
               />
             </Prompt>
 
@@ -505,16 +496,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                     step={2}
                     done={q2Reveal.settled && lostVal.trim().length > 0}
                     typing={q2Reveal.typing}
-                    q="What single leak hurt your results the most?"
-                    hint="Write down the primary mistake or drawdown trigger to eliminate."
+                    q="Biggest leak?"
                   >
                     <AutoText
-                      label="Biggest reason I lost"
+                      label="Biggest leak"
                       minRows={2}
                       value={lostVal}
                       onChange={(v) => rn.setText("lost", v)}
                       onChipSelect={q2Reveal.triggerChipSettle}
-                      placeholder="Write what cost focus or P&L this month…"
+                      placeholder="What cost focus or P&L this month…"
                     />
                   </Prompt>
                 </QuestionReveal>
@@ -527,33 +517,32 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                   <Prompt
                     step={3}
                     done={commit0.trim().length > 0}
-                    q="What is your ONE measurable rule for next month?"
-                    hint="Write one concrete commitment for the month ahead."
+                    q="ONE rule for next month?"
                   >
                     <div className="space-y-3">
                       <LineInput
                         index={1}
-                        label="Primary commitment for next month"
+                        label="Rule for next month"
                         value={commit0}
                         onChange={(v) => rn.setListItem("commitments", 0, v)}
-                        placeholder="Write your #1 rule for next month…"
+                        placeholder="Your #1 rule…"
                       />
 
                       {moreRules || commit1.trim().length > 0 || commit2.trim().length > 0 ? (
                         <div className="space-y-2.5 pt-1">
                           <LineInput
                             index={2}
-                            label="Commitment 2 (optional)"
+                            label="Rule 2"
                             value={commit1}
                             onChange={(v) => rn.setListItem("commitments", 1, v)}
-                            placeholder="Optional second rule…"
+                            placeholder="Optional…"
                           />
                           <LineInput
                             index={3}
-                            label="Commitment 3 (optional)"
+                            label="Rule 3"
                             value={commit2}
                             onChange={(v) => rn.setListItem("commitments", 2, v)}
-                            placeholder="Optional third rule…"
+                            placeholder="Optional…"
                           />
                         </div>
                       ) : (
@@ -565,7 +554,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                           }}
                           className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted transition-colors hover:text-ink"
                         >
-                          <span>+ Add another rule (optional)</span>
+                          <span>+ Add more</span>
                         </button>
                       )}
                     </div>
@@ -582,7 +571,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
 
 function Cell({ rate, n, delay, reduce, strong, onClick }: { rate: number | null; n: number; delay: number; reduce: boolean; strong?: boolean; onClick?: () => void }) {
   const body = n === 0 ? "·" : <>{fmtPct(rate)}<span className="ml-1 text-[10px] font-medium opacity-60">n={n}</span></>;
-  const cls = cn("num inline-block min-w-[68px] rounded-[9px] px-2 py-1 text-center text-[12px] font-semibold", heat(rate, n), strong && n > 0 && "ring-1 ring-inset ring-current/25");
+  const cls = cn("inline-block min-w-[68px] rounded-[9px] px-2 py-1 text-center text-[12px] font-semibold tabular-nums", heat(rate, n), strong && n > 0 && "ring-1 ring-inset ring-current/25");
   return (
     <motion.span initial={reduce ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay, type: "spring", stiffness: 420, damping: 32 }} className="inline-block" title={n ? `${n} trade${n === 1 ? "" : "s"} with this criterion` : "Not present"}>
       {onClick && n > 0 ? (

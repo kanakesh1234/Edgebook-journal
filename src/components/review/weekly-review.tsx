@@ -117,14 +117,13 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
       <SectionReveal index={1}>
         <Section
           id="a1"
-          code="A.1"
           icon="gauge"
           title="Scorecard"
           aside={
             <div className="flex items-center gap-2.5">
               {week.balance != null && (
                 <Chip>
-                  Balance <b className="num font-semibold text-ink">{money(week.balance)}</b>
+                  Balance <b className="font-semibold tabular-nums text-ink">{money(week.balance)}</b>
                 </Chip>
               )}
               <SaveIndicator state={rn.state} />
@@ -135,13 +134,13 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             <div className="flex flex-wrap items-end justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6">
               <div>
                 <p className="text-[12.5px] font-medium text-muted">Net P&amp;L</p>
-                <p className={cn("num mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] sm:text-[50px]", tone(t.net))}>
+                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[50px]", tone(t.net))}>
                   <AnimatedNumber value={t.net} format={signed} />
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
-                  {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L${t.breakevens ? ` · ${t.breakevens}BE` : ""}` : "No trades logged"}
+                  {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L${t.breakevens ? ` · ${t.breakevens}BE` : ""}` : "No trades"}
                 </Chip>
                 {week.isCurrent && (
                   <Chip tone="info">
@@ -153,8 +152,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             </div>
 
             <StatStrip count={5} className="border-t border-line-soft">
-              <StripCell label="Win rate" value={fmtPct(t.winRate)} sub={t.trades ? `${t.winners} of ${t.trades} won` : "No trades"} />
-              <StripCell label="Avg R:R" value={fmtR(t.avgRR)} valueClass={tone(t.avgRR)} sub={t.avgRR == null ? "None recorded" : "Per trade"} />
+              <StripCell label="Win rate" value={fmtPct(t.winRate)} sub={t.trades ? `${t.winners}/${t.trades}` : "—"} />
+              <StripCell label="Avg R:R" value={fmtR(t.avgRR)} valueClass={tone(t.avgRR)} />
               <StripCell
                 label="Sessions"
                 value={
@@ -163,22 +162,22 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                     <span className="text-[0.72em] font-medium text-faint"> / {week.tradingSlots}</span>
                   </>
                 }
-                sub={week.tradingSlots < 5 ? `${5 - week.tradingSlots} holiday` : "Trading days"}
+                sub={week.tradingSlots < 5 ? `${5 - week.tradingSlots} holiday` : undefined}
               />
               <StripCell label="Patience" value={week.noSetupDays} sub="Sat on hands" />
-              <StripCell label="Process grade" value={week.avgGrade ?? "—"} sub={week.avgGrade ? "Week average" : "No grades yet"} />
+              <StripCell label="Grade" value={week.avgGrade ?? "—"} sub={week.avgGrade ? "Avg" : undefined} />
             </StatStrip>
           </Card>
         </Section>
       </SectionReveal>
 
-      {/* 2 — Session log (Clean Apple inset row list matching Monthly Review) */}
+      {/* 2 — Session log */}
       <SectionReveal index={2}>
-        <Section id="a2" code="A.2" icon="list" title="Session log" hint="Every trade this week. Tap any row to open its full journal entry.">
+        <Section id="a2" icon="list" title="Session log">
           {week.log.length === 0 ? (
             <Card>
               <p className="text-[14px] text-muted">
-                No trades logged during {weekLabel(monday)}.{week.noSetupDays > 0 ? ` Sat on hands for ${week.noSetupDays} ${week.noSetupDays === 1 ? "session" : "sessions"}.` : ""}
+                No trades this week.{week.noSetupDays > 0 ? ` Sat on hands ${week.noSetupDays} ${week.noSetupDays === 1 ? "session" : "sessions"}.` : ""}
               </p>
             </Card>
           ) : (
@@ -195,8 +194,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                       className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
                     >
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
-                        <span className="num w-6 shrink-0 text-[12px] text-faint">#{r.n}</span>
-                        <span className="num w-28 shrink-0 text-[13.5px] font-medium text-ink">
+                        <span className="w-6 shrink-0 text-[12px] tabular-nums text-faint">#{r.n}</span>
+                        <span className="w-28 shrink-0 text-[13.5px] font-medium tabular-nums text-ink">
                           {weekdayShort(r.entry.date)}, {formatDateMedium(r.entry.date)}
                         </span>
                         <DirTag dir={r.entry.direction ?? null} />
@@ -204,7 +203,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                           <span className="text-[13px] font-medium text-ink">{r.entry.instrument}</span>
                         )}
                         {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
-                        {r.criteria && <span className="num text-[12px] text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
+                        {r.criteria && <span className="text-[12px] tabular-nums text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
                         {r.primary !== "—" && (
                           <span className={cn("hidden items-center gap-1.5 text-[12px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
                             <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
@@ -213,8 +212,8 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-3.5">
-                        {r.entry.rr != null && <span className={cn("num hidden text-[12.5px] font-medium sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
-                        <span className={cn("num min-w-[68px] text-right text-[14px] font-semibold", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
+                        {r.entry.rr != null && <span className={cn("hidden text-[12.5px] font-medium tabular-nums sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
+                        <span className={cn("min-w-[68px] text-right text-[14px] font-semibold tabular-nums", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
                         <GradeBadge grade={r.grade} />
                       </div>
                     </button>
@@ -240,17 +239,17 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
 
               <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5 border-t border-line-soft bg-ink/[0.02] px-5 py-3 text-[13px] sm:px-6">
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-                  <span className="font-semibold text-ink">Week total</span>
+                  <span className="font-semibold text-ink">Total</span>
                   <span className="text-muted">
-                    Avg R:R <b className={cn("num ml-1 font-semibold", tone(t.avgRR))}>{fmtR(t.avgRR)}</b>
+                    R:R <b className={cn("ml-1 font-semibold tabular-nums", tone(t.avgRR))}>{fmtR(t.avgRR)}</b>
                   </span>
                   <span className="text-muted">
-                    Net P&amp;L <b className={cn("num ml-1 font-semibold", tone(t.net))}>{signed(t.net)}</b>
+                    P&amp;L <b className={cn("ml-1 font-semibold tabular-nums", tone(t.net))}>{signed(t.net)}</b>
                   </span>
                 </div>
                 {week.noSetupDays > 0 && (
                   <span className="text-[12px] font-medium text-muted">
-                    {week.noSetupDays} {week.noSetupDays === 1 ? "day" : "days"} sat on hands
+                    {week.noSetupDays} {week.noSetupDays === 1 ? "day" : "days"} patience
                   </span>
                 )}
               </div>
@@ -259,9 +258,9 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 3 — Edge, Thoughts & Patterns */}
+      {/* 3 — Edge & Patterns */}
       <SectionReveal index={3}>
-        <Section id="a3" code="A.3" icon="sparkles" title="Edge, Thoughts &amp; Patterns">
+        <Section id="a3" icon="sparkles" title="Edge &amp; Patterns">
           <Card pad={false} className="overflow-hidden">
             <div className="grid divide-y divide-line-soft sm:grid-cols-3 sm:divide-x sm:divide-y-0">
               <div className="flex items-start gap-3 p-5">
@@ -299,13 +298,13 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             {thoughtAnalysis.sampleThoughts.length > 0 && (
               <div className="border-t border-line-soft bg-ink/[0.015] px-5 py-3.5 sm:px-6">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-faint">Pre-trade thoughts</span>
+                  <span className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-faint">Thoughts</span>
                   {thoughtAnalysis.sampleThoughts.map((st, idx) => (
                     <span key={idx} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[12px] text-ink">
-                      <span className="num font-medium text-muted">{weekdayShort(st.date)}:</span>
+                      <span className="tabular-nums font-medium text-muted">{weekdayShort(st.date)}:</span>
                       <span className="truncate">{st.text}</span>
                       {st.pnl != null && (
-                        <span className={cn("num font-semibold", tone(st.pnl))}>{signed(st.pnl)}</span>
+                        <span className={cn("font-semibold tabular-nums", tone(st.pnl))}>{signed(st.pnl)}</span>
                       )}
                     </span>
                   ))}
@@ -323,7 +322,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 }}
                 className="flex w-full items-center justify-between py-0.5 text-left text-[13px] font-medium text-muted outline-none transition-colors hover:text-ink"
               >
-                <span>{matrixOpen ? "Hide criteria & pattern breakdown" : "Show criteria & pattern breakdown"}</span>
+                <span>{matrixOpen ? "Hide breakdown" : "Show breakdown"}</span>
                 <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", matrixOpen && "rotate-180")} strokeWidth={2} />
               </button>
             </div>
@@ -340,7 +339,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 >
                   {week.criteria.length > 0 && (
                     <div className="px-3 pb-3 pt-4">
-                      <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Setup Criteria Win Rates</p>
+                      <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Criteria Win Rates</p>
                       <TableShell min={520}>
                         <thead>
                           <tr>
@@ -355,13 +354,13 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                           {week.criteria.map((c) => (
                             <tr key={c.key} className="transition-colors hover:bg-ink/[0.025]">
                               <Td className="max-w-[260px] pl-4 font-medium">{c.label}</Td>
-                              <Td className="num text-right">
+                              <Td className="text-right tabular-nums">
                                 <EvidenceButton count={c.present} label={`Open ${c.present} trades with ${c.label}`} onClick={() => actions.openIds(c.entryIds, c.label)} />
                               </Td>
-                              <Td className="num text-right text-profit">{c.wins}</Td>
-                              <Td className="num text-right text-loss">{c.losses}</Td>
+                              <Td className="text-right tabular-nums text-profit">{c.wins}</Td>
+                              <Td className="text-right tabular-nums text-loss">{c.losses}</Td>
                               <Td className="pr-4 text-right">
-                                <span className={cn("num inline-block min-w-14 rounded-full px-2.5 py-1 text-center text-[12px] font-semibold", heat(c.winRate, c.present))}>
+                                <span className={cn("inline-block min-w-14 rounded-full px-2.5 py-1 text-center text-[12px] font-semibold tabular-nums", heat(c.winRate, c.present))}>
                                   {fmtPct(c.winRate)}
                                 </span>
                               </Td>
@@ -372,7 +371,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                     </div>
                   )}
                   <div className="border-t border-line-soft px-3 pb-3 pt-4">
-                    <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Psychological Pattern Matrix</p>
+                    <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Pattern Matrix</p>
                     <TableShell min={540}>
                       <thead>
                         <tr>
@@ -423,7 +422,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                                   <Td key={d.date} className="text-center">
                                     <span
                                       className={cn(
-                                        "num inline-grid h-[24px] min-w-[24px] place-items-center rounded-[7px] px-1 text-[12px] font-semibold",
+                                        "inline-grid h-[24px] min-w-[24px] place-items-center rounded-[7px] px-1 text-[12px] font-semibold tabular-nums",
                                         n === 0 ? "text-faint" : good ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss",
                                       )}
                                     >
@@ -434,7 +433,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                               })}
                               <Td className="pr-4 text-right">
                                 {r.manual ? (
-                                  <span className={cn("num font-semibold", r.total ? "text-loss" : "text-faint")}>{r.total}</span>
+                                  <span className={cn("font-semibold tabular-nums", r.total ? "text-loss" : "text-faint")}>{r.total}</span>
                                 ) : (
                                   <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />
                                 )}
@@ -452,17 +451,16 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 4 — 3-Minute Check-In (Pure active recall, revealed one by one with delayed smooth animations) */}
+      {/* 4 — Reflection */}
       <SectionReveal index={4}>
         <Section
           id="a5"
-          code="A.5"
           icon="target"
-          title="3-Minute Check-In"
+          title="Reflection"
           aside={
             <Chip tone={completedQuestions === 3 ? "good" : "gold"}>
               {completedQuestions === 3 ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3" />}
-              {completedQuestions}/3 complete
+              {completedQuestions}/3
             </Chip>
           }
         >
@@ -471,8 +469,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
               step={1}
               done={q1Reveal.settled && workedVal.trim().length > 0}
               typing={q1Reveal.typing}
-              q="What worked best this week?"
-              hint="Write in your own words what you executed well."
+              q="What worked best?"
             >
               <AutoText
                 label="What worked best"
@@ -480,7 +477,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 value={workedVal}
                 onChange={(v) => rn.setText("worked", v)}
                 onChipSelect={q1Reveal.triggerChipSettle}
-                placeholder="Write what worked well this week…"
+                placeholder="What did you execute well this week…"
               />
             </Prompt>
 
@@ -491,16 +488,15 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                     step={2}
                     done={q2Reveal.settled && leakVal.trim().length > 0}
                     typing={q2Reveal.typing}
-                    q="What was the #1 leak to cut?"
-                    hint="Write down the single habit or error to leave behind."
+                    q="#1 leak to cut?"
                   >
                     <AutoText
-                      label="Biggest leak to cut"
+                      label="Biggest leak"
                       minRows={2}
                       value={leakVal}
                       onChange={(v) => rn.setText("not-worked", v)}
                       onChipSelect={q2Reveal.triggerChipSettle}
-                      placeholder="Write the single mistake or habit that cost focus or P&L…"
+                      placeholder="The one mistake or habit to leave behind…"
                     />
                   </Prompt>
                 </QuestionReveal>
@@ -513,33 +509,32 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                   <Prompt
                     step={3}
                     done={commit0.trim().length > 0}
-                    q="What is your ONE rule for Monday?"
-                    hint="Write one concrete rule you will follow next week."
+                    q="ONE rule for Monday?"
                   >
                     <div className="space-y-3">
                       <LineInput
                         index={1}
-                        label="Primary rule for next week"
+                        label="Rule for next week"
                         value={commit0}
                         onChange={(v) => rn.setListItem("commitments", 0, v)}
-                        placeholder="Write your #1 rule for Monday…"
+                        placeholder="Your #1 rule for Monday…"
                       />
 
                       {moreCommitments || commit1.trim().length > 0 || commit2.trim().length > 0 ? (
                         <div className="space-y-2.5 pt-1">
                           <LineInput
                             index={2}
-                            label="Commitment 2 (optional)"
+                            label="Rule 2"
                             value={commit1}
                             onChange={(v) => rn.setListItem("commitments", 1, v)}
-                            placeholder="Optional second rule…"
+                            placeholder="Optional…"
                           />
                           <LineInput
                             index={3}
-                            label="Commitment 3 (optional)"
+                            label="Rule 3"
                             value={commit2}
                             onChange={(v) => rn.setListItem("commitments", 2, v)}
-                            placeholder="Optional third rule…"
+                            placeholder="Optional…"
                           />
                         </div>
                       ) : (
@@ -551,7 +546,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                           }}
                           className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted transition-colors hover:text-ink"
                         >
-                          <span>+ Add another rule (optional)</span>
+                          <span>+ Add more</span>
                         </button>
                       )}
                     </div>
