@@ -5,6 +5,7 @@ import { useBacktest } from "@/lib/backtesting/store";
 import type { PlaybackSpeed } from "@/lib/backtesting/engine/clock";
 import { I } from "./tv-icons";
 import { useOutside } from "./tv-ui";
+import { useDraggable } from "./use-draggable";
 
 const SPEEDS: PlaybackSpeed[] = [0.25, 0.5, 1, 2, 5, 10];
 
@@ -28,10 +29,12 @@ export default function ReplayToolbar({ shifted, onClose }: { shifted: boolean; 
   const closeSpeed = useCallback(() => setSpeedOpen(false), []);
   useOutside(ref, speedOpen, closeSpeed);
 
+  const { ref: barRef, gripProps } = useDraggable("replay");
   const finished = status === "completed" || status === "breached";
 
   return (
-    <div className={`tv-replay${shifted ? " is-shifted" : ""}`} onPointerDown={(e) => e.stopPropagation()}>
+    <div ref={barRef} className={`tv-replay${shifted ? " is-shifted" : ""}`} onPointerDown={(e) => e.stopPropagation()}>
+      <span className="tv-grip" {...gripProps} />
       <button type="button" className={`tv-tbtn${selecting ? " is-on" : ""}`} title="Jump to bar (forward only)" disabled={finished || playing} onClick={() => setSelecting(!selecting)}>
         <I name="jump" size={20} /><span>Jump to</span>
       </button>

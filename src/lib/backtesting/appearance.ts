@@ -49,7 +49,16 @@ function load() {
   loaded = true;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) snapshot = { ...DEFAULT_APPEARANCE, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<ChartAppearance>;
+      // Older builds saved the old teal/red defaults as if they were user choices; treat those as "default".
+      const OLD = new Set(["#089981", "#f23645"]);
+      for (const k of ["upColor", "downColor", "wickUp", "wickDown", "borderUp", "borderDown"] as const) {
+        const v = saved[k];
+        if (typeof v === "string" && OLD.has(v.toLowerCase())) saved[k] = null;
+      }
+      snapshot = { ...DEFAULT_APPEARANCE, ...saved };
+    }
   } catch { /* corrupt / blocked storage → defaults */ }
 }
 

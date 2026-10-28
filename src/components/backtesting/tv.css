@@ -185,7 +185,7 @@
 
 /* ---------- replay toolbar ---------- */
 .tv-replay {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 22; display: flex; align-items: center; gap: 2px;
+  position: absolute; top: 10px; left: 50%; transform: translate(calc(-50% + var(--dx, 0px)), var(--dy, 0px)); z-index: 22; display: flex; align-items: center; gap: 2px;
   padding: 4px 6px; border-radius: 8px; background: var(--tv-panel); border: 1px solid var(--tv-border); box-shadow: var(--tv-shadow);
 }
 .tv-replay.is-shifted { top: 56px; }
@@ -404,9 +404,85 @@
 
 /* ---------- panels hidden (TradingView fullscreen mode) ---------- */
 .tv-float-tools {
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 26; display: flex; align-items: center; gap: 2px;
+  position: absolute; left: 50%; bottom: 14px; transform: translate(calc(-50% + var(--dx, 0px)), var(--dy, 0px)); z-index: 26; display: flex; align-items: center; gap: 2px;
   padding: 4px 8px; border-radius: 10px; background: var(--tv-panel); border: 1px solid var(--tv-border); box-shadow: var(--tv-shadow);
   max-width: calc(100% - 16px); overflow-x: auto; scrollbar-width: none;
 }
 .tv-float-tools .tv-tbtn { height: 34px; min-width: 34px; }
 .tv-toast.tv-toast-info { left: 50%; right: auto; bottom: 74px; transform: translateX(-50%); border-color: var(--tv-border); }
+
+/* ================================================================== */
+/*  Apple-style finish: SF type, frosted glass, hairlines, soft depth,  */
+/*  spring-y press states, rounded geometry.                            */
+/* ================================================================== */
+.tv-root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter Variable", Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  --tv-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --tv-hair: color-mix(in srgb, var(--tv-text) 12%, transparent);
+  --tv-glass: color-mix(in srgb, var(--tv-panel) 78%, transparent);
+  --tv-depth: 0 0.5px 0 rgba(255,255,255,.35) inset, 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.14);
+}
+.tv-root[data-tv-theme="dark"] { --tv-depth: 0 0.5px 0 rgba(255,255,255,.08) inset, 0 1px 2px rgba(0,0,0,.3), 0 12px 34px rgba(0,0,0,.5); }
+
+/* buttons */
+.tv-tbtn, .tv-lbtn, .tv-btn, .tv-menu-item { transition: background-color .16s var(--tv-ease), color .16s var(--tv-ease), transform .14s var(--tv-ease), box-shadow .2s var(--tv-ease), filter .16s; }
+.tv-tbtn { border-radius: 9px; }
+.tv-lbtn { border-radius: 10px; }
+.tv-tbtn:active:not(:disabled), .tv-lbtn:active:not(:disabled) { transform: scale(0.93); }
+.tv-btn { border-radius: 9px; }
+.tv-btn:active:not(:disabled) { transform: scale(0.97); }
+.tv-tbtn.is-on { background: var(--tv-active-bg); }
+
+/* bars */
+.tv-top { height: 44px; padding: 0 8px; gap: 3px; border-bottom: 0.5px solid var(--tv-hair);
+  background: var(--tv-bg); /* solid on purpose: backdrop-filter here would trap the mobile position:fixed menus */ }
+.tv-top .tv-tbtn { height: 32px; }
+.tv-left { border-right: 0.5px solid var(--tv-hair); }
+.tv-range, .tv-paper { border-color: var(--tv-hair); }
+.tv-sep { width: 0.5px; background: var(--tv-hair); height: 18px; margin: 0 5px; }
+.tv-symbol { font-weight: 650; letter-spacing: -0.01em; }
+
+/* frosted floating surfaces */
+.tv-replay, .tv-float-tools, .tv-ticket, .tv-menu, .tv-modal, .tv-toast, .tv-fly, .tv-dtb {
+  background: var(--tv-glass);
+  -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px);
+  border: 0.5px solid var(--tv-hair);
+  box-shadow: var(--tv-depth);
+}
+.tv-replay, .tv-float-tools { border-radius: 16px; padding: 5px 8px; }
+.tv-menu, .tv-fly { border-radius: 13px; padding: 6px; }
+.tv-ticket, .tv-modal { border-radius: 18px; }
+.tv-toast { border-radius: 14px; }
+.tv-menu-item { border-radius: 8px; margin: 0; width: 100%; padding: 7px 10px; }
+.tv-menu-head { padding: 8px 10px 4px; letter-spacing: .06em; }
+.tv-menu-sep { background: var(--tv-hair); height: 0.5px; margin: 5px 6px; }
+.tv-modal-back { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); background: rgba(20,16,10,.32); }
+.tv-modal header, .tv-modal footer, .tv-modal section { border-color: var(--tv-hair); }
+.tv-set-tab { border-radius: 10px; }
+.tv-settings { background: color-mix(in srgb, var(--tv-panel) 94%, transparent); }
+
+/* replay play button + drag grip */
+.tv-replay .tv-play { border-radius: 11px; width: 40px; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+.tv-grip {
+  flex: none; width: 14px; height: 30px; margin-right: 2px; border-radius: 6px; cursor: grab; touch-action: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--tv-muted) 70%, transparent) 1.1px, transparent 1.4px) center / 5px 5px;
+  opacity: .65; transition: opacity .15s;
+}
+.tv-grip:hover { opacity: 1; }
+.tv-replay.is-dragging, .tv-float-tools.is-dragging { box-shadow: 0 1px 2px rgba(0,0,0,.1), 0 18px 44px rgba(0,0,0,.28); transition: none; }
+.tv-replay.is-dragging .tv-grip, .tv-float-tools.is-dragging .tv-grip { cursor: grabbing; opacity: 1; }
+.tv-float-tools .tv-tbtn.is-on { background: var(--tv-active-bg); color: var(--tv-active); }
+
+/* trade pill: rounded, calmer */
+.tv-pill { border-radius: 10px; height: 34px; box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 4px 14px rgba(0,0,0,.12); }
+.tv-pill-sell { background: #e5484d; } .tv-pill-sell:hover:not(:disabled) { background: #d23c41; }
+.tv-pill-buy { background: #2f6bff; } .tv-pill-buy:hover:not(:disabled) { background: #2559dd; }
+.tv-trade-btn, .tv-end { border-radius: 9px; }
+
+/* scrollbars: thin, quiet */
+.tv-root ::-webkit-scrollbar { width: 8px; height: 8px; }
+.tv-root ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--tv-text) 22%, transparent); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+.tv-root * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--tv-text) 22%, transparent) transparent; }
+
+@media (prefers-reduced-motion: reduce) { .tv-root * { transition: none !important; } }

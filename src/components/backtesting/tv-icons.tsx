@@ -49,6 +49,7 @@ const P: Record<string, ReactNode> = {
   undo: <><path d="M10 8L6 12l4 4" /><path d="M6 12h9a5 5 0 010 10h-3" /></>,
   redo: <><path d="M18 8l4 4-4 4" /><path d="M22 12h-9a5 5 0 000 10h3" /></>,
   indicators: <><path d="M4 19l5-6 4 3 6-9" /><path d="M4 23h20" /><circle cx="21" cy="7" r="1.6" fill="currentColor" stroke="none" /></>,
+  measure: <><rect x="4" y="9" width="20" height="10" rx="2" /><path d="M8 9v4M12 9v3M16 9v4M20 9v3" /></>,
   replay: <><path d="M12 8l-6 6 6 6V8z" fill="currentColor" stroke="none" /><path d="M21 8l-6 6 6 6V8z" fill="currentColor" stroke="none" /></>,
   alert: <><path d="M7 20h14l-2-3v-5a5 5 0 00-10 0v5z" /><path d="M12 22.5a2.2 2.2 0 004 0" /></>,
   camera: <><path d="M5 10h4l1.5-2.5h7L19 10h4v11H5z" /><circle cx="14" cy="15" r="3.5" /></>,
@@ -87,7 +88,7 @@ export function I({ name, size = 28, ...rest }: { name: keyof typeof P | string;
   return (
     <svg
       width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor"
-      strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}
     >
       {P[name] ?? null}
     </svg>
