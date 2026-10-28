@@ -15,7 +15,7 @@ export const LIMITS = {
 
 export const DEFAULT_PREFS: FeedPrefs = {
   dailyMinutes: 20,
-  autoplayReplay: false,
+  autoplayReplay: true,
   haptics: true,
   music: { enabled: false, source: "ambient-calm", volume: 0.35 },
 };
@@ -90,7 +90,7 @@ export function normalizeFeedState(raw: unknown): FeedState {
   const m = isObj(pr.music) ? pr.music : {};
   const prefs: FeedPrefs = {
     dailyMinutes: num(pr.dailyMinutes, DEFAULT_PREFS.dailyMinutes, 0, 600),
-    autoplayReplay: pr.autoplayReplay === true,
+    autoplayReplay: typeof pr.autoplayReplay === "boolean" ? pr.autoplayReplay : DEFAULT_PREFS.autoplayReplay,
     haptics: pr.haptics !== false,
     music: {
       enabled: m.enabled === true,

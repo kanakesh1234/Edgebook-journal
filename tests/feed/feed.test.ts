@@ -6,20 +6,22 @@ import {
 import { MILESTONES, awardMilestones, milestoneRows } from "../../src/lib/feed/milestones.ts";
 import { freshClock, tick, promptFor, extend, remainingMinutes, parseClock, MAX_TICK_MS, SOFT_EXTENSIONS } from "../../src/lib/feed/session.ts";
 import { buildReplayModel, frameAt, stepIdx, endIdx, progressOf, idxFromProgress, indexAtOrBefore, CONTEXT_BARS, LEAD_BARS, barDelay } from "../../src/lib/feed/replay.ts";
-import { buildFeed, cardsForKeys, diversify, daysBetween, setupStatsFor, keyExists, BATCH_SIZE } from "../../src/lib/feed/build.ts";
+import { buildFeed, cardsForKeys, diversify, daysBetween, extractVideoUrl, setupStatsFor, keyExists, BATCH_SIZE } from "../../src/lib/feed/build.ts";
 
 let n = 0;
 const t = (name: string, fn: () => void) => { fn(); n++; console.log(`  ✅ ${name}`); };
 console.log("\n=== Feed ===");
 
 /* ------------------------------- state ------------------------------- */
-t("normalize: garbage in → valid empty state", () => {
+t("normalize: garbage in → valid empty state with autoplay ON and music OFF", () => {
   for (const bad of [null, undefined, 5, "x", [], { favorites: "no", collections: 7, progress: [], prefs: 3 }]) {
     const s = normalizeFeedState(bad);
     assert.equal(s.v, 1); assert.deepEqual(s.favorites, []); assert.deepEqual(s.collections, []);
     assert.equal(s.prefs.music.enabled, false, "music must default OFF");
-    assert.equal(s.prefs.autoplayReplay, false, "autoplay must default OFF");
+    assert.equal(s.prefs.autoplayReplay, true, "autoplay must default ON for active feed items");
   }
+  const explicitOff = normalizeFeedState({ prefs: { autoplayReplay: false } });
+  assert.equal(explicitOff.prefs.autoplayReplay, false, "explicitly disabled autoplay is preserved");
 });
 t("normalize: dedupes, caps and drops malformed items", () => {
   const favorites = [...Array(LIMITS.favorites + 50).keys()].map((i) => `trade:${i}`).concat(["trade:1", 5 as never, "", "x".repeat(200)]);
@@ -244,6 +246,14 @@ t("feed: lessons — community labelled, linked-to-recent-trade boosted, read si
   const read = buildFeed(base({ entries, lessons, limit: 10, readLessons: new Set(["linked"]) })).filter((c) => c.kind === "lesson");
   assert.notEqual(read[0].key, "lesson:linked");
   assert.equal(buildFeed(base({ lessons: null })).filter((c) => c.kind === "lesson").length, 0, "lessons still loading → none, no crash");
+});
+t("feed: video extraction from lesson HTML, cover, and trade media", () => {
+  assert.equal(extractVideoUrl('<p>Intro</p><video src="/api/lessons/media?id=abc123.mp4" controls></video>'), "/api/lessons/media?id=abc123.mp4");
+  assert.equal(extractVideoUrl("<p>No video</p>", "/api/lessons/media?id=clip99.webm"), "/api/lessons/media?id=clip99.webm");
+  assert.equal(extractVideoUrl("<p>Text only</p>", "/api/lessons/media?id=img1.png"), null);
+  const lWithVid = lesson("v1", { html: '<p>Watch</p><video src="/api/lessons/media?id=vid1.mp4" controls></video>' });
+  const cards = buildFeed(base({ lessons: [lWithVid] })).filter((c) => c.kind === "lesson") as { key: string; videoUrl?: string | null }[];
+  assert.equal(cards[0].videoUrl, "/api/lessons/media?id=vid1.mp4");
 });
 t("feed: inactive setups are skipped; stats come from linked trades", () => {
   const s1 = setup("su1", "ORB"), s2 = setup("su2", "Retired", { active: false });

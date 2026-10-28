@@ -69,6 +69,32 @@ export function setupStatsFor(setup: PlaybookSetup, entries: JournalEntry[]) {
   };
 }
 
+const VIDEO_URL_RE = /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i;
+const VIDEO_TAG_RE = /<video\b[^>]*\bsrc=["']([^"']+)["']/i;
+
+/** Extracts a playable video URL from lesson HTML, cover URL, or explicit video fields when present. */
+export function extractVideoUrl(html?: string | null, cover?: string | null, direct?: string | null): string | null {
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (typeof cover === "string" && VIDEO_URL_RE.test(cover.trim())) return cover.trim();
+  if (typeof html === "string" && html) {
+    const m = VIDEO_TAG_RE.exec(html);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+function tradeVideoUrl(e: JournalEntry): string | null {
+  const direct = (e as { videoUrl?: string | null; video?: string | null }).videoUrl ?? (e as { video?: string | null }).video;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const vidImg = e.images.find((img) => VIDEO_URL_RE.test(img.name) || VIDEO_URL_RE.test(img.id));
+  return vidImg ? `/api/drive/image/${encodeURIComponent(vidImg.id)}` : null;
+}
+
+function lessonVideoUrl(l: LessonView): string | null {
+  const direct = (l as { videoUrl?: string | null; video?: string | null }).videoUrl ?? (l as { video?: string | null }).video;
+  return extractVideoUrl(l.html, l.cover, direct);
+}
+
 /* ------------------------------- scoring ------------------------------- */
 
 interface Affinity { setups: Map<string, number>; instruments: Map<string, number> }
@@ -95,23 +121,24 @@ function tradeCards(i: BuildInput, aff: Affinity): TradeCard[] {
     const plan = planJournalReplay(e, { startingBalance: i.startingBalance, currency: i.currency });
     const replayable = plan.ok && plan.mode === "trade";
     const hasImage = e.images.length > 0;
+    const videoUrl = tradeVideoUrl(e);
     const age = daysBetween(e.date, i.today);
     const key = tradeKey(e.id);
     const sAff = Math.min(1.4, (e.setupId ? aff.setups.get(e.setupId) ?? 0 : 0) * 0.35 + (aff.instruments.get(e.instrument) ?? 0) * 0.1);
 
-    let score = 2 * Math.exp(-age / 21) + (replayable ? 0.6 : 0) + (hasImage ? 0.4 : 0) + sAff;
+    let score = 2 * Math.exp(-age / 21) + (replayable ? 0.6 : 0) + (hasImage || videoUrl ? 0.4 : 0) + sAff;
     let reason = replayable ? "Replay it bar by bar" : whenLabel(e.date, i.today);
     if (sAff >= 0.35 && e.setupId && setupName.get(e.setupId)) { reason = `Because you saved ${setupName.get(e.setupId)}`; }
     else if (best && e.id === best.id) { score += 0.9; reason = "Your best trade in two weeks"; }
     else if (e.pnl < 0 && age <= 14) { score += 0.8; reason = "A recent loss, worth a second look"; }
     if (i.seen.has(key)) score -= 1.2;
     score += hash01(key + i.today) * 0.05; // stable per day
-    return { kind: "trade", key, entry: e, replayable, hasImage, reason, score };
+    return { kind: "trade", key, entry: e, replayable, hasImage, ...(videoUrl ? { videoUrl } : {}), reason, score };
   });
 
   // A trade with neither a chart nor a replay is a weak reel; keep only the freshest few so a sparse journal still has content.
-  const rich = all.filter((c) => c.replayable || c.hasImage);
-  const plain = all.filter((c) => !c.replayable && !c.hasImage).sort((a, b) => b.score - a.score).slice(0, rich.length < 4 ? 6 : 0);
+  const rich = all.filter((c) => c.replayable || c.hasImage || Boolean(c.videoUrl));
+  const plain = all.filter((c) => !c.replayable && !c.hasImage && !c.videoUrl).sort((a, b) => b.score - a.score).slice(0, rich.length < 4 ? 6 : 0);
   return [...rich, ...plain].sort((a, b) => b.score - a.score).slice(0, 60);
 }
 
@@ -137,6 +164,7 @@ function lessonCards(i: BuildInput): LessonCard[] {
   return i.lessons.map((lesson): LessonCard => {
     const key = lessonKey(lesson.id);
     const community = !lesson.mine;
+    const videoUrl = lessonVideoUrl(lesson);
     const ageDays = Math.max(0, (Date.parse(i.today + "T12:00:00Z") - lesson.createdAt) / 86_400_000);
     let score = 1.0 + 0.8 * Math.exp(-ageDays / 14);
     let reason = community ? `Shared by ${lesson.author.name}` : "From your playbook";
@@ -146,7 +174,7 @@ function lessonCards(i: BuildInput): LessonCard[] {
     if (i.readLessons.has(lesson.id)) score -= 1.0;
     if (i.seen.has(key)) score -= 1.0;
     score += hash01(key + i.today) * 0.05;
-    return { kind: "lesson", key, lesson, community, reason, score };
+    return { kind: "lesson", key, lesson, community, ...(videoUrl ? { videoUrl } : {}), reason, score };
   });
 }
 
@@ -191,13 +219,17 @@ export function cardsForKeys(i: BuildInput, keys: FeedKey[]): FeedCard[] {
     const e = trades.get(key);
     if (e) {
       const plan = planJournalReplay(e, { startingBalance: i.startingBalance, currency: i.currency });
-      out.push({ kind: "trade", key, entry: e, replayable: plan.ok && plan.mode === "trade", hasImage: e.images.length > 0, reason: "Saved by you", score: 0 });
+      const videoUrl = tradeVideoUrl(e);
+      out.push({ kind: "trade", key, entry: e, replayable: plan.ok && plan.mode === "trade", hasImage: e.images.length > 0, ...(videoUrl ? { videoUrl } : {}), reason: "Saved by you", score: 0 });
       continue;
     }
     const s = setups.get(key);
     if (s) { out.push({ kind: "setup", key, setup: s, stats: setupStatsFor(s, i.entries), reason: "Saved by you", score: 0 }); continue; }
     const l = lessons.get(key);
-    if (l) out.push({ kind: "lesson", key, lesson: l, community: !l.mine, reason: "Saved by you", score: 0 });
+    if (l) {
+      const videoUrl = lessonVideoUrl(l);
+      out.push({ kind: "lesson", key, lesson: l, community: !l.mine, ...(videoUrl ? { videoUrl } : {}), reason: "Saved by you", score: 0 });
+    }
   }
   return out;
 }

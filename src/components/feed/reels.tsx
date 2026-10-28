@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
@@ -13,12 +13,14 @@ import { useReplayTrade } from "@/components/journal/replay-trade";
 import { lessonsPost } from "@/components/lessons/api";
 import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
 import { barDelay, endIdx, frameAt, idxFromProgress, progressOf, SPEEDS, stepIdx, type Speed } from "@/lib/feed/replay";
-import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard } from "@/lib/feed/types";
+import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard, VideoCard } from "@/lib/feed/types";
 import { useFeed } from "./feed-store";
 import { useReplayData } from "./replay-chart";
 
 const ReplayChart = lazy(() => import("./replay-canvas").then((m) => ({ default: m.ReplayChart })));
-import { ArrowUpRightIcon, BookmarkPlusIcon, HeartIcon, PauseIcon, MusicIcon, PlayIcon, RestartIcon, StepIcon } from "./feed-icons";
+import {
+  ArrowUpRightIcon, BookOpenIcon, BookmarkPlusIcon, HeartIcon, PauseIcon, PlayIcon, RestartIcon, SpeakerIcon, StepIcon,
+} from "./feed-icons";
 
 export interface ReelProps<T extends FeedCard = FeedCard> {
   card: T;
@@ -32,6 +34,18 @@ export interface ReelProps<T extends FeedCard = FeedCard> {
   collected: boolean;
   onFav: () => void;
   onCollect: () => void;
+}
+
+/* -------------------------- visibility helper -------------------------- */
+
+function useDocVisible(): boolean {
+  const [visible, setVisible] = useState(() => (typeof document === "undefined" ? true : document.visibilityState === "visible"));
+  useEffect(() => {
+    const onVis = () => setVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  return visible;
 }
 
 /* ----------------------------- shared frame ----------------------------- */
@@ -60,10 +74,10 @@ function Rail({ fav, collected, onFav, onCollect, href, openLabel, onOpen }: Pic
   );
 }
 
-function Frame({ props, rail, kind, children, label }: { props: ReelProps; rail: ReactNode; kind: string; children: ReactNode; label: string }) {
+function Frame({ props, rail, kind, children, label, split }: { props: ReelProps; rail: ReactNode; kind: string; children: ReactNode; label: string; split?: boolean }) {
   return (
     <article className="fd-card" data-i={props.index} data-key={props.card.key} data-active={props.active || undefined} role="article" aria-posinset={props.index + 1} aria-setsize={props.total} aria-label={label}>
-      <div className="fd-inner" data-split={kind === "Replay" || kind === "Chart" ? "" : undefined}>
+      <div className="fd-inner" data-split={split ?? (kind === "Replay" || kind === "Chart" || kind === "Video") ? "" : undefined}>
         <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
           <p className="fd-chip" title="Why you're seeing this"><span>{props.card.reason}</span></p>
           <p className="fd-kind">{kind}</p>
@@ -79,6 +93,238 @@ const Skeleton = ({ text }: { text: string }) => (
   <div className="fd-skel absolute inset-0 grid place-items-center text-[13px]" style={{ color: "var(--faint)" }} role="status"><span>{text}</span></div>
 );
 
+/* ------------------------- Reels video player ------------------------- */
+
+export function FeedVideoPlayer({
+  src,
+  poster,
+  active,
+  near,
+  label,
+  aspect = "fill",
+}: {
+  src: string;
+  poster?: string | null;
+  active: boolean;
+  near: boolean;
+  label: string;
+  aspect?: "16:9" | "fill";
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const prefs = useFeed((s) => s.state.prefs);
+  const muted = useFeed((s) => s.videoMuted);
+  const setMuted = useFeed((s) => s.setVideoMuted);
+  const setVideoAudioActive = useFeed((s) => s.setVideoAudioActive);
+  const reduce = useReducedMotion();
+  const docVisible = useDocVisible();
+
+  const [playing, setPlaying] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [hud, setHud] = useState<"play" | "pause" | null>(null);
+  const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userPausedRef = useRef(false);
+
+  const flashHud = useCallback((state: "play" | "pause") => {
+    if (hudTimer.current) clearTimeout(hudTimer.current);
+    setHud(state);
+    hudTimer.current = setTimeout(() => setHud(null), 650);
+  }, []);
+
+  useEffect(() => () => { if (hudTimer.current) clearTimeout(hudTimer.current); }, []);
+
+  // Keep DOM muted property synced with store state
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = muted;
+  }, [muted]);
+
+  // Coordinate overlapping audio: notify store when active video is playing with sound
+  useEffect(() => {
+    const activeWithSound = active && playing && !muted && docVisible;
+    setVideoAudioActive(activeWithSound);
+    return () => { if (active) setVideoAudioActive(false); };
+  }, [active, playing, muted, docVisible, setVideoAudioActive]);
+
+  // Autoplay when active card enters viewport; pause immediately when leaving or tab hidden
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (!active || !docVisible) {
+      if (!el.paused) el.pause();
+      setPlaying(false);
+      if (!active) userPausedRef.current = false;
+      return;
+    }
+    if (!prefs.autoplayReplay || reduce || userPausedRef.current || failed) return;
+
+    let cancelled = false;
+    const startPlayback = async () => {
+      try {
+        el.muted = useFeed.getState().videoMuted;
+        await el.play();
+        if (!cancelled) setPlaying(true);
+      } catch {
+        // Browser blocked unmuted autoplay: fall back gracefully to muted playback
+        if (cancelled) return;
+        el.muted = true;
+        setMuted(true);
+        try {
+          await el.play();
+          if (!cancelled) setPlaying(true);
+        } catch {
+          if (!cancelled) setPlaying(false);
+        }
+      }
+    };
+    void startPlayback();
+    return () => {
+      cancelled = true;
+      if (!el.paused) el.pause();
+    };
+  }, [active, docVisible, prefs.autoplayReplay, reduce, failed, setMuted, src]);
+
+  const togglePlay = useCallback(() => {
+    const el = videoRef.current;
+    if (!el || failed) return;
+    if (el.paused) {
+      userPausedRef.current = false;
+      flashHud("play");
+      void el.play().then(() => setPlaying(true)).catch(() => {
+        el.muted = true;
+        setMuted(true);
+        void el.play().then(() => setPlaying(true)).catch(() => {});
+      });
+    } else {
+      userPausedRef.current = true;
+      el.pause();
+      setPlaying(false);
+      flashHud("pause");
+    }
+    if (prefs.haptics) haptic.selection();
+  }, [failed, flashHud, prefs.haptics, setMuted]);
+
+  const toggleRef = useRef(togglePlay);
+  toggleRef.current = togglePlay;
+  useEffect(() => {
+    if (!active) return;
+    const onToggle = () => toggleRef.current();
+    window.addEventListener("fd:toggle-play", onToggle);
+    return () => window.removeEventListener("fd:toggle-play", onToggle);
+  }, [active]);
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const el = videoRef.current;
+    const nextMuted = !muted;
+    setMuted(nextMuted);
+    if (el) {
+      el.muted = nextMuted;
+      if (!nextMuted && el.paused && active && !userPausedRef.current) {
+        void el.play().then(() => setPlaying(true)).catch(() => {});
+      }
+    }
+    if (prefs.haptics) haptic.selection();
+  };
+
+  return (
+    <div
+      className={cn("fd-video-wrap", aspect === "16:9" && "fd-video-wrap--16x9")}
+      onClick={togglePlay}
+      data-playing={playing || undefined}
+    >
+      {near && !failed ? (
+        <video
+          ref={videoRef}
+          className="fd-video"
+          src={src}
+          poster={poster ?? undefined}
+          playsInline
+          loop
+          muted={muted}
+          preload={active ? "auto" : "metadata"}
+          aria-label={label}
+          onLoadedData={() => setReady(true)}
+          onCanPlay={() => setReady(true)}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onError={() => setFailed(true)}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget;
+            if (v.duration > 0) setProgress(Math.min(1, Math.max(0, v.currentTime / v.duration)));
+          }}
+        />
+      ) : null}
+
+      {!ready && !failed && !poster && <Skeleton text={near ? "Loading video…" : ""} />}
+      {failed && (
+        <div className="fd-overlay-msg">
+          <p>This video couldn’t be loaded.</p>
+        </div>
+      )}
+
+      {/* Subtle play/pause feedback indicator on tap or when manually paused */}
+      {(hud || (!playing && ready && !failed)) && (
+        <div className={cn("fd-tap-hud", hud && "is-transient")} aria-hidden="true">
+          <span>{(hud ?? "pause") === "play" ? <PlayIcon /> : <PauseIcon />}</span>
+        </div>
+      )}
+
+      {/* Unobtrusive Apple-style speaker/mute icon in the corner */}
+      <button
+        type="button"
+        className="fd-mute-btn"
+        aria-pressed={!muted}
+        aria-label={muted ? "Unmute video" : "Mute video"}
+        onClick={toggleMute}
+      >
+        <SpeakerIcon muted={muted} />
+      </button>
+
+      {/* Hairline playback progress along the bottom edge */}
+      {ready && !failed && (
+        <div className="fd-video-progress" aria-hidden="true">
+          <i style={{ transform: `scaleX(${progress})` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------- video -------------------------------- */
+
+export function VideoReel(props: ReelProps<VideoCard>) {
+  const { card, active, near } = props;
+  return (
+    <Frame
+      props={props}
+      kind="Video"
+      label={`Video: ${card.title}`}
+      rail={<Rail {...props} href={card.href} openLabel="Open" />}
+    >
+      <div className="fd-media fd-media--video">
+        <FeedVideoPlayer
+          src={card.videoUrl}
+          poster={card.poster}
+          active={active}
+          near={near}
+          label={card.title}
+        />
+      </div>
+      <div className="fd-info">
+        <h3 className="fd-title">{card.title}</h3>
+        {(card.subtitle || card.author) && (
+          <p className="fd-sub fd-clamp2">
+            {[card.author, card.subtitle].filter(Boolean).join(" · ")}
+          </p>
+        )}
+      </div>
+    </Frame>
+  );
+}
+
 /* -------------------------------- trade -------------------------------- */
 
 export function TradeReel(props: ReelProps<TradeCard>) {
@@ -88,6 +334,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const money = (n: number) => formatSignedMoney(n, currency);
   const prefs = useFeed((s) => s.state.prefs);
   const reduce = useReducedMotion();
+  const docVisible = useDocVisible();
   const setReplayPlaying = useFeed((s) => s.setReplayPlaying);
   const replayDone = useFeed((s) => s.replayDone);
   const setPrefs = useFeed((s) => s.setPrefs);
@@ -102,10 +349,29 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<Speed>(1);
+  const [hud, setHud] = useState<"play" | "pause" | null>(null);
+  const hudTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const played = useRef(false);
   const reported = useRef(false);
+  const userPausedRef = useRef(false);
 
-  useEffect(() => { if (model) { setIdx(model.startIdx); setPlaying(false); played.current = false; reported.current = false; } }, [model]);
+  const flashHud = useCallback((state: "play" | "pause") => {
+    if (hudTimer.current) clearTimeout(hudTimer.current);
+    setHud(state);
+    hudTimer.current = setTimeout(() => setHud(null), 600);
+  }, []);
+
+  useEffect(() => () => { if (hudTimer.current) clearTimeout(hudTimer.current); }, []);
+
+  useEffect(() => {
+    if (model) {
+      setIdx(model.startIdx);
+      setPlaying(false);
+      played.current = false;
+      reported.current = false;
+      userPausedRef.current = false;
+    }
+  }, [model]);
 
   // playback clock
   useEffect(() => {
@@ -121,35 +387,56 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     if (played.current && idx >= model.exitIdx && !reported.current) { reported.current = true; replayDone(card.key); }
   }, [idx, model, card.key, replayDone]);
 
-  // leaving the card pauses it; music follows the active card's playback
-  useEffect(() => { if (!active) setPlaying(false); }, [active]);
+  // leaving the card or hiding the tab pauses it; music follows the active card's playback
+  useEffect(() => {
+    if (!active || !docVisible) {
+      setPlaying(false);
+      if (!active) userPausedRef.current = false;
+    }
+  }, [active, docVisible]);
+
   useEffect(() => {
     if (!active) return;
     setReplayPlaying(playing);
     return () => setReplayPlaying(false);
   }, [active, playing, setReplayPlaying]);
 
-  // optional autoplay: off unless the viewer turned it on, and never with reduced motion
+  // Automatic playback when the active replay enters the feed (unless disabled or reduced motion)
   useEffect(() => {
-    if (!active || !model || !prefs.autoplayReplay || reduce || played.current) return;
-    const t = window.setTimeout(() => { played.current = true; setPlaying(true); }, 700);
+    if (!active || !docVisible || mode !== "replay" || !model || !prefs.autoplayReplay || reduce || userPausedRef.current) return;
+    const t = window.setTimeout(() => {
+      setIdx((cur) => {
+        if (cur >= endIdx(model)) {
+          reported.current = false;
+          return model.startIdx;
+        }
+        return cur;
+      });
+      played.current = true;
+      setPlaying(true);
+    }, 320);
     return () => window.clearTimeout(t);
-  }, [active, model, prefs.autoplayReplay, reduce]);
+  }, [active, docVisible, mode, model, prefs.autoplayReplay, reduce]);
 
   const frame = model ? frameAt(model, idx) : null;
-  const togglePlay = () => {
+  const togglePlay = useCallback((fromSurface = false) => {
     if (!model) return;
     if (idx >= endIdx(model)) { setIdx(model.startIdx); reported.current = false; }
     played.current = true;
-    setPlaying((p) => !p);
+    setPlaying((p) => {
+      const next = !p;
+      userPausedRef.current = !next;
+      if (fromSurface) flashHud(next ? "play" : "pause");
+      return next;
+    });
     if (prefs.haptics) haptic.selection();
-  };
+  }, [model, idx, flashHud, prefs.haptics]);
 
   const toggleRef = useRef(togglePlay);
   toggleRef.current = togglePlay;
   useEffect(() => {
     if (!active) return;
-    const h = () => toggleRef.current();
+    const h = () => toggleRef.current(true);
     window.addEventListener("fd:toggle-play", h);
     return () => window.removeEventListener("fd:toggle-play", h);
   }, [active]);
@@ -173,35 +460,58 @@ export function TradeReel(props: ReelProps<TradeCard>) {
       : r != null ? <strong className={cn("fd-num", r >= 0 ? "fd-up" : "fd-down")}>{sign(r)}{Math.abs(r).toFixed(2)}R</strong>
       : pts != null ? <strong className={cn("fd-num", pts >= 0 ? "fd-up" : "fd-down")}>{sign(pts)}{Math.abs(pts).toFixed(2)} pts</strong>
       : null;
-    live = <div className="fd-live" aria-live="off"><small>{frame.phase === "setup" ? "Entry coming up — press play" : frame.phase === "open" ? `In the trade · ${long ? "long" : "short"}` : model?.exitEstimated ? "End of window (no exit recorded)" : "Closed"}</small>{val}</div>;
+    live = (
+      <div className="fd-live" aria-live="off">
+        <small>{frame.phase === "setup" ? (playing ? "Approaching entry…" : "Entry coming up — tap chart or play") : frame.phase === "open" ? `In the trade · ${long ? "long" : "short"}` : model?.exitEstimated ? "End of window (no exit recorded)" : "Closed"}</small>
+        {val}
+      </div>
+    );
   }
 
+  const isReplayView = mode === "replay" && card.replayable;
+
   return (
-    <Frame props={props} kind={card.replayable ? "Replay" : card.hasImage ? "Chart" : "Trade"} label={label}
+    <Frame props={props} kind={card.replayable ? "Replay" : card.videoUrl ? "Video" : card.hasImage ? "Chart" : "Trade"} label={label}
       rail={<Rail {...props} href={`/journal?trade=${encodeURIComponent(entry.id)}`} openLabel="Trade" />}>
-      {card.replayable && (
+      {both && (
         <div className="fd-row" style={{ justifyContent: "space-between", flexWrap: "nowrap", paddingRight: "3.5rem" }}>
-          {both ? (
-            <div className="fd-seg" role="tablist" aria-label="View">
-              {(["replay", "chart"] as const).map((m) => (
-                <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
-              ))}
-            </div>
-          ) : <span />}
-          {mode === "replay" && (
-            <button className="fd-iconbtn" style={{ width: "2.5rem", height: "2.5rem" }} aria-pressed={prefs.music.enabled}
-              aria-label={prefs.music.enabled ? "Music during replays: on. Turn off" : "Music during replays: off. Turn on"}
-              onClick={() => setPrefs({ music: { enabled: !prefs.music.enabled } })}><MusicIcon off={!prefs.music.enabled} /></button>
-          )}
+          <div className="fd-seg" role="tablist" aria-label="View">
+            {(["replay", "chart"] as const).map((m) => (
+              <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setPlaying(false); }}>{m === "replay" ? "Replay" : "Screenshot"}</button>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="fd-media">
-        {mode === "replay" && card.replayable ? (
-          data.status === "ready" && model ? <Suspense fallback={<Skeleton text="Loading chart…" />}><ReplayChart model={model} idx={idx} label={`${title} replay chart`} /></Suspense>
-          : data.status === "error" ? (
-            <div className="fd-overlay-msg"><div><p>{data.message}</p><button className="fd-linkbtn mt-3" onClick={() => setAttempt((a) => a + 1)}>Try again</button></div></div>
+      <div
+        className={cn("fd-media", (card.replayable || card.hasImage || card.videoUrl) && "fd-media--16x9")}
+        onClick={isReplayView && model ? () => togglePlay(true) : undefined}
+        style={isReplayView && model ? { cursor: "pointer" } : undefined}
+      >
+        {isReplayView ? (
+          data.status === "ready" && model ? (
+            <>
+              <Suspense fallback={<Skeleton text="Loading chart…" />}>
+                <ReplayChart model={model} idx={idx} label={`${title} replay chart`} />
+              </Suspense>
+              {(hud || (!playing && userPausedRef.current)) && (
+                <div className={cn("fd-tap-hud", hud && "is-transient")} aria-hidden="true">
+                  <span>{(hud ?? "pause") === "play" ? <PlayIcon /> : <PauseIcon />}</span>
+                </div>
+              )}
+            </>
+          ) : data.status === "error" ? (
+            <div className="fd-overlay-msg"><div><p>{data.message}</p><button className="fd-linkbtn mt-3" onClick={(e) => { e.stopPropagation(); setAttempt((a) => a + 1); }}>Try again</button></div></div>
           ) : <Skeleton text={near ? "Loading price data…" : ""} />
+        ) : card.videoUrl ? (
+          <FeedVideoPlayer
+            src={card.videoUrl}
+            poster={shot ?? null}
+            active={active}
+            near={near}
+            label={`Video for ${title}`}
+            aspect="16:9"
+          />
         ) : card.hasImage ? (
           shot ? <img src={shot} alt={`Chart screenshot for ${title}`} draggable={false} />
           : shot === null ? <div className="fd-overlay-msg"><p>This screenshot couldn’t be loaded.</p></div> : <Skeleton text="" />
@@ -213,22 +523,38 @@ export function TradeReel(props: ReelProps<TradeCard>) {
             </div>
           </div>
         )}
+
+        {isReplayView && (
+          <button
+            type="button"
+            className="fd-mute-btn"
+            aria-pressed={prefs.music.enabled}
+            aria-label={prefs.music.enabled ? "Music during replays: on. Turn off" : "Music during replays: off. Turn on"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setPrefs({ music: { enabled: !prefs.music.enabled } });
+              if (prefs.haptics) haptic.selection();
+            }}
+          >
+            <SpeakerIcon muted={!prefs.music.enabled} />
+          </button>
+        )}
       </div>
 
       {live}
 
-      {mode === "replay" && card.replayable && (
+      {isReplayView && (
         <>
           <div className="fd-scrub">
             <input className="fd-range" type="range" min={0} max={1000} value={model ? Math.round(progressOf(model, idx) * 1000) : 0} disabled={!model}
-              onChange={(e) => { if (model) { setPlaying(false); setIdx(idxFromProgress(model, Number(e.target.value) / 1000)); } }}
+              onChange={(e) => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx(idxFromProgress(model, Number(e.target.value) / 1000)); } }}
               aria-label="Replay position" aria-valuetext={frame ? `${frame.phase === "setup" ? "Before entry" : frame.phase === "open" ? "In trade" : "Closed"}` : "Not loaded"} />
           </div>
           <div className="fd-ctl" role="group" aria-label="Replay controls">
-            <button className="fd-small" onClick={() => { if (model) { setIdx(model.startIdx); setPlaying(false); reported.current = false; } }} disabled={!model} aria-label="Restart replay"><RestartIcon /></button>
-            <button className="fd-small" onClick={() => model && setIdx((i) => stepIdx(model, i, -1))} disabled={!model} aria-label="Back one bar"><StepIcon dir={-1} /></button>
-            <button className="fd-play" onClick={togglePlay} disabled={!model} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
-            <button className="fd-small" onClick={() => model && setIdx((i) => stepIdx(model, i, 1))} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
+            <button className="fd-small" onClick={() => { if (model) { setIdx(model.startIdx); userPausedRef.current = true; setPlaying(false); reported.current = false; } }} disabled={!model} aria-label="Restart replay"><RestartIcon /></button>
+            <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, -1)); } }} disabled={!model} aria-label="Back one bar"><StepIcon dir={-1} /></button>
+            <button className="fd-play" onClick={() => togglePlay(false)} disabled={!model} aria-label={playing ? "Pause replay" : "Play replay"}>{playing ? <PauseIcon /> : <PlayIcon />}</button>
+            <button className="fd-small" onClick={() => { if (model) { userPausedRef.current = true; setPlaying(false); setIdx((i) => stepIdx(model, i, 1)); } }} disabled={!model} aria-label="Forward one bar"><StepIcon /></button>
             <button className="fd-small" onClick={() => setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length])} aria-label={`Speed ${speed}×. Change speed`}>{speed}×</button>
           </div>
         </>
@@ -282,7 +608,7 @@ export function SetupReel(props: ReelProps<SetupCard>) {
 /* -------------------------------- lesson -------------------------------- */
 
 export function LessonReel(props: ReelProps<LessonCard>) {
-  const { lesson, community } = props.card;
+  const { lesson, community, videoUrl } = props.card;
   const lessonOpened = useFeed((s) => s.lessonOpened);
   const [liked, setLiked] = useState(lesson.likedByMe);
   const [likes, setLikes] = useState(lesson.likes);
@@ -302,32 +628,70 @@ export function LessonReel(props: ReelProps<LessonCard>) {
 
   const hasCover = Boolean(lesson.cover) && !broken;
   const pull = lesson.hook || lesson.excerpt;
+  const summaryText = pull && pull !== lesson.subtitle ? pull : lesson.excerpt || lesson.subtitle;
 
   return (
-    <Frame props={props} kind={community ? "Community" : "Lesson"} label={`Lesson: ${lesson.title}`}
+    <Frame props={props} kind={community ? "Community" : "Lesson"} label={`Lesson: ${lesson.title}`} split={false}
       rail={<Rail {...props} href={`/lessons/${lesson.id}`} openLabel="Read" onOpen={() => lessonOpened(props.card.key)} />}>
-      {hasCover ? (
-        <div className="fd-hero" data-cover>
-          {props.near && <img className="fd-hero-img" src={lesson.cover ?? undefined} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />}
-          <div className="fd-hero-scrim" />
-        </div>
-      ) : (
-        <div className="fd-hero" data-tone="gold" data-layout="spread">
-          <p className="fd-qmark" aria-hidden>“</p>
-          <div style={{ display: "grid", gap: "0.75rem" }}>
-            <p className="fd-pull fd-clamp2" style={{ WebkitLineClamp: 7 }}>{pull || lesson.title}</p>
-            <p className="fd-pull-meta">{community ? lesson.author.name : "You"} · {lesson.readMins} min read</p>
+      <div className="fd-lesson-stage">
+        <div className="fd-lesson-split">
+          {/* Left: 16:9 landscape thumbnail or inline video */}
+          <div className="fd-lesson-thumb" data-empty={!hasCover && !videoUrl ? "true" : undefined}>
+            {videoUrl ? (
+              <FeedVideoPlayer
+                src={videoUrl}
+                poster={hasCover ? lesson.cover : null}
+                active={props.active}
+                near={props.near}
+                label={`Video for ${lesson.title}`}
+                aspect="16:9"
+              />
+            ) : hasCover ? (
+              <>
+                {props.near && (
+                  <img
+                    className="fd-lesson-img"
+                    src={lesson.cover ?? undefined}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                    onError={() => setBroken(true)}
+                  />
+                )}
+                <div className="fd-lesson-scrim" aria-hidden="true" />
+                <span className="fd-lesson-badge">{lesson.readMins} min read</span>
+              </>
+            ) : (
+              <div className="fd-lesson-poster" aria-hidden="true">
+                <span className="fd-lesson-poster-icon"><BookOpenIcon /></span>
+                <p className="fd-lesson-poster-kicker">{community ? "Community Note" : "Playbook Lesson"}</p>
+                <span className="fd-lesson-badge">{lesson.readMins} min read</span>
+              </div>
+            )}
           </div>
-        </div>
-      )}
-      <div className="fd-info">
-        <h3 className="fd-title">{lesson.title}</h3>
-        {(lesson.subtitle || (hasCover && pull)) && <p className="fd-sub fd-clamp2">{lesson.subtitle || pull}</p>}
-        <div className="fd-row" style={{ marginTop: "0.625rem" }}>
-          <Link href={`/lessons/${lesson.id}`} onClick={() => lessonOpened(props.card.key)} className="fd-linkbtn is-primary">Read lesson<ArrowUpRightIcon /></Link>
-          <button className="fd-linkbtn" onClick={() => void like()} aria-pressed={liked} aria-label={liked ? "Unlike lesson" : "Like lesson"}>
-            <HeartIcon filled={liked} />{likes > 0 ? likes : "Like"}
-          </button>
+
+          {/* Right: concise scannable summary + clear primary action */}
+          <div className="fd-lesson-summary">
+            <p className="fd-lesson-meta">
+              <span>{community ? lesson.author.name : "You"}</span>
+              <span aria-hidden="true">·</span>
+              <span>{lesson.readMins} min read</span>
+            </p>
+            <h3 className="fd-title fd-lesson-title">{lesson.title}</h3>
+            {lesson.subtitle && <p className="fd-lesson-subtitle">{lesson.subtitle}</p>}
+            {summaryText && summaryText !== lesson.subtitle && (
+              <p className="fd-lesson-excerpt">{summaryText}</p>
+            )}
+            <div className="fd-row fd-lesson-actions">
+              <Link href={`/lessons/${lesson.id}`} onClick={() => lessonOpened(props.card.key)} className="fd-linkbtn is-primary">
+                Read lesson<ArrowUpRightIcon />
+              </Link>
+              <button type="button" className="fd-linkbtn" onClick={() => void like()} aria-pressed={liked} aria-label={liked ? "Unlike lesson" : "Like lesson"}>
+                <HeartIcon filled={liked} />{likes > 0 ? likes : "Like"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </Frame>

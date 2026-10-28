@@ -23,6 +23,26 @@ export const RestartIcon = (p: P) => <svg {...base(strip(p))}><path d="M4 12a8 8
 export const MusicIcon = ({ off, ...p }: P & { off?: boolean }) => (
   <svg {...base(strip(p))}><path d="M9 17.5V6l10-2v11.5" /><circle cx="6.8" cy="17.5" r="2.2" /><circle cx="16.8" cy="15.5" r="2.2" />{off && <path d="M3.5 3.5l17 17" />}</svg>
 );
+/** Apple SF Symbols-style speaker.wave.2 / speaker.slash icon for corner mute toggle. */
+export const SpeakerIcon = ({ muted, ...p }: P & { muted?: boolean }) => (
+  <svg {...base(strip(p))}>
+    <path d="M11 5.5 6.8 9H4.2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.6l4.2 3.5a.8.8 0 0 0 1.3-.6V6.1a.8.8 0 0 0-1.3-.6Z" fill="currentColor" stroke="none" />
+    {muted ? (
+      <path d="m16 9.5 4.5 5M20.5 9.5l-4.5 5" />
+    ) : (
+      <>
+        <path d="M15.5 9.2a4.2 4.2 0 0 1 0 5.6" />
+        <path d="M18.3 6.8a7.5 7.5 0 0 1 0 10.4" />
+      </>
+    )}
+  </svg>
+);
+export const BookOpenIcon = (p: P) => (
+  <svg {...base(strip(p))}>
+    <path d="M3.5 6.2A2.2 2.2 0 0 1 5.7 4h4.1a2.2 2.2 0 0 1 2.2 2.2v12.3a1.8 1.8 0 0 0-1.8-1.8H5.7a2.2 2.2 0 0 1-2.2-2.2V6.2Z" />
+    <path d="M20.5 6.2A2.2 2.2 0 0 0 18.3 4h-4.1A2.2 2.2 0 0 0 12 6.2v12.3a1.8 1.8 0 0 1 1.8-1.8h4.5a2.2 2.2 0 0 0 2.2-2.2V6.2Z" />
+  </svg>
+);
 export const SlidersIcon = (p: P) => <svg {...base(strip(p))}><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>;
 export const ArrowUpRightIcon = (p: P) => <svg {...base(strip(p))}><path d="M7 17 17 7M8.5 7H17v8.5" /></svg>;
 export const CheckIcon = (p: P) => <svg {...base(strip(p))}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;

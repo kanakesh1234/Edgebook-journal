@@ -7,14 +7,15 @@ import { useApp } from "@/lib/store";
 import { todayKey } from "@/lib/format";
 import { toast } from "@/components/ui/toast";
 import { useLessonIndex } from "@/components/lessons/use-lesson-index";
+import type { LessonView } from "@/components/lessons/types";
 import { useReadProgress } from "@/components/lessons/progress";
-import { buildFeed, cardsForKeys, keyExists, type BuildInput } from "@/lib/feed/build";
+import { buildFeed, cardsForKeys, extractVideoUrl, keyExists, type BuildInput } from "@/lib/feed/build";
 import { savedKeys } from "@/lib/feed/state";
 import { music } from "@/lib/feed/music";
 import type { FeedCard, FeedCollection, FeedKey } from "@/lib/feed/types";
 import { recentSeen, useFeed, useFeedSync } from "./feed-store";
 import { useSessionClock } from "./use-session-clock";
-import { EndReel, LessonReel, SetupReel, StarterReel, TradeReel, type ReelProps } from "./reels";
+import { EndReel, LessonReel, SetupReel, StarterReel, TradeReel, VideoReel, type ReelProps } from "./reels";
 import { BreakPrompt, CollectSheet, ManageCollectionSheet, SettingsSheet } from "./sheets";
 import { CollectionsPanel, ProgressPanel, SidePanel } from "./panels";
 import { SlidersIcon, XIcon } from "./feed-icons";
@@ -31,14 +32,17 @@ export function FeedScreen() {
   const status = useApp((s) => s.status);
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
-  const { lessons, failed: lessonsFailed } = useLessonIndex();
+  const { lessons: briefLessons, failed: lessonsFailed } = useLessonIndex();
+  const [fullLessons, setFullLessons] = useState<LessonView[] | null>(null);
   const readStore = useReadProgress();
   const hydrated = useFeedSync();
 
   const feedState = useFeed((s) => s.state);
-  const seen = useFeed((s) => s.seen);
   const prefs = feedState.prefs;
   const replayPlaying = useFeed((s) => s.replayPlaying);
+  const videoAudioActive = useFeed((s) => s.videoAudioActive);
+  const videoMuted = useFeed((s) => s.videoMuted);
+  const setVideoMuted = useFeed((s) => s.setVideoMuted);
   const view = useFeed((s) => s.view);
   const toggleFavorite = useFeed((s) => s.toggleFavorite);
   const setPrefs = useFeed((s) => s.setPrefs);
@@ -53,10 +57,31 @@ export function FeedScreen() {
   const scroller = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
+  // Hydrate full lesson HTML in the background so embedded <video> tags inside lessons are discovered.
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    let alive = true;
+    fetch("/api/lessons", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ lessons?: LessonView[] }>) : null))
+      .then((d) => { if (alive && d?.lessons) setFullLessons(d.lessons); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [status]);
+
+  const lessons = useMemo(() => {
+    if (!briefLessons) return fullLessons;
+    if (!fullLessons) return briefLessons;
+    const fullById = new Map(fullLessons.map((l) => [l.id, l]));
+    return briefLessons.map((b) => {
+      const f = fullById.get(b.id);
+      return f && f.html ? { ...b, html: f.html } : b;
+    });
+  }, [briefLessons, fullLessons]);
+
   const today = todayKey();
   const playbook = useMemo(() => settings.playbook ?? [], [settings.playbook]);
   const readLessons = useMemo(() => new Set(Object.entries(readStore).filter(([, v]) => v?.done).map(([k]) => k)), [readStore]);
-  const lessonList = lessonsFailed ? null : lessons;
+  const lessonList = lessonsFailed && !lessons ? null : lessons;
 
   // Inputs that decide card *content* (no `seen`/favorites, so Saved views don't churn while scrolling).
   const liveInput = useMemo<BuildInput>(() => ({
@@ -76,6 +101,22 @@ export function FeedScreen() {
     // drop saved references to deleted trades/setups (lessons are left alone: a failed fetch must never erase saves)
     if (i.entries.length > 0) useFeed.getState().prune((k) => k.startsWith("lesson:") || keyExists(i, k));
   }, [ready, batch]);
+
+  // Enrich frozen batch if full lesson HTML arrives with embedded video URLs
+  useEffect(() => {
+    if (!batch || !fullLessons) return;
+    const videoByLesson = new Map<string, string>();
+    for (const l of fullLessons) {
+      const v = extractVideoUrl(l.html, l.cover);
+      if (v) videoByLesson.set(`lesson:${l.id}`, v);
+    }
+    if (videoByLesson.size === 0) return;
+    setBatch((cur) =>
+      cur
+        ? cur.map((c) => (c.kind === "lesson" && !c.videoUrl && videoByLesson.has(c.key) ? { ...c, videoUrl: videoByLesson.get(c.key) } : c))
+        : cur,
+    );
+  }, [batch, fullLessons]);
 
   const openCol = openColId ? feedState.collections.find((c) => c.id === openColId) ?? null : null;
   useEffect(() => { if (openColId && !openCol) setOpenColId(null); }, [openColId, openCol]);
@@ -140,6 +181,12 @@ export function FeedScreen() {
 
   /* ------------------------------- keyboard ------------------------------- */
   const sheetOpen = !!collectKey || settingsOpen || manageOpen || session.prompt !== "none";
+  const activeHasVideo = Boolean(
+    activeCard &&
+    (activeCard.kind === "video" ||
+      (activeCard.kind === "lesson" && activeCard.videoUrl) ||
+      (activeCard.kind === "trade" && !activeCard.replayable && activeCard.videoUrl)),
+  );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (sheetOpen || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -153,11 +200,14 @@ export function FeedScreen() {
       else if (k === " ") { e.preventDefault(); window.dispatchEvent(new Event("fd:toggle-play")); }
       else if (k === "f" && activeKey) useFeed.getState().toggleFavorite(activeKey);
       else if (k === "c" && activeKey) setCollectKey(activeKey);
-      else if (k === "m") setPrefs({ music: { enabled: !prefs.music.enabled } });
+      else if (k === "m") {
+        if (activeHasVideo) setVideoMuted(!videoMuted);
+        else setPrefs({ music: { enabled: !prefs.music.enabled } });
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen, showReels, activeKey, step, setPrefs, prefs.music.enabled]);
+  }, [sheetOpen, showReels, activeKey, activeHasVideo, videoMuted, setVideoMuted, step, setPrefs, prefs.music.enabled]);
 
   /* -------------------------------- music -------------------------------- */
   const [docVisible, setDocVisible] = useState(true);
@@ -168,7 +218,8 @@ export function FeedScreen() {
   }, []);
   const volumeRef = useRef(prefs.music.volume);
   volumeRef.current = prefs.music.volume;
-  const shouldPlay = prefs.music.enabled && replayPlaying && docVisible && session.prompt === "none";
+  // Never overlap replay ambience with an active unmuted video
+  const shouldPlay = prefs.music.enabled && replayPlaying && !videoAudioActive && docVisible && session.prompt === "none";
   useEffect(() => {
     if (!shouldPlay) { music.stop(500); return; }
     let cancelled = false, retry: (() => void) | null = null;
@@ -197,6 +248,7 @@ export function FeedScreen() {
       case "trade": return <TradeReel key={c.key} card={c} {...common} />;
       case "setup": return <SetupReel key={c.key} card={c} {...common} />;
       case "lesson": return <LessonReel key={c.key} card={c} {...common} />;
+      case "video": return <VideoReel key={c.key} card={c} {...common} />;
       case "starter": return <StarterReel key={c.key} card={c} {...common} />;
     }
   };

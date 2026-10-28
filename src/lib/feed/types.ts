@@ -32,7 +32,7 @@ export interface FeedMusicPrefs {
 export interface FeedPrefs {
   /** Minutes of Feed per day before a gentle break prompt. 0 = no limit. */
   dailyMinutes: number;
-  /** Replays start only when the viewer taps play, unless this is on. */
+  /** Replays and videos start automatically when entering the active viewport unless turned off. */
   autoplayReplay: boolean;
   haptics: boolean;
   music: FeedMusicPrefs;
@@ -79,6 +79,7 @@ export interface TradeCard extends CardBase {
   entry: JournalEntry;
   replayable: boolean;
   hasImage: boolean;
+  videoUrl?: string | null;
 }
 export interface SetupCard extends CardBase {
   kind: "setup";
@@ -90,6 +91,17 @@ export interface LessonCard extends CardBase {
   lesson: LessonView;
   /** Written by someone in the viewer's friend circle. */
   community: boolean;
+  /** Optional embedded video URL extracted from the lesson. */
+  videoUrl?: string | null;
+}
+export interface VideoCard extends CardBase {
+  kind: "video";
+  videoUrl: string;
+  poster?: string | null;
+  title: string;
+  subtitle?: string;
+  author?: string;
+  href?: string;
 }
 export interface StarterCard extends CardBase {
   kind: "starter";
@@ -99,4 +111,4 @@ export interface EndCard extends CardBase {
   kind: "end";
   seen: number;
 }
-export type FeedCard = TradeCard | SetupCard | LessonCard | StarterCard | EndCard;
+export type FeedCard = TradeCard | SetupCard | LessonCard | VideoCard | StarterCard | EndCard;

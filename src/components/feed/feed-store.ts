@@ -17,7 +17,7 @@ import { useApp, hasLoadFailed } from "@/lib/store";
 import { todayKey } from "@/lib/format";
 import { uid } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
-import type { FeedKey, FeedPrefs, FeedState } from "@/lib/feed/types";
+import type { FeedKey, FeedState } from "@/lib/feed/types";
 import {
   createCollection as mkCollection, deleteCollection as rmCollection, emptyFeedState, normalizeFeedState, pruneMissing,
   recordLessonOpened, recordReplayDone, recordView, renameCollection as renameCol, setPrefs as applyPrefs, toggleFavorite, toggleInCollection,
@@ -50,6 +50,10 @@ interface FeedStore {
   seen: SeenMap;
   /** A replay on the active card is playing — drives optional music. Never persisted. */
   replayPlaying: boolean;
+  /** Shared video mute state across the Feed session (starts muted for safe browser autoplay). */
+  videoMuted: boolean;
+  /** Whether an active video is currently playing with audio — prevents overlapping background music. */
+  videoAudioActive: boolean;
 
   hydrate(userId: string, raw: unknown): void;
   toggleFavorite(key: FeedKey): boolean;
@@ -63,6 +67,8 @@ interface FeedStore {
   setPrefs(patch: Parameters<typeof applyPrefs>[1]): void;
   prune(exists: (key: FeedKey) => boolean): void;
   setReplayPlaying(v: boolean): void;
+  setVideoMuted(v: boolean): void;
+  setVideoAudioActive(v: boolean): void;
 }
 
 /** Apply a change, then check whether it earned a milestone (announced once, quietly). */
@@ -77,6 +83,8 @@ export const useFeed = create<FeedStore>((set, get) => ({
   hydratedFor: null,
   seen: {},
   replayPlaying: false,
+  videoMuted: true,
+  videoAudioActive: false,
 
   hydrate(userId, raw) {
     if (get().hydratedFor === userId) return;
@@ -116,6 +124,8 @@ export const useFeed = create<FeedStore>((set, get) => ({
     if (next !== get().state) set({ state: next });
   },
   setReplayPlaying: (v) => { if (get().replayPlaying !== v) set({ replayPlaying: v }); },
+  setVideoMuted: (v) => { if (get().videoMuted !== v) set({ videoMuted: v }); },
+  setVideoAudioActive: (v) => { if (get().videoAudioActive !== v) set({ videoAudioActive: v }); },
 }));
 
 /** Keys seen within the ranking window, for buildFeed(). */

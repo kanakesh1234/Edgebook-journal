@@ -201,7 +201,7 @@ export function SettingsSheet({ open, onClose }: { open: boolean; onClose: () =>
 
       <section style={{ display: "grid", gap: "0.5rem" }}>
         <p className="fd-label">Playback</p>
-        <div className="fd-opt"><span><b>Autoplay replays</b><small>Off by default. Replays start only when you press play.</small></span><Switch checked={prefs.autoplayReplay} onChange={(v) => setPrefs({ autoplayReplay: v })} label="Autoplay replays" /></div>
+        <div className="fd-opt"><span><b>Autoplay replays</b><small>On by default. Active replays and videos start automatically in the feed.</small></span><Switch checked={prefs.autoplayReplay} onChange={(v) => setPrefs({ autoplayReplay: v })} label="Autoplay replays" /></div>
         <div className="fd-opt"><span><b>Haptic feedback</b><small>Light taps on phones that support it.</small></span><Switch checked={prefs.haptics} onChange={(v) => setPrefs({ haptics: v })} label="Haptic feedback" /></div>
       </section>
 
