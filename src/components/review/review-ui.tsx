@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { Sym, type SymName } from "@/components/journal/symbols";
 import { EASE, SPRING } from "@/components/journal/journal-ui";
@@ -27,23 +27,50 @@ export type SectionDef = { id: string; label: string; icon: SymName };
 export const WEEKLY_SECTIONS: SectionDef[] = [
   { id: "a1", label: "Scorecard", icon: "gauge" },
   { id: "a2", label: "Daily log", icon: "list" },
-  { id: "a3", label: "Criteria", icon: "checklist" },
-  { id: "a4", label: "Patterns", icon: "heart" },
-  { id: "a5", label: "Narrative", icon: "sparkles" },
-  { id: "a6", label: "Refinements", icon: "bulb" },
-  { id: "a7", label: "Commitments", icon: "target" },
+  { id: "a3", label: "Edge & Patterns", icon: "sparkles" },
+  { id: "a5", label: "3-Min Ritual", icon: "target" },
 ];
 export const MONTHLY_SECTIONS: SectionDef[] = [
   { id: "b1", label: "Scorecard", icon: "gauge" },
-  { id: "b2", label: "Session log", icon: "list" },
   { id: "b3", label: "Equity curve", icon: "chart" },
-  { id: "b4", label: "Heatmap", icon: "checklist" },
-  { id: "b5", label: "Patterns", icon: "heart" },
-  { id: "b6", label: "Reflection", icon: "bulb" },
-  { id: "b7", label: "Prop firm", icon: "shield" },
-  { id: "b8", label: "Decisions", icon: "check" },
-  { id: "b9", label: "Commitments", icon: "target" },
+  { id: "b2", label: "Session log", icon: "list" },
+  { id: "b4", label: "Edge & Prop", icon: "shield" },
+  { id: "b6", label: "3-Min Ritual", icon: "target" },
 ];
+
+/**
+ * Apple HIG unhurried progressive reveal hook for review questions:
+ * Waits until the user has typed at least `minChars` characters AND paused typing for `delayMs`
+ * before latching `true` so the next question never jarringly pops in on the very first keystroke.
+ */
+export function useReviewSettledReveal(
+  text: string,
+  alreadyAnsweredDownstream: boolean,
+  resetKey: string,
+  minChars = 3,
+  delayMs = 680,
+): { settled: boolean; typing: boolean } {
+  const [latched, setLatched] = useState(false);
+  useEffect(() => {
+    setLatched(false);
+  }, [resetKey]);
+
+  const trimmed = text.trim();
+  useEffect(() => {
+    if (alreadyAnsweredDownstream) {
+      setLatched(true);
+      return;
+    }
+    if (trimmed.length < minChars) return;
+    const timer = window.setTimeout(() => setLatched(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [trimmed, alreadyAnsweredDownstream, minChars, delayMs]);
+
+  return {
+    settled: latched || alreadyAnsweredDownstream,
+    typing: !latched && !alreadyAnsweredDownstream && trimmed.length > 0,
+  };
+}
 
 /* ─────────────────────────────────────────────────────────────
    Motion
@@ -189,35 +216,105 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
 ───────────────────────────────────────────────────────────── */
 
 /** A question and its answer field. */
-export const Prompt = ({ q, children, className }: { q: string; children: ReactNode; className?: string }) => (
-  <div className={className}><p className="mb-2 px-0.5 text-[15px] font-medium leading-snug tracking-[-0.005em] text-ink">{q}</p>{children}</div>
+export const Prompt = ({ q, step, done, typing, children, className }: { q: string; step?: number; done?: boolean; typing?: boolean; children: ReactNode; className?: string }) => (
+  <div className={className}>
+    <div className="mb-2.5 flex items-center justify-between gap-2 px-0.5">
+      <div className="flex items-center gap-2.5 min-w-0">
+        {step != null && (
+          <span
+            className={cn(
+              "num grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold transition-colors duration-300",
+              done
+                ? "bg-profit text-white shadow-[0_4px_10px_-2px_rgb(22_163_74/0.4)]"
+                : "bg-gold/[0.15] text-gold-deep dark:text-gold",
+            )}
+          >
+            {done ? <DrawCheck className="h-3 w-3" /> : step}
+          </span>
+        )}
+        <p className="text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-ink">{q}</p>
+      </div>
+      <AnimatePresence initial={false}>
+        {typing && (
+          <motion.span
+            initial={{ opacity: 0, y: 2 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="inline-flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-gold"
+          >
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold-strong" />
+            <span>Settling…</span>
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </div>
+    {children}
+  </div>
 );
 
-/** A writing field that grows with its text. Looks like a note, not a form control. */
-export function AutoText({ value, onChange, placeholder, label, minRows = 3, maxLength = 4000, className, suggest }: {
+export type SmartChipOption = {
+  label: string;
+  text: string;
+  tone?: "good" | "bad" | "gold" | "ai";
+};
+
+/** A writing field that grows with its text. Looks like a note, not a form control. Supports one-tap AI smart chips. */
+export function AutoText({ value, onChange, placeholder, label, minRows = 2, maxLength = 4000, className, suggest, chips }: {
   value: string; onChange: (v: string) => void; placeholder?: string; label: string; minRows?: number; maxLength?: number; className?: string;
   /** A factual sentence built from the trader's data that one tap appends. */
   suggest?: { text: string; label?: string } | null;
+  /** Multiple one-tap smart chips pre-computed from the period's real trades & AI Brain. */
+  chips?: SmartChipOption[];
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = () => { const el = ref.current; if (!el) return; el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; };
   useLayoutEffect(fit, [value]);
   useEffect(() => { const ro = new ResizeObserver(fit); if (ref.current) ro.observe(ref.current); return () => ro.disconnect(); }, []);
   const words = value.trim() ? value.trim().split(/\s+/).length : 0;
-  const can = suggest && !value.includes(suggest.text);
+
+  const allChips: SmartChipOption[] = [
+    ...(suggest ? [{ label: suggest.label ?? "Add from your data", text: suggest.text, tone: "gold" as const }] : []),
+    ...(chips ?? []),
+  ].filter((c) => c.text && !value.includes(c.text));
+
+  const appendText = (snippet: string) => {
+    onChange(value.trim() ? `${value.replace(/\s+$/, "")} ${snippet}` : snippet);
+  };
+
   return (
-    <div className={cn("group rounded-[16px] bg-ink/[0.04] transition-[box-shadow,background-color] duration-200 hover:bg-ink/[0.055] focus-within:bg-raised focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--gold-strong)_45%,transparent),0_6px_20px_-10px_rgb(0_0_0/0.18)]", className)}>
+    <div className={cn("group rounded-[18px] border border-line-soft bg-ink/[0.035] transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.05] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_18%,transparent),0_8px_24px_-12px_rgb(0_0_0/0.16)]", className)}>
       <textarea
         ref={ref} aria-label={label} value={value} rows={minRows} maxLength={maxLength} placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
-        className="block w-full resize-none rounded-[16px] bg-transparent px-4 pb-1 pt-3.5 text-[15px] leading-[1.6] text-ink outline-none placeholder:text-faint"
+        className="block w-full resize-none rounded-[18px] bg-transparent px-4 pb-1.5 pt-3.5 text-[15px] leading-[1.58] text-ink outline-none placeholder:text-faint"
       />
-      <div className="flex min-h-9 items-center justify-between gap-2 px-3 pb-2">
-        <div>{can && (
-          <button type="button" onClick={() => onChange(value ? `${value.replace(/\s+$/, "")}\n${suggest!.text}` : suggest!.text)} className="inline-flex items-center gap-1.5 rounded-full bg-gold/[0.12] px-3 py-1.5 text-[12.5px] font-medium text-gold-deep outline-none transition-[transform,background-color] hover:bg-gold/[0.2] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-[0.96] dark:text-gold">
-            <Sym name="sparkles" className="h-3.5 w-3.5" />{suggest!.label ?? "Add from your data"}
-          </button>
-        )}</div>
-        <span className={cn("num text-[12px] font-normal transition-opacity duration-200", words ? "text-faint opacity-100" : "opacity-0")}>{words} {words === 1 ? "word" : "words"}</span>
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {allChips.map((chip, idx) => {
+            const chipTone =
+              chip.tone === "good"
+                ? "bg-profit/12 text-profit hover:bg-profit/20"
+                : chip.tone === "bad"
+                  ? "bg-loss/12 text-loss hover:bg-loss/20"
+                  : chip.tone === "ai"
+                    ? "bg-[#5e5ce6]/12 text-[#5e5ce6] hover:bg-[#5e5ce6]/20 dark:text-[#a5a4ff]"
+                    : "bg-gold/[0.12] text-gold-deep hover:bg-gold/[0.2] dark:text-gold";
+            return (
+              <button
+                key={`${chip.label}-${idx}`}
+                type="button"
+                onClick={() => appendText(chip.text)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium outline-none transition-[transform,background-color] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-[0.96]",
+                  chipTone,
+                )}
+              >
+                <Sym name="sparkles" className="h-3 w-3" />
+                <span>+ {chip.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <span className={cn("num ml-auto text-[11.5px] font-normal transition-opacity duration-200", words ? "text-faint opacity-100" : "opacity-0")}>{words} {words === 1 ? "word" : "words"}</span>
       </div>
     </div>
   );

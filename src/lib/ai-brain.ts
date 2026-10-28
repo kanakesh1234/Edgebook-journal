@@ -1,5 +1,5 @@
-import type { JournalEntry, PlaybookSetup, TradePlan } from "./types";
-import { MISTAKE_CATEGORIES, categoryOf, isMistakeKey, mistakeLabel, mistakeOf, mistakeTagsOf, type MistakeKey } from "./mistakes";
+import type { AiBrainDailyRecord, AiBrainMemory, JournalEntry, PlaybookSetup, TradePlan } from "./types";
+import { categoryOf, isMistakeKey, mistakeLabel, mistakeOf, mistakeTagsOf, type MistakeKey } from "./mistakes";
 import { dayTrades } from "./risk";
 import { scanSources, type ScanSource } from "./tagging/rules";
 import type { TagBundle } from "./tagging/evidence";
@@ -8,13 +8,14 @@ import { groundRun, type ModelRun } from "./tagging/prompt";
 /**
  * EDGEBOOK ADAPTIVE AI BRAIN
  *
- * Learns continuously from the trader's recorded entries, plans, playbook rules, and autopsy reflections.
+ * Learns continuously from the trader's recorded entries, plans, playbook rules, and autopsy reflections,
+ * and persists its cumulative understanding in Google Drive (`settings.aiBrain` in `journal.json`).
  * As the journal grows:
  *   1. Personal phrase -> mistake log-likelihood weights sharpen from the trader's own vocabulary.
- *   2. Conditional mistake probabilities (Emotion x Mistake, Setup x Mistake, After-Loss x Mistake, Time-Window x Mistake)
+ *   2. Conditional mistake probabilities (Emotion x Mistake, Setup x Mistake, After-Loss x Mistake, Plan -> Autopsy alignment)
  *      shift from Laplace-smoothed priors to empirical personal frequencies.
  *   3. Powers live pre-trade mistake tagging in Plan & Record ("Thought" & "Mistakes to watch"),
- *      guaranteed grounded tagging in /api/journal/tag-trade, and deep synthesis in Minato.
+ *      guaranteed grounded tagging in /api/journal/tag-trade, Weekly/Monthly AI briefs, Practice studio, and Minato.
  */
 
 export interface LearnedTagSuggestion {
@@ -69,7 +70,7 @@ export function computeBrainCalibration(
   const linkedPlans = plans.length;
   // Effective evidence units: reviewed trades carry 2x weight, plans 1x, raw trades 0.6x
   const units = reviewedTrades * 2 + linkedPlans * 1 + Math.max(0, totalTrades - reviewedTrades) * 0.6;
-  const calibrationPct = totalTrades === 0
+  const calibrationPct = totalTrades === 0 && linkedPlans === 0
     ? 35
     : Math.min(98, Math.max(38, Math.round(38 + 60 * (1 - Math.exp(-units / 24)))));
   const tier: BrainCalibration["tier"] =
@@ -85,9 +86,10 @@ export function computeBrainCalibration(
 }
 
 /**
- * Builds an empirical Naive-Bayes + conditional frequency model from the trader's own journal.
+ * Builds an empirical Naive-Bayes + conditional frequency model from the trader's own journal,
+ * merging any prior persisted Drive memory (`prevMemory`) so learned vocabulary survives even if old trades are pruned.
  */
-export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) {
+export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[], prevMemory?: AiBrainMemory | null) {
   const planById = new Map(plans.map((p) => [p.id, p]));
   const planOf = (e: JournalEntry) =>
     (e.planId ? planById.get(e.planId) : undefined) ??
@@ -96,13 +98,32 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
 
   const tagCounts = new Map<MistakeKey, number>();
   const tokenTagCounts = new Map<string, Map<MistakeKey, number>>();
+
+  // Seed with persisted Drive vocabulary if available (weighted lightly so fresh live entries dominate)
+  if (prevMemory?.learnedVocabulary) {
+    for (const [word, mapObj] of Object.entries(prevMemory.learnedVocabulary)) {
+      const m = new Map<MistakeKey, number>();
+      for (const [k, cnt] of Object.entries(mapObj)) {
+        if (isMistakeKey(k) && typeof cnt === "number" && cnt > 0) {
+          m.set(k, Math.min(cnt, 3));
+        }
+      }
+      if (m.size > 0) tokenTagCounts.set(word, m);
+    }
+  }
+
   const emotionStats = new Map<string, { n: number; wins: number; pnl: number; mistakes: Map<MistakeKey, number> }>();
   const setupStats = new Map<string, { n: number; wins: number; pnl: number; mistakes: Map<MistakeKey, number> }>();
   const afterLossMistakes = new Map<MistakeKey, number>();
   let afterLossTotal = 0;
   let afterLossWins = 0;
 
-  // Group by day to detect post-loss trades
+  let linkedCount = 0;
+  let followedPlanCount = 0;
+  let watchPreventedCount = 0;
+  let watchRepeatedCount = 0;
+
+  // Group by day to detect post-loss trades and build daily understandings
   const byDay = new Map<string, JournalEntry[]>();
   for (const e of entries) {
     const list = byDay.get(e.date);
@@ -110,15 +131,42 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
     else byDay.set(e.date, [e]);
   }
 
-  for (const [date, dayList] of byDay) {
+  const dailyRecords: AiBrainDailyRecord[] = [];
+
+  for (const [date, dayList] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const ordered = dayTrades(date, dayList);
+    let dayPnl = 0;
+    let dayFollowed = 0;
+    let dayReviewed = 0;
+    const dayEmotions = new Map<string, number>();
+    const dayMistakes = new Map<MistakeKey, number>();
+
     ordered.forEach((e, idx) => {
+      dayPnl += e.pnl;
       const hadLossBefore = idx > 0 && ordered.slice(0, idx).some((prev) => prev.pnl < 0);
       const plan = planOf(e);
       const tags = mistakeTagsOf(e);
       const primaryMistake = mistakeOf(e);
       const allKeys = new Set<MistakeKey>(tags.map((t) => t.key));
       if (primaryMistake && primaryMistake.key !== "other") allKeys.add(primaryMistake.key);
+
+      for (const k of allKeys) dayMistakes.set(k, (dayMistakes.get(k) ?? 0) + 1);
+
+      if (plan) {
+        linkedCount++;
+        if (e.review?.outcome?.followedPlan === true) followedPlanCount++;
+        const watched = plan.watchMistakes ?? [];
+        if (watched.length > 0) {
+          const repeated = watched.some((w) => isMistakeKey(w) && allKeys.has(w));
+          if (repeated) watchRepeatedCount++;
+          else if (e.reviewStatus === "reviewed" || e.review?.followUp?.mistake === "none") watchPreventedCount++;
+        }
+      }
+
+      if (e.review?.outcome?.followedPlan != null) {
+        dayReviewed++;
+        if (e.review.outcome.followedPlan) dayFollowed++;
+      }
 
       if (hadLossBefore) {
         afterLossTotal++;
@@ -128,6 +176,7 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
 
       const emo = (plan?.emotionalState || e.review?.psychology?.emotionBefore || e.review?.psychology?.emotionAfter || "").toUpperCase();
       if (emo) {
+        dayEmotions.set(emo, (dayEmotions.get(emo) ?? 0) + 1);
         const st = emotionStats.get(emo) ?? { n: 0, wins: 0, pnl: 0, mistakes: new Map() };
         st.n++;
         if (e.pnl > 0) st.wins++;
@@ -136,7 +185,7 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
         emotionStats.set(emo, st);
       }
 
-      const setupKey = (e.setupId || e.setup || plan?.playbookName || "").trim().toLowerCase();
+      const setupKey = (e.setup || e.setupId || plan?.playbookName || "").trim().toLowerCase();
       if (setupKey) {
         const st = setupStats.get(setupKey) ?? { n: 0, wins: 0, pnl: 0, mistakes: new Map() };
         st.n++;
@@ -172,6 +221,26 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
         }
       }
     });
+
+    const topEmo = [...dayEmotions.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const topMistakeKey = [...dayMistakes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const planRate = dayReviewed > 0 ? Math.round((dayFollowed / dayReviewed) * 100) / 100 : null;
+    const summaryParts = [
+      `${ordered.length} trade${ordered.length === 1 ? "" : "s"} (${dayPnl >= 0 ? "+" : "−"}$${Math.abs(Math.round(dayPnl))})`,
+      topEmo ? `felt ${topEmo.toLowerCase()}` : null,
+      topMistakeKey ? `main leak: ${mistakeLabel(topMistakeKey)}` : "clean execution",
+    ].filter(Boolean);
+
+    dailyRecords.push({
+      date,
+      trades: ordered.length,
+      netPnl: Math.round(dayPnl * 100) / 100,
+      dominantEmotion: topEmo,
+      mainMistake: topMistakeKey,
+      planFollowedRate: planRate,
+      summary: summaryParts.join(" · "),
+      updatedAt: Date.now(),
+    });
   }
 
   return {
@@ -182,13 +251,89 @@ export function buildPersonalBrain(entries: JournalEntry[], plans: TradePlan[]) 
     afterLossMistakes,
     afterLossTotal,
     afterLossWins,
+    planToAutopsy: {
+      linkedCount,
+      followedPlanCount,
+      watchPreventedCount,
+      watchRepeatedCount,
+    },
+    dailyRecords: dailyRecords.slice(-60),
     calibration: computeBrainCalibration(entries, plans, tokenTagCounts.size),
   };
 }
 
 /**
+ * Synthesizes the complete Plan -> Thought -> Setup -> Trade -> Autopsy history into a compact,
+ * serializable `AiBrainMemory` object saved directly in Google Drive (`settings.aiBrain` in `journal.json`).
+ */
+export function syncAiBrainMemory(
+  entries: JournalEntry[],
+  plans: TradePlan[],
+  _playbook: PlaybookSetup[] = [],
+  prevMemory?: AiBrainMemory | null,
+): AiBrainMemory {
+  const b = buildPersonalBrain(entries, plans, prevMemory);
+
+  // Keep top 120 most informative tokens to keep the Drive JSON payload compact and fast
+  const vocabEntries = [...b.tokenTagCounts.entries()]
+    .map(([word, map]) => {
+      const total = [...map.values()].reduce((s, n) => s + n, 0);
+      const obj: Record<string, number> = {};
+      for (const [k, cnt] of map.entries()) obj[k] = cnt;
+      return { word, total, obj };
+    })
+    .filter((x) => x.total >= 2)
+    .sort((a, b2) => b2.total - a.total)
+    .slice(0, 120);
+
+  const learnedVocabulary: Record<string, Record<string, number>> = {};
+  for (const item of vocabEntries) {
+    learnedVocabulary[item.word] = item.obj;
+  }
+
+  const emotionProfile: AiBrainMemory["emotionProfile"] = {};
+  for (const [emo, st] of b.emotionStats.entries()) {
+    const topMistakes: Record<string, number> = {};
+    for (const [k, cnt] of st.mistakes.entries()) topMistakes[k] = cnt;
+    emotionProfile[emo] = {
+      n: st.n,
+      wins: st.wins,
+      netPnl: Math.round(st.pnl * 100) / 100,
+      topMistakes,
+    };
+  }
+
+  const setupProfile: AiBrainMemory["setupProfile"] = {};
+  for (const [su, st] of b.setupStats.entries()) {
+    const topMistakes: Record<string, number> = {};
+    for (const [k, cnt] of st.mistakes.entries()) topMistakes[k] = cnt;
+    setupProfile[su] = {
+      n: st.n,
+      wins: st.wins,
+      netPnl: Math.round(st.pnl * 100) / 100,
+      topMistakes,
+    };
+  }
+
+  return {
+    v: 1,
+    updatedAt: Date.now(),
+    totalTradesAnalyzed: b.calibration.totalTrades,
+    reviewedTradesAnalyzed: b.calibration.reviewedTrades,
+    plansAnalyzed: b.calibration.linkedPlans,
+    calibrationPct: b.calibration.calibrationPct,
+    tier: b.calibration.tier,
+    learnedVocabulary,
+    emotionProfile,
+    setupProfile,
+    planToAutopsy: b.planToAutopsy,
+    dailyUnderstandings: b.dailyRecords,
+  };
+}
+
+/**
  * Live pre-trade analysis for Plan & Record ("Plan", "Thought", and "Mistakes to watch for today").
- * Combines what the trader just typed with their growing historical journal brain.
+ * Combines what the trader just typed with their growing historical journal brain in Google Drive.
  */
 export function analyzePreTradeThought(
   draft: {
@@ -207,8 +352,9 @@ export function analyzePreTradeThought(
   entries: JournalEntry[],
   plans: TradePlan[],
   _playbook?: PlaybookSetup[],
+  persistedMemory?: AiBrainMemory | null,
 ): PreTradeBrainRead {
-  const brain = buildPersonalBrain(entries, plans);
+  const brain = buildPersonalBrain(entries, plans, persistedMemory);
   const suggestions = new Map<MistakeKey, LearnedTagSuggestion>();
 
   const upsert = (s: LearnedTagSuggestion) => {
@@ -248,7 +394,7 @@ export function analyzePreTradeThought(
       const m = brain.tokenTagCounts.get(tok);
       if (!m) continue;
       for (const [k, count] of m.entries()) {
-        if (count < 2) continue; // require at least 2 historical occurrences of this word with this mistake
+        if (count < 2) continue;
         const cur = vocabScores.get(k) ?? { score: 0, matchedWord: tok };
         cur.score += count;
         vocabScores.set(k, cur);
@@ -260,7 +406,7 @@ export function analyzePreTradeThought(
           key: k,
           label: mistakeLabel(k),
           confidence: Math.min(0.9, 0.52 + info.score * 0.08),
-          reason: `Your journal links “${info.matchedWord}” with ${mistakeLabel(k).toLowerCase()} in past reviews`,
+          reason: `Your Drive Brain links “${info.matchedWord}” with ${mistakeLabel(k).toLowerCase()} in past autopsies`,
           source: "history",
         });
       }
@@ -375,7 +521,6 @@ export function analyzePreTradeThought(
     }
   }
 
-  // Compute thought clarity score (0-100) based on completeness of pre-trade thinking
   let clarityScore = 25;
   if (draft.thesis.trim().length >= 15) clarityScore += 25;
   if (draft.emotion) clarityScore += 15;
@@ -390,8 +535,8 @@ export function analyzePreTradeThought(
     setupInsight ??
     emotionInsight ??
     (brain.calibration.totalTrades > 0
-      ? `AI Brain calibrated across ${brain.calibration.totalTrades} trades (${brain.calibration.reviewedTrades} reviewed).`
-      : "AI Brain is active — every plan and review you log sharpens its personal accuracy.");
+      ? `AI Brain synced in Drive across ${brain.calibration.totalTrades} trades (${brain.calibration.reviewedTrades} autopsies).`
+      : "AI Brain is active in Drive — every plan and autopsy you log sharpens its personal accuracy.");
 
   const subline =
     sortedSuggestions.length > 0
@@ -418,7 +563,6 @@ export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
   const scan = scanSources(bundle.sources.map((s) => ({ id: s.id, role: s.role, text: s.text })));
   const rawTags: { key: string; evidence: { src: string; quote: string }[] }[] = [];
 
-  // 1. Objective & claim facts with explicit keys
   for (const f of bundle.facts) {
     if (f.key && isMistakeKey(f.key) && f.key !== "other") {
       rawTags.push({
@@ -428,7 +572,6 @@ export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
     }
   }
 
-  // 2. Linguistic & semantic rule hits with verbatim quotes
   for (const ks of scan.scores) {
     if (ks.score < 1.5 || ks.key === "other") continue;
     const validHits = ks.hits.filter((h) => !h.negated && h.role !== "went-well" && h.quote.trim().length >= 4);
@@ -442,7 +585,6 @@ export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
     }
   }
 
-  // 3. Semantic phrase fallback for subtle descriptions when explicit regexes didn't fire
   if (rawTags.length === 0) {
     const semanticPatterns: { key: MistakeKey; rx: RegExp }[] = [
       { key: "early", rx: /\b(before\s+\w+\s+closed|too\s+soon|jumped\s+the\s+gun|anticipated|no\s+confirmation|didn't\s+wait|did\s+not\s+wait)\b/i },
@@ -470,12 +612,10 @@ export function synthesizeBrainTagRun(bundle: TagBundle): ModelRun {
 
 /**
  * Generates a concise 2-line mistake & recognition summary for any trade card in the Feed.
- * Line 1: Badge + Primary mistake (or clean execution status) + secondary tag pills.
- * Line 2: Specific cause, trader's own note/lesson, or actionable recognition cue.
  */
 export function summarizeTradeMistakeForFeed(
   entry: JournalEntry,
-  allEntries: JournalEntry[],
+  _allEntries: JournalEntry[],
   plans: TradePlan[],
 ): {
   tone: "loss" | "gold" | "profit";
@@ -491,7 +631,6 @@ export function summarizeTradeMistakeForFeed(
 
   const blunderLabels: Record<number, string> = { 1: "Slip", 2: "Costly Mistake", 3: "Blunder" };
 
-  // 1. Explicit mistake recorded or detected by audit
   if (primary && !primary.pending) {
     const secondary = allTags
       .filter((t) => t.key !== primary.key)
@@ -523,7 +662,6 @@ export function summarizeTradeMistakeForFeed(
     };
   }
 
-  // 2. Check if any pre-trade checklist rules were skipped on this trade
   const unconfirmedPre = (entry.preTradeChecklist ?? []).filter((r) => !r.confirmed);
   const skippedPlanRules = (plan?.rules ?? []).filter((r) => r.state !== "ready");
   if (unconfirmedPre.length > 0 || skippedPlanRules.length > 0) {
@@ -542,7 +680,6 @@ export function summarizeTradeMistakeForFeed(
     };
   }
 
-  // 3. Reviewed as "No mistake" (clean execution)
   if (f?.mistake === "none" || entry.review?.outcome?.followedPlan === true) {
     const takeaway =
       f?.biggestMistake?.trim() ||
@@ -560,7 +697,6 @@ export function summarizeTradeMistakeForFeed(
     };
   }
 
-  // 4. Unreviewed trade: scan notes/reflection for any implicit mistake keywords
   const noteScan = scanSources([
     { id: "s1", role: "mistake-detail", text: entry.notes ?? "" },
     { id: "s2", role: "lesson", text: refl?.lesson ?? "" },
@@ -575,7 +711,6 @@ export function summarizeTradeMistakeForFeed(
     };
   }
 
-  // 5. Default fallback for unreviewed trades
   if (entry.pnl < 0) {
     return {
       tone: "gold",

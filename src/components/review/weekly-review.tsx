@@ -1,18 +1,22 @@
 "use client";
 
-import { useMemo } from "react";
-import { motion } from "motion/react";
+import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { addDays, formatDateMedium, weekdayShort } from "@/lib/format";
 import { Sym } from "@/components/journal/symbols";
-import { SPRING } from "@/components/journal/journal-ui";
+import { EASE, SPRING } from "@/components/journal/journal-ui";
 import { EmptyState } from "@/components/ui/misc";
 import { toast } from "@/components/ui/toast";
 import { buildWeek, type DayRow, type ReviewContext } from "@/lib/review/metrics";
-import { isoWeek, weekLabel } from "@/lib/review/period";
+import { weekLabel } from "@/lib/review/period";
 import { PSYCH_PATTERNS } from "@/lib/review/mistakes";
 import { cn } from "@/lib/utils";
-import { AnimatedNumber, AutoText, CarriedCommitments, Card, Chip, DirTag, DrawCheck, EvidenceButton, fmtPct, fmtR, GradeBadge, GradePicker, Kpi, LineInput, Prompt, SaveIndicator, Section, StatStrip, StripCell, TableShell, Td, Th, tone, useMoney } from "./review-ui";
+import {
+  AnimatedNumber, AutoText, CarriedCommitments, Card, Chip, DirTag, DrawCheck, EvidenceButton,
+  fmtPct, fmtR, GradeBadge, GradePicker, Kpi, LineInput, Prompt, SaveIndicator, Section,
+  StatStrip, StripCell, TableShell, Td, Th, tone, useMoney, useReviewSettledReveal, type SmartChipOption,
+} from "./review-ui";
 import { DayBars, OutcomeBar, WinRateRing, heat } from "./review-charts";
 import { useReviewNotes } from "./use-review-notes";
 import type { ReviewActions } from "./reviews-panel";
@@ -20,23 +24,64 @@ import type { ReviewActions } from "./reviews-panel";
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 
 const STATE_CHIP: Record<DayRow["state"], { label: string; t: "good" | "neutral" | "gold" | "info" | "bad" }> = {
-  traded: { label: "Setup · traded", t: "good" }, "no-setup": { label: "No setup", t: "info" }, pass: { label: "Pass", t: "gold" },
-  unlogged: { label: "Not logged", t: "bad" }, holiday: { label: "Holiday", t: "neutral" }, weekend: { label: "Weekend", t: "neutral" }, upcoming: { label: "Upcoming", t: "neutral" },
+  traded: { label: "Setup · traded", t: "good" },
+  "no-setup": { label: "No setup", t: "info" },
+  pass: { label: "Pass", t: "gold" },
+  unlogged: { label: "Not logged", t: "bad" },
+  holiday: { label: "Holiday", t: "neutral" },
+  weekend: { label: "Weekend", t: "neutral" },
+  upcoming: { label: "Upcoming", t: "neutral" },
 };
 
 export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; monday: string; actions: ReviewActions }) {
   const { money, signed } = useMoney();
   const rn = useReviewNotes("weekly", monday);
   const { notes } = rn;
+  const aiBrain = useApp((s) => s.settings.aiBrain);
   const week = useMemo(() => buildWeek(ctx, monday, notes.dayMarks), [ctx, monday, notes.dayMarks]);
   const prevMonday = addDays(monday, -7);
   const prevCommit = useApp((s) => s.settings.reviews?.weekly?.[prevMonday]?.lists.commitments)?.filter((c) => c.trim()) ?? [];
   const t = week.totals;
   const traded = week.days.filter((d) => d.state === "traded");
-  const best = [...traded].sort((a, b) => b.pnl - a.pnl)[0], worst = [...traded].sort((a, b) => a.pnl - b.pnl)[0];
+  const best = [...traded].sort((a, b) => b.pnl - a.pnl)[0];
+  const worst = [...traded].sort((a, b) => a.pnl - b.pnl)[0];
   const mistakeNames = (d: DayRow) => [...new Set(d.trades.flatMap((e) => week.mistakes.filter((m) => m.entryIds.includes(e.id)).map((m) => m.label)))];
-  const dayLine = (d: DayRow, kind: string) => `${kind}: ${weekdayShort(d.date)} ${formatDateMedium(d.date)} — ${signed(d.pnl)} over ${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}${d.grade ? `, grade ${d.grade}` : ""}.${mistakeNames(d).length ? ` Recorded: ${mistakeNames(d).join(", ")}.` : ""}`;
+  const dayLine = (d: DayRow, kind: string) =>
+    `${kind}: ${weekdayShort(d.date)} ${formatDateMedium(d.date)} (${signed(d.pnl)} across ${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}${d.grade ? `, grade ${d.grade}` : ""}).${mistakeNames(d).length ? ` Tagged: ${mistakeNames(d).join(", ")}.` : ""}`;
   const heldDays = week.days.filter((d) => d.state === "no-setup" || d.state === "pass");
+  const topMistake = week.mistakes[0];
+
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [moreCommitments, setMoreCommitments] = useState(false);
+
+  // Backwards-compatible unified values so any earlier notes in "worked"/"best-day" or "not-worked"/"worst-day" are preserved seamlessly
+  const workedVal = notes.text["worked"] ?? notes.text["best-day"] ?? "";
+  const leakVal = notes.text["not-worked"] ?? notes.text["worst-day"] ?? "";
+  const commit0 = notes.lists["commitments"]?.[0] ?? "";
+  const commit1 = notes.lists["commitments"]?.[1] ?? "";
+  const commit2 = notes.lists["commitments"]?.[2] ?? "";
+
+  // Apple HIG delayed progressive reveal: Q2 unfolds 680ms after pausing on Q1; Q3 unfolds 680ms after pausing on Q2
+  const q1Reveal = useReviewSettledReveal(workedVal, leakVal.trim().length > 0 || commit0.trim().length > 0, monday, 3, 680);
+  const q2Reveal = useReviewSettledReveal(leakVal, commit0.trim().length > 0, monday, 3, 680);
+
+  const workedChips: SmartChipOption[] = [
+    ...(best && best.pnl > 0 ? [{ label: `Best day (${weekdayShort(best.date)} ${signed(best.pnl)})`, text: dayLine(best, "Best execution"), tone: "good" as const }] : []),
+    ...(week.strongest ? [{ label: `Top criterion: ${week.strongest.label} (${fmtPct(week.strongest.winRate)})`, text: `Strongest edge was confirming “${week.strongest.label}” (${fmtPct(week.strongest.winRate)} win rate, ${week.strongest.wins}/${week.strongest.present}).`, tone: "good" as const }] : []),
+    ...(heldDays.length > 0 ? [{ label: `Sat on hands (${heldDays.length}d)`, text: `Practiced patience on ${heldDays.map((d) => weekdayShort(d.date)).join(", ")} when no A+ setup triggered.`, tone: "gold" as const }] : []),
+  ];
+
+  const leakChips: SmartChipOption[] = [
+    ...(topMistake ? [{ label: `#1 Leak: ${topMistake.label} (${topMistake.count}×)`, text: `Primary leak was ${topMistake.label} (${topMistake.count}×${topMistake.lost > 0 ? `, costing ${signed(-topMistake.lost)}` : ""}).`, tone: "bad" as const }] : []),
+    ...(worst && worst.pnl < 0 ? [{ label: `Hardest day (${weekdayShort(worst.date)} ${signed(worst.pnl)})`, text: dayLine(worst, "Hardest session"), tone: "bad" as const }] : []),
+    ...(week.unloggedDays > 0 ? [{ label: `${week.unloggedDays} unlogged day${week.unloggedDays === 1 ? "" : "s"}`, text: `Left ${week.unloggedDays} weekday${week.unloggedDays === 1 ? "" : "s"} unlogged — log every session or mark No Setup.`, tone: "gold" as const }] : []),
+  ];
+
+  const commitSuggestions: SmartChipOption[] = [
+    ...(topMistake ? [{ label: `Eliminate ${topMistake.label}`, text: `Pause 10 seconds before entry to verify I am not repeating ${topMistake.label.toLowerCase()}.`, tone: "ai" as const }] : []),
+    ...(week.strongest ? [{ label: `Require ${week.strongest.label}`, text: `Only execute when “${week.strongest.label}” is explicitly confirmed in pre-trade Thought.`, tone: "good" as const }] : []),
+    { label: "Hard stop after 2 losses", text: "Lock out of the platform immediately after 2 losing trades in a single session.", tone: "gold" as const },
+  ];
 
   const logNoSetup = async (date: string) => {
     try { await useApp.getState().logNoTradeDay(date); } catch { toast.error("Could not log the day"); }
@@ -50,15 +95,119 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
     return <EmptyState icon={<Sym name="calendar" className="h-6 w-6" />} title="This week hasn't started" body={`${weekLabel(monday)} is still ahead. Come back on Friday after the close — or step back to a finished week.`} />;
   }
 
+  const completedQuestions = [workedVal.trim(), leakVal.trim(), commit0.trim()].filter(Boolean).length;
+
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <Chip>{week.balance != null ? <>End-of-week balance <b className="num font-semibold text-ink">{money(week.balance)}</b></> : "Balance unavailable"}</Chip>
-          {week.isCurrent && <Chip tone="info"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-info" aria-hidden />In progress · review after Friday's close</Chip>}
+          {week.isCurrent && <Chip tone="info"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-info" aria-hidden />In progress · review after Friday&apos;s close</Chip>}
+          <Chip tone="gold"><Sym name="sparkles" className="h-3 w-3" />3-Minute Ritual · {completedQuestions}/3 done</Chip>
         </div>
         <SaveIndicator state={rn.state} />
       </div>
+
+      {/* AI Brain Weekly Executive Brief — synthesizes Plan -> Thought -> Setup -> Autopsy */}
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.48, ease: EASE }}
+        aria-label="AI Brain Weekly Synthesis"
+        className={cn(
+          "relative overflow-hidden rounded-[26px] border border-ink/[0.08] p-5 sm:p-6",
+          "bg-gradient-to-br from-[#5e5ce6]/[0.08] via-surface to-gold/[0.07] shadow-panel",
+          "dark:border-white/10 dark:from-[#5e5ce6]/[0.14] dark:via-surface dark:to-gold/[0.08]",
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#5e5ce6] text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.55)]">
+              <Sym name="sparkles" className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[14.5px] font-semibold tracking-[-0.01em] text-ink">AI Brain · Weekly Synthesis</p>
+                <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2.5 py-0.5 text-[11px] font-semibold text-profit">
+                  <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                  Synced to Google Drive
+                </span>
+                {aiBrain && (
+                  <span className="rounded-full bg-[#5e5ce6]/14 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                    {aiBrain.tier} · {aiBrain.calibrationPct}% calibrated
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[12.5px] text-muted">
+                Distilled automatically from your Plan, Thought, Setup rules, and Autopsies so you can review in under 3 minutes.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#a5"
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-canvas transition-transform hover:opacity-90 active:scale-95"
+          >
+            <span>Jump to 3 questions</span>
+            <Sym name="arrowDownRight" className="h-3.5 w-3.5" />
+          </a>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-profit">What Paid You</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {week.strongest
+                ? `${week.strongest.label} (${fmtPct(week.strongest.winRate)} win rate)`
+                : best && best.pnl > 0
+                  ? `${weekdayShort(best.date)} session (${signed(best.pnl)})`
+                  : t.trades > 0
+                    ? `${t.winners} winning ${t.winners === 1 ? "trade" : "trades"} logged`
+                    : "No trades logged yet"}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {week.strongest
+                ? `Won ${week.strongest.wins} of ${week.strongest.present} trades when confirmed.`
+                : best
+                  ? `Best execution across ${best.trades.length} ${best.trades.length === 1 ? "trade" : "trades"}.`
+                  : "Log trades in Plan & Record to unlock edge detection."}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-loss">#1 Leak to Cut</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {topMistake
+                ? `${topMistake.label} (${topMistake.count}×)`
+                : week.unloggedDays > 0
+                  ? `${week.unloggedDays} unlogged weekday${week.unloggedDays === 1 ? "" : "s"}`
+                  : "Zero mistake blunders tagged"}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {topMistake
+                ? topMistake.lost > 0
+                  ? `Cost ${signed(-topMistake.lost)} in realized losses this week.`
+                  : "Tagged in your post-trade autopsies."
+                : week.unloggedDays > 0
+                  ? "Mark No-Setup days in the log below to keep your streak clean."
+                  : "Clean process adherence across your reviewed trades."}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#5e5ce6] dark:text-[#a5a4ff]">Plan → Autopsy Sync</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {week.avgGrade ? `Grade ${week.avgGrade} Process` : `${week.sessions}/${week.tradingSlots} Sessions Active`}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {week.noSetupDays > 0
+                ? `Sat on hands ${week.noSetupDays} day${week.noSetupDays === 1 ? "" : "s"} with no setup.`
+                : aiBrain && aiBrain.planToAutopsy.linkedCount > 0
+                  ? `${Math.round((aiBrain.planToAutopsy.followedPlanCount / Math.max(1, aiBrain.planToAutopsy.linkedCount)) * 100)}% lifetime plan adherence stored in Drive.`
+                  : "Every answer below updates your Drive AI profile."}
+            </p>
+          </div>
+        </div>
+      </motion.section>
 
       <CarriedCommitments title="Commitments carried from last week" items={prevCommit} done={notes.done} onToggle={(i, v) => rn.setDone(`prev:${i}`, v)} />
 
@@ -93,13 +242,13 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             <StripCell label="Process grade" value={week.avgGrade ?? "—"} sub={week.avgGrade ? "Average, A–D" : "Grade a day below"} />
           </StatStrip>
           {week.weekendEntries > 0 && (
-            <p className="flex items-start gap-2.5 border-t border-line-soft bg-gold/[0.08] px-5 py-3 text-[13px] leading-snug text-gold-deep dark:text-gold sm:px-7"><Sym name="moon" className="mt-px h-4 w-4 shrink-0" />{week.weekendEntries} {week.weekendEntries === 1 ? "trade is" : "trades are"} dated on a weekend. {week.weekendEntries === 1 ? "It counts" : "They count"} in P&amp;L but not as a session — check the date if that's a mistake.</p>
+            <p className="flex items-start gap-2.5 border-t border-line-soft bg-gold/[0.08] px-5 py-3 text-[13px] leading-snug text-gold-deep dark:text-gold sm:px-7"><Sym name="moon" className="mt-px h-4 w-4 shrink-0" />{week.weekendEntries} {week.weekendEntries === 1 ? "trade is" : "trades are"} dated on a weekend. {week.weekendEntries === 1 ? "It counts" : "They count"} in P&amp;L but not as a session — check the date if that&apos;s a mistake.</p>
           )}
         </Card>
       </Section>
 
       {/* A.2 — Daily log */}
-      <Section id="a2" code="A.2" icon="list" title="Daily log" hint="Monday to Friday you trade. Saturday and Sunday are for review, practice and backtesting.">
+      <Section id="a2" code="A.2" icon="list" title="Daily log" hint="Monday to Friday you trade. Tap any trade to inspect its replay and autopsy.">
         <Card pad={false} className="overflow-hidden">
           <div className="hidden px-3 pb-1 pt-4 md:block">
             <TableShell min={880}>
@@ -114,7 +263,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
           </ul>
           <div className="flex items-center gap-3 border-t border-line-soft bg-ink/[0.025] px-5 py-3.5">
             <Sym name="moon" className="h-[17px] w-[17px] shrink-0 text-faint" />
-            <p className="min-w-0 text-[13.5px] text-muted"><span className="font-medium text-ink">Weekend · {formatDateMedium(week.days[5].date)} – {formatDateMedium(week.days[6].date)}</span> <span className="hidden sm:inline">· Holidays, practice, backtesting and this review.</span>{week.weekendEntries > 0 ? ` ${week.weekendEntries} trade${week.weekendEntries === 1 ? "" : "s"} dated here.` : ""}</p>
+            <p className="min-w-0 text-[13.5px] text-muted"><span className="font-medium text-ink">Weekend · {formatDateMedium(week.days[5].date)} – {formatDateMedium(week.days[6].date)}</span> <span className="hidden sm:inline">· Rest, practice, and this 3-minute review.</span>{week.weekendEntries > 0 ? ` ${week.weekendEntries} trade${week.weekendEntries === 1 ? "" : "s"} dated here.` : ""}</p>
           </div>
           <div className="flex flex-wrap items-center gap-x-7 gap-y-1 border-t border-line-soft px-5 py-3.5 text-[14px]">
             <span className="font-semibold text-ink">Week total</span>
@@ -125,117 +274,267 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </Card>
       </Section>
 
-      {/* A.3 — Criteria */}
-      <Section id="a3" code="A.3" icon="checklist" title="Setup criteria" hint="Which confirmations actually led to wins. Criteria are the pre-trade checklist items you confirmed on each trade.">
+      {/* A.3 — Edge & Patterns (Scannable summary + progressive disclosure for deep matrix) */}
+      <Section id="a3" code="A.3" icon="sparkles" title="Edge &amp; Patterns" hint="Auto-detected from your checklists and trade autopsies — zero manual busywork required.">
         <Card pad={false} className="overflow-hidden">
-          {week.criteria.length === 0 ? (
-            <p className="p-5 text-[14.5px] leading-relaxed text-muted sm:p-6">No criteria were recorded this week. Confirm the pre-trade checklist when you plan or log a trade and every criterion appears here with its win rate.</p>
-          ) : (
-            <>
-              <div className="px-3 pb-1 pt-4">
-                <TableShell min={660}>
-                  <thead><tr><Th className="pl-4">Criterion</Th><Th className="text-right">Present</Th><Th className="text-right">Won</Th><Th className="text-right">Lost</Th><Th className="text-right">Win rate</Th><Th className="min-w-[200px] pl-5">Observations</Th></tr></thead>
-                  <tbody>
-                    {week.criteria.map((c) => (
-                      <tr key={c.key} className="transition-colors hover:bg-ink/[0.025]">
-                        <Td className="max-w-[260px] pl-4 font-medium">{c.label}</Td>
-                        <Td className="num text-right"><EvidenceButton count={c.present} label={`Open ${c.present} trades with ${c.label}`} onClick={() => actions.openIds(c.entryIds, c.label)} /></Td>
-                        <Td className="num text-right text-profit">{c.wins}</Td><Td className="num text-right text-loss">{c.losses}</Td>
-                        <Td className="text-right"><span className={cn("num inline-block min-w-14 rounded-full px-2.5 py-1 text-center text-[12.5px] font-semibold", heat(c.winRate, c.present))}>{fmtPct(c.winRate)}</span></Td>
-                        <Td className="pl-4"><input aria-label={`Notes on ${c.label}`} value={notes.text[`crit:${c.key}`] ?? ""} onChange={(e) => rn.setText(`crit:${c.key}`, e.target.value)} placeholder="Add a note" maxLength={300} className="w-full rounded-[9px] bg-transparent px-2.5 py-1.5 text-[14px] text-ink outline-none transition-[background-color,box-shadow] placeholder:text-faint hover:bg-ink/[0.04] focus:bg-raised focus:ring-2 focus:ring-gold-strong/45" /></Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </TableShell>
-              </div>
-              <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-                <div className="flex items-start gap-3 px-5 py-4"><span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-profit/15 text-profit"><Sym name="arrowUpRight" className="h-4 w-4" strokeWidth={2} /></span>
-                  <Kpi label="Strongest criterion" value={<span className="text-[17px] leading-tight tracking-[-0.015em]">{week.strongest?.label ?? "—"}</span>} sub={week.strongest ? `${fmtPct(week.strongest.winRate)} when present (${week.strongest.wins}/${week.strongest.present})` : "Needs 2+ trades with a criterion"} /></div>
-                <div className="flex items-start gap-3 px-5 py-4"><span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-loss/15 text-loss"><Sym name="arrowDownRight" className="h-4 w-4" strokeWidth={2} /></span>
-                  <Kpi label="Least predictive criterion" value={<span className="text-[17px] leading-tight tracking-[-0.015em]">{week.weakest?.label ?? "—"}</span>} sub={week.weakest ? `${fmtPct(week.weakest.winRate)} when present (${week.weakest.wins}/${week.weakest.present})` : "Needs 2+ criteria with 2+ trades"} /></div>
-              </div>
-            </>
-          )}
-        </Card>
-        <div className="mt-7 grid gap-x-8 gap-y-6 lg:grid-cols-2">
-          <Prompt q="Was the weekly profile correctly identified on Monday? How did this affect your trades?"><AutoText label="Weekly profile" value={notes.text["profile"] ?? ""} onChange={(v) => rn.setText("profile", v)} placeholder="What did you expect from the week, and what did price do?" /></Prompt>
-          <Prompt q="Which day had your best execution this week, and why?"><AutoText label="Best execution" value={notes.text["best-day"] ?? ""} onChange={(v) => rn.setText("best-day", v)} placeholder="What made it different?" suggest={best ? { text: dayLine(best, "Best day"), label: "Add best day" } : null} /></Prompt>
-          <Prompt q="Which day had your worst execution, and what specific mistake was made?"><AutoText label="Worst execution" value={notes.text["worst-day"] ?? ""} onChange={(v) => rn.setText("worst-day", v)} placeholder="Name the exact mistake." suggest={worst && worst !== best ? { text: dayLine(worst, "Worst day"), label: "Add worst day" } : null} /></Prompt>
-          <Prompt q="Was there a session where no setup formed and you correctly sat on your hands?"><AutoText label="Discipline" value={notes.text["held"] ?? ""} onChange={(v) => rn.setText("held", v)} placeholder="Describe your mental discipline in that session." suggest={heldDays.length ? { text: `Held ${heldDays.length} ${heldDays.length === 1 ? "day" : "days"} without a setup: ${heldDays.map((d) => weekdayShort(d.date)).join(", ")}.`, label: "Add held days" } : null} /></Prompt>
-        </div>
-      </Section>
-
-      {/* A.4 — Patterns */}
-      <Section id="a4" code="A.4" icon="heart" title="Psychological patterns" hint="Pulled from your trade reviews. Two patterns only you can see — tick them by day.">
-        <Card pad={false} className="overflow-hidden">
-          <div className="px-3 pb-1 pt-4">
-            <TableShell min={580}>
-              <thead><tr><Th className="pl-4">Pattern</Th>{DAY_NAMES.map((n) => <Th key={n} className="text-center">{n}</Th>)}<Th className="text-right">Total</Th></tr></thead>
-              <tbody>
-                {[...week.patterns.rows.filter((r) => PSYCH_PATTERNS.some((p) => p.key === r.key) || r.total > 0), week.patterns.correct].map((r) => {
-                  const good = r.key === "correct";
-                  return (
-                    <tr key={r.key} className="transition-colors hover:bg-ink/[0.025]">
-                      <Td className="pl-4 font-medium">{r.label}{r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}</Td>
-                      {week.days.slice(0, 5).map((d) => {
-                        const n = r.perDay[d.date] ?? 0;
-                        const blocked = d.state === "holiday" || d.state === "upcoming";
-                        if (r.manual) {
-                          const key = r.key === "skipped" ? "skippedValid" : "biasLock";
-                          const on = !!notes.dayMarks[d.date]?.[key];
-                          return (
-                            <Td key={d.date} className="text-center">
-                              <button type="button" role="checkbox" aria-checked={on} aria-label={`${r.label} on ${weekdayShort(d.date)}`} disabled={blocked} onClick={() => (r.key === "skipped" ? void setPass(d.date, !on) : rn.setMark(d.date, { biasLock: !on }))}
-                                className={cn("mx-auto grid h-[26px] w-[26px] place-items-center rounded-[8px] border outline-none transition-[background-color,border-color,transform] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-90 disabled:opacity-30", on ? "border-loss bg-loss text-white" : "border-line-strong hover:border-faint hover:bg-ink/[0.04]")}>
-                                {on && <DrawCheck className="h-3.5 w-3.5" />}
-                              </button>
-                            </Td>
-                          );
-                        }
-                        return <Td key={d.date} className="text-center"><span className={cn("num inline-grid h-[26px] min-w-[26px] place-items-center rounded-[8px] px-1 text-[12.5px] font-semibold", n === 0 ? "text-faint" : good ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss")}>{n || "·"}</span></Td>;
-                      })}
-                      <Td className="text-right">{r.manual ? <span className={cn("num font-semibold", r.total ? "text-loss" : "text-faint")}>{r.total}</span> : <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />}</Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </TableShell>
+          <div className="grid divide-y divide-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+            <div className="flex items-start gap-3.5 p-5 sm:p-6">
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-profit/15 text-profit">
+                <Sym name="arrowUpRight" className="h-4 w-4" strokeWidth={2.2} />
+              </span>
+              <Kpi
+                label="Strongest setup criterion"
+                value={<span className="text-[18px] leading-tight tracking-[-0.015em]">{week.strongest?.label ?? "Confirm checklist rules in Plan"}</span>}
+                sub={week.strongest ? `${fmtPct(week.strongest.winRate)} win rate when present (${week.strongest.wins}/${week.strongest.present} trades)` : "Needs 2+ trades with pre-trade checklist rules"}
+              />
+            </div>
+            <div className="flex items-start gap-3.5 p-5 sm:p-6">
+              <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-loss/15 text-loss">
+                <Sym name="heart" className="h-4 w-4" strokeWidth={2} />
+              </span>
+              <Kpi
+                label="Most frequent psychological leak"
+                value={<span className="text-[18px] leading-tight tracking-[-0.015em]">{topMistake ? topMistake.label : "Clean execution"}</span>}
+                sub={topMistake ? `${topMistake.count}× this week${topMistake.lost > 0 ? ` · ${signed(-topMistake.lost)} impact` : ""}` : "No recurring mistake tags triggered this week"}
+              />
+            </div>
           </div>
-          <p className="border-t border-line-soft px-5 py-3.5 text-[13px] leading-snug text-muted">Counts come from the mistake type and process flags you recorded in each trade review. Overtrading also counts trades beyond your daily-trade limit.</p>
+
+          {week.insights.length > 0 && (
+            <ul className="divide-y divide-line-soft border-t border-line-soft bg-ink/[0.015]">
+              {week.insights.slice(0, 3).map((i, k) => (
+                <motion.li key={i.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.06 + k * 0.04 }} className="flex items-start gap-3.5 px-5 py-3.5 sm:px-6">
+                  <span className={cn("mt-px grid h-6 w-6 shrink-0 place-items-center rounded-full", i.tone === "good" ? "bg-profit/15 text-profit" : i.tone === "warn" ? "bg-loss/15 text-loss" : "bg-info/15 text-info")}>
+                    <Sym name={i.tone === "warn" ? "shield" : i.tone === "good" ? "check" : "bulb"} className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="min-w-0 flex-1 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[14px] leading-snug text-ink">{i.text}</p>
+                    {i.evidence && (
+                      <button
+                        type="button"
+                        onClick={() => (i.evidence!.kind === "mistake" ? actions.openMistake(i.evidence!.key) : actions.openIds(i.evidence!.ids, "Evidence"))}
+                        className="group inline-flex items-center gap-1 text-[12.5px] font-semibold text-gold-deep outline-none hover:opacity-75 dark:text-gold"
+                      >
+                        Inspect trades
+                        <Sym name="arrowUpRight" className="h-3 w-3 transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px" strokeWidth={2.2} />
+                      </button>
+                    )}
+                  </div>
+                </motion.li>
+              ))}
+            </ul>
+          )}
+
+          <div className="border-t border-line-soft px-5 py-3 sm:px-6">
+            <button
+              type="button"
+              aria-expanded={matrixOpen}
+              onClick={() => setMatrixOpen((v) => !v)}
+              className="flex w-full items-center justify-between text-left text-[13.5px] font-medium text-muted outline-none transition-colors hover:text-ink"
+            >
+              <span>{matrixOpen ? "Hide detailed criteria & day-by-day pattern tables" : "Inspect detailed criteria & day-by-day pattern tables"}</span>
+              <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", matrixOpen && "rotate-180")} strokeWidth={2} />
+            </button>
+          </div>
+
+          <AnimatePresence initial={false}>
+            {matrixOpen && (
+              <motion.div
+                key="weekly-matrix"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.34, ease: EASE }}
+                className="overflow-hidden border-t border-line-soft"
+              >
+                {week.criteria.length > 0 && (
+                  <div className="px-3 pb-3 pt-4">
+                    <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Setup Criteria Win Rates</p>
+                    <TableShell min={560}>
+                      <thead><tr><Th className="pl-4">Criterion</Th><Th className="text-right">Present</Th><Th className="text-right">Won</Th><Th className="text-right">Lost</Th><Th className="text-right pr-4">Win rate</Th></tr></thead>
+                      <tbody>
+                        {week.criteria.map((c) => (
+                          <tr key={c.key} className="transition-colors hover:bg-ink/[0.025]">
+                            <Td className="max-w-[260px] pl-4 font-medium">{c.label}</Td>
+                            <Td className="num text-right"><EvidenceButton count={c.present} label={`Open ${c.present} trades with ${c.label}`} onClick={() => actions.openIds(c.entryIds, c.label)} /></Td>
+                            <Td className="num text-right text-profit">{c.wins}</Td>
+                            <Td className="num text-right text-loss">{c.losses}</Td>
+                            <Td className="text-right pr-4"><span className={cn("num inline-block min-w-14 rounded-full px-2.5 py-1 text-center text-[12.5px] font-semibold", heat(c.winRate, c.present))}>{fmtPct(c.winRate)}</span></Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </TableShell>
+                  </div>
+                )}
+                <div className="border-t border-line-soft px-3 pb-3 pt-4">
+                  <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Psychological Pattern Matrix</p>
+                  <TableShell min={580}>
+                    <thead><tr><Th className="pl-4">Pattern</Th>{DAY_NAMES.map((n) => <Th key={n} className="text-center">{n}</Th>)}<Th className="text-right pr-4">Total</Th></tr></thead>
+                    <tbody>
+                      {[...week.patterns.rows.filter((r) => PSYCH_PATTERNS.some((p) => p.key === r.key) || r.total > 0), week.patterns.correct].map((r) => {
+                        const good = r.key === "correct";
+                        return (
+                          <tr key={r.key} className="transition-colors hover:bg-ink/[0.025]">
+                            <Td className="pl-4 font-medium">{r.label}{r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}</Td>
+                            {week.days.slice(0, 5).map((d) => {
+                              const n = r.perDay[d.date] ?? 0;
+                              const blocked = d.state === "holiday" || d.state === "upcoming";
+                              if (r.manual) {
+                                const key = r.key === "skipped" ? "skippedValid" : "biasLock";
+                                const on = !!notes.dayMarks[d.date]?.[key];
+                                return (
+                                  <Td key={d.date} className="text-center">
+                                    <button type="button" role="checkbox" aria-checked={on} aria-label={`${r.label} on ${weekdayShort(d.date)}`} disabled={blocked} onClick={() => (r.key === "skipped" ? void setPass(d.date, !on) : rn.setMark(d.date, { biasLock: !on }))}
+                                      className={cn("mx-auto grid h-[26px] w-[26px] place-items-center rounded-[8px] border outline-none transition-[background-color,border-color,transform] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-90 disabled:opacity-30", on ? "border-loss bg-loss text-white" : "border-line-strong hover:border-faint hover:bg-ink/[0.04]")}>
+                                      {on && <DrawCheck className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </Td>
+                                );
+                              }
+                              return <Td key={d.date} className="text-center"><span className={cn("num inline-grid h-[26px] min-w-[26px] place-items-center rounded-[8px] px-1 text-[12.5px] font-semibold", n === 0 ? "text-faint" : good ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss")}>{n || "·"}</span></Td>;
+                            })}
+                            <Td className="text-right pr-4">{r.manual ? <span className={cn("num font-semibold", r.total ? "text-loss" : "text-faint")}>{r.total}</span> : <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />}</Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </TableShell>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Card>
       </Section>
 
-      {/* A.5 — Narrative */}
-      <Section id="a5" code="A.5" icon="sparkles" title="Narrative" hint="What your numbers say, then what you say about them.">
-        {week.insights.length > 0 && (
-          <ul className="mb-6 divide-y divide-line-soft overflow-hidden rounded-[18px] border border-line-soft bg-surface shadow-panel">
-            {week.insights.map((i, k) => (
-              <motion.li key={i.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.1 + k * 0.05 }} className="flex items-start gap-3.5 px-4 py-3.5 sm:px-5">
-                <span className={cn("mt-px grid h-7 w-7 shrink-0 place-items-center rounded-full", i.tone === "good" ? "bg-profit/15 text-profit" : i.tone === "warn" ? "bg-loss/15 text-loss" : "bg-info/15 text-info")}><Sym name={i.tone === "warn" ? "shield" : i.tone === "good" ? "check" : "bulb"} className="h-4 w-4" /></span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] leading-snug text-ink">{i.text}</p>
-                  {i.evidence && <button type="button" onClick={() => (i.evidence!.kind === "mistake" ? actions.openMistake(i.evidence!.key) : actions.openIds(i.evidence!.ids, "Evidence"))} className="group mt-1.5 inline-flex items-center gap-1 text-[13px] font-medium text-gold-deep outline-none hover:opacity-75 focus-visible:underline dark:text-gold">See the trades<Sym name="arrowUpRight" className="h-3 w-3 transition-transform duration-200 group-hover:-translate-y-px group-hover:translate-x-px" strokeWidth={2.2} /></button>}
-                </div>
-              </motion.li>
-            ))}
-          </ul>
-        )}
-        <AutoText label="Weekly narrative" minRows={6} value={notes.text["narrative"] ?? ""} onChange={(v) => rn.setText("narrative", v)} placeholder="Tell the story of the week: what price did, what you did, and what connects the two." />
-      </Section>
+      {/* A.5 — 3-Minute Weekly Ritual (Short, sweet, anti-procrastination, progressive delayed reveal) */}
+      <Section
+        id="a5"
+        code="A.5"
+        icon="target"
+        title="3-Minute Weekly Ritual"
+        hint="Only 3 high-impact questions. Each question unfolds smoothly after you finish typing—or tap an AI chip to answer in one click."
+        aside={<SaveIndicator state={rn.state} />}
+      >
+        <Card className="space-y-7 rounded-[26px] p-6 sm:p-8">
+          {/* Question 1 */}
+          <Prompt
+            step={1}
+            done={q1Reveal.settled && workedVal.trim().length > 0}
+            typing={q1Reveal.typing}
+            q="What worked best this week? (Keep doing)"
+          >
+            <AutoText
+              label="What worked best"
+              minRows={2}
+              value={workedVal}
+              onChange={(v) => rn.setText("worked", v)}
+              placeholder="One sentence is plenty — or tap a chip from your data below."
+              chips={workedChips}
+            />
+          </Prompt>
 
-      {/* A.6 — Refinements */}
-      <Section id="a6" code="A.6" icon="bulb" title="Setup refinements">
-        <div className="grid gap-x-8 gap-y-6 md:grid-cols-2">
-          <Prompt q="What worked this week"><AutoText label="What worked" value={notes.text["worked"] ?? ""} onChange={(v) => rn.setText("worked", v)} placeholder="Keep doing…" /></Prompt>
-          <Prompt q="What did not work"><AutoText label="What did not work" value={notes.text["not-worked"] ?? ""} onChange={(v) => rn.setText("not-worked", v)} placeholder="Stop or change…" /></Prompt>
-        </div>
-      </Section>
+          {/* Question 2 — Unfolds smoothly after 680ms typing settle on Q1 */}
+          <AnimatePresence initial={false}>
+            {q1Reveal.settled && (
+              <motion.div
+                key="wk-q2"
+                initial={{ opacity: 0, y: 14, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.46, ease: EASE, delay: 0.06 }}
+                className="border-t border-line-soft pt-6"
+              >
+                <Prompt
+                  step={2}
+                  done={q2Reveal.settled && leakVal.trim().length > 0}
+                  typing={q2Reveal.typing}
+                  q="What was the #1 leak to cut? (Stop doing)"
+                >
+                  <AutoText
+                    label="Biggest leak to cut"
+                    minRows={2}
+                    value={leakVal}
+                    onChange={(v) => rn.setText("not-worked", v)}
+                    placeholder="Name the single mistake or habit that cost you focus or P&L."
+                    chips={leakChips}
+                  />
+                </Prompt>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-      {/* A.7 — Commitments */}
-      <Section id="a7" code="A.7" icon="target" title="Commitments" hint="Three specific commitments you carry into next week. They come back at the top of your next review.">
-        <div className="max-w-3xl space-y-2.5">
-          {[0, 1, 2].map((i) => <LineInput key={i} index={i + 1} label={`Commitment ${i + 1}`} value={notes.lists["commitments"]?.[i] ?? ""} onChange={(v) => rn.setListItem("commitments", i, v)} placeholder={["Something measurable I will do…", "A rule I will not break…", "One thing I will review each morning…"][i]} />)}
-        </div>
+          {/* Question 3 — Unfolds smoothly after 680ms typing settle on Q2 */}
+          <AnimatePresence initial={false}>
+            {q2Reveal.settled && (
+              <motion.div
+                key="wk-q3"
+                initial={{ opacity: 0, y: 14, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.46, ease: EASE, delay: 0.06 }}
+                className="border-t border-line-soft pt-6"
+              >
+                <Prompt
+                  step={3}
+                  done={commit0.trim().length > 0}
+                  q="What is your ONE non-negotiable rule for Monday?"
+                >
+                  <div className="space-y-3">
+                    <LineInput
+                      index={1}
+                      label="Primary rule for next week"
+                      value={commit0}
+                      onChange={(v) => rn.setListItem("commitments", 0, v)}
+                      placeholder="A specific, measurable rule I will keep next week…"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {commitSuggestions
+                        .filter((c) => c.text !== commit0)
+                        .map((chip, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => rn.setListItem("commitments", 0, chip.text)}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6]/12 px-3 py-1 text-[12px] font-medium text-[#5e5ce6] transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                          >
+                            <Sym name="sparkles" className="h-3 w-3" />
+                            <span>+ {chip.label}</span>
+                          </button>
+                        ))}
+                    </div>
+
+                    {(moreCommitments || commit1.trim().length > 0 || commit2.trim().length > 0) ? (
+                      <div className="space-y-2.5 pt-2">
+                        <LineInput
+                          index={2}
+                          label="Commitment 2 (optional)"
+                          value={commit1}
+                          onChange={(v) => rn.setListItem("commitments", 1, v)}
+                          placeholder="Optional second rule…"
+                        />
+                        <LineInput
+                          index={3}
+                          label="Commitment 3 (optional)"
+                          value={commit2}
+                          onChange={(v) => rn.setListItem("commitments", 2, v)}
+                          placeholder="Optional third rule…"
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setMoreCommitments(true)}
+                        className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted transition-colors hover:text-ink"
+                      >
+                        <span>+ Add up to 2 more rules (optional)</span>
+                      </button>
+                    )}
+                  </div>
+                </Prompt>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
       </Section>
     </div>
   );

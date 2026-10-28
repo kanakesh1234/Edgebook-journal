@@ -120,6 +120,8 @@ export interface JournalSettings {
   primaryChallengeId?: string | null;
   /** AI companion preferences. */
   aiPrefs?: AiPrefs;
+  /** Persistent AI Brain trader profile synced to Google Drive (`journal.json`). */
+  aiBrain?: AiBrainMemory;
   /** Trade Time Machine progression. Answers stay local to the journal; raw
    * trade evidence is never replaced or inferred by game state. */
   practiceProgress?: PracticeProgress;
@@ -553,6 +555,47 @@ export interface AiPrefs {
   includeNotes: boolean;
   /** Preferred maximum size for a single MINATO reply. The provider may impose a lower ceiling. */
   responseTokenLimit?: number;
+}
+
+/**
+ * Persistent AI Brain trader profile stored in `settings.aiBrain` inside Google Drive (`journal.json`).
+ * Synthesizes everything from Plan -> Thought -> Setup -> Trade -> Autopsy so the AI understands
+ * the trader better every day and retains cumulative insights across devices and sessions.
+ */
+export interface AiBrainDailyRecord {
+  date: string;
+  trades: number;
+  netPnl: number;
+  dominantEmotion?: string;
+  mainMistake?: string;
+  planFollowedRate?: number | null;
+  summary: string;
+  updatedAt: number;
+}
+
+export interface AiBrainMemory {
+  v: 1;
+  updatedAt: number;
+  totalTradesAnalyzed: number;
+  reviewedTradesAnalyzed: number;
+  plansAnalyzed: number;
+  calibrationPct: number;
+  tier: "Seed" | "Calibrating" | "Calibrated" | "High-Precision";
+  /** Personal phrase/word -> mistake count matrix learned from the trader's own notes and autopsies. */
+  learnedVocabulary: Record<string, Record<string, number>>;
+  /** Emotional state -> outcomes and mistake frequencies. */
+  emotionProfile: Record<string, { n: number; wins: number; netPnl: number; topMistakes: Record<string, number> }>;
+  /** Setup name/id -> outcomes and mistake frequencies. */
+  setupProfile: Record<string, { n: number; wins: number; netPnl: number; topMistakes: Record<string, number> }>;
+  /** Plan-to-Autopsy alignment metrics. */
+  planToAutopsy: {
+    linkedCount: number;
+    followedPlanCount: number;
+    watchPreventedCount: number;
+    watchRepeatedCount: number;
+  };
+  /** Rolling 60-day daily trader understanding log. */
+  dailyUnderstandings: AiBrainDailyRecord[];
 }
 
 export interface PracticeProgress {

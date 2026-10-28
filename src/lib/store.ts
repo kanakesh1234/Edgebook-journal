@@ -10,6 +10,7 @@ import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl, primeImageUrl } from "./images";
 import { uid } from "./utils";
 import { purgeTradeTraces } from "./cleanup";
+import { syncAiBrainMemory } from "./ai-brain";
 import { generateDemoEntries } from "./seed";
 import { toast } from "@/components/ui/toast";
 
@@ -193,7 +194,17 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
     return;
   }
 
-  const payload: JournalPayload = { entries, settings, dayLogs, plans, version: 2 };
+  let syncedSettings = settings;
+  try {
+    syncedSettings = {
+      ...settings,
+      aiBrain: syncAiBrainMemory(entries, plans, settings.playbook ?? [], settings.aiBrain),
+    };
+  } catch {
+    syncedSettings = settings;
+  }
+
+  const payload: JournalPayload = { entries, settings: syncedSettings, dayLogs, plans, version: 2 };
   const snapshotKey = `${Date.now()}`;
 
   // Supabase working memory is an advisory crash-recovery copy. It starts at the same moment as the
@@ -218,7 +229,7 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
       status
         ? `${syncError?.message ?? `Drive error ${status}`}. Your change is stored locally; retry when Drive is available.`
         : "Your change is stored locally but was not confirmed on Drive. Retry when your connection is back.",
-      { label: "Retry", onClick: () => { void persist(userId, entries, settings, dayLogs, plans); } },
+      { label: "Retry", onClick: () => { void persist(userId, entries, syncedSettings, dayLogs, plans); } },
     );
   }
 }
@@ -274,13 +285,20 @@ export const useApp = create<AppState>((set, get) => ({
     // IMPORTANT: Always set status to "authenticated" so the user isn't stuck
     // on the splash screen forever — they see the app (with the error toast)
     // and can reload to retry.
+    const loadedEntries = payload?.entries ?? [];
+    const loadedPlans = payload?.plans ?? [];
+    const baseSettings = { ...defaultSettings(), ...(payload?.settings ?? {}) };
+    const syncedSettings: JournalSettings = {
+      ...baseSettings,
+      aiBrain: syncAiBrainMemory(loadedEntries, loadedPlans, baseSettings.playbook ?? [], baseSettings.aiBrain),
+    };
     set({
       status: "authenticated",
       user,
-      entries: payload?.entries ?? [],
-      settings: { ...defaultSettings(), ...(payload?.settings ?? {}) },
+      entries: loadedEntries,
+      settings: syncedSettings,
       dayLogs: payload?.dayLogs ?? [],
-      plans: payload?.plans ?? [],
+      plans: loadedPlans,
     });
   },
 

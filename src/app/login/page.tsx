@@ -52,16 +52,11 @@ function LoginView() {
   const [busy, setBusy] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Drive flow feedback (connected / errors surfaced by the callback).
-  // Hidden while an OAuth redirect is in progress — the login page must
-  // show ONLY the authentication state, never journal/Drive data errors.
   const driveParam = params.get("drive");
   const driveMessage = !googleLoading && driveParam
     ? (DRIVE_MESSAGES[driveParam] ?? { tone: "error" as const, text: "Google sign-in encountered an unexpected issue. Please try again." })
     : undefined;
 
-  // Already signed in → straight to the journal
-  // OAuth callback success → also straight to the journal (skip login form)
   useEffect(() => {
     if (driveParam === "connected") {
       router.replace("/dashboard");
@@ -108,12 +103,20 @@ function LoginView() {
   };
 
   return (
-    <div className="grid min-h-dvh lg:grid-cols-[1fr_1.1fr]">
-      {/* ------------------------------ Brand panel ------------------------------ */}
+    <div className="grid min-h-dvh lg:grid-cols-[1.08fr_1fr]">
+      {/* ------------------------------ Apple HIG Spatial Brand Panel ------------------------------ */}
       <aside className="relative hidden overflow-hidden border-r border-line bg-surface lg:block">
-        <div className="grid-backdrop absolute inset-0 opacity-60" aria-hidden />
+        <div className="grid-backdrop absolute inset-0 opacity-50" aria-hidden />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(640px 420px at 15% 20%, rgba(94,92,230,0.10), transparent 70%), radial-gradient(540px 380px at 85% 80%, rgba(236,192,99,0.09), transparent 70%)",
+          }}
+        />
 
-        <div className="relative flex h-full flex-col justify-between p-12">
+        <div className="relative flex h-full flex-col justify-between p-12 xl:p-14">
           <div className="flex items-center justify-between">
             <Link href="/" aria-label="Back to home">
               <Wordmark />
@@ -121,69 +124,84 @@ function LoginView() {
             <ThemeToggle />
           </div>
 
-          <div>
-            <motion.h1
-              initial={{ opacity: 0, y: 24 }}
+          <div className="my-auto py-8">
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, ease: EASE }}
-              className="max-w-md font-serif text-5xl font-normal leading-[1.06] tracking-[-0.02em] text-ink"
+              transition={{ duration: 0.55, ease: EASE }}
+              className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-raised/85 px-3.5 py-1 text-xs font-semibold text-muted backdrop-blur"
             >
-              The review is{" "}
-              <span className="italic text-gold-grad">the edge.</span>
+              <span className="h-2 w-2 rounded-full bg-profit" />
+              <span>Google Drive Synced · AI Brain v1</span>
+            </motion.div>
+
+            <motion.h1
+              initial={{ opacity: 0, y: 22 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.68, delay: 0.08, ease: EASE }}
+              className="mt-5 max-w-lg font-display text-[42px] font-bold leading-[1.06] tracking-[-0.03em] text-ink xl:text-[48px]"
+            >
+              Every trade trains{" "}
+              <span className="font-serif font-normal italic text-gold-grad">your personal AI Brain.</span>
             </motion.h1>
             <motion.p
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.7, delay: 0.12, ease: EASE }}
-              className="mt-5 max-w-sm leading-relaxed text-muted"
+              transition={{ duration: 0.68, delay: 0.16, ease: EASE }}
+              className="mt-4 max-w-md text-[15px] leading-relaxed text-muted"
             >
-              Sign in and pick up exactly where the market left you — every session measured,
-              every lesson kept.
+              Sign in to sync your private Google Drive journal—complete with pre-trade Thought guardrails, 16:9 trade replays, 3-minute reviews, and spaced-repetition practice arenas.
             </motion.p>
 
-            {/* Decorative road */}
-            <motion.svg
-              viewBox="0 0 420 120"
-              className="mt-12 w-full max-w-sm"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3, duration: 0.8 }}
-              aria-hidden
+            {/* Live Apple Bento Telemetry Preview Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.72, delay: 0.24, ease: EASE }}
+              className="mt-8 max-w-lg space-y-3 rounded-[24px] border border-line-strong bg-raised/85 p-5 shadow-xl backdrop-blur-xl"
             >
-              <path
-                d="M8 100 C90 100 110 30 200 30 C290 30 310 88 412 88"
-                fill="none"
-                stroke="var(--color-line-strong)"
-                strokeWidth="14"
-                strokeLinecap="round"
-              />
-              <path
-                d="M8 100 C90 100 110 30 200 30 C290 30 310 88 412 88"
-                fill="none"
-                stroke="var(--color-gold)"
-                strokeWidth="1.6"
-                strokeDasharray="6 14"
-                strokeLinecap="round"
-                style={{ animation: "dash-flow 1.4s linear infinite" }}
-              />
-              <circle cx="8" cy="100" r="7" fill="var(--color-raised)" stroke="var(--color-muted)" strokeWidth="2" />
-              <circle cx="412" cy="88" r="7" fill="var(--color-profit)" />
-              <text x="26" y="118" fontSize="10" fill="var(--color-faint)" fontFamily="var(--font-mono)">START</text>
-              <text x="392" y="70" fontSize="10" fill="var(--color-profit)" fontFamily="var(--font-mono)" textAnchor="end">TARGET</text>
-            </motion.svg>
+              <div className="flex items-center justify-between border-b border-line-soft pb-3">
+                <div>
+                  <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[#5e5ce6] dark:text-[#a5a4ff]">
+                    EdgeBook AI Brain · Drive Record
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold text-ink">
+                    Plan → Thought → Setup → Autopsy Connected
+                  </p>
+                </div>
+                <span className="rounded-full bg-profit/15 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-profit">
+                  94% Clarity
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 pt-1">
+                <div className="rounded-2xl border border-line-soft bg-surface px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">16:9 Replays</p>
+                  <p className="mt-0.5 text-xs font-semibold text-ink">2-Line Mistake Strip</p>
+                </div>
+                <div className="rounded-2xl border border-line-soft bg-surface px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Reviews</p>
+                  <p className="mt-0.5 text-xs font-semibold text-ink">3-Min Smart Chips</p>
+                </div>
+                <div className="rounded-2xl border border-line-soft bg-surface px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Practice</p>
+                  <p className="mt-0.5 text-xs font-semibold text-ink">5 Neural Arenas</p>
+                </div>
+              </div>
+            </motion.div>
           </div>
 
-          <ul className="space-y-3 text-sm text-muted">
+          <ul className="space-y-2.5 text-[13.5px] text-muted">
             {[
-              "Journal stays private in your own Google Drive",
-              "Screenshots, analytics, playbook & calendar",
-              "Export everything as JSON anytime",
+              "Journal & AI Brain stay 100% private in your own Google Drive",
+              "Interactive Equity Curve & live-scrubbing session calendar",
+              "Instant JSON export and offline local resilience",
             ].map((t, i) => (
               <motion.li
                 key={t}
-                initial={{ opacity: 0, x: -14 }}
+                initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 + i * 0.1, duration: 0.5, ease: EASE }}
+                transition={{ delay: 0.36 + i * 0.08, duration: 0.45, ease: EASE }}
                 className="flex items-center gap-2.5"
               >
                 <CheckIcon className="h-4 w-4 shrink-0 text-profit" />
@@ -194,13 +212,13 @@ function LoginView() {
         </div>
       </aside>
 
-      {/* ------------------------------- Form panel ------------------------------ */}
+      {/* ------------------------------- Spatial Glass Auth Card ------------------------------ */}
       <main className="relative flex items-center justify-center px-5 py-12 sm:px-10">
         <motion.div
-          initial={{ opacity: 0, y: 28 }}
+          initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.65, ease: EASE }}
-          className="panel relative w-full max-w-md p-7 sm:p-9"
+          transition={{ duration: 0.6, ease: EASE }}
+          className="panel relative w-full max-w-[440px] rounded-[28px] border border-line-strong/80 p-7 shadow-[0_32px_80px_-28px_rgba(0,0,0,0.45)] backdrop-blur-2xl sm:p-9"
         >
           <div className="mb-8 flex items-center justify-between lg:hidden">
             <Link href="/" aria-label="Back to home">
@@ -209,18 +227,24 @@ function LoginView() {
             <ThemeToggle />
           </div>
 
-          <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-ink">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-[11px] font-semibold text-gold">
+            <span>EdgeBook Workspace</span>
+          </div>
+
+          <h2 className="mt-3 font-display text-[26px] font-semibold tracking-[-0.025em] text-ink">
             {mode === "signin" ? "Welcome back" : "Create your journal"}
           </h2>
-          <p className="mt-1.5 text-sm text-muted">
-            {mode === "signin" ? "Sign in to continue your streak." : "One account — journal and Drive, together."}
+          <p className="mt-1 text-sm text-muted">
+            {mode === "signin"
+              ? "Sign in to load your Google Drive journal and AI Brain."
+              : "One account — private Google Drive sync and AI Brain included."}
           </p>
 
           {driveMessage && (
             <p
               role="status"
               className={cn(
-                "mt-5 rounded-lg border px-3 py-2.5 text-[13px]",
+                "mt-5 rounded-2xl border px-3.5 py-2.5 text-[13px]",
                 driveMessage.tone === "error"
                   ? "border-loss/25 bg-loss/[0.07] text-loss"
                   : "border-info/25 bg-info/[0.06] text-info",
@@ -230,7 +254,7 @@ function LoginView() {
             </p>
           )}
 
-          {/* Primary: Google — single click, loading state, no double-fire */}
+          {/* Primary: Google OAuth + Drive Sync */}
           <button
             type="button"
             disabled={googleLoading || busy}
@@ -241,7 +265,7 @@ function LoginView() {
               window.location.assign("/api/auth/google/start?next=/dashboard");
             }}
             className={cn(
-              "group mt-6 flex h-11 w-full items-center justify-center gap-3 rounded-control border border-line-strong bg-surface text-sm font-medium text-ink shadow-sm transition-all duration-200 hover:bg-raised hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20",
+              "group mt-6 flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-line-strong bg-raised text-[14.5px] font-semibold text-ink shadow-sm transition-all duration-200 hover:border-gold/50 hover:bg-surface hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20",
               googleLoading && "pointer-events-none opacity-60",
             )}
             aria-label="Continue with Google"
@@ -252,19 +276,19 @@ function LoginView() {
             ) : (
               <GoogleIcon className="h-[18px] w-[18px]" />
             )}
-            {googleLoading ? "Redirecting to Google…" : "Continue with Google"}
+            {googleLoading ? "Connecting to Google Drive…" : "Continue with Google Drive"}
             {!googleLoading && (
-              <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-muted" />
+              <ArrowRightIcon className="h-4 w-4 text-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-ink" />
             )}
           </button>
-          <p className="mt-2 text-center text-xs text-faint">
-            New here? This creates your journal. Returning? This signs you in — Drive included.
+          <p className="mt-2 text-center text-[11.5px] text-faint">
+            Recommended · Automatically syncs your journal &amp; AI Brain to Google Drive.
           </p>
 
           {/* Divider */}
           <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-widest text-faint">
             <span className="h-px flex-1 bg-line" />
-            or continue with email
+            or local email session
             <span className="h-px flex-1 bg-line" />
           </div>
 
@@ -272,11 +296,12 @@ function LoginView() {
           <div
             role="tablist"
             aria-label="Authentication mode"
-            className="grid grid-cols-2 gap-1 rounded-control border border-line bg-canvas/60 p-1"
+            className="grid grid-cols-2 gap-1 rounded-2xl border border-line bg-canvas/60 p-1"
           >
             {(["signin", "signup"] as const).map((m) => (
               <button
                 key={m}
+                type="button"
                 role="tab"
                 aria-selected={mode === m}
                 onClick={() => {
@@ -284,7 +309,7 @@ function LoginView() {
                   setErrors({});
                 }}
                 className={cn(
-                  "relative rounded-lg py-1.5 text-sm font-medium transition-colors",
+                  "relative rounded-xl py-2 text-[13.5px] font-semibold transition-colors",
                   mode === m ? "text-ink" : "text-faint hover:text-muted",
                 )}
               >
@@ -292,7 +317,7 @@ function LoginView() {
                   <motion.span
                     layoutId="auth-tab"
                     transition={{ type: "spring", stiffness: 480, damping: 38 }}
-                    className="absolute inset-0 rounded-lg border border-line-strong bg-raised"
+                    className="absolute inset-0 rounded-xl border border-line-strong bg-raised shadow-sm"
                   />
                 )}
                 <span className="relative">{m === "signin" ? "Sign in" : "Create account"}</span>
@@ -351,19 +376,19 @@ function LoginView() {
             </Field>
 
             {errors.form && (
-              <p role="alert" className="rounded-lg border border-loss/25 bg-loss/[0.07] px-3 py-2.5 text-[13px] text-loss">
+              <p role="alert" className="rounded-xl border border-loss/25 bg-loss/[0.07] px-3 py-2.5 text-[13px] text-loss">
                 {errors.form}
               </p>
             )}
 
-            <Button type="submit" variant="gold" loading={busy} disabled={busy} className="h-10 w-full">
-              {mode === "signin" ? "Sign in" : "Create journal"}
+            <Button type="submit" variant="gold" loading={busy} disabled={busy} className="h-11 w-full rounded-2xl text-[14.5px] font-semibold">
+              {mode === "signin" ? "Sign in to Workspace" : "Create Journal"}
               {!busy && <ArrowRightIcon className="h-4 w-4" />}
             </Button>
           </form>
 
           <p className="mt-6 text-center text-xs leading-relaxed text-faint">
-            Your journal stays private — stored in your own Google Drive, or locally on this device.
+            Your journal and AI Brain stay private — stored in your own Google Drive or locally on this device.
           </p>
         </motion.div>
       </main>

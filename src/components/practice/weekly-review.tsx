@@ -184,20 +184,59 @@ export function WeeklyReview() {
             <TrendChart points={trend} selected={start} onPick={setStart} format={money} />
           </Card>
 
-          <Card title="Your week in words" className="mt-5">
+          <Card title="Your week in words · 2-minute check-in" className="mt-5">
             {lastFocus && <p className="mb-4 rounded-2xl bg-gold/[0.08] px-4 py-3 text-[14px] text-ink"><span className="text-muted">Last week you chose to focus on: </span>{lastFocus}</p>}
             <div>
-              <Label done={wentWell.trim().length > 0} htmlFor="wk-well">What worked this week?</Label>
+              <div className="flex items-center justify-between">
+                <Label done={wentWell.trim().length > 0} htmlFor="wk-well">1. What worked best this week?</Label>
+                {wentWell.trim().length > 0 && !focus.trim() && (
+                  <span className="text-[11.5px] font-medium text-gold">Unfolding next prompt…</span>
+                )}
+              </div>
               <TextBlock id="wk-well" maxLength={400} value={wentWell} onChange={(e) => setWentWell(e.target.value)} placeholder="A sentence or two is plenty." className="mt-2.5" />
+              {week.best && !wentWell.trim() && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setWentWell(`Best trade (${money(week.best!.pnl)}) followed my planned setup rules cleanly.`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-3 py-1 text-[12px] font-medium text-profit transition-all hover:bg-profit/20 active:scale-95"
+                  >
+                    <Sym name="sparkles" className="h-3 w-3" />
+                    <span>+ Best trade ({money(week.best.pnl)})</span>
+                  </button>
+                  {week.plan.followed > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setWentWell(`Followed my pre-trade plan on ${week.plan.followed} trades (${money(week.plan.netFollowed)} net).`)}
+                      className="inline-flex items-center gap-1 rounded-full bg-gold/12 px-3 py-1 text-[12px] font-medium text-gold transition-all hover:bg-gold/20 active:scale-95"
+                    >
+                      <Sym name="sparkles" className="h-3 w-3" />
+                      <span>+ Plan adherence ({week.plan.followed} trades)</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            {(wentWell.trim().length > 0 || focus.trim().length > 0) && (
-              <Reveal focus>
-                <Label done={focus.trim().length > 0} htmlFor="wk-focus">One thing to focus on next week</Label>
-                <TextBlock id="wk-focus" maxLength={280} value={focus} onChange={(e) => setFocus(e.target.value)} placeholder={week.mistakes[0] ? `e.g. No ${week.mistakes[0].label.toLowerCase()} — ` : "One concrete behaviour."} className="mt-2.5" />
+            {(wentWell.trim().length >= 3 || focus.trim().length > 0) && (
+              <Reveal focus delay={0.35}>
+                <Label done={focus.trim().length > 0} htmlFor="wk-focus">2. One rule to focus on next week</Label>
+                <TextBlock id="wk-focus" maxLength={280} value={focus} onChange={(e) => setFocus(e.target.value)} placeholder={week.mistakes[0] ? `e.g. Eliminate ${week.mistakes[0].label.toLowerCase()} — ` : "One concrete behaviour."} className="mt-2.5" />
+                {week.mistakes[0] && !focus.trim() && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFocus(`Eliminate ${week.mistakes[0]!.label.toLowerCase()} by pausing 10 seconds before clicking entry.`)}
+                      className="inline-flex items-center gap-1 rounded-full bg-[#5e5ce6]/12 px-3 py-1 text-[12px] font-medium text-[#5e5ce6] transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                    >
+                      <Sym name="sparkles" className="h-3 w-3" />
+                      <span>+ Cut {week.mistakes[0].label}</span>
+                    </button>
+                  </div>
+                )}
               </Reveal>
             )}
             <div className="mt-5 flex items-center justify-between gap-4">
-              <p className="text-[13px] text-faint">{savedAt && !dirty ? "Saved" : ""}</p>
+              <p className="text-[13px] text-faint">{savedAt && !dirty ? "Saved to Google Drive" : ""}</p>
               <PrimaryButton disabled={!dirty || (!wentWell.trim() && !focus.trim())} loading={busy} onClick={save}>Save review</PrimaryButton>
             </div>
           </Card>

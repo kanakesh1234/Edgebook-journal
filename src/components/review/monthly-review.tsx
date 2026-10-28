@@ -11,13 +11,21 @@ import { buildMonth, type ReviewContext } from "@/lib/review/metrics";
 import { addMonths, monthTitle, weekLabel } from "@/lib/review/period";
 import { PSYCH_PATTERNS } from "@/lib/review/mistakes";
 import { cn } from "@/lib/utils";
-import { AnimatedNumber, AutoText, CarriedCommitments, Card, Chip, DirTag, EvidenceButton, fmtPct, fmtR, GradeBadge, Group, LineInput, Prompt, SaveIndicator, Section, StatRow, StatStrip, StripCell, TableShell, Td, Th, tone, useMoney } from "./review-ui";
+import {
+  AnimatedNumber, AutoText, CarriedCommitments, Card, Chip, DirTag, EvidenceButton,
+  fmtPct, fmtR, GradeBadge, Group, LineInput, Prompt, SaveIndicator, Section,
+  StatRow, StatStrip, StripCell, TableShell, Td, Th, tone, useMoney, useReviewSettledReveal, type SmartChipOption,
+} from "./review-ui";
 import { PairBar, SessionCurve, Sparkline, WinRateRing, OutcomeBar, heat } from "./review-charts";
 import { useReviewNotes } from "./use-review-notes";
 import type { ReviewActions } from "./reviews-panel";
 
 const SHAPE_TEXT: Record<string, string> = {
-  ascending: "smooth and ascending", recovering: "ascending, with a drawdown along the way", descending: "descending, driven by one deep drawdown", choppy: "choppy, with frequent reversals", empty: "too short to read yet",
+  ascending: "smooth and ascending",
+  recovering: "ascending, with a drawdown along the way",
+  descending: "descending, driven by one deep drawdown",
+  choppy: "choppy, with frequent reversals",
+  empty: "too short to read yet",
 };
 
 export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; month: string; actions: ReviewActions }) {
@@ -25,36 +33,168 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const reduce = useReducedMotion();
   const rn = useReviewNotes("monthly", month);
   const { notes } = rn;
+  const aiBrain = useApp((s) => s.settings.aiBrain);
   const weekly = useApp((s) => s.settings.reviews?.weekly);
   const prevCommit = useApp((s) => s.settings.reviews?.monthly?.[addMonths(month, -1)]?.lists.commitments)?.filter((c) => c.trim()) ?? [];
   const m = useMemo(() => buildMonth(ctx, month, (mon) => weekly?.[mon]?.dayMarks), [ctx, month, weekly]);
   const t = m.totals;
-  // Hovering a drawdown or streak in the lists lights its marker on the curve.
   const [hotDrawdown, setHotDrawdown] = useState<number | null>(null);
   const [hotStreak, setHotStreak] = useState<number | null>(null);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [moreRules, setMoreRules] = useState(false);
+
+  const wonVal = notes.text["won"] ?? notes.text["edge"] ?? "";
+  const lostVal = notes.text["lost"] ?? notes.text["curve"] ?? "";
+  const commit0 = notes.lists["commitments"]?.[0] ?? "";
+  const commit1 = notes.lists["commitments"]?.[1] ?? "";
+  const commit2 = notes.lists["commitments"]?.[2] ?? "";
+
+  // Apple HIG delayed progressive reveal: Q2 unfolds 680ms after pausing on Q1; Q3 unfolds 680ms after pausing on Q2
+  const q1Reveal = useReviewSettledReveal(wonVal, lostVal.trim().length > 0 || commit0.trim().length > 0, month, 3, 680);
+  const q2Reveal = useReviewSettledReveal(lostVal, commit0.trim().length > 0, month, 3, 680);
 
   if (m.isFuture) return <EmptyState icon={<Sym name="calendar" className="h-6 w-6" />} title="This month hasn't started" body={`${monthTitle(month)} is still ahead. Complete this review on the last trading day of the month.`} />;
 
   const bestDay = [...m.days].filter((d) => d.state === "traded").sort((a, b) => b.pnl - a.pnl)[0];
   const worstDay = [...m.days].filter((d) => d.state === "traded").sort((a, b) => a.pnl - b.pnl)[0];
-  const topCrit = [...m.criteria].filter((c) => c.present >= 3 && c.winRate != null).sort((a, b) => b.winRate! - a.winRate! || b.present - a.present)[0];
-  const costly = [...m.mistakes].filter((x) => x.lost > 0).sort((a, b) => b.lost - a.lost)[0];
-  const mostPresent = m.criteria[0];
+  const topCrit = [...m.criteria].filter((c) => c.present >= 3 && c.winRate != null).sort((a, b) => b.winRate! - a.winRate! || b.present - a.present)[0] ?? m.criteria[0];
+  const costly = [...m.mistakes].filter((x) => x.lost > 0).sort((a, b) => b.lost - a.lost)[0] ?? m.mistakes[0];
   const combo = m.combos[0];
   const low = m.thresholds.filter((r) => r.met <= 2 && r.trades > 0);
-  const dayText = (d: typeof bestDay, kind: string) => `${kind}: ${formatDateMedium(d.date)} — ${signed(d.pnl)} over ${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}${d.grade ? `, grade ${d.grade}` : ""}.`;
+  const dayText = (d: typeof bestDay, kind: string) => `${kind}: ${formatDateMedium(d.date)} (${signed(d.pnl)} across ${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}${d.grade ? `, grade ${d.grade}` : ""}).`;
   const p = m.prop;
   const hardest = m.worstWeek && m.worstWeek !== m.bestWeek ? m.worstWeek : null;
 
+  const wonChips: SmartChipOption[] = [
+    ...(topCrit ? [{ label: `Top criterion: ${topCrit.label} (${fmtPct(topCrit.winRate)})`, text: `Strongest edge was confirming “${topCrit.label}” — ${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present}).`, tone: "good" as const }] : []),
+    ...(combo ? [{ label: `Best combo (${fmtPct(combo.winRate)})`, text: `Highest-probability combo: ${combo.labels.join(" + ")} (${fmtPct(combo.winRate)} over ${combo.trades} trades, ${signed(combo.net)}).`, tone: "good" as const }] : []),
+    ...(bestDay && bestDay.pnl > 0 ? [{ label: `Best session (${formatDateMedium(bestDay.date)})`, text: dayText(bestDay, "Best session"), tone: "gold" as const }] : []),
+  ];
+
+  const lostChips: SmartChipOption[] = [
+    ...(costly ? [{ label: `#1 Leak: ${costly.label} (${costly.count}×)`, text: `Costliest mistake was ${costly.label} — ${costly.lost > 0 ? `${signed(-costly.lost)} across ` : ""}${costly.count} ${costly.count === 1 ? "trade" : "trades"}.`, tone: "bad" as const }] : []),
+    ...(m.drawdowns[0] ? [{ label: `Max drawdown (${signed(-m.drawdowns[0].depth)})`, text: `Curve was ${SHAPE_TEXT[m.shape]}, with deepest drawdown ${signed(-m.drawdowns[0].depth)} on ${formatDateMedium(m.drawdowns[0].date)}.`, tone: "bad" as const }] : []),
+    ...(low.length ? [{ label: `Low-criteria trades (${low.reduce((s, r) => s + r.trades, 0)})`, text: `Took ${low.reduce((s, r) => s + r.trades, 0)} trades with ≤2 criteria confirmed (${signed(low.reduce((s, r) => s + r.net, 0))}).`, tone: "gold" as const }] : []),
+    ...(worstDay && worstDay.pnl < 0 ? [{ label: `Worst session (${formatDateMedium(worstDay.date)})`, text: dayText(worstDay, "Hardest session"), tone: "bad" as const }] : []),
+  ];
+
+  const nextMonthRuleChips: SmartChipOption[] = [
+    ...(costly ? [{ label: `Eliminate ${costly.label}`, text: `Never enter a trade without checking for ${costly.label.toLowerCase()} in pre-trade Thought.`, tone: "ai" as const }] : []),
+    ...(topCrit ? [{ label: `Require ${topCrit.label}`, text: `Require “${topCrit.label}” + at least 3 confirmed checklist rules before sizing full risk.`, tone: "good" as const }] : []),
+    { label: "Protect prop drawdown", text: "Cap daily risk strictly at 1R after a losing trade so drawdown never compounds.", tone: "gold" as const },
+  ];
+
+  const completedQuestions = [wonVal.trim(), lostVal.trim(), commit0.trim()].filter(Boolean).length;
+
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <Chip>Sessions <b className="num font-semibold text-ink">{m.sessions} / {m.tradingDays}</b></Chip>
           <Chip>{m.balance != null ? <>Month-end balance <b className="num font-semibold text-ink">{money(m.balance)}</b></> : "Balance unavailable"}</Chip>
+          <Chip tone="gold"><Sym name="sparkles" className="h-3 w-3" />3-Minute Ritual · {completedQuestions}/3 done</Chip>
         </div>
         <SaveIndicator state={rn.state} />
       </div>
+
+      {/* AI Brain Monthly Synthesis Card */}
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.48, ease: EASE }}
+        aria-label="AI Brain Monthly Synthesis"
+        className={cn(
+          "relative overflow-hidden rounded-[26px] border border-ink/[0.08] p-5 sm:p-6",
+          "bg-gradient-to-br from-[#5e5ce6]/[0.08] via-surface to-gold/[0.07] shadow-panel",
+          "dark:border-white/10 dark:from-[#5e5ce6]/[0.14] dark:via-surface dark:to-gold/[0.08]",
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#5e5ce6] text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.55)]">
+              <Sym name="sparkles" className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[14.5px] font-semibold tracking-[-0.01em] text-ink">AI Brain · Monthly Executive Brief</p>
+                <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2.5 py-0.5 text-[11px] font-semibold text-profit">
+                  <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                  Synced to Google Drive
+                </span>
+                {aiBrain && (
+                  <span className="rounded-full bg-[#5e5ce6]/14 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                    {aiBrain.tier} · {aiBrain.calibrationPct}% calibrated
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[12.5px] text-muted">
+                Every trade from Plan → Thought → Setup → Autopsy is synthesized here. Review the numbers and answer 3 short prompts below.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#b6"
+            className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-semibold text-canvas transition-transform hover:opacity-90 active:scale-95"
+          >
+            <span>Jump to 3 questions</span>
+            <Sym name="arrowDownRight" className="h-3.5 w-3.5" />
+          </a>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-profit">A+ Edge Driver</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {combo
+                ? `${combo.labels.join(" + ")} (${fmtPct(combo.winRate)})`
+                : topCrit
+                  ? `${topCrit.label} (${fmtPct(topCrit.winRate)})`
+                  : m.bestWeek
+                    ? `Week ${m.bestWeek.label} (${signed(m.bestWeek.net)})`
+                    : "Building monthly sample"}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {combo
+                ? `Generated ${signed(combo.net)} across ${combo.trades} high-conviction trades.`
+                : topCrit
+                  ? `Confirmed on ${topCrit.present} trades with ${topCrit.wins} wins.`
+                  : "Confirm setup rules in Plan Trade to map your best combinations."}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-loss">Costliest Leak</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {costly
+                ? `${costly.label} (${costly.count}×)`
+                : m.forcedTrades > 0
+                  ? `${m.forcedTrades} forced trade${m.forcedTrades === 1 ? "" : "s"}`
+                  : "Zero major mistake leaks"}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {costly
+                ? costly.lost > 0
+                  ? `Cost ${signed(-costly.lost)} across ${monthTitle(month)}.`
+                  : "Flagged in post-trade autopsies."
+                : "Discipline held across sessions."}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#5e5ce6] dark:text-[#a5a4ff]">Equity &amp; Prop Status</p>
+            <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
+              {m.curve.length >= 2 ? `Curve is ${SHAPE_TEXT[m.shape]}` : `${m.sessions} active sessions`}
+            </p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              {p.dailyLossBreaches === 0
+                ? "0 daily loss limit breaches all month."
+                : p.dailyLossBreaches != null
+                  ? `${p.dailyLossBreaches}× daily loss limit breached — tighten stop rules.`
+                  : `${m.noSetupDays} disciplined no-setup days logged.`}
+            </p>
+          </div>
+        </div>
+      </motion.section>
 
       <CarriedCommitments title="Commitments carried from last month" items={prevCommit} done={notes.done} onToggle={(i, v) => rn.setDone(`prev:${i}`, v)} />
 
@@ -109,6 +249,33 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </div>
       </Section>
 
+      {/* B.3 — Equity curve */}
+      <Section id="b3" code="B.3" icon="chart" title="Equity curve" hint="Cumulative P&L after each session. Red numbers mark the three deepest drawdowns; green bands your best streaks. Hover the chart to read a session.">
+        <Card pad={false} className="overflow-hidden">
+          <div className="p-3 sm:p-5"><SessionCurve curve={m.curve} drawdowns={m.drawdowns} streaks={m.streaks} activeDrawdown={hotDrawdown} activeStreak={hotStreak} /></div>
+          {(m.drawdowns.length > 0 || m.streaks.length > 0) && (
+            <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+              <div className="px-5 py-4 sm:px-6">
+                <p className="mb-2 text-[13px] font-medium text-muted">Deepest drawdowns</p>
+                {m.drawdowns.length === 0 ? <p className="text-[14px] text-muted">No drawdown this month.</p> : m.drawdowns.map((d, i) => (
+                  <p key={d.date} tabIndex={0} onPointerEnter={() => setHotDrawdown(i)} onPointerLeave={() => setHotDrawdown(null)} onFocus={() => setHotDrawdown(i)} onBlur={() => setHotDrawdown(null)} className="-mx-2 flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[14px] outline-none transition-colors hover:bg-loss/[0.07] focus-visible:bg-loss/[0.07]">
+                    <span className="num grid h-5 w-5 place-items-center rounded-full bg-loss/15 text-[11px] font-semibold text-loss">{i + 1}</span><span className="text-muted">{formatDateMedium(d.date)} · session {d.session}</span><span className="num ml-auto font-semibold text-loss">{signed(-d.depth)}</span>
+                  </p>
+                ))}
+              </div>
+              <div className="px-5 py-4 sm:px-6">
+                <p className="mb-2 text-[13px] font-medium text-muted">Best winning streaks</p>
+                {m.streaks.length === 0 ? <p className="text-[14px] text-muted">No back-to-back winning sessions yet.</p> : m.streaks.map((s, i) => (
+                  <p key={i} tabIndex={0} onPointerEnter={() => setHotStreak(i)} onPointerLeave={() => setHotStreak(null)} onFocus={() => setHotStreak(i)} onBlur={() => setHotStreak(null)} className="-mx-2 flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[14px] outline-none transition-colors hover:bg-profit/[0.08] focus-visible:bg-profit/[0.08]">
+                    <span className="num grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-[11px] font-semibold text-profit">{i + 1}</span><span className="text-muted">{s.length} sessions · {formatDateMedium(m.curve[s.from].date)} – {formatDateMedium(m.curve[s.to].date)}</span><span className="num ml-auto font-semibold text-profit">{signed(s.pnl)}</span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      </Section>
+
       {/* B.2 — Session log */}
       <Section id="b2" code="B.2" icon="list" title="Session log" hint="Every trade this month, in order. Select a row to open the full journal entry.">
         {m.log.length === 0 ? <Card><p className="text-[14.5px] text-muted">No trades logged in {monthTitle(month)}.</p></Card> : (
@@ -149,106 +316,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         )}
       </Section>
 
-      {/* B.3 — Equity curve */}
-      <Section id="b3" code="B.3" icon="chart" title="Equity curve" hint="Cumulative P&L after each session. Red numbers mark the three deepest drawdowns; green bands your best streaks. Hover the chart to read a session.">
-        <Card pad={false} className="overflow-hidden">
-          <div className="p-3 sm:p-5"><SessionCurve curve={m.curve} drawdowns={m.drawdowns} streaks={m.streaks} activeDrawdown={hotDrawdown} activeStreak={hotStreak} /></div>
-          {(m.drawdowns.length > 0 || m.streaks.length > 0) && (
-            <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-              <div className="px-5 py-4 sm:px-6">
-                <p className="mb-2 text-[13px] font-medium text-muted">Deepest drawdowns</p>
-                {m.drawdowns.length === 0 ? <p className="text-[14px] text-muted">No drawdown this month.</p> : m.drawdowns.map((d, i) => (
-                  <p key={d.date} tabIndex={0} onPointerEnter={() => setHotDrawdown(i)} onPointerLeave={() => setHotDrawdown(null)} onFocus={() => setHotDrawdown(i)} onBlur={() => setHotDrawdown(null)} className="-mx-2 flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[14px] outline-none transition-colors hover:bg-loss/[0.07] focus-visible:bg-loss/[0.07]">
-                    <span className="num grid h-5 w-5 place-items-center rounded-full bg-loss/15 text-[11px] font-semibold text-loss">{i + 1}</span><span className="text-muted">{formatDateMedium(d.date)} · session {d.session}</span><span className="num ml-auto font-semibold text-loss">{signed(-d.depth)}</span>
-                  </p>
-                ))}
-              </div>
-              <div className="px-5 py-4 sm:px-6">
-                <p className="mb-2 text-[13px] font-medium text-muted">Best winning streaks</p>
-                {m.streaks.length === 0 ? <p className="text-[14px] text-muted">No back-to-back winning sessions yet.</p> : m.streaks.map((s, i) => (
-                  <p key={i} tabIndex={0} onPointerEnter={() => setHotStreak(i)} onPointerLeave={() => setHotStreak(null)} onFocus={() => setHotStreak(i)} onBlur={() => setHotStreak(null)} className="-mx-2 flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[14px] outline-none transition-colors hover:bg-profit/[0.08] focus-visible:bg-profit/[0.08]">
-                    <span className="num grid h-5 w-5 place-items-center rounded-full bg-profit/15 text-[11px] font-semibold text-profit">{i + 1}</span><span className="text-muted">{s.length} sessions · {formatDateMedium(m.curve[s.from].date)} – {formatDateMedium(m.curve[s.to].date)}</span><span className="num ml-auto font-semibold text-profit">{signed(s.pnl)}</span>
-                  </p>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-        <div className="mt-6 max-w-3xl"><Prompt q="Describe the shape of your equity curve. Smooth, choppy, or a specific drawdown cluster — and what caused it?">
-          <AutoText label="Equity curve shape" value={notes.text["curve"] ?? ""} onChange={(v) => rn.setText("curve", v)} placeholder="What caused the shape?" suggest={m.curve.length >= 3 ? { text: `Curve shape: ${SHAPE_TEXT[m.shape]}.${m.drawdowns[0] ? ` Deepest drawdown ${signed(-m.drawdowns[0].depth)} by ${formatDateMedium(m.drawdowns[0].date)}.` : ""}`, label: "Add curve summary" } : null} />
-        </Prompt></div>
-      </Section>
-
-      {/* B.4 — Heatmap */}
-      <Section id="b4" code="B.4" icon="checklist" title="Setup-criteria heatmap" hint="Win rate when each criterion was confirmed, by week. Faint cells have fewer than 3 trades — don't trust them yet.">
-        <Card pad={false} className="overflow-hidden">
-          {m.heatmap.length === 0 ? <p className="p-5 text-[14.5px] leading-relaxed text-muted sm:p-6">No criteria recorded this month. Confirm the pre-trade checklist on each trade and the heatmap fills itself.</p> : (
-            <div className="px-3 pb-2 pt-4">
-              <TableShell min={Math.max(560, 260 + m.weeks.length * 92)}>
-                <thead><tr><Th className="pl-4">Criterion</Th>{m.weeks.map((w) => <Th key={w.monday} className="text-center"><button type="button" onClick={() => actions.openWeek?.(w.monday)} title={weekLabel(w.monday)} className="rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-ink/[0.05] hover:text-ink focus-visible:ring-2 focus-visible:ring-gold-strong/50">Wk {w.label}</button></Th>)}<Th className="text-center">Month</Th></tr></thead>
-                <tbody>
-                  {m.heatmap.map((h, ri) => (
-                    <tr key={h.key}>
-                      <Td className="max-w-[240px] pl-4 font-medium">{h.label}</Td>
-                      {h.perWeek.map((c, ci) => <Td key={ci} className="text-center"><Cell rate={c.winRate} n={c.present} delay={0.1 + (ri + ci) * 0.025} reduce={!!reduce} /></Td>)}
-                      <Td className="text-center"><Cell rate={h.total.winRate} n={h.total.present} delay={0.1 + ri * 0.025} reduce={!!reduce} strong onClick={() => actions.openIds(h.total.entryIds, h.label)} /></Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableShell>
-            </div>
-          )}
-        </Card>
-        <div className="mt-6 max-w-3xl space-y-6">
-          <Prompt q="Which criteria were present most often, and which had the highest win rate when present?"><AutoText label="Edge identification" value={notes.text["edge"] ?? ""} onChange={(v) => rn.setText("edge", v)} placeholder="Your edge-identification map…" suggest={mostPresent ? { text: `Most present: “${mostPresent.label}” (${mostPresent.present} trades).${topCrit ? ` Highest win rate when present: “${topCrit.label}” at ${fmtPct(topCrit.winRate)} (${topCrit.wins}/${topCrit.present}).` : ""}`, label: "Add from heatmap" } : null} /></Prompt>
-          <Prompt q="Which combination of criteria produced your highest win rate? Describe it precisely.">
-            {m.combos.length > 0 && <div className="mb-2.5 flex flex-wrap gap-1.5">{m.combos.map((c) => <Chip key={c.keys.join("+")} tone="good" className="py-1.5">{c.labels.join(" + ")} · {fmtPct(c.winRate)} <span className="font-normal opacity-70">({c.wins}/{c.trades})</span></Chip>)}</div>}
-            <AutoText label="Best combination" value={notes.text["combo"] ?? ""} onChange={(v) => rn.setText("combo", v)} placeholder={m.combos.length ? "Describe the combination and why it works." : "Needs 3+ trades that share the same criteria."} suggest={combo ? { text: `Best combination: ${combo.labels.join(" + ")} — ${fmtPct(combo.winRate)} win rate over ${combo.trades} trades (${signed(combo.net)}).`, label: "Add best combo" } : null} /></Prompt>
-          <Prompt q="Were there setups you took with only 2 criteria confirmed? What was the outcome? Should the minimum threshold change?">
-            {m.thresholds.length > 0 && (
-              <div className="mb-2.5 overflow-hidden rounded-[16px] border border-line-soft bg-surface"><TableShell min={420}><thead><tr><Th className="pl-4 pt-3">Criteria confirmed</Th><Th className="pt-3 text-right">Trades</Th><Th className="pt-3 text-right">Win rate</Th><Th className="pr-4 pt-3 text-right">Net</Th></tr></thead>
-                <tbody>{m.thresholds.map((r, i) => { const end = i === m.thresholds.length - 1; return <tr key={r.met}><Td rule={!end} className="pl-4 font-medium">{r.met}</Td><Td rule={!end} className="num text-right">{r.trades}</Td><Td rule={!end} className="text-right"><span className={cn("num inline-block min-w-14 rounded-full px-2.5 py-1 text-center text-[12.5px] font-semibold", heat(r.winRate, r.trades))}>{fmtPct(r.winRate)}</span></Td><Td rule={!end} className={cn("num pr-4 text-right font-semibold", tone(r.net))}>{signed(r.net)}</Td></tr>; })}</tbody></TableShell></div>
-            )}
-            <AutoText label="Minimum threshold" value={notes.text["threshold"] ?? ""} onChange={(v) => rn.setText("threshold", v)} placeholder="Should the minimum number of criteria change?" suggest={low.length ? { text: `Trades with 2 or fewer criteria: ${low.reduce((s, r) => s + r.trades, 0)}, netting ${signed(low.reduce((s, r) => s + r.net, 0))}.`, label: "Add low-criteria result" } : null} /></Prompt>
-        </div>
-      </Section>
-
-      {/* B.5 — Patterns */}
-      <Section id="b5" code="B.5" icon="heart" title="Psychological patterns" hint="Frequency and cost come from your trade reviews. Write the root cause and the fix next to each pattern.">
-        <Card pad={false} className="overflow-hidden">
-          <div className="px-3 pb-1 pt-4">
-            <TableShell min={700}>
-              <thead><tr><Th className="pl-4">Pattern</Th><Th className="text-right">Frequency</Th><Th className="text-right">Impact (lost)</Th><Th className="min-w-[260px] pl-5">Root cause / remediation plan</Th></tr></thead>
-              <tbody>
-                {[...m.patterns.rows.filter((r) => PSYCH_PATTERNS.some((x) => x.key === r.key) || r.total > 0), m.patterns.correct].map((r) => (
-                  <tr key={r.key} className="transition-colors hover:bg-ink/[0.025]">
-                    <Td className="pl-4 font-medium">{r.label}{r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}</Td>
-                    <Td className="text-right">{r.manual ? <span className="num font-semibold text-ink">{r.total}</span> : <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />}</Td>
-                    <Td className={cn("num text-right font-semibold", r.lost ? "text-loss" : "text-faint")}>{r.key === "correct" || r.manual ? "—" : r.lost ? signed(-r.lost) : "—"}</Td>
-                    <Td className="pl-4">{r.key === "correct" ? <span className="px-2.5 text-[13.5px] text-muted">Replicate this.</span> : <input aria-label={`Plan for ${r.label}`} value={notes.mistakePlans[r.key] ?? ""} onChange={(e) => rn.setPlan(r.key, e.target.value)} placeholder={r.total ? "Root cause and what changes" : "Not seen — nothing to fix"} maxLength={400} className="w-full rounded-[9px] bg-transparent px-2.5 py-1.5 text-[14px] text-ink outline-none transition-[background-color,box-shadow] placeholder:text-faint hover:bg-ink/[0.04] focus:bg-raised focus:ring-2 focus:ring-gold-strong/45" />}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableShell>
-          </div>
-          <p className="border-t border-line-soft px-5 py-3.5 text-[13px] leading-snug text-muted">Frequency opens the exact trades in your Journal. Tick “skipped valid setup” and “bias lock” per day in the Weekly reviews.</p>
-        </Card>
-      </Section>
-
-      {/* B.6 — Reflection */}
-      <Section id="b6" code="B.6" icon="bulb" title="Reflection">
-        <div className="grid gap-x-8 gap-y-7 lg:grid-cols-2">
-          <Prompt q="What is the single biggest reason you won this month? Be specific — not “I was disciplined.”"><AutoText label="Biggest reason I won" value={notes.text["won"] ?? ""} onChange={(v) => rn.setText("won", v)} placeholder="One concrete reason." suggest={topCrit ? { text: `Strongest driver in the data: “${topCrit.label}” — ${fmtPct(topCrit.winRate)} win rate when confirmed (${topCrit.wins}/${topCrit.present}).`, label: "Add data point" } : null} /></Prompt>
-          <Prompt q="What is the single biggest reason you lost money or underperformed? Be brutally honest."><AutoText label="Biggest reason I lost" value={notes.text["lost"] ?? ""} onChange={(v) => rn.setText("lost", v)} placeholder="The real reason." suggest={costly ? { text: `Costliest recorded mistake: ${costly.label} — ${signed(-costly.lost)} across ${costly.count} ${costly.count === 1 ? "trade" : "trades"}.`, label: "Add costliest mistake" } : null} /></Prompt>
-          <Prompt q="How did your narrative reading evolve over the month? Are you consistently identifying the correct weekly profile by Monday?"><AutoText label="Narrative evolution" value={notes.text["narrative"] ?? ""} onChange={(v) => rn.setText("narrative", v)} placeholder="How has your read of the week improved or slipped?" /></Prompt>
-          <Prompt q="Is your A+ setup still valid as defined? Should any criterion change based on this month's evidence?"><AutoText label="Setup validity" value={notes.text["valid"] ?? ""} onChange={(v) => rn.setText("valid", v)} placeholder="Keep, tighten or drop a criterion — and why." /></Prompt>
-          <Prompt q="Describe the ONE session that was your best of the month. What made it perfect, and how do you replicate it?"><AutoText label="Best session" value={notes.text["best"] ?? ""} onChange={(v) => rn.setText("best", v)} placeholder="Why was it perfect?" suggest={bestDay ? { text: dayText(bestDay, "Best session"), label: "Add best session" } : null} /></Prompt>
-          <Prompt q="Describe the ONE session that was your worst. What exactly broke down, and what would you do differently?"><AutoText label="Worst session" value={notes.text["worst"] ?? ""} onChange={(v) => rn.setText("worst", v)} placeholder="Where did it break?" suggest={worstDay && worstDay !== bestDay ? { text: dayText(worstDay, "Worst session"), label: "Add worst session" } : null} /></Prompt>
-        </div>
-      </Section>
-
-      {/* B.7 — Prop firm */}
-      <Section id="b7" code="B.7" icon="shield" title="Prop-firm checkpoint" hint={ctx.challenge ? `Measured against “${ctx.challenge.name}”.` : "Measured against the targets in Settings. Pick a challenge in the Trading Lab to use its rules."} aside={<Chip tone={p.status === "pass" ? "good" : p.status === "fail" ? "bad" : "gold"}>{{ pass: "Passed", fail: "Failed", "in-progress": "In progress", none: "No target set" }[p.status]}</Chip>}>
+      {/* B.4 — Edge, Prop & Automated Decisions */}
+      <Section
+        id="b4"
+        code="B.4"
+        icon="shield"
+        title="Edge &amp; Prop Checkpoint"
+        hint={ctx.challenge ? `Measured against “${ctx.challenge.name}” and your recorded checklist rules.` : "Measured against your Settings targets and recorded checklist rules."}
+        aside={<Chip tone={p.status === "pass" ? "good" : p.status === "fail" ? "bad" : "gold"}>{{ pass: "Passed", fail: "Failed", "in-progress": "In progress", none: "No target set" }[p.status]}</Chip>}
+      >
         <Card pad={false} className="overflow-hidden">
           <div className="grid lg:grid-cols-2 lg:divide-x lg:divide-line-soft">
             <div className="p-5 sm:p-6"><Meter label="Profit target" target={p.target} actual={p.achieved} fmt={money} good={p.target != null && p.achieved >= p.target} suffix={p.target != null ? `${Math.max(0, Math.round((p.achieved / p.target) * 100))}% of target` : "Set a target in Settings or a challenge"} reduce={!!reduce} /></div>
@@ -258,24 +334,201 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
             <div className="min-w-0"><p className="text-[14.5px] font-medium text-ink">Daily loss limit breached</p><p className="text-[12.5px] text-muted">{p.dailyLossLimit != null ? `Limit ${money(p.dailyLossLimit)} per day · target 0 times` : "No daily loss limit set"}</p></div>
             <span className={cn("num text-[26px] font-semibold tracking-[-0.03em]", p.dailyLossBreaches == null ? "text-faint" : p.dailyLossBreaches === 0 ? "text-profit" : "text-loss")}>{p.dailyLossBreaches == null ? "—" : `${p.dailyLossBreaches}×`}</span>
           </div>
-        </Card>
-      </Section>
 
-      {/* B.8 — Decisions */}
-      <Section id="b8" code="B.8" icon="check" title="Month-end decisions" hint="Answered by your numbers, with what each answer means.">
-        <div className="grid items-start gap-4 md:grid-cols-2">
+          <div className="border-t border-line-soft px-5 py-3 sm:px-6">
+            <button
+              type="button"
+              aria-expanded={matrixOpen}
+              onClick={() => setMatrixOpen((v) => !v)}
+              className="flex w-full items-center justify-between text-left text-[13.5px] font-medium text-muted outline-none transition-colors hover:text-ink"
+            >
+              <span>{matrixOpen ? "Hide criteria heatmap & psychological breakdown" : "Inspect criteria heatmap & psychological breakdown"}</span>
+              <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", matrixOpen && "rotate-180")} strokeWidth={2} />
+            </button>
+          </div>
+
+          <AnimatePresence initial={false}>
+            {matrixOpen && (
+              <motion.div
+                key="monthly-matrix"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.34, ease: EASE }}
+                className="overflow-hidden border-t border-line-soft"
+              >
+                {m.heatmap.length > 0 && (
+                  <div className="px-3 pb-3 pt-4">
+                    <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Setup-Criteria Heatmap by Week</p>
+                    <TableShell min={Math.max(560, 260 + m.weeks.length * 92)}>
+                      <thead><tr><Th className="pl-4">Criterion</Th>{m.weeks.map((w) => <Th key={w.monday} className="text-center"><button type="button" onClick={() => actions.openWeek?.(w.monday)} title={weekLabel(w.monday)} className="rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-ink/[0.05] hover:text-ink">Wk {w.label}</button></Th>)}<Th className="text-center">Month</Th></tr></thead>
+                      <tbody>
+                        {m.heatmap.map((h, ri) => (
+                          <tr key={h.key}>
+                            <Td className="max-w-[240px] pl-4 font-medium">{h.label}</Td>
+                            {h.perWeek.map((c, ci) => <Td key={ci} className="text-center"><Cell rate={c.winRate} n={c.present} delay={0.04 + (ri + ci) * 0.02} reduce={!!reduce} /></Td>)}
+                            <Td className="text-center"><Cell rate={h.total.winRate} n={h.total.present} delay={0.04 + ri * 0.02} reduce={!!reduce} strong onClick={() => actions.openIds(h.total.entryIds, h.label)} /></Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </TableShell>
+                  </div>
+                )}
+
+                <div className="border-t border-line-soft px-3 pb-3 pt-4">
+                  <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Psychological Patterns &amp; Cost</p>
+                  <TableShell min={580}>
+                    <thead><tr><Th className="pl-4">Pattern</Th><Th className="text-right">Frequency</Th><Th className="text-right pr-4">Impact (lost)</Th></tr></thead>
+                    <tbody>
+                      {[...m.patterns.rows.filter((r) => PSYCH_PATTERNS.some((x) => x.key === r.key) || r.total > 0), m.patterns.correct].map((r) => (
+                        <tr key={r.key} className="transition-colors hover:bg-ink/[0.025]">
+                          <Td className="pl-4 font-medium">{r.label}{r.manual && <span className="ml-2 rounded-full bg-ink/[0.06] px-2 py-0.5 text-[11px] font-medium text-faint">Self-reported</span>}</Td>
+                          <Td className="text-right">{r.manual ? <span className="num font-semibold text-ink">{r.total}</span> : <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />}</Td>
+                          <Td className={cn("num text-right pr-4 font-semibold", r.lost ? "text-loss" : "text-faint")}>{r.key === "correct" || r.manual ? "—" : r.lost ? signed(-r.lost) : "—"}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </TableShell>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
+
+        <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
           {m.decisions.map((d, i) => <Decision key={d.id} d={d} index={i} />)}
         </div>
       </Section>
 
-      {/* B.9 — Lessons & commitments */}
-      <Section id="b9" code="B.9" icon="target" title="Lessons and commitments" hint="Commitments return at the top of next month's review.">
-        <div className="grid gap-x-8 gap-y-7 md:grid-cols-2">
-          <div><p className="mb-3 flex items-center gap-2 px-0.5 text-[15px] font-medium text-ink"><Sym name="bulb" className="h-[17px] w-[17px] text-gold" />Top 3 lessons</p>
-            <div className="space-y-2.5">{[0, 1, 2].map((i) => <LineInput key={i} index={i + 1} label={`Lesson ${i + 1}`} value={notes.lists["lessons"]?.[i] ?? ""} onChange={(v) => rn.setListItem("lessons", i, v)} placeholder="What this month taught me…" />)}</div></div>
-          <div><p className="mb-3 flex items-center gap-2 px-0.5 text-[15px] font-medium text-ink"><Sym name="flag" className="h-[17px] w-[17px] text-gold" />Top 3 commitments for next month</p>
-            <div className="space-y-2.5">{[0, 1, 2].map((i) => <LineInput key={i} index={i + 1} label={`Commitment ${i + 1}`} value={notes.lists["commitments"]?.[i] ?? ""} onChange={(v) => rn.setListItem("commitments", i, v)} placeholder="A specific, measurable promise…" />)}</div></div>
-        </div>
+      {/* B.6 — 3-Minute Monthly Ritual (Sweet, short, progressive delayed reveal) */}
+      <Section
+        id="b6"
+        code="B.6"
+        icon="target"
+        title="3-Minute Monthly Ritual"
+        hint="No procrastination. Answer 3 focused prompts—each one reveals smoothly after you finish typing, with one-tap AI chips from your data."
+        aside={<SaveIndicator state={rn.state} />}
+      >
+        <Card className="space-y-7 rounded-[26px] p-6 sm:p-8">
+          {/* Question 1 */}
+          <Prompt
+            step={1}
+            done={q1Reveal.settled && wonVal.trim().length > 0}
+            typing={q1Reveal.typing}
+            q="What was your #1 A+ edge this month? (Replicate)"
+          >
+            <AutoText
+              label="Biggest reason I won"
+              minRows={2}
+              value={wonVal}
+              onChange={(v) => rn.setText("won", v)}
+              placeholder="Name the setup, criterion, or habit that paid you most."
+              chips={wonChips}
+            />
+          </Prompt>
+
+          {/* Question 2 — Unfolds smoothly after 680ms typing settle on Q1 */}
+          <AnimatePresence initial={false}>
+            {q1Reveal.settled && (
+              <motion.div
+                key="mo-q2"
+                initial={{ opacity: 0, y: 14, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.46, ease: EASE, delay: 0.06 }}
+                className="border-t border-line-soft pt-6"
+              >
+                <Prompt
+                  step={2}
+                  done={q2Reveal.settled && lostVal.trim().length > 0}
+                  typing={q2Reveal.typing}
+                  q="What single leak hurt your equity curve the most? (Eliminate)"
+                >
+                  <AutoText
+                    label="Biggest reason I lost"
+                    minRows={2}
+                    value={lostVal}
+                    onChange={(v) => rn.setText("lost", v)}
+                    placeholder="Be specific — which mistake or drawdown trigger cost you?"
+                    chips={lostChips}
+                  />
+                </Prompt>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Question 3 — Unfolds smoothly after 680ms typing settle on Q2 */}
+          <AnimatePresence initial={false}>
+            {q2Reveal.settled && (
+              <motion.div
+                key="mo-q3"
+                initial={{ opacity: 0, y: 14, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.46, ease: EASE, delay: 0.06 }}
+                className="border-t border-line-soft pt-6"
+              >
+                <Prompt
+                  step={3}
+                  done={commit0.trim().length > 0}
+                  q="What is your ONE measurable commitment for next month?"
+                >
+                  <div className="space-y-3">
+                    <LineInput
+                      index={1}
+                      label="Primary commitment for next month"
+                      value={commit0}
+                      onChange={(v) => rn.setListItem("commitments", 0, v)}
+                      placeholder="A specific, measurable rule I will keep next month…"
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {nextMonthRuleChips
+                        .filter((c) => c.text !== commit0)
+                        .map((chip, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => rn.setListItem("commitments", 0, chip.text)}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6]/12 px-3 py-1 text-[12px] font-medium text-[#5e5ce6] transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                          >
+                            <Sym name="sparkles" className="h-3 w-3" />
+                            <span>+ {chip.label}</span>
+                          </button>
+                        ))}
+                    </div>
+
+                    {(moreRules || commit1.trim().length > 0 || commit2.trim().length > 0) ? (
+                      <div className="space-y-2.5 pt-2">
+                        <LineInput
+                          index={2}
+                          label="Commitment 2 (optional)"
+                          value={commit1}
+                          onChange={(v) => rn.setListItem("commitments", 1, v)}
+                          placeholder="Optional second rule…"
+                        />
+                        <LineInput
+                          index={3}
+                          label="Commitment 3 (optional)"
+                          value={commit2}
+                          onChange={(v) => rn.setListItem("commitments", 2, v)}
+                          placeholder="Optional third rule…"
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setMoreRules(true)}
+                        className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted transition-colors hover:text-ink"
+                      >
+                        <span>+ Add up to 2 more rules (optional)</span>
+                      </button>
+                    )}
+                  </div>
+                </Prompt>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Card>
       </Section>
     </div>
   );

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
+  AnimatePresence,
   motion,
   useMotionValue,
   useReducedMotion,
@@ -11,6 +12,7 @@ import {
 } from "motion/react";
 import { ArrowRightIcon, CheckIcon, RouteIcon, TargetIcon, TrendingUpIcon } from "@/components/ui/icons";
 import { EASE } from "./reveal";
+import { cn } from "@/lib/utils";
 
 /* --------------------------- decorative data --------------------------- */
 
@@ -28,30 +30,38 @@ const CANDLES = [
 ];
 
 const EQUITY_PATH =
-  "M8 262 C60 256 84 224 122 229 C162 234 184 186 232 190 C272 194 292 216 330 198 C372 178 382 128 430 130 C468 132 486 96 552 66";
+  "M8 232 C60 226 84 196 122 201 C162 206 184 162 232 166 C272 170 292 188 330 172 C372 154 382 108 430 110 C468 112 486 78 552 48";
+
+type ShowcaseTab = "equity" | "replay" | "brain" | "practice";
+
+const SHOWCASE_TABS: { id: ShowcaseTab; label: string; badge: string }[] = [
+  { id: "equity", label: "Equity & Calendar", badge: "Live Scrub" },
+  { id: "replay", label: "16:9 Replay", badge: "60fps" },
+  { id: "brain", label: "Drive AI Brain", badge: "Synced" },
+  { id: "practice", label: "Neural Practice", badge: "5 Arenas" },
+];
 
 /* --------------------------------- view --------------------------------- */
 
 export function Hero() {
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
+  const [activeTab, setActiveTab] = useState<ShowcaseTab>("equity");
 
-  // Pointer parallax (desktop only, enabled after mount to avoid hydration drift)
   const [parallaxOn, setParallaxOn] = useState(false);
   useEffect(() => {
     if (!reduce && window.matchMedia("(hover: hover)").matches) setParallaxOn(true);
   }, [reduce]);
   const enableParallax = parallaxOn;
 
-  // Pointer parallax (desktop only)
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
   const sx = useSpring(mx, { stiffness: 60, damping: 18 });
   const sy = useSpring(my, { stiffness: 60, damping: 18 });
-  const rotX = useTransform(sy, [-1, 1], [5, -5]);
-  const rotY = useTransform(sx, [-1, 1], [-6, 6]);
-  const chipShiftX = useTransform(sx, [-1, 1], [12, -12]);
-  const chipShiftY = useTransform(sy, [-1, 1], [9, -9]);
+  const rotX = useTransform(sy, [-1, 1], [4, -4]);
+  const rotY = useTransform(sx, [-1, 1], [-5, 5]);
+  const chipShiftX = useTransform(sx, [-1, 1], [10, -10]);
+  const chipShiftY = useTransform(sy, [-1, 1], [8, -8]);
 
   const onMouseMove = (e: React.MouseEvent) => {
     if (!enableParallax || !sectionRef.current) return;
@@ -64,75 +74,47 @@ export function Hero() {
     <section
       ref={sectionRef}
       onMouseMove={onMouseMove}
-      className="relative overflow-hidden pb-10 pt-32 sm:pt-40"
+      className="relative overflow-hidden pb-14 pt-32 sm:pt-40"
       aria-label="Edgebook introduction"
     >
       {/* Backdrop layers */}
       <div className="grid-backdrop absolute inset-0 [mask-image:radial-gradient(ellipse_75%_65%_at_50%_35%,black_35%,transparent_78%)]" aria-hidden />
 
-      {/* Candlestick field */}
-      <svg
-        aria-hidden
-        viewBox="0 0 470 280"
-        className="pointer-events-none absolute right-[-4%] top-[16%] hidden w-[46%] max-w-[640px] opacity-[0.34] lg:block xl:right-[2%]"
-        preserveAspectRatio="xMidYMid meet"
-      >
-        {CANDLES.map((c, i) => {
-          const up = !c.d;
-          const color = up ? "var(--color-profit)" : "var(--color-loss)";
-          const top = Math.min(c.o, c.c);
-          const bh = Math.max(10, Math.abs(c.o - c.c));
-          return (
-            <motion.g
-              key={i}
-              initial={{ opacity: 0, scaleY: 0 }}
-              animate={{ opacity: 1, scaleY: 1 }}
-              transition={{ delay: 0.5 + i * 0.09, duration: 0.6, ease: EASE }}
-              style={{ transformOrigin: `${c.x}px ${top + bh / 2}px` }}
-            >
-              <line x1={c.x} y1={c.l} x2={c.x} y2={c.h} stroke={color} strokeWidth="1.6" strokeLinecap="round" />
-              <rect x={c.x - 7} y={top} width="14" height={bh} rx="2.5" fill={color} opacity={up ? 0.75 : 0.65} />
-            </motion.g>
-          );
-        })}
-      </svg>
-
-      <div className="relative mx-auto grid max-w-6xl items-center gap-16 px-5 sm:px-8 lg:grid-cols-[1.02fr_0.98fr]">
+      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 sm:px-8 lg:grid-cols-[1.02fr_0.98fr]">
         {/* ------------------------------ Copy ------------------------------ */}
         <div>
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: EASE }}
-            className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-raised/80 py-1.5 pl-2 pr-3.5 text-xs font-medium text-muted backdrop-blur"
+            className="inline-flex items-center gap-2.5 rounded-full border border-line-strong bg-raised/85 py-1.5 pl-2.5 pr-4 text-xs font-medium text-muted shadow-sm backdrop-blur-xl"
           >
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-profit opacity-50" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-profit" />
             </span>
-            Local-first trading journal
+            <span>Google Drive AI Brain · 16:9 Replays · 3-Min Reviews</span>
           </motion.div>
 
           <motion.h1
             initial={{ opacity: 0, y: 26 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.75, delay: 0.08, ease: EASE }}
-            className="mt-6 font-display text-[44px] font-bold leading-[1.04] tracking-[-0.03em] text-ink sm:text-6xl xl:text-[72px]"
+            className="mt-6 font-display text-[44px] font-bold leading-[1.03] tracking-[-0.035em] text-ink sm:text-6xl xl:text-[68px]"
           >
-            Your trading edge,
-            <br />
-            <span className="font-serif font-normal italic tracking-normal text-gold-grad">measured daily.</span>
+            The AI trading OS that{" "}
+            <span className="font-serif font-normal italic tracking-normal text-gold-grad">
+              learns your edge.
+            </span>
           </motion.h1>
 
           <motion.p
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.75, delay: 0.18, ease: EASE }}
-            className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg"
+            className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-[17.5px]"
           >
-            Edgebook turns every session into evidence — journal entries with annotated screenshots,
-            performance analytics that expose your patterns, and an animated roadmap from today&apos;s equity
-            to your next milestone.
+            From pre-trade <strong className="font-semibold text-ink">Plan &amp; Thought</strong> to post-trade <strong className="font-semibold text-ink">Autopsy</strong>, Edgebook&apos;s persistent AI Brain stores your behavioral profile in your own Google Drive—powering 16:9 trade replays, anti-procrastination reviews, and neural practice arenas.
           </motion.p>
 
           <motion.div
@@ -143,16 +125,16 @@ export function Hero() {
           >
             <Link
               href="/login?mode=signup"
-              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-ink px-6 text-[15px] font-semibold text-canvas shadow-sm transition-all duration-200 hover:opacity-85 active:scale-[0.97]"
+              className="group inline-flex h-12 items-center gap-2.5 rounded-full bg-ink px-7 text-[15px] font-semibold text-canvas shadow-[0_12px_28px_-10px_rgba(0,0,0,0.45)] transition-all duration-200 hover:opacity-90 active:scale-[0.97]"
             >
-              Start your journal
+              Launch Your Journal
               <ArrowRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
             </Link>
             <a
-              href="#method"
-              className="inline-flex h-12 items-center rounded-xl border border-line-strong px-6 text-[15px] font-medium text-ink transition-colors duration-200 hover:border-faint hover:bg-ink/[0.04] active:scale-[0.97]"
+              href="#features"
+              className="inline-flex h-12 items-center rounded-full border border-line-strong bg-surface/60 px-6 text-[15px] font-medium text-ink backdrop-blur transition-colors duration-200 hover:border-faint hover:bg-ink/[0.04] active:scale-[0.97]"
             >
-              See how it works
+              Explore the Architecture
             </a>
           </motion.div>
 
@@ -162,7 +144,11 @@ export function Hero() {
             transition={{ duration: 0.8, delay: 0.45 }}
             className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-faint"
           >
-            {["Free forever", "Private by design", "Export anytime"].map((t) => (
+            {[
+              "100% Private in Your Google Drive",
+              "Real-time AI Mistake Guardrails",
+              "5 Spaced-Repetition Arenas",
+            ].map((t) => (
               <li key={t} className="flex items-center gap-1.5">
                 <CheckIcon className="h-3.5 w-3.5 text-profit" />
                 {t}
@@ -171,112 +157,283 @@ export function Hero() {
           </motion.ul>
         </div>
 
-        {/* ---------------------------- App mock ---------------------------- */}
+        {/* ------------------- Interactive Apple Studio Showcase ------------------- */}
         <motion.div
           initial={{ opacity: 0, y: 40, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.9, delay: 0.25, ease: EASE }}
-          className="relative mx-auto w-full max-w-[560px] [perspective:1400px]"
+          className="relative mx-auto w-full max-w-[580px] [perspective:1400px]"
         >
           <motion.div
             style={enableParallax ? { rotateX: rotX, rotateY: rotY, transformStyle: "preserve-3d" } : undefined}
-            className="panel relative overflow-hidden p-5 shadow-[0_50px_120px_-40px_rgba(0,0,0,0.85)] sm:p-6"
+            className="panel relative overflow-hidden rounded-[28px] border border-line-strong/80 p-5 shadow-[0_50px_120px_-40px_rgba(0,0,0,0.85)] backdrop-blur-2xl sm:p-6"
           >
-            {/* Mock header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-faint">Equity curve</p>
-                <p className="kpi mt-1 text-xl text-ink">
-                  $14,820{" "}
-                  <span className="num text-sm text-profit">+48.2%</span>
-                </p>
+            {/* Interactive Apple Glass Segmented Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-soft pb-4">
+              <div role="tablist" aria-label="Product preview" className="flex flex-wrap gap-1 rounded-full bg-ink/[0.06] p-1">
+                {SHOWCASE_TABS.map((t) => {
+                  const on = activeTab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={on}
+                      onClick={() => setActiveTab(t.id)}
+                      className={cn(
+                        "relative rounded-full px-3 py-1.5 text-[11.5px] font-semibold transition-colors",
+                        on ? "text-ink" : "text-muted hover:text-ink",
+                      )}
+                    >
+                      {on && (
+                        <motion.span
+                          layoutId="hero-showcase-pill"
+                          transition={{ type: "spring", stiffness: 420, damping: 32 }}
+                          className="absolute inset-0 rounded-full bg-raised shadow-sm"
+                        />
+                      )}
+                      <span className="relative">{t.label}</span>
+                    </button>
+                  );
+                })}
               </div>
-              <span className="rounded-lg border border-profit/25 bg-profit/10 px-2.5 py-1 font-mono text-[11px] font-semibold text-profit">
-                LIVE
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-profit/25 bg-profit/10 px-2.5 py-1 font-mono text-[10.5px] font-semibold text-profit">
+                <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                DRIVE SYNCED
               </span>
             </div>
 
-            {/* Chart */}
-            <div className="relative mt-5">
-              <svg viewBox="0 0 560 300" className="w-full" role="img" aria-label="Animated equity curve rising toward a target line">
-                <defs>
-                  <linearGradient id="hero-area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-profit)" stopOpacity="0.28" />
-                    <stop offset="100%" stopColor="var(--color-profit)" stopOpacity="0" />
-                  </linearGradient>
-                  <linearGradient id="hero-line" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="var(--color-profit)" />
-                    <stop offset="100%" stopColor="var(--color-gold)" />
-                  </linearGradient>
-                </defs>
+            {/* Tab Content */}
+            <div className="mt-5 min-h-[305px]">
+              <AnimatePresence mode="wait" initial={false}>
+                {activeTab === "equity" && (
+                  <motion.div
+                    key="tab-equity"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.28, ease: EASE }}
+                  >
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-faint">
+                          Equity &amp; Session Scrubbing
+                        </p>
+                        <p className="kpi mt-1 text-[28px] leading-none text-ink">
+                          $16,480<span className="text-[15px] font-medium text-faint">.00</span>{" "}
+                          <span className="num ml-1.5 text-sm font-semibold text-profit">+$6,480 (+64.8%)</span>
+                        </p>
+                      </div>
+                      <span className="text-xs text-muted">18W · 4L · 82% Win Rate</span>
+                    </div>
 
-                {[70, 140, 210].map((y) => (
-                  <line key={y} x1="0" y1={y} x2="560" y2={y} stroke="var(--color-line)" strokeWidth="1" />
-                ))}
+                    <div className="relative mt-4">
+                      <svg viewBox="0 0 560 220" className="w-full" role="img" aria-label="Animated equity curve rising toward target">
+                        <defs>
+                          <linearGradient id="hero-area" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="var(--color-profit)" stopOpacity="0.28" />
+                            <stop offset="100%" stopColor="var(--color-profit)" stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id="hero-line" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="var(--color-profit)" />
+                            <stop offset="100%" stopColor="var(--color-gold)" />
+                          </linearGradient>
+                        </defs>
+                        {[45, 105, 165].map((y) => (
+                          <line key={y} x1="0" y1={y} x2="560" y2={y} stroke="var(--color-line)" strokeWidth="1" />
+                        ))}
+                        <line x1="0" y1="32" x2="560" y2="32" stroke="var(--color-gold)" strokeWidth="1.2" strokeDasharray="5 7" opacity="0.7" />
+                        <text x="8" y="24" fontSize="10" fill="var(--color-gold)" fontFamily="var(--font-mono)" letterSpacing="1.8">
+                          TARGET $20,000
+                        </text>
+                        <motion.path
+                          d={`${EQUITY_PATH} L552 220 L8 220 Z`}
+                          fill="url(#hero-area)"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ duration: 0.6 }}
+                        />
+                        <motion.path
+                          d={EQUITY_PATH}
+                          fill="none"
+                          stroke="url(#hero-line)"
+                          strokeWidth="2.8"
+                          strokeLinecap="round"
+                          initial={{ pathLength: 0 }}
+                          animate={{ pathLength: 1 }}
+                          transition={{ duration: 1.2, ease: "easeInOut" }}
+                        />
+                        <circle cx="552" cy="48" r="5.5" fill="var(--color-gold)" />
+                      </svg>
+                    </div>
 
-                {/* Target */}
-                <motion.g
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 1.6, duration: 0.6 }}
-                >
-                  <line x1="0" y1="52" x2="560" y2="52" stroke="var(--color-gold)" strokeWidth="1.2" strokeDasharray="5 7" opacity="0.7" />
-                  <text x="8" y="44" fontSize="11" fill="var(--color-gold)" fontFamily="var(--font-mono)" letterSpacing="2">
-                    TARGET $20,000
-                  </text>
-                </motion.g>
+                    <div className="mt-3 grid grid-cols-4 gap-2">
+                      {[
+                        { label: "Win rate", value: "82%", tone: "text-profit" },
+                        { label: "Avg R:R", value: "+2.4R", tone: "text-profit" },
+                        { label: "Drawdown", value: "0.0%", tone: "text-ink" },
+                        { label: "Reviewed", value: "100%", tone: "text-gold" },
+                      ].map((s) => (
+                        <div key={s.label} className="rounded-xl border border-line bg-raised/70 px-3 py-2">
+                          <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">{s.label}</p>
+                          <p className={`num mt-0.5 text-sm font-semibold ${s.tone}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
 
-                {/* Start */}
-                <line x1="0" y1="266" x2="560" y2="266" stroke="var(--color-line-strong)" strokeWidth="1" strokeDasharray="3 6" />
+                {activeTab === "replay" && (
+                  <motion.div
+                    key="tab-replay"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.28, ease: EASE }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-faint">
+                          16:9 Cinema Trade Replay
+                        </p>
+                        <p className="mt-0.5 text-sm font-semibold text-ink">
+                          MNQ · Long · NY Open Liquidity Sweep (+3.2R)
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-profit/15 px-2.5 py-0.5 font-mono text-xs font-semibold text-profit">
+                        +$640
+                      </span>
+                    </div>
 
-                {/* Area + line */}
-                <motion.path
-                  d={`${EQUITY_PATH} L552 300 L8 300 Z`}
-                  fill="url(#hero-area)"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 1.15, duration: 0.9 }}
-                />
-                <motion.path
-                  d={EQUITY_PATH}
-                  fill="none"
-                  stroke="url(#hero-line)"
-                  strokeWidth="2.6"
-                  strokeLinecap="round"
-                  initial={{ pathLength: 0 }}
-                  animate={{ pathLength: 1 }}
-                  transition={{ delay: 0.55, duration: 1.7, ease: "easeInOut" }}
-                />
-                <motion.circle
-                  cx="552"
-                  cy="66"
-                  r="5"
-                  fill="var(--color-gold)"
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 2.2, type: "spring", stiffness: 300, damping: 14 }}
-                />
-              </svg>
-            </div>
+                    {/* 16:9 TradingView-Proportional Candlestick Stage */}
+                    <div className="relative overflow-hidden rounded-2xl border border-line bg-canvas/85 p-3">
+                      <svg viewBox="0 0 470 175" className="w-full" aria-label="16:9 Trade Replay Preview">
+                        {[35, 85, 135].map((y) => (
+                          <line key={y} x1="0" y1={y} x2="470" y2={y} stroke="var(--color-line)" strokeWidth="0.8" />
+                        ))}
+                        {/* Entry & TP lines */}
+                        <line x1="180" y1="115" x2="450" y2="115" stroke="var(--color-gold)" strokeWidth="1" strokeDasharray="4 4" />
+                        <line x1="180" y1="55" x2="450" y2="55" stroke="var(--color-profit)" strokeWidth="1" strokeDasharray="4 4" />
+                        {CANDLES.map((c, i) => {
+                          const up = !c.d;
+                          const color = up ? "var(--color-profit)" : "var(--color-loss)";
+                          const top = Math.min(c.o, c.c) * 0.65 - 10;
+                          const bh = Math.max(8, Math.abs(c.o - c.c) * 0.65);
+                          const h = c.h * 0.65 - 10;
+                          const l = c.l * 0.65 - 10;
+                          return (
+                            <g key={i}>
+                              <line x1={c.x} y1={l} x2={c.x} y2={h} stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+                              <rect x={c.x - 4.5} y={top} width="9" height={bh} rx="2" fill={color} opacity={0.88} />
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
 
-            {/* Mock footer stats */}
-            <div className="mt-5 grid grid-cols-3 gap-3">
-              {[
-                { label: "Win rate", value: "61%", tone: "text-ink" },
-                { label: "Avg R:R", value: "+1.8R", tone: "text-profit" },
-                { label: "Drawdown", value: "−$310", tone: "text-loss" },
-              ].map((s, i) => (
-                <motion.div
-                  key={s.label}
-                  initial={{ opacity: 0, y: 14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 1.3 + i * 0.12, duration: 0.5, ease: EASE }}
-                  className="rounded-xl border border-line bg-raised/70 px-3 py-2.5"
-                >
-                  <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-faint">{s.label}</p>
-                  <p className={`num mt-0.5 text-sm ${s.tone}`}>{s.value}</p>
-                </motion.div>
-              ))}
+                    {/* 2-Line AI Mistake Recognition Strip */}
+                    <div className="rounded-xl border border-profit/25 bg-profit/[0.08] px-3.5 py-2.5 text-xs">
+                      <p className="font-semibold text-ink">
+                        <span className="mr-1.5 text-profit">[A+ Execution]</span>
+                        Waited for 9:35 NY sweep + 5m displacement close before entering.
+                      </p>
+                      <p className="mt-0.5 text-muted">
+                        AI Brain Note: 6/6 setup rules confirmed — zero FOMO or premature entry detected.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === "brain" && (
+                  <motion.div
+                    key="tab-brain"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.28, ease: EASE }}
+                    className="space-y-3"
+                  >
+                    <div className="rounded-2xl border border-[#5e5ce6]/25 bg-[#5e5ce6]/[0.08] p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                          EdgeBook AI Brain · High-Precision (92% Calibrated)
+                        </span>
+                        <span className="font-mono text-xs font-semibold text-ink">Clarity 94%</span>
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-ink">
+                        &ldquo;Calm state + NY Sweep setup has a 74% historical win rate ($4,120 net).&rdquo;
+                      </p>
+                      <p className="mt-1 text-xs text-muted">
+                        Auto-tagged Watch Trap: Wait for the 5m candle body close before clicking buy.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="rounded-xl border border-line bg-raised/70 p-3">
+                        <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint">
+                          Plan → Thought → Setup
+                        </p>
+                        <p className="mt-1 text-xs font-medium text-ink">
+                          Unhurried 700ms delayed question reveal prevents rushed entries.
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-line bg-raised/70 p-3">
+                        <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint">
+                          3-Minute Weekly Ritual
+                        </p>
+                        <p className="mt-1 text-xs font-medium text-ink">
+                          3 core prompts + one-tap AI smart chips eliminate review procrastination.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === "practice" && (
+                  <motion.div
+                    key="tab-practice"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.28, ease: EASE }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-faint">
+                          5-Axis Edge Mastery &amp; Spaced Repetition
+                        </p>
+                        <p className="mt-0.5 text-sm font-semibold text-ink">
+                          Mistake trades automatically convert into Box 0–5 drills
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-gold/15 px-2.5 py-0.5 font-mono text-xs font-semibold text-gold">
+                        14d Streak
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5 rounded-2xl border border-line bg-raised/70 p-3.5">
+                      {[
+                        { label: "Setup & Criteria", pct: 88, color: "bg-[#0A84FF]" },
+                        { label: "Entry Timing & Patience", pct: 79, color: "bg-profit" },
+                        { label: "Risk & Stop Sizing", pct: 92, color: "bg-gold-strong" },
+                        { label: "Emotional Discipline", pct: 85, color: "bg-[#5E5CE6]" },
+                      ].map((bar) => (
+                        <div key={bar.label}>
+                          <div className="flex justify-between text-xs">
+                            <span className="font-medium text-ink">{bar.label}</span>
+                            <span className="font-mono font-semibold text-muted">{bar.pct}%</span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink/[0.08]">
+                            <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${bar.pct}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
 
@@ -290,8 +447,8 @@ export function Hero() {
             >
               <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
                 <TrendingUpIcon className="h-4 w-4 text-profit" />
-                <span className="text-xs font-semibold tabular text-ink">+$420</span>
-                <span className="text-[11px] text-faint">NQ long</span>
+                <span className="text-xs font-semibold tabular text-ink">+$640</span>
+                <span className="text-[11px] text-faint">MNQ A+ Sweep</span>
               </div>
             </motion.div>
 
@@ -303,9 +460,9 @@ export function Hero() {
               style={{ animationDelay: "-4s" }}
             >
               <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-overlay/95 px-3 py-2 shadow-xl backdrop-blur">
-                <RouteIcon className="h-4 w-4 text-info" />
-                <span className="text-xs font-semibold tabular text-ink">48%</span>
-                <span className="text-[11px] text-faint">of journey</span>
+                <RouteIcon className="h-4 w-4 text-[#5e5ce6]" />
+                <span className="text-xs font-semibold tabular text-ink">AI Brain</span>
+                <span className="text-[11px] text-faint">Drive Synced</span>
               </div>
             </motion.div>
 
@@ -318,7 +475,7 @@ export function Hero() {
             >
               <div className="flex items-center gap-2 rounded-xl border border-gold/30 bg-gradient-to-br from-gold/[0.13] to-transparent px-3 py-2 shadow-xl backdrop-blur">
                 <TargetIcon className="h-4 w-4 text-gold" />
-                <span className="text-[11px] font-semibold text-gold">$5,180 to target</span>
+                <span className="text-[11px] font-semibold text-gold">3-Min Weekly Ritual</span>
               </div>
             </motion.div>
           </motion.div>

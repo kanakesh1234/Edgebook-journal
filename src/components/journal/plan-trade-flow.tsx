@@ -230,8 +230,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         entries,
         plans,
         playbook,
+        settings.aiBrain,
       ),
-    [today, thesis, emotion, emotionReason, newsAnswer, newsEvents, finalInstrument, draw, invalidation, breakPlan, thoughtNote, playbookId, selectedPlaybook?.name, entries, plans, playbook],
+    [today, thesis, emotion, emotionReason, newsAnswer, newsEvents, finalInstrument, draw, invalidation, breakPlan, thoughtNote, playbookId, selectedPlaybook?.name, entries, plans, playbook, settings.aiBrain],
   );
 
   // Auto-seed top AI-suggested mistake tags once when entering the "thought" step if the trader hasn't manually picked any yet
@@ -739,6 +740,10 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">EdgeBook AI Brain</p>
                         <span className="rounded-full bg-[#5e5ce6]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
                           {brainRead.calibration.tier} · {brainRead.calibration.calibrationPct}% calibrated
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2 py-0.5 text-[10.5px] font-semibold text-profit">
+                          <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                          Drive Synced
                         </span>
                       </div>
                       <p className="mt-0.5 text-[12px] text-muted">

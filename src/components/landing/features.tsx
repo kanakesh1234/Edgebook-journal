@@ -7,7 +7,6 @@ import {
   ChartLineIcon,
   ImageIcon,
   RouteIcon,
-  SearchIcon,
   ShieldIcon,
 } from "@/components/ui/icons";
 import { Reveal, EASE } from "./reveal";
@@ -23,15 +22,14 @@ function CardShell({
     <motion.div
       whileHover={{ y: -5 }}
       transition={{ duration: 0.35, ease: EASE }}
-      className={`panel group relative overflow-hidden p-6 transition-shadow duration-300 hover:shadow-[0_28px_60px_-24px_rgba(0,0,0,0.75)] sm:p-7 ${className}`}
+      className={`panel group relative overflow-hidden rounded-[26px] p-6 transition-shadow duration-300 hover:shadow-[0_28px_60px_-24px_rgba(0,0,0,0.65)] sm:p-7 ${className}`}
     >
-      {/* hover glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
         style={{
           background:
-            "radial-gradient(420px 200px at 20% 0%, rgba(236,192,99,0.07), transparent 70%)",
+            "radial-gradient(420px 200px at 20% 0%, rgba(236,192,99,0.08), transparent 70%)",
         }}
       />
       {children}
@@ -39,9 +37,9 @@ function CardShell({
   );
 }
 
-function IconTile({ children }: { children: React.ReactNode }) {
+function IconTile({ children, accent = "text-gold" }: { children: React.ReactNode; accent?: string }) {
   return (
-    <div className="mb-4 inline-grid h-11 w-11 place-items-center rounded-xl border border-line-strong bg-raised text-gold shadow-inner">
+    <div className={`mb-4 inline-grid h-11 w-11 place-items-center rounded-2xl border border-line-strong bg-raised shadow-inner ${accent}`}>
       {children}
     </div>
   );
@@ -52,88 +50,73 @@ export function Features() {
     <section id="features" className="relative py-24 sm:py-32">
       <div className="mx-auto max-w-6xl px-5 sm:px-8">
         <Reveal>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">The toolkit</p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.02em] text-ink sm:text-[44px]">
-            Everything a serious journal needs,{" "}
-            <span className="font-serif font-normal italic text-muted">nothing it doesn&apos;t.</span>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">Apple-Grade Architecture</p>
+          <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
+            Built around how elite traders{" "}
+            <span className="font-serif font-normal italic text-muted">think, execute, and evolve.</span>
           </h2>
         </Reveal>
 
-        <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {/* Performance analytics — wide card */}
+        <div className="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {/* 1. Persistent Google Drive AI Brain — wide card */}
           <Reveal className="md:col-span-2" delay={0}>
             <CardShell className="h-full">
-              <IconTile>
-                <ChartLineIcon className="h-5 w-5" />
-              </IconTile>
-              <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Performance dashboard
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <IconTile accent="text-[#5e5ce6] dark:text-[#a5a4ff]">
+                  <ChartLineIcon className="h-5 w-5" />
+                </IconTile>
+                <span className="rounded-full bg-[#5e5ce6]/15 px-3 py-1 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                  Persistent Memory in Your Google Drive
+                </span>
+              </div>
+              <h3 className="font-display text-xl font-semibold tracking-tight text-ink">
+                An AI Brain that compounds with every trade
               </h3>
-              <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted">
-                Total P&amp;L, win rate, average R:R, drawdown and best day — computed live from your
-                journal and rendered as charts you&apos;ll actually want to read.
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
+                Every pre-trade Plan, Thought hypothesis, Setup checklist, and post-trade Autopsy updates your personal AI Brain profile inside your own Google Drive. As your sample grows, its pre-trade mistake warnings and post-trade tagging become sharper every single day.
               </p>
-              <div className="pointer-events-none mt-6 flex items-end gap-1.5" aria-hidden>
-                {[34, 52, 40, 66, 48, 78, 58, 88].map((h, i) => (
-                  <motion.div
-                    key={i}
-                    className={`w-full rounded-t-md ${
-                      i % 3 === 2 ? "bg-loss/45" : "bg-profit/55"
-                    } ${i === 7 ? "bg-gradient-to-t from-profit/30 to-gold/80" : ""}`}
-                    style={{ height: h }}
-                    initial={{ scaleY: 0, opacity: 0 }}
-                    whileInView={{ scaleY: 1, opacity: 1 }}
-                    viewport={{ once: true, margin: "-60px" }}
-                    transition={{ delay: 0.15 + i * 0.06, duration: 0.5, ease: EASE }}
-                  />
+              <div className="mt-6 grid grid-cols-3 gap-2.5 sm:grid-cols-4" aria-hidden>
+                {[
+                  { k: "1. Plan", v: "Thesis & Emotion" },
+                  { k: "2. Thought", v: "AI Trap Guardrails" },
+                  { k: "3. Execute", v: "16:9 Chart Replay" },
+                  { k: "4. Autopsy", v: "Drive AI Sync" },
+                ].map((step) => (
+                  <div key={step.k} className="rounded-2xl border border-line bg-raised/70 px-3 py-2.5">
+                    <p className="font-mono text-[10.5px] font-semibold text-gold">{step.k}</p>
+                    <p className="mt-0.5 text-xs font-medium text-ink">{step.v}</p>
+                  </div>
                 ))}
               </div>
             </CardShell>
           </Reveal>
 
-          {/* Roadmap */}
-          <Reveal delay={0.08}>
+          {/* 2. 16:9 Replays & 2-Line Mistake Strip */}
+          <Reveal delay={0.06}>
             <CardShell className="h-full">
               <IconTile>
-                <RouteIcon className="h-5 w-5" />
+                <ImageIcon className="h-5 w-5" />
               </IconTile>
               <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Animated progress roadmap
+                16:9 Replays &amp; Mistake Strip
               </h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                Watch your avatar ride the road from starting equity to your target. Every logged
-                session moves you forward.
+                Full-screen Reels-style feed with TradingView-proportioned candles, 60fps Apple cubic-bezier camera glide, click-anywhere play/pause, and a 2-line mistake summary beneath every replay.
               </p>
             </CardShell>
           </Reveal>
 
-          {/* Journal */}
-          <Reveal delay={0.05}>
-            <CardShell className="h-full">
-              <IconTile>
-                <BookOpenIcon className="h-5 w-5" />
-              </IconTile>
-              <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Daily journaling
-              </h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                Date, P&amp;L, R:R, instrument, setup and notes. Fast to fill in after the close,
-                structured enough to query later.
-              </p>
-            </CardShell>
-          </Reveal>
-
-          {/* Calendar */}
-          <Reveal delay={0.12}>
+          {/* 3. Equity-Curve Benchmark Calendar */}
+          <Reveal delay={0.1}>
             <CardShell className="h-full">
               <IconTile>
                 <CalendarIcon className="h-5 w-5" />
               </IconTile>
               <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Monthly P&amp;L calendar
+                Live-Scrubbing P&amp;L Calendar
               </h3>
               <p className="mt-1.5 mb-5 text-sm leading-relaxed text-muted">
-                Green days, red days and rest days — your month at a glance.
+                Built to the same benchmark as our Equity Curve—scrub across any day to inspect live P&amp;L, switch between Standard, Heatmap, and Cumulative modes, and audit review discipline.
               </p>
               <div className="grid grid-cols-7 gap-1" aria-hidden>
                 {[14, 8, -6, 0, 11, -9, 0, 6, 13, 4, -4, 9, 16, 0, 7, -8, 12, 10, -5, 15, 3, 18, -3, 9, 21, 6, -7, 12].map(
@@ -143,9 +126,9 @@ export function Features() {
                       initial={{ opacity: 0, scale: 0.6 }}
                       whileInView={{ opacity: 1, scale: 1 }}
                       viewport={{ once: true }}
-                      transition={{ delay: i * 0.02, duration: 0.3 }}
-                      className={`aspect-square rounded-[4px] ${
-                        v > 0 ? "bg-profit/50" : v < 0 ? "bg-loss/45" : "bg-ink/[0.06]"
+                      transition={{ delay: i * 0.015, duration: 0.3 }}
+                      className={`aspect-square rounded-[5px] ${
+                        v > 0 ? "bg-profit/55" : v < 0 ? "bg-loss/45" : "bg-ink/[0.06]"
                       }`}
                     />
                   ),
@@ -154,60 +137,55 @@ export function Features() {
             </CardShell>
           </Reveal>
 
-          {/* Screenshots */}
-          <Reveal delay={0.16}>
+          {/* 4. 3-Minute Weekly & Monthly Reviews */}
+          <Reveal delay={0.14}>
             <CardShell className="h-full">
               <IconTile>
-                <ImageIcon className="h-5 w-5" />
+                <BookOpenIcon className="h-5 w-5" />
               </IconTile>
               <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Screenshot archive
+                3-Minute Anti-Procrastination Reviews
               </h3>
               <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                Attach before/after charts to every entry and browse them back in a beautiful gallery.
+                No 20-question walls of text. Weekly and Monthly reviews give you an instant AI Brain executive brief plus 3 progressive questions with one-tap smart chips from your data.
               </p>
-              <div className="relative mt-5 h-16" aria-hidden>
-                <div className="absolute left-0 top-1 h-14 w-24 rotate-[-5deg] rounded-lg border border-line-strong bg-raised" />
-                <div className="absolute left-10 top-0 h-14 w-28 rotate-[2deg] rounded-lg border border-line-strong bg-overlay shadow-lg">
-                  <svg viewBox="0 0 100 30" className="h-full w-full opacity-70">
-                    <path d="M2 26 L25 18 L45 22 L70 8 L97 4" stroke="var(--color-profit)" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-                  </svg>
-                </div>
-              </div>
             </CardShell>
           </Reveal>
 
-          {/* Local-first */}
-          <Reveal delay={0.2} className="md:col-span-2 lg:col-span-1">
-            <CardShell className="h-full md:flex md:items-start md:gap-6">
-              <div>
+          {/* 5. Neural Practice Studio */}
+          <Reveal delay={0.18}>
+            <CardShell className="h-full">
+              <IconTile>
+                <RouteIcon className="h-5 w-5" />
+              </IconTile>
+              <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
+                Neural Practice &amp; 5 Arenas
+              </h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                Drill your own charts in Time Machine, Trade Recall, ICT Lab, Risk Math, and Week Boss—backed by 5-axis skill telemetry and Box 0–5 spaced repetition.
+              </p>
+            </CardShell>
+          </Reveal>
+
+          {/* 6. Private & Portable */}
+          <Reveal delay={0.22} className="md:col-span-2 lg:col-span-3">
+            <CardShell className="flex flex-col justify-between gap-6 sm:flex-row sm:items-center">
+              <div className="flex items-start gap-4">
                 <IconTile>
                   <ShieldIcon className="h-5 w-5" />
                 </IconTile>
-                <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                  Private &amp; portable
-                </h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Your data lives on your device — no server required. Export or import everything as
-                  JSON whenever you like.
-                </p>
+                <div>
+                  <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
+                    Owned by you, stored in your Google Drive
+                  </h3>
+                  <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">
+                    Your trades, screenshots, playbook rules, and AI Brain profile live in your private Google Drive folder (`EdgeBook/journals/journal.json`) with instant local caching and one-click JSON export.
+                  </p>
+                </div>
               </div>
-            </CardShell>
-          </Reveal>
-
-          {/* Search */}
-          <Reveal delay={0.24}>
-            <CardShell className="h-full">
-              <IconTile>
-                <SearchIcon className="h-5 w-5" />
-              </IconTile>
-              <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                Find any trade
-              </h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                Full-text search plus filters for outcome, instrument and direction. Your worst habits
-                can hide from you — they can&apos;t hide from search.
-              </p>
+              <span className="shrink-0 rounded-full border border-profit/30 bg-profit/10 px-4 py-1.5 font-mono text-xs font-semibold text-profit">
+                Zero Vendor Lock-In
+              </span>
             </CardShell>
           </Reveal>
         </div>
