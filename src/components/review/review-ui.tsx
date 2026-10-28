@@ -17,9 +17,9 @@ import type { SaveState } from "./use-review-notes";
 ───────────────────────────────────────────────────────────── */
 
 /** The iOS sheet & progressive disclosure curve: starts decisively, settles very softly. */
-export const REVIEW_SMOOTH = [0.32, 0.72, 0, 1] as const;
-export const REVIEW_EXPAND = { duration: 0.62, ease: REVIEW_SMOOTH } as const;
-export const REVIEW_COLLAPSE = { duration: 0.28, ease: [0.4, 0, 0.6, 1] as const } as const;
+export const REVIEW_SMOOTH = [0.22, 1, 0.36, 1] as const;
+export const REVIEW_EXPAND = { duration: 0.68, ease: REVIEW_SMOOTH } as const;
+export const REVIEW_COLLAPSE = { duration: 0.32, ease: [0.4, 0, 0.6, 1] as const } as const;
 
 /* ─────────────────────────────────────────────────────────────
    Formatting
@@ -39,7 +39,7 @@ export const tone = (n: number | null) => (n == null || n === 0 ? "text-ink" : n
 export type SectionDef = { id: string; label: string; icon: SymName };
 export const WEEKLY_SECTIONS: SectionDef[] = [
   { id: "a1", label: "Scorecard", icon: "gauge" },
-  { id: "a2", label: "Daily log", icon: "list" },
+  { id: "a2", label: "Session log", icon: "list" },
   { id: "a3", label: "Edge & Thoughts", icon: "sparkles" },
   { id: "a5", label: "3-Min Ritual", icon: "target" },
 ];
@@ -52,45 +52,60 @@ export const MONTHLY_SECTIONS: SectionDef[] = [
 
 /**
  * Apple HIG unhurried progressive reveal hook for review questions:
- * - If the user taps a quick-pick chip, it settles for a brief 360ms beat so the chip highlight registers before unfolding the next prompt.
- * - If the user types manually, it waits until at least `minChars` characters are typed AND typing pauses for `delayMs` (680ms) before unfolding.
+ * - Questions always reveal strictly one by one (`enabled` chains Q2 after Q1, and Q3 after Q2).
+ * - When typing manually, waits until at least `minChars` characters are written AND typing pauses for `delayMs` (850ms)
+ *   before unfolding the next question (or unfolds after a brief 220ms beat on Enter/blur).
+ * - When loading a period that already has written answers, staggers the reveal by 420ms per step so questions still
+ *   cascade open one by one smoothly instead of snapping in all at once.
  */
 export function useReviewSettledReveal(
   text: string,
   alreadyAnsweredDownstream: boolean,
   resetKey: string,
-  minChars = 3,
-  delayMs = 680,
+  minChars = 5,
+  delayMs = 850,
+  enabled = true,
 ): { settled: boolean; typing: boolean; triggerChipSettle: () => void } {
   const [latched, setLatched] = useState(false);
-  const chipTimer = useRef<number | undefined>(undefined);
+  const manualTimer = useRef<number | undefined>(undefined);
+  const initialMount = useRef(true);
 
   useEffect(() => {
     setLatched(false);
-    window.clearTimeout(chipTimer.current);
+    initialMount.current = true;
+    window.clearTimeout(manualTimer.current);
   }, [resetKey]);
 
-  useEffect(() => () => window.clearTimeout(chipTimer.current), []);
+  useEffect(() => () => window.clearTimeout(manualTimer.current), []);
 
   const trimmed = text.trim();
   useEffect(() => {
-    if (alreadyAnsweredDownstream) {
-      setLatched(true);
+    if (!enabled) {
+      setLatched(false);
       return;
     }
-    if (trimmed.length < minChars) return;
-    const timer = window.setTimeout(() => setLatched(true), delayMs);
+    if (trimmed.length === 0 && !alreadyAnsweredDownstream) {
+      setLatched(false);
+      return;
+    }
+    if (trimmed.length < minChars && !alreadyAnsweredDownstream) {
+      return;
+    }
+    const wait = initialMount.current && (trimmed.length >= minChars || alreadyAnsweredDownstream) ? 420 : delayMs;
+    initialMount.current = false;
+    const timer = window.setTimeout(() => setLatched(true), wait);
     return () => window.clearTimeout(timer);
-  }, [trimmed, alreadyAnsweredDownstream, minChars, delayMs]);
+  }, [trimmed, alreadyAnsweredDownstream, minChars, delayMs, enabled]);
 
   const triggerChipSettle = () => {
-    window.clearTimeout(chipTimer.current);
-    chipTimer.current = window.setTimeout(() => setLatched(true), 360);
+    if (!enabled || trimmed.length < 2) return;
+    window.clearTimeout(manualTimer.current);
+    manualTimer.current = window.setTimeout(() => setLatched(true), 220);
   };
 
   return {
-    settled: latched || alreadyAnsweredDownstream,
-    typing: !latched && !alreadyAnsweredDownstream && trimmed.length > 0,
+    settled: enabled && latched,
+    typing: enabled && !latched && trimmed.length > 0,
     triggerChipSettle,
   };
 }
@@ -113,7 +128,7 @@ export function SectionReveal({ index = 0, children, className }: { index?: numb
   );
 }
 
-export function QuestionReveal({ children, delay = 0.04, className }: { children: ReactNode; delay?: number; className?: string }) {
+export function QuestionReveal({ children, delay = 0.08, className }: { children: ReactNode; delay?: number; className?: string }) {
   const reduce = useReducedMotion();
   const [clip, setClip] = useState(true);
   return (
@@ -121,27 +136,27 @@ export function QuestionReveal({ children, delay = 0.04, className }: { children
       initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
       animate={
         reduce
-          ? { opacity: 1, transition: { duration: 0.2, delay } }
+          ? { opacity: 1, transition: { duration: 0.24, delay } }
           : {
               opacity: 1,
               height: "auto",
               transition: {
                 height: { ...REVIEW_EXPAND, delay },
-                opacity: { duration: 0.34, delay },
+                opacity: { duration: 0.42, delay: delay + 0.04, ease: REVIEW_SMOOTH },
               },
             }
       }
       exit={
         reduce
-          ? { opacity: 0, transition: { duration: 0.14 } }
-          : { opacity: 0, height: 0, transition: { height: REVIEW_COLLAPSE, opacity: { duration: 0.16 } } }
+          ? { opacity: 0, transition: { duration: 0.16 } }
+          : { opacity: 0, height: 0, transition: { height: REVIEW_COLLAPSE, opacity: { duration: 0.18 } } }
       }
       onAnimationStart={() => setClip(true)}
       onAnimationComplete={() => setClip(false)}
       className={cn("-mx-2 -mb-2 px-2 pb-2", clip && "overflow-hidden", className)}
     >
       <motion.div
-        initial={reduce ? false : { opacity: 0, y: 12, filter: "blur(6px)" }}
+        initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
         animate={
           reduce
             ? undefined
@@ -149,10 +164,10 @@ export function QuestionReveal({ children, delay = 0.04, className }: { children
                 opacity: 1,
                 y: 0,
                 filter: "blur(0px)",
-                transition: { duration: 0.52, delay: delay + 0.12, ease: REVIEW_SMOOTH },
+                transition: { duration: 0.58, delay: delay + 0.14, ease: REVIEW_SMOOTH },
               }
         }
-        exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.16 } }}
+        exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.18 } }}
         className="border-t border-line-soft/80 pt-7"
       >
         {children}
@@ -394,7 +409,7 @@ export function Segmented<T extends string>({ value, onChange, options, label }:
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Low-Friction Guided Reflection Primitives
+   Low-Friction Guided Reflection Primitives (Active Recall)
 ───────────────────────────────────────────────────────────── */
 
 export const Prompt = ({
@@ -467,8 +482,6 @@ export function AutoText({
   minRows = 2,
   maxLength = 4000,
   className,
-  suggest,
-  chips,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -495,56 +508,8 @@ export function AutoText({
     return () => ro.disconnect();
   }, []);
 
-  const allChips: SmartChipOption[] = [
-    ...(suggest ? [{ label: suggest.label ?? "Add from your data", text: suggest.text, tone: "gold" as const }] : []),
-    ...(chips ?? []),
-  ].filter((c) => c.text);
-
-  const toggleChip = (snippet: string) => {
-    haptic.selection();
-    if (value.includes(snippet)) {
-      const next = value.replace(snippet, "").replace(/\s{2,}/g, " ").trim();
-      onChange(next);
-      return;
-    }
-    const next = value.trim() ? `${value.replace(/\s+$/, "")} ${snippet}` : snippet;
-    onChange(next);
-    onChipSelect?.();
-  };
-
   return (
-    <div className={cn("space-y-2.5", className)}>
-      {allChips.length > 0 && (
-        <ChipStagger className="flex flex-wrap items-center gap-1.5">
-          {allChips.map((chip, idx) => {
-            const active = value.includes(chip.text);
-            const activeTone =
-              chip.tone === "good"
-                ? "border-profit/45 bg-profit/14 text-profit"
-                : chip.tone === "bad"
-                  ? "border-loss/45 bg-loss/14 text-loss"
-                  : "border-gold/50 bg-gold/15 text-gold-deep dark:text-gold";
-            return (
-              <button
-                key={`${chip.label}-${idx}`}
-                type="button"
-                aria-pressed={active}
-                onClick={() => toggleChip(chip.text)}
-                className={cn(
-                  "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium outline-none transition-all duration-150 focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-[0.96]",
-                  active
-                    ? activeTone
-                    : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink",
-                )}
-              >
-                {active ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3 opacity-70" />}
-                <span>{chip.label}</span>
-              </button>
-            );
-          })}
-        </ChipStagger>
-      )}
-
+    <div className={cn("space-y-2", className)}>
       <div className="group rounded-[18px] border border-line-soft bg-ink/[0.03] transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.045] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)]">
         <textarea
           ref={ref}
@@ -554,6 +519,15 @@ export function AutoText({
           maxLength={maxLength}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            if (value.trim().length >= 2) onChipSelect?.();
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && value.trim().length >= 2) {
+              e.preventDefault();
+              onChipSelect?.();
+            }
+          }}
           className="block w-full resize-none rounded-[18px] bg-transparent px-4 py-3 text-[14.5px] leading-[1.55] text-ink outline-none placeholder:text-faint"
         />
       </div>
@@ -744,7 +718,7 @@ export function CarriedCommitments({ title, items, done, onToggle }: { title: st
                 >
                   <AnimatePresence initial={false}>
                     {on && (
-                      <motion.span key="c" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.4, opacity: 0 }} transition={SPRING} className="flex">
+                      <motion.span key="c" initial={{ scale: 0.4, opacity: 0 }} animate={{ opacity: 1, scale: 1 }} exit={{ scale: 0.4, opacity: 0 }} transition={SPRING} className="flex">
                         <DrawCheck className="h-3 w-3" />
                       </motion.span>
                     )}

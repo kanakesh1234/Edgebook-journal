@@ -9,7 +9,7 @@ import { haptic } from "@/lib/haptics";
 import { buildWeek, recurringMistakes, shiftWeek, thisWeekStart, weekEndOf } from "@/lib/weekly";
 import { RISK_COPY } from "@/lib/risk";
 import { cn } from "@/lib/utils";
-import { FLOW_SMOOTH, Label, PrimaryButton, QuietButton, Reveal, Stagger, TextBlock } from "@/components/journal/flow-ui";
+import { FLOW_SMOOTH, Label, PrimaryButton, QuietButton, Reveal, TextBlock } from "@/components/journal/flow-ui";
 import { Sym } from "@/components/journal/symbols";
 import { Eyebrow, StatTile, surface } from "./ui";
 import "./practice.css";
@@ -55,17 +55,17 @@ export function WeeklyReview() {
     const f = saved?.focus ?? "";
     setWentWell(w);
     setFocus(f);
-    setQ2Ready(w.trim().length >= 3 || f.trim().length > 0);
+    setQ2Ready(false);
     setSavedAt(saved?.updatedAt ?? null);
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (focus.trim().length > 0) {
-      setQ2Ready(true);
+    if (wentWell.trim().length === 0 && focus.trim().length === 0) {
+      setQ2Ready(false);
       return;
     }
-    if (wentWell.trim().length < 3) return;
-    const t = window.setTimeout(() => setQ2Ready(true), 620);
+    if (wentWell.trim().length < 5 && focus.trim().length === 0) return;
+    const t = window.setTimeout(() => setQ2Ready(true), 800);
     return () => window.clearTimeout(t);
   }, [wentWell, focus]);
 
@@ -85,19 +85,6 @@ export function WeeklyReview() {
 
   const range = `${formatDateMedium(start)} – ${formatDateMedium(weekEndOf(start))}`;
   const empty = week.count === 0;
-
-  const wellOptions = [
-    ...(week.best && week.best.pnl > 0 ? [`Best trade (${money(week.best.pnl)}) followed my planned setup rules cleanly.`] : []),
-    ...(week.plan.followed > 0 ? [`Followed my pre-trade plan on ${week.plan.followed} trades (${money(week.plan.netFollowed)} net).`] : []),
-    "Respected my stop loss and daily risk limit.",
-    "Waited patiently for A+ setup confirmation.",
-  ];
-
-  const focusOptions = [
-    ...(week.mistakes[0] ? [`Eliminate ${week.mistakes[0].label.toLowerCase()} by pausing 10 seconds before clicking entry.`] : []),
-    "Only take setups with all checklist rules confirmed.",
-    "Stop trading for the session after 2 consecutive losses.",
-  ];
 
   return (
     <div className="mx-auto w-full max-w-[960px] pb-28 sm:pb-16">
@@ -192,7 +179,7 @@ export function WeeklyReview() {
                           <li key={d.date} className="flex items-center justify-between py-2 text-[13.5px]">
                             <span className="font-medium text-ink">{formatDateMedium(d.date)}</span>
                             <span className="text-muted">
-                              {d.risk ? `${ RISK_COPY[d.risk.status]} · ${formatMoney(d.risk.used, cur)} / ${formatMoney(d.risk.limit, cur)}` : `${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}`}
+                              {d.risk ? `${RISK_COPY[d.risk.status]} · ${formatMoney(d.risk.used, cur)} / ${formatMoney(d.risk.limit, cur)}` : `${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}`}
                             </span>
                             <span className={cn("num font-semibold", tone(d.net))}>{money(d.net)}</span>
                           </li>
@@ -252,73 +239,28 @@ export function WeeklyReview() {
               <Label done={wentWell.trim().length > 0} htmlFor="wk-well">
                 1. What worked best this week?
               </Label>
-              <Stagger className="mt-2.5 flex flex-wrap gap-1.5" delay={0.04}>
-                {wellOptions.map((opt, idx) => {
-                  const active = wentWell.includes(opt);
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        haptic.selection();
-                        setWentWell(active ? "" : opt);
-                        if (!active) window.setTimeout(() => setQ2Ready(true), 360);
-                      }}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium transition-all active:scale-95",
-                        active ? "border-profit/45 bg-profit/12 text-profit" : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink",
-                      )}
-                    >
-                      <Sym name="sparkles" className="h-3 w-3" />
-                      <span>{opt}</span>
-                    </button>
-                  );
-                })}
-              </Stagger>
               <TextBlock
                 id="wk-well"
                 maxLength={400}
                 value={wentWell}
                 onChange={(e) => setWentWell(e.target.value)}
-                placeholder="Or write a quick sentence…"
+                placeholder="Write in your own words what worked well…"
                 className="mt-2.5"
               />
             </div>
 
-            <AnimatePresence initial={false}>
+            <AnimatePresence>
               {q2Ready && (
-                <Reveal key="wk-q2" delay={0.06}>
+                <Reveal key="wk-q2" delay={0.1}>
                   <Label done={focus.trim().length > 0} htmlFor="wk-focus">
                     2. One rule to focus on next week
                   </Label>
-                  <Stagger className="mt-2.5 flex flex-wrap gap-1.5" delay={0.04}>
-                    {focusOptions.map((opt, idx) => {
-                      const active = focus === opt;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            haptic.selection();
-                            setFocus(active ? "" : opt);
-                          }}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium transition-all active:scale-95",
-                            active ? "border-gold/50 bg-gold/15 text-gold-deep dark:text-gold" : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink",
-                          )}
-                        >
-                          <Sym name="sparkles" className="h-3 w-3" />
-                          <span>{opt}</span>
-                        </button>
-                      );
-                    })}
-                  </Stagger>
                   <TextBlock
                     id="wk-focus"
                     maxLength={280}
                     value={focus}
                     onChange={(e) => setFocus(e.target.value)}
-                    placeholder="Or write one concrete rule for Monday…"
+                    placeholder="Write one concrete rule for Monday…"
                     className="mt-2.5"
                   />
                 </Reveal>

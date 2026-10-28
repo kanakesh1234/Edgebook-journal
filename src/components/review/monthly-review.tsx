@@ -18,7 +18,6 @@ import {
   CarriedCommitments,
   Card,
   Chip,
-  ChipStagger,
   DirTag,
   DrawCheck,
   EvidenceButton,
@@ -44,7 +43,6 @@ import {
   tone,
   useMoney,
   useReviewSettledReveal,
-  type SmartChipOption,
 } from "./review-ui";
 import { heat } from "./review-charts";
 import { useReviewNotes } from "./use-review-notes";
@@ -75,8 +73,8 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const commit1 = notes.lists["commitments"]?.[1] ?? "";
   const commit2 = notes.lists["commitments"]?.[2] ?? "";
 
-  const q1Reveal = useReviewSettledReveal(wonVal, lostVal.trim().length > 0 || commit0.trim().length > 0, month, 3, 680);
-  const q2Reveal = useReviewSettledReveal(lostVal, commit0.trim().length > 0, month, 3, 680);
+  const q1Reveal = useReviewSettledReveal(wonVal, lostVal.trim().length > 0 || commit0.trim().length > 0, month, 5, 850, true);
+  const q2Reveal = useReviewSettledReveal(lostVal, commit0.trim().length > 0, month, 5, 850, q1Reveal.settled);
 
   if (m.isFuture) {
     return (
@@ -88,105 +86,12 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
     );
   }
 
-  const bestDay = [...m.days].filter((d) => d.state === "traded").sort((a, b) => b.pnl - a.pnl)[0];
-  const worstDay = [...m.days].filter((d) => d.state === "traded").sort((a, b) => a.pnl - b.pnl)[0];
   const topCrit = [...m.criteria].filter((c) => c.present >= 2 && c.winRate != null).sort((a, b) => b.winRate! - a.winRate! || b.present - a.present)[0] ?? m.criteria[0];
   const costly = [...m.mistakes].filter((x) => x.lost > 0).sort((a, b) => b.lost - a.lost)[0] ?? m.mistakes[0];
-  const combo = m.combos[0];
-  const low = m.thresholds.filter((r) => r.met <= 2 && r.trades > 0);
-  const dayText = (d: typeof bestDay, kind: string) =>
-    `${kind}: ${formatDateMedium(d.date)} (${signed(d.pnl)} across ${d.trades.length} ${d.trades.length === 1 ? "trade" : "trades"}${d.grade ? `, grade ${d.grade}` : ""}).`;
   const p = m.prop;
   const hardest = m.worstWeek && m.worstWeek !== m.bestWeek ? m.worstWeek : null;
   const maxDrawdown = m.drawdowns[0];
   const bestStreak = m.streaks[0];
-
-  const wonChips: SmartChipOption[] = [
-    ...(topCrit
-      ? [
-          {
-            label: `${topCrit.label} (${fmtPct(topCrit.winRate)})`,
-            text: `Strongest edge was confirming “${topCrit.label}” — ${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present}).`,
-            tone: "good" as const,
-          },
-        ]
-      : []),
-    ...(thoughtAnalysis.plannedTrades > 0
-      ? [
-          {
-            label: `Pre-trade thoughts (${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades})`,
-            text: thoughtAnalysis.chipText,
-            tone: "ai" as const,
-          },
-        ]
-      : []),
-    ...(combo
-      ? [
-          {
-            label: `Best combo (${fmtPct(combo.winRate)})`,
-            text: `Highest-probability combo: ${combo.labels.join(" + ")} (${fmtPct(combo.winRate)} over ${combo.trades} trades, ${signed(combo.net)}).`,
-            tone: "good" as const,
-          },
-        ]
-      : []),
-    ...(bestDay && bestDay.pnl > 0 ? [{ label: `Best day · ${formatDateMedium(bestDay.date)}`, text: dayText(bestDay, "Best session"), tone: "good" as const }] : []),
-    { label: "Consistent risk sizing", text: "Kept risk per trade consistent and protected my downside.", tone: "gold" as const },
-  ];
-
-  const lostChips: SmartChipOption[] = [
-    ...(costly
-      ? [
-          {
-            label: `${costly.label} (${costly.count}×)`,
-            text: `Costliest mistake was ${costly.label} — ${costly.lost > 0 ? `${signed(-costly.lost)} across ` : ""}${costly.count} ${costly.count === 1 ? "trade" : "trades"}.`,
-            tone: "bad" as const,
-          },
-        ]
-      : []),
-    ...(maxDrawdown
-      ? [
-          {
-            label: `Max drawdown (${signed(-maxDrawdown.depth)})`,
-            text: `Deepest drawdown was ${signed(-maxDrawdown.depth)} on ${formatDateMedium(maxDrawdown.date)}.`,
-            tone: "bad" as const,
-          },
-        ]
-      : []),
-    ...(low.length
-      ? [
-          {
-            label: `Low-criteria trades (${low.reduce((s, r) => s + r.trades, 0)})`,
-            text: `Took ${low.reduce((s, r) => s + r.trades, 0)} trades with ≤2 criteria confirmed (${signed(low.reduce((s, r) => s + r.net, 0))}).`,
-            tone: "gold" as const,
-          },
-        ]
-      : []),
-    ...(worstDay && worstDay.pnl < 0 ? [{ label: `Hardest day · ${formatDateMedium(worstDay.date)}`, text: dayText(worstDay, "Hardest session"), tone: "bad" as const }] : []),
-    { label: "Clean process month", text: "Executed my plan cleanly; drawdowns were within normal rules.", tone: "good" as const },
-  ];
-
-  const nextMonthRuleChips: SmartChipOption[] = [
-    ...(costly
-      ? [
-          {
-            label: `Cut ${costly.label}`,
-            text: `Never enter a trade without checking for ${costly.label.toLowerCase()} in pre-trade Thought.`,
-            tone: "ai" as const,
-          },
-        ]
-      : []),
-    ...(topCrit
-      ? [
-          {
-            label: `Require ${topCrit.label}`,
-            text: `Require “${topCrit.label}” + at least 3 confirmed checklist rules before sizing full risk.`,
-            tone: "good" as const,
-          },
-        ]
-      : []),
-    { label: "Log If → Then thoughts daily", text: "Write at least one If → Then scenario in Pre-trade Thought before every trade.", tone: "ai" as const },
-    { label: "Cap risk at 1R after a loss", text: "Cap daily risk strictly at 1R after a losing trade so drawdown never compounds.", tone: "gold" as const },
-  ];
 
   const completedQuestions = [wonVal.trim(), lostVal.trim(), commit0.trim()].filter(Boolean).length;
   const visibleTrades = showAllTrades ? m.log : m.log.slice(0, 8);
@@ -514,12 +419,15 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                         haptic.selection();
                         actions.openTrade(r.entry.id);
                       }}
-                      className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
+                      className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
                     >
                       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
                         <span className="num w-6 shrink-0 text-[12px] text-faint">#{r.n}</span>
                         <span className="num w-24 shrink-0 text-[13.5px] font-medium text-ink">{formatDateMedium(r.entry.date)}</span>
                         <DirTag dir={r.entry.direction ?? null} />
+                        {r.entry.instrument && r.entry.instrument !== "—" && (
+                          <span className="text-[13px] font-medium text-ink">{r.entry.instrument}</span>
+                        )}
                         {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
                         {r.criteria && <span className="num text-[12px] text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
                         {r.primary !== "—" && (
@@ -558,7 +466,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 4 — 3-Minute Monthly Check-In */}
+      {/* 4 — 3-Minute Monthly Check-In (Pure active recall, revealed one by one with delayed smooth animations) */}
       <SectionReveal index={4}>
         <Section
           id="b6"
@@ -578,7 +486,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               done={q1Reveal.settled && wonVal.trim().length > 0}
               typing={q1Reveal.typing}
               q="What was your #1 A+ edge this month?"
-              hint="Tap the setup or habit worth replicating next month."
+              hint="Write in your own words the setup or habit worth repeating."
             >
               <AutoText
                 label="Biggest reason I won"
@@ -586,20 +494,19 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                 value={wonVal}
                 onChange={(v) => rn.setText("won", v)}
                 onChipSelect={q1Reveal.triggerChipSettle}
-                placeholder="Optional note — name the setup, criterion, or habit that paid you most…"
-                chips={wonChips}
+                placeholder="Write the setup, criterion, or habit that paid you most…"
               />
             </Prompt>
 
-            <AnimatePresence initial={false}>
+            <AnimatePresence>
               {q1Reveal.settled && (
-                <QuestionReveal key="mo-q2">
+                <QuestionReveal key="mo-q2" delay={0.1}>
                   <Prompt
                     step={2}
                     done={q2Reveal.settled && lostVal.trim().length > 0}
                     typing={q2Reveal.typing}
                     q="What single leak hurt your results the most?"
-                    hint="Pick the primary mistake or drawdown trigger to eliminate."
+                    hint="Write down the primary mistake or drawdown trigger to eliminate."
                   >
                     <AutoText
                       label="Biggest reason I lost"
@@ -607,56 +514,29 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                       value={lostVal}
                       onChange={(v) => rn.setText("lost", v)}
                       onChipSelect={q2Reveal.triggerChipSettle}
-                      placeholder="Optional note — be specific about what cost focus or P&L…"
-                      chips={lostChips}
+                      placeholder="Write what cost focus or P&L this month…"
                     />
                   </Prompt>
                 </QuestionReveal>
               )}
             </AnimatePresence>
 
-            <AnimatePresence initial={false}>
+            <AnimatePresence>
               {q2Reveal.settled && (
-                <QuestionReveal key="mo-q3">
+                <QuestionReveal key="mo-q3" delay={0.1}>
                   <Prompt
                     step={3}
                     done={commit0.trim().length > 0}
                     q="What is your ONE measurable rule for next month?"
-                    hint="Lock in one concrete commitment."
+                    hint="Write one concrete commitment for the month ahead."
                   >
                     <div className="space-y-3">
-                      <ChipStagger className="flex flex-wrap items-center gap-1.5">
-                        {nextMonthRuleChips.map((chip, idx) => {
-                          const active = commit0 === chip.text;
-                          return (
-                            <button
-                              key={idx}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() => {
-                                haptic.selection();
-                                rn.setListItem("commitments", 0, active ? "" : chip.text);
-                              }}
-                              className={cn(
-                                "inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium outline-none transition-all duration-150 active:scale-95",
-                                active
-                                  ? "border-gold/50 bg-gold/15 text-gold-deep dark:text-gold"
-                                  : "border-line bg-raised text-muted hover:border-line-strong hover:text-ink",
-                              )}
-                            >
-                              {active ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3 opacity-70" />}
-                              <span>{chip.label}</span>
-                            </button>
-                          );
-                        })}
-                      </ChipStagger>
-
                       <LineInput
                         index={1}
                         label="Primary commitment for next month"
                         value={commit0}
                         onChange={(v) => rn.setListItem("commitments", 0, v)}
-                        placeholder="Or type a custom rule for next month…"
+                        placeholder="Write your #1 rule for next month…"
                       />
 
                       {moreRules || commit1.trim().length > 0 || commit2.trim().length > 0 ? (

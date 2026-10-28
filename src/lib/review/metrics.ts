@@ -237,10 +237,14 @@ export function propCheckpoint(args: { challenge: Challenge | null; settings: Jo
 
 export interface Insight { id: string; tone: "good" | "warn" | "info"; text: string; /** Journal filter that opens the evidence. */ evidence?: { kind: "mistake"; key: string } | { kind: "ids"; ids: string[] } }
 
+/* ───────── Shared Session Log Row ───────── */
+
+export interface SessionLogRow { n: number; entry: JournalEntry; criteria: { met: number; total: number } | null; cum: number; grade: ProcessGrade | null; primary: string }
+
 /* ───────── Weekly ───────── */
 
 export interface WeekReview {
-  monday: string; days: DayRow[]; tradingSlots: number; entries: JournalEntry[];
+  monday: string; days: DayRow[]; tradingSlots: number; entries: JournalEntry[]; log: SessionLogRow[];
   totals: Totals; sessions: number; noSetupDays: number; unloggedDays: number; weekendEntries: number;
   maxDayLoss: number | null; avgGrade: ProcessGrade | null; balance: number | null; startBalance: number;
   criteria: CriterionStat[]; strongest: CriterionStat | null; weakest: CriterionStat | null;
@@ -305,8 +309,22 @@ export function buildWeek(ctx: ReviewContext, monday: string, marks?: Record<str
   const mistakes = classifyMistakes(list);
   const startBalance = ctx.challenge?.startingBalance ?? settings.startingEquity;
   const upto = entries.filter((e) => e.date <= sunday);
+  let cum = 0;
+  const log: SessionLogRow[] = list.map((e, i) => {
+    const c = criteriaOfEntry(e);
+    const m = mistakesOfEntry(e)[0];
+    const g = marks?.[e.date]?.grade ?? gradeOfEntry(e);
+    return {
+      n: i + 1,
+      entry: e,
+      criteria: c.length ? { met: c.filter((x) => x.present).length, total: c.length } : null,
+      cum: (cum += e.pnl),
+      grade: g,
+      primary: m ? m.label : g === "A" || g === "B" ? "Correct execution" : "—",
+    };
+  });
   return {
-    monday, days, tradingSlots: trading.length, entries: list, totals: totalsOf(list), sessions: traded.length,
+    monday, days, tradingSlots: trading.length, entries: list, log, totals: totalsOf(list), sessions: traded.length,
     noSetupDays: days.filter((d) => d.state === "no-setup" || d.state === "pass").length, unloggedDays: days.filter((d) => d.state === "unlogged").length,
     weekendEntries: list.filter((e) => isWeekend(e.date)).length,
     maxDayLoss: traded.length ? Math.min(0, ...traded.map((d) => d.pnl)) : null,
@@ -322,7 +340,6 @@ export function buildWeek(ctx: ReviewContext, monday: string, marks?: Record<str
 
 /* ───────── Monthly ───────── */
 
-export interface SessionLogRow { n: number; entry: JournalEntry; criteria: { met: number; total: number } | null; cum: number; grade: ProcessGrade | null; primary: string }
 export interface WeekSlice { monday: string; label: number; totals: Totals; net: number; sessions: number }
 export interface MonthReview {
   month: string; days: DayRow[]; tradingDays: number; sessions: number; entries: JournalEntry[]; totals: Totals; balance: number | null;

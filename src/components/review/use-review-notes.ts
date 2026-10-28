@@ -8,7 +8,67 @@ export type ReviewKind = "weekly" | "monthly";
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 export const emptyNotes = (): ReviewNotes => ({ text: {}, lists: {}, done: {}, dayMarks: {}, mistakePlans: {}, updatedAt: 0 });
-const norm = (n: Partial<ReviewNotes> | undefined): ReviewNotes => ({ ...emptyNotes(), ...(n ?? {}) });
+
+/**
+ * Strip legacy auto-filled chip boilerplate so reflection questions remain purely user-written.
+ */
+const LEGACY_CHIP_PATTERNS: RegExp[] = [
+  /Backed \d+\/\d+ trades with pre-trade If\s*→\s*Then thoughts[^.]*\./gi,
+  /Logged pre-trade If\s*→\s*Then thoughts on \d+\/\d+ trades[^.]*\./gi,
+  /Best execution:\s*[^.]*\.(?:\s*Tagged:\s*[^.]*\.)?/gi,
+  /Hardest session:\s*[^.]*\.(?:\s*Tagged:\s*[^.]*\.)?/gi,
+  /Best session:\s*[^.]*\./gi,
+  /Strongest edge was confirming “[^”]+”[^.]*\./gi,
+  /Practiced patience on [^.]* when no A\+ setup triggered\./gi,
+  /Respected my predefined stop loss without widening or hesitating\./gi,
+  /Primary leak was [^.]*\./gi,
+  /Left \d+ weekdays? unlogged\s*—\s*log every session or mark Sat on hands\./gi,
+  /Entered too early before the setup fully confirmed\./gi,
+  /Took a lower-quality setup instead of waiting for A\+ criteria\./gi,
+  /No major process leak this week; losses were normal variance\./gi,
+  /Pause 10 seconds before entry to verify I am not repeating [^.]*\./gi,
+  /Only execute when “[^”]+” is explicitly confirmed in pre-trade Thought\./gi,
+  /Write at least one If\s*→\s*Then scenario in Pre-trade Thought before every (?:entry|trade)\./gi,
+  /Wait for the confirmation candle to close before clicking entry\./gi,
+  /Lock out for the session immediately after 2 losing trades\./gi,
+  /Highest-probability combo:[^.]*\./gi,
+  /Kept risk per trade consistent and protected my downside\./gi,
+  /Costliest mistake was [^.]*\./gi,
+  /Deepest drawdown was [^.]*\./gi,
+  /Took \d+ trades with ≤2 criteria confirmed[^.]*\./gi,
+  /Executed my plan cleanly; drawdowns were within normal rules\./gi,
+  /Never enter a trade without checking for [^.]* in pre-trade Thought\./gi,
+  /Require “[^”]+” \+ at least 3 confirmed checklist rules before sizing full risk\./gi,
+  /Cap daily risk strictly at 1R after a losing trade so drawdown never compounds\./gi,
+];
+
+function stripLegacyChips(s: string | undefined): string {
+  if (!s) return "";
+  let out = s;
+  for (const re of LEGACY_CHIP_PATTERNS) {
+    out = out.replace(re, "");
+  }
+  return out.replace(/\s{2,}/g, " ").trim();
+}
+
+const norm = (n: Partial<ReviewNotes> | undefined): ReviewNotes => {
+  const base = { ...emptyNotes(), ...(n ?? {}) };
+  const cleanedText: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base.text ?? {})) {
+    const cleaned = stripLegacyChips(v);
+    if (cleaned) cleanedText[k] = cleaned;
+  }
+  const cleanedLists: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(base.lists ?? {})) {
+    cleanedLists[k] = (arr ?? []).map((item) => stripLegacyChips(item));
+  }
+  return {
+    ...base,
+    text: cleanedText,
+    lists: cleanedLists,
+  };
+};
+
 const DEBOUNCE = 900;
 
 /**
