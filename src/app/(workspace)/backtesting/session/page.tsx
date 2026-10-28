@@ -58,6 +58,20 @@ function BacktestWorkspaceInner() {
   const speed = useBacktest((s) => s.speed);
 
   const [retryNonce, setRetryNonce] = useState(0);
+
+  // Leaving the workspace. A session opened from a JOURNAL trade ("Replay this trade") is throw-away:
+  // delete it on the way out and go back to the journal. Normal backtests are saved and return to the Lab.
+  const leave = async () => {
+    const st = useBacktest.getState();
+    if (st.config?.replayTrade) {
+      const { discardReplaySession } = await import("@/lib/backtesting/persistence");
+      await discardReplaySession(st.sessionId);
+      router.push("/journal");
+      return;
+    }
+    await saveSession();
+    router.push("/lab#backtesting");
+  };
   const [replayOpen, setReplayOpen] = useState(true);
   const [ticketOpen, setTicketOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -266,7 +280,7 @@ function BacktestWorkspaceInner() {
     <div className="tv-root" data-tv-theme={theme}>
       {!panelsHidden && <TopToolbar
         onToggleFocus={togglePanels}
-        onBack={() => { saveSession(); router.push("/lab#backtesting"); }}
+        onBack={() => { void leave(); }}
         replayOpen={replayOpen}
         onToggleReplay={() => setReplayOpen((o) => !o)}
         ticketOpen={ticketOpen}
@@ -347,7 +361,7 @@ function BacktestWorkspaceInner() {
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
 
       {showResults && (
-        <SessionResults onReturnToSessions={() => { saveSession(); router.push("/lab#backtesting"); }} />
+        <SessionResults onReturnToSessions={() => { void leave(); }} />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { JournalEntry } from "@/lib/types";
 import { useApp } from "@/lib/store";
@@ -26,10 +26,18 @@ export function useReplayTrade(entry: JournalEntry | null) {
     [entry, startingEquity, currency],
   );
 
+  // Replays are throw-away: sweep any left over from an earlier visit (closed tab, back button) as soon as the
+  // journal is on screen, so they never pile up in Backtests or in storage.
+  useEffect(() => {
+    void import("@/lib/backtesting/persistence").then((m) => m.purgeReplaySessions(useBacktest.getState().sessionId)).catch(() => undefined);
+  }, []);
+
   const start = useCallback(async () => {
     if (!plan || !plan.ok || busy) return;
     setBusy(true);
     try {
+      const { purgeReplaySessions } = await import("@/lib/backtesting/persistence");
+      await purgeReplaySessions();
       const st = useBacktest.getState();
       st.initSession(plan.config);
       await useBacktest.getState().saveSession();

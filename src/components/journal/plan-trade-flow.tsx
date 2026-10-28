@@ -146,6 +146,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     watch: watch.map((k) => MISTAKE_CATEGORIES.find((c) => c.key === k)?.label ?? k),
     confirmedRules: rules.filter((_, i) => ruleStates[String(i)] === "ready").map((r) => r.text || ""),
     skippedRules: rules.filter((_, i) => ruleStates[String(i)] !== "ready").map((r) => r.text || ""),
+    ruleTotal: rules.length,
   }), [playbookId, selectedPlaybook, emotion, emotionReason, thesis, draw, invalidation, breakPlan, newsAnswer, newsEvents, dayLimit, watch, rules, ruleStates]);
 
   const order: StepId[] = useMemo(() => (playbook.length ? ["plan", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "trade", "chart", "autopsy", "done"]), [playbook.length]);
@@ -282,6 +283,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     invalidation: invalidation.trim() || undefined,
     expectedSetup: selectedPlaybook?.name,
     emotionalState: emotion || undefined,
+    // "What's behind that feeling?" was asked and then dropped; keep it so the journal can show it next to the trade.
+    emotionalNote: emotionReason.trim() || undefined,
     whatCouldBreakPlan: breakPlan.trim() || undefined,
     watchMistakes: watch.length ? watch : undefined,
     maxLoss: dayLimit ?? undefined, // the limit set on Home, kept with the plan for reviews and audits

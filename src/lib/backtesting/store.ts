@@ -544,9 +544,15 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   loadSessionList: async () => {
     set({ sessionsLoading: true });
     try {
-      const { listBacktestSessions, sessionToSummary } = await import('./persistence');
-      const sessions = await listBacktestSessions();
-      set({ sessions: sessions.map(sessionToSummary), sessionsLoading: false });
+      const { listBacktestSessions, sessionToSummary, syncBacktestsWithCloud } = await import('./persistence');
+      // 1. This device first (instant). Journal replays are swept out here and never listed.
+      const local = await listBacktestSessions();
+      set({ sessions: local.map(sessionToSummary), sessionsLoading: false });
+      // 2. Then Google Drive: pull sessions made on other devices, push the ones Drive hasn't got yet.
+      if (await syncBacktestsWithCloud()) {
+        const merged = await listBacktestSessions();
+        set({ sessions: merged.map(sessionToSummary) });
+      }
     } catch {
       set({ sessionsLoading: false });
     }

@@ -1,4 +1,4 @@
-import type { JournalEntry, TradePlan } from "../types";
+import { checklistScore, type JournalEntry, type TradePlan } from "../types";
 import { dayTrades } from "../risk";
 import { mistakeTagsOf } from "../mistakes";
 import { ruleStats, statFor, ruleText } from "../rule-stats";
@@ -20,6 +20,8 @@ export type PlanDraft = {
   watch: string[];
   /** Rule texts the trader ticked / left unticked, and how many the setup has. */
   confirmedRules: string[]; skippedRules: string[];
+  /** How many rules the chosen setup has in total (confirmed + skipped). Lets the odds work even when rule texts are blank. */
+  ruleTotal?: number;
 };
 
 export type Factor = { id: string; label: string; n: number; winRate: number | null; avgPnl: number | null; /** winRate − baseline, in points */ delta: number | null };
@@ -133,45 +135,225 @@ export function localOutlook(f: OutlookFacts, d: PlanDraft): Outlook {
 /*  Win / loss probability                                             */
 /* ------------------------------------------------------------------ */
 
+export type OddsDriver = { label: string; /** change in win chance, in percentage points */ pts: number };
+export type OddsChecklist = {
+  done: number; total: number;
+  /** Win chance if none / all of the setup's rules are confirmed (everything else held as planned). */
+  atNone: number; atAll: number;
+  /** Average gain in win chance per extra rule confirmed. */
+  perRule: number;
+  /** True when your own trades say how much the checklist matters; false while it is still the standard assumption. */
+  fromHistory: boolean;
+  /** What the fitted effect says: more rules ⇒ more wins ("up"), no real difference ("flat"), or the opposite ("down"). */
+  trend: "up" | "flat" | "down";
+  /** Past trades that carry a checklist, and how they did when it was (mostly) complete vs not. */
+  history: { n: number; fullWinRate: number | null; fullN: number; partialWinRate: number | null; partialN: number } | null;
+};
+export type OddsSimilar = { n: number; winRate: number | null; avgPnl: number | null; profitFactor: number | null; avgR: number | null; label: string };
 export type WinOdds =
   | { status: "thin"; n: number; needed: number }
-  | { status: "ready"; /** 0–100 */ win: number; loss: number; n: number; confidence: "low" | "medium" | "high"; /** the closest-matching group of past trades, if any */ basis: { n: number; label: string; weak: boolean } | null };
+  | {
+      status: "ready";
+      /** 0–100 */ win: number; loss: number; n: number;
+      /** Likely range (about 80% sure the true chance sits inside). */ low: number; high: number;
+      confidence: "low" | "medium" | "high";
+      checklist: OddsChecklist | null;
+      drivers: OddsDriver[];
+      similar: OddsSimilar | null;
+    };
 
 const MIN_HISTORY = 5;
-const PRIOR = 2; // how strongly a small group is pulled back toward the overall record
+const RISKY_FEELINGS = new Set(["FOMO", "ANXIOUS", "FRUSTRATED", "REVENGE-PRONE", "TIRED", "DISTRACTED"]);
 const logit = (p: number) => Math.log(p / (1 - p));
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
 /**
- * "How likely is THIS trade to win or lose, given how you have traded before?"
+ * Feature columns. Every past trade — and the trade being planned — is described the same way:
+ *   0 intercept
+ *   1 checklist  : share of the setup's rules confirmed before the trade, centred on one half (−0.5 … +0.5)
+ *   2 setup      : 1 when the trade used the setup being planned
+ *   3 feeling    : 1 when the plan was written while FOMO / anxious / frustrated / revenge-prone / tired / distracted
+ *   4 news       : 1 when the plan listed a news event
+ *   5 afterLoss  : 1 when an earlier trade the same day lost
+ *   6 later      : 1 for the second trade of the day or later
+ */
+// The setup's rules ARE the edge — a trade with every rule confirmed should win more often than one with none. That is the
+// starting assumption (+1.0 on the log-odds scale ≈ +25 points near 50%). Your own trades then confirm, shrink or reverse it.
+const PRIOR_MEAN = [0, 1.0, 0, 0, 0, 0, 0];
+// How hard each coefficient is pulled back to its starting value. Higher = needs more trades to move.
+const PRIOR_STRENGTH = [0, 2, 4, 4, 4, 4, 4];
+
+/** Solve A·x = b (A is small, symmetric positive definite). Gaussian elimination with partial pivoting. */
+function solve(A: number[][], b: number[]): number[] {
+  const n = b.length;
+  const M = A.map((r, i) => [...r, b[i]!]);
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r]![c]!) > Math.abs(M[p]![c]!)) p = r;
+    [M[c], M[p]] = [M[p]!, M[c]!];
+    const d = M[c]![c]! || 1e-9;
+    for (let k = c; k <= n; k++) M[c]![k] = M[c]![k]! / d;
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r]![c]!; if (f) for (let k = c; k <= n; k++) M[r]![k] = M[r]![k]! - f * M[c]![k]!; }
+  }
+  return M.map((r) => r[n]!);
+}
+
+/** Share of the setup's rules the trader confirmed before a past trade, from whatever record that trade has. */
+function adherenceOf(e: JournalEntry, plan: TradePlan | undefined): number | null {
+  if (plan?.rules?.length) return plan.rules.filter((r) => r.state === "ready").length / plan.rules.length;
+  if (e.preTradeChecklist?.length) return e.preTradeChecklist.filter((i) => i.confirmed).length / e.preTradeChecklist.length;
+  if (e.checklist) { const s = checklistScore(e.checklist); return s.required > 0 ? s.confirmed / s.required : null; }
+  return null;
+}
+
+/**
+ * "How likely is THIS trade to win, given how you have traded before — and how complete your checklist is?"
  *
- * Start from the overall record (smoothed, so 2 wins from 2 trades is not "100%"). Each group of past trades that resembles
- * this plan nudges the figure up or down, pulled back toward the overall record when the group is small. Break-even trades
- * are neither a win nor a loss and are left out. Like everything here it describes the trader's own habits, never the market.
+ * A ridge-regularised logistic model fitted to the trader's own decided trades (break-evens are neither a win nor a loss).
+ * Unlike the earlier version, every factor is fitted TOGETHER, so overlapping evidence is not double counted, and the
+ * checklist is a first-class input: confirming more of the setup's rules raises the chance, by as much as your trades
+ * support. Until enough of your trades carry a checklist, the checklist effect is the standard assumption (and the card
+ * says so). The result is a range, not a promise, and always describes the trader's habits — never the market.
  */
 export function winOdds(d: PlanDraft, entries: JournalEntry[], plans: TradePlan[]): WinOdds {
-  const { past, groups } = similarGroups(d, entries, plans);
-  const decided = past.filter((e) => e.pnl !== 0);
-  if (decided.length < MIN_HISTORY) return { status: "thin", n: decided.length, needed: MIN_HISTORY };
+  const past = entries.filter((e) => e.date <= d.date && e.pnl !== undefined && e.pnl !== 0);
+  if (past.length < MIN_HISTORY) return { status: "thin", n: past.length, needed: MIN_HISTORY };
 
-  const wins = (t: JournalEntry[]) => t.filter((e) => e.pnl > 0).length;
-  const p0 = (wins(decided) + 0.5) / (decided.length + 1); // Jeffreys smoothing: 2 wins from 2 trades is not "100%"
+  const planById = new Map(plans.map((p) => [p.id, p]));
+  const planOf = (e: JournalEntry) => (e.planId ? planById.get(e.planId) : undefined) ?? plans.find((p) => p.linkedTradeId === e.id);
+  const sameName = (e: JournalEntry) => !e.setupId && !!e.setup && !!d.setupName && e.setup.trim().toLowerCase() === d.setupName.trim().toLowerCase();
+  const isSetup = (e: JournalEntry) => (d.setupId ? e.setupId === d.setupId || sameName(e) : false);
 
-  let weight = 0, shift = 0;
-  const used: { n: number; label: string; weak: boolean }[] = [];
-  for (const g of groups) {
-    const t = g.trades.filter((e) => e.pnl !== 0);
-    if (t.length < MIN) continue;
-    const pg = (wins(t) + PRIOR * p0) / (t.length + PRIOR);
-    const w = Math.min(t.length, 10) * (g.weak ? 0.5 : 1);
-    shift += w * (logit(pg) - logit(p0));
-    weight += w;
-    used.push({ n: t.length, label: g.label, weak: !!g.weak });
+  // Position in the day, for "after a loss" and "later trade".
+  const byDay = new Map<string, JournalEntry[]>();
+  for (const e of entries) { const l = byDay.get(e.date); if (l) l.push(e); else byDay.set(e.date, [e]); }
+  const order = new Map<string, { idx: number; lossBefore: boolean }>();
+  for (const [date, list] of byDay) {
+    const t = dayTrades(date, list);
+    t.forEach((e, i) => order.set(e.id, { idx: i, lossBefore: t.slice(0, i).some((x) => x.pnl < 0) }));
   }
-  const p = Math.min(0.95, Math.max(0.05, sigmoid(logit(p0) + (weight ? shift / weight : 0))));
-  const win = Math.round(p * 100);
-  const confidence = decided.length < 10 || used.length === 0 ? "low" : decided.length < 30 ? "medium" : "high";
-  // The most specific evidence to quote: the group with the most trades.
-  const basis = used.filter((u) => !u.weak).sort((a, b) => b.n - a.n)[0] ?? null;
-  return { status: "ready", win, loss: 100 - win, n: decided.length, confidence, basis };
+
+  type Row = { x: number[]; y: number; e: JournalEntry; adh: number | null };
+  const rows: Row[] = past.map((e) => {
+    const plan = planOf(e);
+    const adh = adherenceOf(e, plan);
+    const pos = order.get(e.id);
+    return {
+      e, adh, y: e.pnl > 0 ? 1 : 0,
+      x: [
+        1,
+        adh == null ? 0 : adh - 0.5,
+        isSetup(e) ? 1 : 0,
+        plan?.emotionalState && RISKY_FEELINGS.has(plan.emotionalState) ? 1 : 0,
+        (plan?.newsEvents?.length ?? 0) > 0 ? 1 : 0,
+        pos?.lossBefore ? 1 : 0,
+        (pos?.idx ?? 0) >= 1 ? 1 : 0,
+      ],
+    };
+  });
+
+  const total = d.ruleTotal ?? d.confirmedRules.length + d.skippedRules.length;
+  const done = d.confirmedRules.length;
+  const todayOrder = dayTrades(d.date, entries);
+  const draftX = [
+    1,
+    total > 0 ? done / total - 0.5 : 0,
+    d.setupId ? 1 : 0,
+    d.emotion && RISKY_FEELINGS.has(d.emotion) ? 1 : 0,
+    d.news.length > 0 ? 1 : 0,
+    todayOrder.some((t) => t.pnl < 0) ? 1 : 0,
+    todayOrder.length >= 1 ? 1 : 0,
+  ];
+
+  /* ---- fit: Newton–Raphson on the penalised log-likelihood ---- */
+  const K = draftX.length;
+  const wins = rows.reduce((s, r) => s + r.y, 0);
+  const p0 = (wins + 0.5) / (rows.length + 1); // Jeffreys smoothing: 2 wins from 2 trades is not "100%"
+  let beta = PRIOR_MEAN.map((m, j) => (j === 0 ? logit(p0) : m));
+  let H: number[][] = [];
+  for (let it = 0; it < 30; it++) {
+    const g = new Array(K).fill(0);
+    H = Array.from({ length: K }, () => new Array(K).fill(0));
+    for (const r of rows) {
+      const p = sigmoid(r.x.reduce((s, v, j) => s + v * beta[j]!, 0));
+      const w = p * (1 - p);
+      for (let a = 0; a < K; a++) {
+        g[a] += (r.y - p) * r.x[a]!;
+        for (let b = 0; b < K; b++) H[a]![b] += w * r.x[a]! * r.x[b]!;
+      }
+    }
+    for (let j = 1; j < K; j++) { g[j] -= PRIOR_STRENGTH[j]! * (beta[j]! - PRIOR_MEAN[j]!); H[j]![j] += PRIOR_STRENGTH[j]!; }
+    H[0]![0] += 1e-6;
+    const step = solve(H, g);
+    beta = beta.map((v, j) => v + Math.max(-2, Math.min(2, step[j]!)));
+    if (step.every((s) => Math.abs(s) < 1e-6)) break;
+  }
+
+  const eta = (x: number[]) => x.reduce((s, v, j) => s + v * beta[j]!, 0);
+  const clampP = (p: number) => Math.min(0.95, Math.max(0.05, p));
+  const pct = (p: number) => Math.round(clampP(p) * 100);
+  const p = clampP(sigmoid(eta(draftX)));
+
+  // Likely range from the curvature of the fit (Laplace approximation): wide with little data, narrow with a lot.
+  const hx = solve(H, draftX);
+  const se = Math.sqrt(Math.max(0, draftX.reduce((s, v, j) => s + v * hx[j]!, 0)));
+  const low = pct(sigmoid(eta(draftX) - 1.28 * se)), high = pct(sigmoid(eta(draftX) + 1.28 * se));
+
+  /* ---- what is moving the number ---- */
+  const without = (j: number) => { const x = [...draftX]; x[j] = 0; return x; };
+  const drivers: OddsDriver[] = [];
+  const draftLabel = (j: number) =>
+    j === 1 ? (total > 0 ? `Checklist ${done}/${total}` : "Checklist")
+    : j === 2 ? `${d.setupName ?? "This setup"} record`
+    : j === 3 ? `Feeling ${d.emotion ? d.emotion.toLowerCase() : ""}`.trim()
+    : j === 4 ? "News day"
+    : j === 5 ? "After a loss today"
+    : "Later trade of the day";
+  for (let j = 1; j < K; j++) {
+    if (draftX[j] === 0 && j !== 1) continue;
+    const pts = Math.round((p - clampP(sigmoid(eta(without(j))))) * 100);
+    if (Math.abs(pts) >= 1) drivers.push({ label: draftLabel(j), pts });
+  }
+  drivers.sort((a, b) => Math.abs(b.pts) - Math.abs(a.pts));
+
+  /* ---- the checklist, spelled out ---- */
+  const known = rows.filter((r) => r.adh != null);
+  const spread = known.length ? Math.max(...known.map((r) => r.adh!)) - Math.min(...known.map((r) => r.adh!)) : 0;
+  const fromHistory = known.length >= 8 && spread >= 0.25;
+  const wr = (l: Row[]) => (l.length ? l.filter((r) => r.y === 1).length / l.length : null);
+  const full = known.filter((r) => r.adh! >= 0.99), partial = known.filter((r) => r.adh! < 0.99);
+  let checklist: OddsChecklist | null = null;
+  if (total > 0) {
+    const atNone = pct(sigmoid(eta([...draftX.slice(0, 1), -0.5, ...draftX.slice(2)])));
+    const atAll = pct(sigmoid(eta([...draftX.slice(0, 1), 0.5, ...draftX.slice(2)])));
+    checklist = {
+      done, total, atNone, atAll, perRule: Math.round(((atAll - atNone) / total) * 10) / 10, fromHistory,
+      trend: atAll - atNone >= 5 ? "up" : atAll - atNone <= -5 ? "down" : "flat",
+      history: known.length ? { n: known.length, fullWinRate: wr(full), fullN: full.length, partialWinRate: wr(partial), partialN: partial.length } : null,
+    };
+  }
+
+  /* ---- the closest past trades, with the numbers a trader actually judges a setup by ---- */
+  let pool = d.setupId ? rows.filter((r) => isSetup(r.e)) : rows;
+  let label = d.setupId ? `${d.setupName ?? "this setup"} trades` : "your trades";
+  if (pool.length < 3) { pool = rows; label = "your trades"; }
+  if (total > 0) {
+    const near = pool.filter((r) => r.adh != null && Math.abs(r.adh - done / total) <= 0.25);
+    if (near.length >= 3) { pool = near; label = `${label} with a similar checklist`; }
+  }
+  const gw = pool.filter((r) => r.e.pnl > 0).reduce((s, r) => s + r.e.pnl, 0);
+  const gl = Math.abs(pool.filter((r) => r.e.pnl < 0).reduce((s, r) => s + r.e.pnl, 0));
+  const rs = pool.map((r) => r.e.rr).filter((v): v is number => typeof v === "number");
+  const similar: OddsSimilar | null = pool.length
+    ? {
+        n: pool.length, label, winRate: wr(pool),
+        avgPnl: Math.round((pool.reduce((s, r) => s + r.e.pnl, 0) / pool.length) * 100) / 100,
+        profitFactor: gl > 0 ? Math.round((gw / gl) * 100) / 100 : null,
+        avgR: rs.length ? Math.round((rs.reduce((s, v) => s + v, 0) / rs.length) * 100) / 100 : null,
+      }
+    : null;
+
+  const confidence = rows.length < 10 ? "low" : rows.length < 30 ? "medium" : "high";
+  const win = pct(p);
+  return { status: "ready", win, loss: 100 - win, n: rows.length, low: Math.min(low, win), high: Math.max(high, win), confidence, checklist, drivers: drivers.slice(0, 4), similar };
 }

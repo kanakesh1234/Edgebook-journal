@@ -23,6 +23,7 @@ import { useLessonIndex } from "@/components/lessons/use-lesson-index";
 import { LessonPeek, LessonPicker, LessonThumb } from "./lesson-links";
 import { ReplayTradeCard, useReplayTrade } from "./replay-trade";
 import { EntryTags } from "./tag-panel";
+import { PlanVsTrade } from "./plan-vs-trade";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
@@ -686,6 +687,8 @@ function Story({ entry, tab, onTab, scroll, onReflect, canEdit, onPickLesson, on
                     )}
                   </section>
                 )}
+
+                <PlanVsTrade entry={entry} />
 
                 {risk && <RiskMeter risk={risk} currency={currency} label={`${formatDateMedium(entry.date)} vs your limit`} />}
 

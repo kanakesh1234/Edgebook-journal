@@ -14,9 +14,15 @@ import { Spinner } from "@/components/ui/button";
 import { haptic } from "@/lib/haptics";
 
 export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
-/** Height/opacity transition for steps that unfold in or out. */
-/** Critically-damped spring (no bounce): Apple's default for anything the user can interrupt. */
-export const FLOW_EXPAND = { type: "spring", duration: 0.5, bounce: 0 } as const;
+/** The iOS sheet curve: starts decisively, settles very softly. Used for anything that unfolds in place. */
+export const FLOW_SMOOTH = [0.32, 0.72, 0, 1] as const;
+/**
+ * Height unfold. A tween on the iOS curve instead of a spring: a spring on `height: auto` overshoots its measured
+ * height and makes the content below stutter. Slower than before (0.62s) so a new question reads as "arriving".
+ */
+export const FLOW_EXPAND = { duration: 0.62, ease: FLOW_SMOOTH } as const;
+/** Leaving is always quicker than arriving, so nothing lingers. */
+export const FLOW_COLLAPSE = { duration: 0.26, ease: [0.4, 0, 0.6, 1] } as const;
 /** Quick cross-fade for one-line micro feedback. */
 export const FLOW_FADE = { duration: 0.16 } as const;
 
@@ -168,17 +174,17 @@ export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: {
 /** Slide + fade between steps; direction follows forward/back. */
 export function StepTransition({ stepKey, dir, children }: { stepKey: string; dir: 1 | -1; children: React.ReactNode }) {
   const reduce = useReducedMotion();
-  const dx = reduce ? 0 : 28;
+  const dx = reduce ? 0 : 36;
   return (
     <AnimatePresence mode="wait" initial={false} custom={dir}>
       <motion.div
         key={stepKey}
         custom={dir}
         variants={{
-          enter: (d: number) => ({ opacity: 0, x: d * dx }),
-          // Arrive on a spring; leave quickly so the next screen never waits on the last.
-          center: { opacity: 1, x: 0, transition: { type: "spring", duration: 0.45, bounce: 0 } },
-          exit: (d: number) => ({ opacity: 0, x: -d * (dx * 0.5), transition: { duration: 0.14, ease: "easeIn" } }),
+          enter: (d: number) => ({ opacity: 0, x: d * dx, filter: reduce ? "none" : "blur(4px)" }),
+          // Arrive on the iOS curve (no spring wobble); leave fast so the next screen never waits on the last.
+          center: { opacity: 1, x: 0, filter: "blur(0px)", transition: { duration: 0.5, ease: FLOW_SMOOTH } },
+          exit: (d: number) => ({ opacity: 0, x: -d * (dx * 0.45), transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }),
         }}
         initial="enter"
         animate="center"
@@ -244,13 +250,13 @@ export function IconTile({ tile, children, className }: { tile: string; children
  */
 export function Collapse({ children, id, className }: { children: React.ReactNode; id?: string; className?: string }) {
   const [clip, setClip] = useState(true);
+  const reduce = useReducedMotion();
   return (
     <motion.div
       id={id}
       initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={FLOW_EXPAND}
+      animate={{ height: "auto", opacity: 1, transition: reduce ? { duration: 0.15 } : { height: FLOW_EXPAND, opacity: { duration: 0.42, delay: 0.1, ease: FLOW_SMOOTH } } }}
+      exit={{ height: 0, opacity: 0, transition: reduce ? { duration: 0.12 } : { height: FLOW_COLLAPSE, opacity: { duration: 0.16 } } }}
       onAnimationStart={() => setClip(true)}
       onAnimationComplete={() => setClip(false)}
       // 8px of built-in room on the sides and bottom (cancelled by negative margins, so layout is unchanged):
@@ -273,24 +279,34 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
   const [clip, setClip] = useState(true);
   useEffect(() => {
     if (!focus) return;
-    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 160 + delay * 1000);
+    // Wait until the question is mostly open, so the caret never lands in a field that is still sliding.
+    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 380 + delay * 1000);
     return () => window.clearTimeout(t);
   }, [focus, delay]);
-  const hidden = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const shown = reduce ? { opacity: 1 } : { opacity: 1, height: "auto" };
+  const shut = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
+  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.3, delay } } };
+  const gone = reduce ? { opacity: 0, transition: { duration: 0.12 } } : { opacity: 0, height: 0, transition: { height: FLOW_COLLAPSE, opacity: { duration: 0.14 } } };
   return (
     <motion.section
       ref={ref}
-      initial={hidden}
-      animate={shown}
-      exit={hidden}
-      transition={reduce ? { duration: 0.18 } : { ...FLOW_EXPAND, delay }}
+      initial={shut}
+      animate={open}
+      exit={gone}
       onAnimationStart={() => setClip(true)}
       onAnimationComplete={() => setClip(false)}
       // Same built-in room as Collapse: focus rings and shadows are never cut.
       className={cn("-mx-2 -mb-2 px-2 pb-2", clip && "overflow-hidden")}
     >
-      <div className="pt-8">{children}</div>
+      {/* The room opens first; the question then settles into it — a short rise, a soft de-blur and a fade.
+          Transform + opacity + filter only, so it stays on the GPU and never jitters the layout below. */}
+      <motion.div
+        className="pt-8"
+        initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
+        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.55, delay: delay + 0.12, ease: FLOW_SMOOTH } }}
+        exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.16 } }}
+      >
+        {children}
+      </motion.div>
     </motion.section>
   );
 }
@@ -304,9 +320,10 @@ export function Stagger({ children, className, delay = 0.05 }: { children: React
         <motion.span
           key={i}
           className="inline-flex"
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
-          animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
-          transition={{ duration: 0.28, ease: FLOW_EASE, delay: Math.min(i * delay, 0.6) }}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.97 }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+          // Starts after the question's own room has begun to open (0.22s), then the chips follow one by one.
+          transition={{ duration: 0.42, ease: FLOW_SMOOTH, delay: 0.22 + Math.min(i * delay, 0.55) }}
         >
           {child}
         </motion.span>
