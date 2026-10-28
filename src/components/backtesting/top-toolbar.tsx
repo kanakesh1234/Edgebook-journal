@@ -10,6 +10,7 @@ import { emitChartCommand } from "./chart-bus";
 import { fmtPrice } from "./drawings/render";
 import { I } from "./tv-icons";
 import { useOutside } from "./tv-ui";
+import IndicatorsMenu from "./indicators-menu";
 
 const QUICK_TF: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1h", "4h"];
 const TF_GROUPS: Array<{ title: string; items: Timeframe[] }> = [
@@ -56,9 +57,11 @@ interface Props {
   ticketOpen: boolean;
   onToggleTicket: () => void;
   onOpenSettings: () => void;
+  /** Hide / show all panels (TradingView fullscreen mode). */
+  onToggleFocus: () => void;
 }
 
-export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketOpen, onToggleTicket, onOpenSettings }: Props) {
+export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketOpen, onToggleTicket, onOpenSettings, onToggleFocus }: Props) {
   const config = useBacktest((s) => s.config);
   const instruments = useBacktest((s) => s.instruments);
   const active = useBacktest((s) => s.activeInstrument);
@@ -80,17 +83,6 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
   const saveSession = useBacktest((s) => s.saveSession);
   const setShowResults = useBacktest((s) => s.setShowResults);
   const { resolved: theme } = useTheme();
-
-  const [fs, setFs] = useState(false);
-  useEffect(() => {
-    const on = () => setFs(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", on);
-    return () => document.removeEventListener("fullscreenchange", on);
-  }, []);
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void document.documentElement.requestFullscreen?.();
-  };
 
   const lastClose = (candleData[active] || []).at(-1)?.close ?? null;
   const [alertPrice, setAlertPrice] = useState("");
@@ -169,6 +161,10 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       </Dropdown>
       <i className="tv-sep" />
 
+      {/* Indicators */}
+      <IndicatorsMenu />
+      <i className="tv-sep" />
+
       {/* Alert */}
       <Dropdown title="Create alert" button={<><I name="alert" size={22} /><span>Alert{myAlerts.length ? ` ${myAlerts.length}` : ""}</span></>}>
         {(close) => (
@@ -230,7 +226,7 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       <button type="button" className="tv-tbtn" title="Toggle light/dark" onClick={() => setThemeChoice(theme === "dark" ? "light" : "dark")}>
         <I name={theme === "dark" ? "sun" : "moon"} size={22} />
       </button>
-      <button type="button" className="tv-tbtn" title="Fullscreen (Shift+F)" onClick={toggleFullscreen}><I name={fs ? "fullscreenExit" : "fullscreen"} size={22} /></button>
+      <button type="button" className="tv-tbtn" title="Fullscreen — hide panels (Shift+F)" onClick={onToggleFocus}><I name="fullscreen" size={22} /></button>
       <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={22} />}>
         {(close) => (
           <>

@@ -5,7 +5,8 @@ export type ChartCommand =
   | { type: "range"; seconds: number | "all" | "ytd" }
   | { type: "goto"; time: number }
   | { type: "screenshot"; mode: "download" | "copy" }
-  | { type: "scroll-latest" };
+  | { type: "scroll-latest" }
+  | { type: "settings" };
 
 type Listener = (cmd: ChartCommand) => void;
 const listeners = new Set<Listener>();

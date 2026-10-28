@@ -3,6 +3,8 @@
 /* ------------------------------------------------------------------ */
 /*  Chart appearance (Settings → Symbol / Canvas in TradingView terms) */
 /*  Stored on this device, shared by every session.                     */
+/*  Defaults follow the Edgebook theme: green + black candles on a       */
+/*  warm white canvas (dark mode: warm dark canvas, light down candles). */
 /* ------------------------------------------------------------------ */
 
 import { useSyncExternalStore } from "react";
@@ -10,12 +12,13 @@ import { useSyncExternalStore } from "react";
 export interface ChartAppearance {
   /** null = follow the app theme (TradingView dark #131722 / light #FFFFFF). */
   background: string | null;
-  upColor: string;
-  downColor: string;
-  wickUp: string;
-  wickDown: string;
-  borderUp: string;
-  borderDown: string;
+  /** null = Edgebook default for the current theme (green up / black down; light-on-dark in dark mode). */
+  upColor: string | null;
+  downColor: string | null;
+  wickUp: string | null;
+  wickDown: string | null;
+  borderUp: string | null;
+  borderDown: string | null;
   gridVertical: boolean;
   gridHorizontal: boolean;
   showLegend: boolean;
@@ -24,12 +27,12 @@ export interface ChartAppearance {
 
 export const DEFAULT_APPEARANCE: ChartAppearance = {
   background: null,
-  upColor: "#089981",
-  downColor: "#F23645",
-  wickUp: "#089981",
-  wickDown: "#F23645",
-  borderUp: "#089981",
-  borderDown: "#F23645",
+  upColor: null,
+  downColor: null,
+  wickUp: null,
+  wickDown: null,
+  borderUp: null,
+  borderDown: null,
   gridVertical: true,
   gridHorizontal: true,
   showLegend: true,
@@ -74,19 +77,38 @@ export function useChartAppearance(): ChartAppearance {
   return useSyncExternalStore(subscribe, () => { load(); return snapshot; }, () => DEFAULT_APPEARANCE);
 }
 
+/** Site surface colours (globals.css --raised / dark surface). */
+export const DEFAULT_BG = { light: "#fffefb", dark: "#1c1813" };
+
+const DEFAULT_CANDLES = {
+  light: { up: "#2e8b57", down: "#15130f" },
+  dark: { up: "#5fb47f", down: "#e9e4d8" },
+};
+
+/** Resolved candle colours: the user's pick, else the Edgebook default for the theme. */
+export function candleColorsFor(theme: "light" | "dark", a: ChartAppearance) {
+  const d = DEFAULT_CANDLES[theme];
+  const up = a.upColor ?? d.up, down = a.downColor ?? d.down;
+  return {
+    up, down,
+    borderUp: a.borderUp ?? up, borderDown: a.borderDown ?? down,
+    wickUp: a.wickUp ?? up, wickDown: a.wickDown ?? down,
+  };
+}
+
 /** TradingView's own palettes for the two app themes. */
 export function paletteFor(theme: "light" | "dark", a: ChartAppearance) {
   const dark = theme === "dark";
-  const bg = a.background ?? (dark ? "#131722" : "#FFFFFF");
+  const bg = a.background ?? (dark ? DEFAULT_BG.dark : DEFAULT_BG.light);
   // Pick readable text/grid for whatever background the user chose.
   const lum = luminance(bg);
   const darkBg = lum < 0.45;
   return {
     bg,
     darkBg,
-    text: darkBg ? "#D1D4DC" : "#131722",
-    grid: darkBg ? "rgba(42,46,57,0.9)" : "rgba(42,46,57,0.1)",
-    border: darkBg ? "#2A2E39" : "#E0E3EB",
+    text: darkBg ? "#e9e4d8" : "#26221a",
+    grid: darkBg ? "rgba(233,228,216,0.07)" : "rgba(38,34,26,0.07)",
+    border: darkBg ? "#3a342a" : "#e7e1d4",
     crosshair: darkBg ? "#9598A1" : "#9598A1",
     crosshairLabel: darkBg ? "#363A45" : "#131722",
   };

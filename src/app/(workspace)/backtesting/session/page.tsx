@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useBacktest } from "@/lib/backtesting/store";
 import { loadSymbolCandles, resolveClock } from "@/lib/backtesting/data/loader";
@@ -16,7 +16,8 @@ import PaperPanel from "@/components/backtesting/paper-panel";
 import OrderTicket from "@/components/backtesting/order-ticket";
 import SettingsDialog from "@/components/backtesting/settings-dialog";
 import SessionResults from "@/components/backtesting/session-results";
-import { emitChartCommand } from "@/components/backtesting/chart-bus";
+import { emitChartCommand, onChartCommand } from "@/components/backtesting/chart-bus";
+import FloatingTools from "@/components/backtesting/floating-tools";
 import "@/components/backtesting/tv.css";
 
 const ALT_TOOLS: Record<string, "trend-line" | "horizontal-line" | "horizontal-ray" | "vertical-line" | "cross-line" | "fib-retracement"> = {
@@ -60,6 +61,37 @@ function BacktestWorkspaceInner() {
   const [replayOpen, setReplayOpen] = useState(true);
   const [ticketOpen, setTicketOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panelsHidden, setPanelsHidden] = useState(false);
+  const [hint, setHint] = useState(false);
+
+  // TradingView "fullscreen": hide every panel, go browser-fullscreen, Esc brings them back.
+  const hidePanels = () => {
+    setPanelsHidden(true); setHint(true);
+    void document.documentElement.requestFullscreen?.().catch(() => {});
+  };
+  const showPanels = () => {
+    setPanelsHidden(false); setHint(false);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  };
+  const togglePanels = () => (panelsRef.current.hidden ? showPanels() : hidePanels());
+  const panelsRef = useRef({ hidden: false, toggle: () => {} });
+  panelsRef.current = { hidden: panelsHidden, toggle: togglePanels };
+
+  useEffect(() => {
+    if (!hint) return;
+    const id = setTimeout(() => setHint(false), 3500);
+    return () => clearTimeout(id);
+  }, [hint]);
+
+  // Browser Esc / exiting fullscreen also restores the panels.
+  useEffect(() => {
+    const on = () => { if (!document.fullscreenElement) { setPanelsHidden(false); setHint(false); } };
+    document.addEventListener("fullscreenchange", on);
+    return () => document.removeEventListener("fullscreenchange", on);
+  }, []);
+
+  // Context menu → Settings…
+  useEffect(() => onChartCommand((c) => { if (c.type === "settings") setSettingsOpen(true); }), []);
 
   // Load session from IndexedDB if we have an ID
   useEffect(() => {
@@ -166,11 +198,7 @@ function BacktestWorkspaceInner() {
       if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
         if (e.code === "KeyB" && canTrade) { e.preventDefault(); st.placeOrder("buy", st.orderQty); return; }
         if (e.code === "KeyS" && canTrade) { e.preventDefault(); st.placeOrder("sell", st.orderQty); return; }
-        if (e.code === "KeyF") {
-          e.preventDefault();
-          if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.();
-          return;
-        }
+        if (e.code === "KeyF") { e.preventDefault(); panelsRef.current.toggle(); return; }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
@@ -181,7 +209,10 @@ function BacktestWorkspaceInner() {
         if (st.status !== "completed" && st.status !== "breached") st.setPlaying(!st.playing);
       } else if (e.key === "ArrowRight") { e.preventDefault(); if (!st.playing) st.advanceClock(); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); if (!st.playing) st.stepBack(); }
-      else if (e.key === "Escape") { st.setActiveDrawingTool("cursor"); }
+      else if (e.key === "Escape") {
+        if (panelsRef.current.hidden) { panelsRef.current.toggle(); return; }
+        st.setActiveDrawingTool("cursor");
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -233,17 +264,18 @@ function BacktestWorkspaceInner() {
 
   return (
     <div className="tv-root" data-tv-theme={theme}>
-      <TopToolbar
+      {!panelsHidden && <TopToolbar
+        onToggleFocus={togglePanels}
         onBack={() => { saveSession(); router.push("/lab#backtesting"); }}
         replayOpen={replayOpen}
         onToggleReplay={() => setReplayOpen((o) => !o)}
         ticketOpen={ticketOpen}
         onToggleTicket={() => setTicketOpen((o) => !o)}
         onOpenSettings={() => setSettingsOpen(true)}
-      />
+      />}
 
       <div className="tv-body">
-        <LeftToolbar symbol={activeInstrument} />
+        {!panelsHidden && <LeftToolbar symbol={activeInstrument} />}
 
         <div className="tv-main">
           <div className="tv-stage">
@@ -258,6 +290,7 @@ function BacktestWorkspaceInner() {
             />
 
             <ReplayTradeBanner />
+            {panelsHidden && <FloatingTools onExit={showPanels} />}
             {replayOpen && <ReplayToolbar shifted={!!selectedDrawingId} onClose={() => setReplayOpen(false)} />}
             {ticketOpen && <OrderTicket onClose={() => setTicketOpen(false)} />}
 
@@ -295,10 +328,14 @@ function BacktestWorkspaceInner() {
             )}
           </div>
 
-          <RangeBar />
-          <PaperPanel />
+          {!panelsHidden && <RangeBar />}
+          {!panelsHidden && <PaperPanel />}
         </div>
       </div>
+
+      {panelsHidden && hint && (
+        <div className="tv-toast tv-toast-info" role="status"><span>Panels hidden. Press ESC to show panels.</span></div>
+      )}
 
       {alertNotice && (
         <div className="tv-toast" role="status">

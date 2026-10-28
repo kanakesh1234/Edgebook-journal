@@ -27,7 +27,7 @@ import type { CandleData } from "@/lib/backtesting/data/types";
 import type { ChartType, DrawingObject } from "@/lib/backtesting/types";
 import { useBacktest } from "@/lib/backtesting/store";
 import { instrumentBySymbol } from "@/lib/backtesting/instruments";
-import { paletteFor, useChartAppearance } from "@/lib/backtesting/appearance";
+import { candleColorsFor, paletteFor, useChartAppearance } from "@/lib/backtesting/appearance";
 import { formatMoney } from "@/lib/format";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,8 @@ import { fmtPrice, fmtSigned } from "./drawings/render";
 import { onChartCommand } from "./chart-bus";
 import ChartContextMenu, { type ContextTarget } from "./context-menu";
 import DrawingToolbar from "./drawing-toolbar";
+import { IndicatorLayer, IndicatorLegend } from "./indicators-layer";
+import { useIndicators } from "@/lib/backtesting/indicator-store";
 
 /* New York wall-clock: lightweight-charts prints UTC unless told otherwise,
    and the whole app speaks America/New_York. */
@@ -310,7 +312,8 @@ export default function BacktestChart({
     });
 
     const first = candlesRef.current[0]?.close ?? 0;
-    const up = appearance.upColor, down = appearance.downColor;
+    const cc = candleColorsFor(theme, appearance);
+    const up = cc.up, down = cc.down;
     let series: ISeriesApi<SeriesType>;
     switch (chartType) {
       case "bar":
@@ -334,15 +337,15 @@ export default function BacktestChart({
       case "hollow-candles":
         series = chart.addSeries(CandlestickSeries, {
           upColor: "rgba(0,0,0,0)", downColor: down,
-          borderUpColor: appearance.borderUp, borderDownColor: appearance.borderDown,
-          wickUpColor: appearance.wickUp, wickDownColor: appearance.wickDown,
+          borderUpColor: cc.borderUp, borderDownColor: cc.borderDown,
+          wickUpColor: cc.wickUp, wickDownColor: cc.wickDown,
         });
         break;
       default:
         series = chart.addSeries(CandlestickSeries, {
           upColor: up, downColor: down,
-          borderUpColor: appearance.borderUp, borderDownColor: appearance.borderDown,
-          wickUpColor: appearance.wickUp, wickDownColor: appearance.wickDown,
+          borderUpColor: cc.borderUp, borderDownColor: cc.borderDown,
+          wickUpColor: cc.wickUp, wickDownColor: cc.wickDown,
         });
     }
 
@@ -795,7 +798,7 @@ export default function BacktestChart({
 
   const last = candles.length ? candles[candles.length - 1].close : null;
   const canTrade = status === "paused" || status === "running";
-  const upCol = appearance.upColor, dnCol = appearance.downColor;
+  const { up: upCol, down: dnCol } = candleColorsFor(theme, appearance);
   const legendColor = bar ? (bar.c.close >= bar.c.open ? upCol : dnCol) : pal.text;
   const tfLabel = timeframe.replace(/^(\d+)m$/, "$1").replace("1D", "D");
 
@@ -812,6 +815,7 @@ export default function BacktestChart({
   return (
     <div ref={wrapRef} className="tv-chart-wrap" style={{ background: pal.bg }} onContextMenu={onContextMenu}>
       <div ref={containerRef} className="tv-chart-canvas" />
+      <IndicatorLayer chartRef={chartRef} candles={candles} epoch={epoch} />
 
       {/* Legend + quick trade (top-left, like TradingView) */}
       {appearance.showLegend && (
@@ -859,6 +863,7 @@ export default function BacktestChart({
               </button>
             </div>
           )}
+          <IndicatorLegend candles={candles} onOpen={() => useIndicators.getState().setPanel(true)} />
         </div>
       )}
 

@@ -80,6 +80,8 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
   }
 
   items.push(
+    { label: `Copy price ${price}`, onClick: run(() => { void navigator.clipboard?.writeText(p.toFixed(2)).catch(() => {}); }) },
+    "sep",
     {
       label: `Add alert on ${symbol} at ${price}`, 
       onClick: run(() => st.addAlert(symbol, p, lastPrice !== null && p < lastPrice ? "down" : "up")),
@@ -94,8 +96,10 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
     "sep",
     { label: "Reset chart view", hint: "Alt+R", onClick: run(() => emitChartCommand({ type: "reset" })) },
     { label: st.drawingsHidden ? "Show all drawings" : "Hide all drawings", onClick: run(() => st.setDrawingsHidden(!st.drawingsHidden)) },
-    { label: "Remove all drawings", danger: true, onClick: run(() => st.clearDrawings(symbol)) },
   );
+  const drawCount = (st.drawings[symbol] || []).length;
+  if (drawCount > 0) items.push({ label: `Remove ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, danger: true, onClick: run(() => st.clearDrawings(symbol)) });
+  items.push("sep", { label: "Settings…", onClick: run(() => emitChartCommand({ type: "settings" })) });
 
   // Keep the menu on screen.
   const left = Math.min(x, (ref.current?.parentElement?.clientWidth ?? 1200) - 300);
