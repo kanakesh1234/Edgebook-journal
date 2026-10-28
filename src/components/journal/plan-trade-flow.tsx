@@ -163,6 +163,26 @@ function thoughtVisual(text: string, manualKind?: ThoughtKind): { kind: ThoughtK
   };
 }
 
+/** Auto-growing textarea for thought rows — grows with content, no scroll, seamless in the list. */
+function ThoughtTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  };
+  useEffect(fit, [props.value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      {...props}
+      className="block w-full resize-none bg-transparent text-[15.5px] leading-snug text-ink outline-none placeholder:text-faint"
+    />
+  );
+}
+
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 const DEFAULT_INSTRUMENT = "MNQ";
 const cleanPrice = (v: string) => {
@@ -1156,58 +1176,61 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             transition={FLOW_EXPAND}
                             className="overflow-hidden"
                           >
-                            <div className="flex items-center gap-3 px-4 py-3.5 transition-colors focus-within:bg-gold/[0.04]">
+                            <div className="flex gap-3 px-4 py-3.5 transition-colors focus-within:bg-gold/[0.04]">
                               <button
                                 type="button"
                                 onClick={() => cycleThoughtKind(th.id, vis.kind)}
                                 title={`${vis.tag} — tap to change`}
-                                className="shrink-0 rounded-[9px] outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-gold-strong/50"
+                                className="mt-0.5 shrink-0 self-start rounded-[9px] outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-gold-strong/50"
                               >
                                 <IconTile tile={vis.tile}>{vis.glyph}</IconTile>
                               </button>
-                              <input
-                                autoFocus={idx === thoughts.length - 1}
-                                aria-label={`Thought or impulse ${idx + 1}`}
-                                value={th.text}
-                                onChange={(e) => patchThought(th.id, e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && !e.metaKey && !e.ctrlKey && th.text.trim()) {
-                                    e.preventDefault();
-                                    addThought();
+                              <div className="min-w-0 flex-1">
+                                <ThoughtTextarea
+                                  autoFocus={idx === thoughts.length - 1}
+                                  aria-label={`Thought or impulse ${idx + 1}`}
+                                  value={th.text}
+                                  onChange={(e) => patchThought(th.id, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && th.text.trim()) {
+                                      e.preventDefault();
+                                      addThought();
+                                    }
+                                  }}
+                                  placeholder={
+                                    idx === 0
+                                      ? "Write a thought or impulse…"
+                                      : "Another…"
                                   }
-                                }}
-                                placeholder={
-                                  idx === 0
-                                    ? "Write a thought or impulse…"
-                                    : "Another…"
-                                }
-                                maxLength={220}
-                                className="min-w-0 flex-1 bg-transparent py-1 text-[15.5px] text-ink outline-none placeholder:text-faint"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => cycleThoughtKind(th.id, vis.kind)}
-                                className={cn(
-                                  "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
-                                  vis.kind === "impulse"
-                                    ? "bg-[#ff9f0a]/15 text-[#d97706] dark:text-[#ffb340]"
-                                    : vis.kind === "idea"
-                                      ? "bg-gold/15 text-gold-deep dark:text-gold"
-                                      : "bg-ink/[0.055] text-muted hover:text-ink",
-                                )}
-                              >
-                                {vis.tag}
-                              </button>
-                              {thoughts.length > 1 && (
-                                <button
-                                  type="button"
-                                  aria-label="Remove line"
-                                  onClick={() => removeThought(th.id)}
-                                  className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
-                                >
-                                  <IconMinus />
-                                </button>
-                              )}
+                                  maxLength={280}
+                                />
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => cycleThoughtKind(th.id, vis.kind)}
+                                    className={cn(
+                                      "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                                      vis.kind === "impulse"
+                                        ? "bg-[#ff9f0a]/15 text-[#d97706] dark:text-[#ffb340]"
+                                        : vis.kind === "idea"
+                                          ? "bg-gold/15 text-gold-deep dark:text-gold"
+                                          : "bg-ink/[0.055] text-muted hover:text-ink",
+                                    )}
+                                  >
+                                    {vis.tag}
+                                  </button>
+                                  {thoughts.length > 1 && (
+                                    <button
+                                      type="button"
+                                      aria-label="Remove line"
+                                      onClick={() => removeThought(th.id)}
+                                      className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
+                                    >
+                                      <IconMinus />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </motion.li>
                         );
