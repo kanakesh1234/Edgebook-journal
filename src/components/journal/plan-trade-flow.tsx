@@ -1135,16 +1135,13 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
             {step === "thought" && (
               <div>
                 <StepTitle
-                  title="Thoughts & impulses"
-                  subtitle="Write what you are thinking or any impulse you feel before entry."
+                  title="Before you enter"
+                  subtitle="Note any thought or impulse."
                 />
 
-                {/* Clean Apple List for Thoughts, Ideas & Impulses (zero auto-fillers) */}
-                <div className="space-y-2.5 pt-6">
-                  <div className="flex items-center justify-between px-0.5">
-                    <Label done={nonEmptyThoughts.length > 0}>Your mind right now</Label>
-                    <span className="text-[12px] text-faint">Tap icon to switch · ↵ to add</span>
-                  </div>
+                {/* Apple-style thought list */}
+                <div className="space-y-2.5 pt-7">
+                  <Label done={nonEmptyThoughts.length > 0}>Your mind right now</Label>
 
                   <ul className="divide-y divide-line-soft overflow-hidden rounded-[22px] border border-line bg-raised shadow-panel">
                     <AnimatePresence initial={false}>
@@ -1159,11 +1156,11 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             transition={FLOW_EXPAND}
                             className="overflow-hidden"
                           >
-                            <div className="flex items-center gap-3 px-4 py-3 transition-colors focus-within:bg-gold/[0.04]">
+                            <div className="flex items-center gap-3 px-4 py-3.5 transition-colors focus-within:bg-gold/[0.04]">
                               <button
                                 type="button"
                                 onClick={() => cycleThoughtKind(th.id, vis.kind)}
-                                title={`Tagged as ${vis.tag} — tap to switch between Thought, Impulse, and Idea`}
+                                title={`${vis.tag} — tap to change`}
                                 className="shrink-0 rounded-[9px] outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-gold-strong/50"
                               >
                                 <IconTile tile={vis.tile}>{vis.glyph}</IconTile>
@@ -1181,8 +1178,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                 }}
                                 placeholder={
                                   idx === 0
-                                    ? "What are you thinking, or what impulse do you feel?"
-                                    : "Add another thought, idea, or impulse…"
+                                    ? "Write a thought or impulse…"
+                                    : "Another…"
                                 }
                                 maxLength={220}
                                 className="min-w-0 flex-1 bg-transparent py-1 text-[15.5px] text-ink outline-none placeholder:text-faint"
@@ -1220,7 +1217,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                       <button
                         type="button"
                         onClick={() => addThought()}
-                        className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[14.5px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
+                        className="flex w-full items-center gap-2.5 px-4 py-3.5 text-left text-[14.5px] font-medium text-gold transition-colors hover:bg-gold/[0.05]"
                       >
                         <IconPlus /> Add another
                       </button>
@@ -1228,22 +1225,22 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   </ul>
                 </div>
 
-                {/* Collapsible "Add more" section — minimal, compact Apple layout */}
-                <div className="pt-5">
+                {/* Optional extras — tucked away, Apple-clean */}
+                <div className="pt-6">
                   <Disclosure
                     label="Add more"
                     defaultOpen={images.length > 0 || instrument.trim().length > 0 || draw.trim().length > 0}
                   >
-                    <div className="space-y-5 pt-1">
-                      {/* 1 — Pre-Trade Chart Snapshot */}
-                      <div className="space-y-2">
+                    <div className="space-y-6 pt-1">
+                      {/* Chart snapshot */}
+                      <div className="space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2.5">
                             <IconTile tile="bg-gradient-to-b from-[#0ea5e9] to-[#0284c7]" className="h-6 w-6 rounded-[7px]">
                               <GlyphCamera />
                             </IconTile>
-                            <Label done={images.length > 0} hint="optional · ⌘V">
-                              Pre-trade chart
+                            <Label done={images.length > 0}>
+                              Chart snapshot
                             </Label>
                           </div>
                           {images.length > 0 && <span className="text-[12px] font-medium text-profit">{images.length}/2</span>}
@@ -1251,9 +1248,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         <ImageUploader items={images} onChange={updateImagesAndCache} max={2} variant="apple" />
                       </div>
 
-                      {/* 2 — Guard against */}
-                      <div className="space-y-2">
-                        <Label done={watch.length > 0} hint="optional">
+                      {/* Guard against */}
+                      <div className="space-y-2.5">
+                        <Label done={watch.length > 0}>
                           Guard against
                         </Label>
                         <div className="flex flex-wrap gap-2">
@@ -1292,9 +1289,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         </div>
                       </div>
 
-                      {/* 3 — Instrument & Key Level in a compact 2-column row */}
-                      <div className="grid gap-3 border-t border-line-soft pt-4 sm:grid-cols-2">
-                        <div className="space-y-2">
+                      {/* Instrument & Key level */}
+                      <div className="grid gap-4 border-t border-line-soft pt-5 sm:grid-cols-2">
+                        <div className="space-y-2.5">
                           <Label htmlFor="flow-instrument">Instrument</Label>
                           <TextBox
                             id="flow-instrument"
@@ -1326,13 +1323,13 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             </div>
                           )}
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-2.5">
                           <Label htmlFor="flow-draw">Key level</Label>
                           <TextBox
                             id="flow-draw"
                             value={draw}
                             onChange={(e) => setDraw(e.target.value)}
-                            placeholder="e.g. London low, 15m FVG"
+                            placeholder="London low, 15m FVG…"
                           />
                         </div>
                       </div>
