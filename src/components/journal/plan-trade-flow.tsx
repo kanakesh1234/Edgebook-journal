@@ -17,6 +17,7 @@ import { currencySymbol, formatDateMedium, todayKey, weekdayLong } from "@/lib/f
 import { dayLimitFor } from "@/lib/risk";
 import { Modal } from "@/components/ui/modal";
 import { ShieldIcon } from "@/components/ui/icons";
+import { Sym } from "@/components/journal/symbols";
 import { cn, uid } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
 import { ImageUploader, type UploadItem } from "./image-uploader";
@@ -89,11 +90,6 @@ const label = (e: string) => e.charAt(0) + e.slice(1).toLowerCase();
 const IconPlus = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
     <path d="M12 5v14M5 12h14" />
-  </svg>
-);
-const IconMinus = () => (
-  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden>
-    <path d="M6 12h12" />
   </svg>
 );
 const GlyphCamera = () => (
@@ -1123,9 +1119,9 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                             type="button"
                                             aria-label="Remove event"
                                             onClick={() => setNewsEvents((l) => l.filter((x) => x.id !== ev.id))}
-                                            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
+                                            className="shrink-0 rounded-lg p-1.5 text-faint/50 outline-none transition-all hover:bg-loss/10 hover:text-loss focus-visible:ring-2 focus-visible:ring-loss/30 active:scale-90"
                                           >
-                                            <IconMinus />
+                                            <Sym name="trash" className="h-4 w-4" strokeWidth={1.8} />
                                           </button>
                                         )}
                                       </div>
@@ -1204,19 +1200,17 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                   }
                                   maxLength={280}
                                 />
-                                {thoughts.length > 1 && (
-                                  <div className="mt-1.5">
-                                    <button
-                                      type="button"
-                                      aria-label="Remove line"
-                                      onClick={() => removeThought(th.id)}
-                                      className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink/[0.07] text-muted transition-all hover:bg-loss/15 hover:text-loss active:scale-90"
-                                    >
-                                      <IconMinus />
-                                    </button>
-                                  </div>
-                                )}
                               </div>
+                              {thoughts.length > 1 && (
+                                <button
+                                  type="button"
+                                  aria-label="Remove thought"
+                                  onClick={() => removeThought(th.id)}
+                                  className="mt-0.5 shrink-0 self-start rounded-lg p-1.5 text-faint/50 outline-none transition-all hover:bg-loss/10 hover:text-loss focus-visible:ring-2 focus-visible:ring-loss/30 active:scale-90"
+                                >
+                                  <Sym name="trash" className="h-4 w-4" strokeWidth={1.8} />
+                                </button>
+                              )}
                             </div>
                           </motion.li>
                         );
