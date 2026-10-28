@@ -16,7 +16,7 @@ export interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children">
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-ink text-canvas font-semibold hover:opacity-85 shadow-sm",
+    "bg-gold-strong text-on-gold font-semibold hover:bg-gold-strong-hover shadow-sm",
   gold: "bg-gold-strong text-on-gold font-semibold hover:bg-gold-strong-hover shadow-sm",
   ghost: "text-muted hover:text-ink hover:bg-ink/[0.05]",
   outline: "border border-line-strong text-ink bg-transparent hover:bg-ink/[0.04] hover:border-faint",

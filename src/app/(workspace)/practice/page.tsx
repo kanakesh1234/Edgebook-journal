@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
@@ -34,9 +33,6 @@ import { DAILY_XP_GOAL, xpLevel } from "@/lib/practice/xp";
 import { prepareRound, warmBank, type Round } from "@/lib/practice/round";
 import { applyOutcome, arenaLevels, evaluateRound, failsOf, gateFor, levelBestOf, levelOf, type ArenaMode } from "@/lib/practice/arena";
 import type { GameProgress as PracticeProgress } from "@/lib/practice/progress-ext";
-import { Sym } from "@/components/journal/symbols";
-import { EASE } from "@/components/landing/reveal";
-import { cn } from "@/lib/utils";
 
 type Phase = { kind: "idle" } | { kind: "preparing"; mode: ArenaMode } | { kind: "playing"; mode: ArenaMode; level: number; round: Round };
 
@@ -69,7 +65,6 @@ function snapshot() {
 export default function PracticePage() {
   const allEntries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
-  const aiBrain = settings.aiBrain;
   const { entries } = useMemo(() => scopeToPrimary(settings, allEntries), [settings, allEntries]);
   const progress = (settings.practiceProgress ?? EMPTY) as PracticeProgress;
   const today = todayKey();
@@ -240,57 +235,7 @@ export default function PracticePage() {
   const trophySpan = useMemo(() => spanDays(progress), [progress]);
   const todayXp = progress.dailyStats?.[today]?.xp ?? 0;
 
-  // Spaced-repetition mistake telemetry
-  const revisionStats = useMemo(() => {
-    const rev = Object.values(progress.revision ?? {});
-    const dueNow = rev.filter((r) => r.box < 5 && r.due <= today).length;
-    const inSchedule = rev.filter((r) => r.box > 0 && r.box < 5).length;
-    const mastered = rev.filter((r) => r.box >= 5).length;
-    const mistakeTrades = entries.filter((e) => e.pnl < 0 || !!e.review?.followUp?.mistakeCategory).length;
-    return { dueNow, inSchedule, mastered, mistakeTrades };
-  }, [progress.revision, today, entries]);
-
-  // 5-Axis Edge Mastery Matrix derived from real practice & journal evidence
-  const skillAxes = useMemo(() => {
-    const m = progress.masteryByTag ?? {};
-    const reviewedCount = entries.filter((e) => e.reviewStatus === "reviewed").length;
-    const planLinked = plans.filter((p) => p.status === "executed").length;
-    const clamp = (v: number) => Math.min(100, Math.max(18, Math.round(v)));
-
-    return [
-      {
-        label: "Setup & Criteria",
-        score: clamp(32 + (m["setup"] ?? 0) * 8 + (m["ict"] ?? 0) * 6 + planLinked * 5),
-        note: "Pre-trade checklist & ICT recognition",
-        color: "var(--gold-strong)",
-      },
-      {
-        label: "Entry Timing & Patience",
-        score: clamp(30 + (tmPerf?.correct ?? 0) * 5 + (m["timing"] ?? 0) * 8),
-        note: "Waiting for displacement & sweep",
-        color: "var(--profit)",
-      },
-      {
-        label: "Risk & Stop Sizing",
-        score: clamp(35 + (duelPerf?.correct ?? 0) * 5 + (m["risk"] ?? 0) * 8),
-        note: "Position sizing, R-multiple & drawdown math",
-        color: "var(--info)",
-      },
-      {
-        label: "Autopsy & Pattern Recall",
-        score: clamp(28 + (matrixPerf?.correct ?? 0) * 6 + reviewedCount * 4),
-        note: "Remembering lessons from past trades",
-        color: "var(--gold)",
-      },
-      {
-        label: "Emotional Discipline",
-        score: clamp(34 + streak * 7 + (bossPerf?.correct ?? 0) * 6),
-        note: "Zero tilt after losses & rule adherence",
-        color: "var(--profit-deep)",
-      },
-    ];
-  }, [progress.masteryByTag, entries, plans, tmPerf, duelPerf, matrixPerf, bossPerf, streak]);
-
+  // Background AI recommendation — highlights the right arena card without text-heavy banners
   const recommended = useMemo(
     () =>
       recommendMode({
@@ -306,184 +251,18 @@ export default function PracticePage() {
     [progress, matrixLock, duelLock, bossLock, tmLock, cards.length],
   );
 
-  const recommendedMode: ArenaMode = recommended?.mode ?? (usable.length > 0 ? "time-machine" : "math-duel");
-  const topLeakLabel = thisWeek.mistakes[0]?.label ?? "Premature Entry & Risk Sizing";
-
   return (
     <div className="mx-auto w-full max-w-[1120px] pb-28 sm:pb-16">
-      {/* Apple HIG Editorial Header */}
-      <motion.header
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.48, ease: EASE }}
-        className="flex flex-wrap items-end justify-between gap-4"
-      >
-        <div className="min-w-0">
-          <div className="inline-flex items-center gap-2 rounded-full border border-line bg-raised px-3 py-1 text-[11.5px] font-semibold text-muted">
-            <span className="h-2 w-2 rounded-full bg-profit" />
-            <span>Neural Practice Studio · Powered by Google Drive AI Brain</span>
-          </div>
-          <h1 className="mt-3 font-display text-[36px] font-semibold leading-none tracking-[-0.04em] text-ink sm:text-[46px]">
-            Practice &amp; Edge Mastery
-          </h1>
-          <p className="mt-2.5 max-w-2xl text-[15.5px] leading-snug text-muted">
-            Your trades, plans, and autopsies are converted by the AI Brain into spaced-repetition drills—so every mistake becomes permanent muscle memory.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Link
-            href="/practice/ict"
-            className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-raised px-4 text-[13px] font-semibold text-ink transition-all hover:border-line-strong active:scale-95"
-          >
-            <Sym name="bulb" className="h-4 w-4 text-gold" />
-            <span>ICT Flashcards ({cards.length})</span>
-          </Link>
-          <Link
-            href="/practice/weekly"
-            className="inline-flex h-10 items-center gap-2 rounded-full bg-ink px-4 text-[13px] font-semibold text-canvas transition-all hover:opacity-90 active:scale-95"
-          >
-            <Sym name="calendar" className="h-4 w-4" />
-            <span>Weekly Check-In</span>
-          </Link>
-        </div>
-      </motion.header>
+      <header className="pr-rise">
+        <h1 className="font-display text-[36px] font-semibold leading-none tracking-[-0.04em] text-ink sm:text-[46px]">Practice</h1>
+        <p className="mt-2.5 max-w-xl text-[16px] leading-snug text-muted">
+          Five ways to train on your own trades. Clear the gate to level up.
+        </p>
+      </header>
 
       {notice && <p role="status" className="pr-surface mt-6 px-5 py-4 text-[14px] text-muted">{notice}</p>}
 
-      {/* Layer 1: AI Brain Neural Coach & How AI Works Studio Card */}
-      <motion.section
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.52, delay: 0.06, ease: EASE }}
-        aria-label="How AI Powers Your Practice"
-        className={cn(
-          "relative mt-7 overflow-hidden rounded-[28px] border border-line p-6 sm:p-7",
-          "bg-gradient-to-br from-gold/[0.09] via-surface to-profit/[0.06] shadow-panel",
-          "dark:border-line-strong dark:from-gold/[0.12] dark:via-surface dark:to-profit/[0.07]",
-        )}
-      >
-        <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-center">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-gold-strong px-3 py-1 text-[11.5px] font-semibold text-on-gold shadow-sm">
-                <Sym name="sparkles" className="h-3.5 w-3.5" />
-                <span>AI Brain Neural Coach</span>
-              </span>
-              <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-gold-deep dark:text-gold">
-                {aiBrain ? `${aiBrain.tier} · ${aiBrain.calibrationPct}% Calibrated` : "Adaptive Mode"}
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2.5 py-0.5 text-[11px] font-semibold text-profit">
-                <span className="h-1.5 w-1.5 rounded-full bg-profit" />
-                Drive Synced
-              </span>
-            </div>
-
-            <h2 className="mt-3.5 font-display text-[24px] font-semibold leading-tight tracking-[-0.025em] text-ink sm:text-[28px]">
-              {recommended?.reason ?? `Target today's focus: ${ MODE_META[recommendedMode].title }`}
-            </h2>
-            <p className="mt-2 max-w-xl text-[14px] leading-relaxed text-muted">
-              The AI Brain continuously reads your <strong className="font-semibold text-ink">Plan → Thought → Setup → Autopsy</strong> chain in Google Drive. When a trade is tagged with a mistake (like <span className="font-medium text-ink">{topLeakLabel}</span>), it schedules spaced-repetition drills across Boxes 0–5 until you answer 5 consecutive times without error.
-            </p>
-
-            {/* 3-Step AI Pipeline Pills */}
-            <div className="mt-5 grid gap-2.5 sm:grid-cols-3">
-              {[
-                {
-                  step: "01 · Drive Sync",
-                  title: "Plan → Autopsy Evidence",
-                  sub: `${allEntries.length} trades & ${plans.length} plans indexed`,
-                },
-                {
-                  step: "02 · AI Synthesis",
-                  title: "Personal Mistake Drills",
-                  sub: `${revisionStats.mistakeTrades} mistake trades converted`,
-                },
-                {
-                  step: "03 · Box 0–5 Mastery",
-                  title: "Spaced Repetition",
-                  sub: `${revisionStats.dueNow} due now · ${revisionStats.mastered} mastered`,
-                },
-              ].map((item, idx) => (
-                <motion.div
-                  key={item.step}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, delay: 0.14 + idx * 0.07, ease: EASE }}
-                  className="rounded-[18px] border border-line-soft bg-surface/90 px-3.5 py-3"
-                >
-                  <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] text-gold-deep dark:text-gold">
-                    {item.step}
-                  </p>
-                  <p className="mt-1 text-[13.5px] font-semibold text-ink">{item.title}</p>
-                  <p className="mt-0.5 text-[11.5px] text-muted">{item.sub}</p>
-                </motion.div>
-              ))}
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void start(recommendedMode)}
-                disabled={busyMode !== null}
-                className="inline-flex h-11 items-center gap-2 rounded-full bg-gold-strong px-6 text-[14px] font-semibold text-on-gold shadow-sm transition-all hover:bg-gold-strong-hover active:scale-95 disabled:opacity-50"
-              >
-                <Sym name="sparkles" className="h-4 w-4" />
-                <span>
-                  {busyMode === recommendedMode
-                    ? "Preparing AI Session…"
-                    : `Start Recommended: ${MODE_META[recommendedMode].title} (Lv ${levels[recommendedMode]})`}
-                </span>
-              </button>
-              <span className="text-[12.5px] text-muted">
-                +{DAILY_XP_GOAL - Math.min(DAILY_XP_GOAL, todayXp) > 0 ? `${DAILY_XP_GOAL - Math.min(DAILY_XP_GOAL, todayXp)} XP to daily goal` : "Daily XP goal complete ✓"}
-              </span>
-            </div>
-          </div>
-
-          {/* Right Column: 5-Axis Edge Mastery Matrix */}
-          <div className="rounded-[22px] border border-line-soft bg-surface/95 p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Edge Telemetry</p>
-                <h3 className="mt-0.5 text-[16px] font-semibold tracking-[-0.015em] text-ink">5-Axis Skill Calibration</h3>
-              </div>
-              <span className="num rounded-full bg-gold/15 px-2.5 py-1 text-[12px] font-semibold text-gold">
-                {accuracy != null ? `${accuracy}% Accuracy` : `Rank: ${rankOf(progress.xp)}`}
-              </span>
-            </div>
-
-            <div className="mt-4 space-y-3.5">
-              {skillAxes.map((axis, idx) => (
-                <div key={axis.label}>
-                  <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                    <span className="font-medium text-ink">{axis.label}</span>
-                    <span className="num font-mono text-[12.5px] font-semibold text-muted">{axis.score}%</span>
-                  </div>
-                  <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-ink/[0.06]">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${axis.score}%` }}
-                      transition={{ duration: 0.85, delay: 0.2 + idx * 0.08, ease: EASE }}
-                      className="h-full rounded-full"
-                      style={{ backgroundColor: axis.color }}
-                    />
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-faint">{axis.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </motion.section>
-
-      {/* Layer 2: Player Hero & 7-Day Consistency Strip */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.48, delay: 0.14, ease: EASE }}
-        className="mt-6"
-      >
+      <div className="mt-8">
         <PlayerHero
           rank={rankOf(progress.xp)}
           level={level}
@@ -494,26 +273,14 @@ export default function PracticePage() {
           goal={DAILY_XP_GOAL}
           week={week}
         />
-      </motion.div>
-
-      {/* Layer 3: All 5 Training Arenas (Bento Grid) */}
-      <div className="mt-12 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gold">5 Interactive Arenas</p>
-          <h2 className="mt-1 font-display text-[26px] font-semibold tracking-[-0.03em] text-ink">
-            Choose Your Training Arena
-          </h2>
-        </div>
-        <p className="text-[13.5px] text-muted">
-          Adaptive Solo-Leveling progression — clear the gate to advance levels.
-        </p>
       </div>
 
-      <div className="pr-grid mt-5">
+      <h2 className="pr-section-title pr-rise mt-12" style={{ ["--i" as string]: 2 }}>Train</h2>
+      <div className="pr-grid mt-4">
         <SectionCard
           mode="time-machine"
           level={levels["time-machine"]}
-          recommended={recommendedMode === "time-machine"}
+          recommended={recommended?.mode === "time-machine"}
           blocked={tmLock}
           busy={busyMode === "time-machine"}
           stats={[
@@ -521,28 +288,27 @@ export default function PracticePage() {
             { label: "accuracy", value: pct(tmPerf?.correct ?? 0, tmPerf?.attempts ?? 0) },
           ]}
           meter={tmLock ? undefined : meterFor("time-machine")}
-          primary={{ label: "Enter Time Machine", onClick: () => void start("time-machine") }}
+          primary={{ label: "Start", onClick: () => void start("time-machine") }}
         />
 
         <SectionCard
           mode="matrix"
           level={levels.matrix}
-          recommended={recommendedMode === "matrix"}
+          recommended={recommended?.mode === "matrix"}
           blocked={matrixLock}
           busy={busyMode === "matrix"}
           stats={[
             { label: usable.length === 1 ? "trade" : "trades", value: usable.length },
-            { label: "due now", value: revisionStats.dueNow },
             { label: "accuracy", value: pct(matrixPerf?.correct ?? 0, matrixPerf?.attempts ?? 0) },
           ]}
           meter={matrixLock ? undefined : meterFor("matrix")}
-          primary={{ label: "Start Trade Recall", onClick: () => void start("matrix") }}
+          primary={{ label: "Start", onClick: () => void start("matrix") }}
         />
 
         <SectionCard
           mode="ict"
           level={levels.ict}
-          recommended={recommendedMode === "ict"}
+          recommended={recommended?.mode === "ict"}
           busy={busyMode === "ict"}
           stats={[
             { label: cards.length === 1 ? "card" : "cards", value: cards.length },
@@ -552,7 +318,7 @@ export default function PracticePage() {
           meter={cards.length > 0 ? meterFor("ict") : undefined}
           primary={
             cards.length > 0
-              ? { label: "Start ICT Lab", onClick: () => void start("ict") }
+              ? { label: "Start", onClick: () => void start("ict") }
               : { label: "Add your first question", href: "/practice/ict" }
           }
           secondary={{ label: cards.length > 0 ? "Manage cards" : "How it works", href: "/practice/ict" }}
@@ -561,21 +327,21 @@ export default function PracticePage() {
         <SectionCard
           mode="math-duel"
           level={levels["math-duel"]}
-          recommended={recommendedMode === "math-duel"}
+          recommended={recommended?.mode === "math-duel"}
           blocked={duelLock}
           busy={busyMode === "math-duel"}
           stats={[
             { label: "rounds", value: duelPerf?.attempts ?? 0 },
             { label: "accuracy", value: pct(duelPerf?.correct ?? 0, duelPerf?.attempts ?? 0) },
           ]}
-          meter={ meterFor("math-duel") }
-          primary={{ label: "Start Risk Math", onClick: () => void start("math-duel") }}
+          meter={meterFor("math-duel")}
+          primary={{ label: "Start", onClick: () => void start("math-duel") }}
         />
 
         <SectionCard
           mode="boss"
           level={levels.boss}
-          recommended={recommendedMode === "boss"}
+          recommended={recommended?.mode === "boss"}
           blocked={bossLock}
           busy={busyMode === "boss"}
           stats={[
@@ -583,25 +349,20 @@ export default function PracticePage() {
             { label: "accuracy", value: pct(bossPerf?.correct ?? 0, bossPerf?.attempts ?? 0) },
           ]}
           meter={bossLock ? undefined : meterFor("boss")}
-          primary={{ label: "Challenge Week Boss", onClick: () => void start("boss") }}
+          primary={{ label: "Start", onClick: () => void start("boss") }}
         />
       </div>
 
-      {/* Layer 4: Weekly Review & Process Check-In */}
-      <h2 className="pr-section-title mt-14">Weekly Process Check-In</h2>
+      <h2 className="pr-section-title pr-rise mt-14" style={{ ["--i" as string]: 4 }}>Reflect</h2>
       <Link
         href="/practice/weekly"
-        className="pr-surface group mt-4 flex flex-wrap items-center gap-x-8 gap-y-4 px-6 py-5 transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.995]"
+        className="pr-surface pr-rise group mt-4 flex flex-wrap items-center gap-x-8 gap-y-4 px-6 py-5 transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.995]"
+        style={{ ["--i" as string]: 5 }}
       >
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="text-[18px] font-semibold tracking-[-0.02em] text-ink">2-Minute Weekly Practice Review</p>
-            <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11px] font-semibold text-gold">Anti-Procrastination</span>
-          </div>
-          <p className="mt-1 max-w-[56ch] text-[14px] leading-snug text-muted">
-            {thisWeek.count === 0
-              ? "Your week in numbers: P&L, plan discipline, loss limits, and one-tap AI reflection chips."
-              : thisWeek.insights[0]?.text}
+          <p className="text-[18px] font-semibold tracking-[-0.02em] text-ink">Weekly review</p>
+          <p className="mt-1 max-w-[52ch] text-[14px] leading-snug text-muted">
+            {thisWeek.count === 0 ? "Your week in numbers: P&L, plan discipline, loss limits, and mistakes." : thisWeek.insights[0]?.text}
           </p>
         </div>
         <dl className="flex items-center gap-6 text-right">
@@ -621,8 +382,7 @@ export default function PracticePage() {
         <span aria-hidden className="text-[20px] text-faint transition-transform group-hover:translate-x-0.5">›</span>
       </Link>
 
-      {/* Layer 5: Daily Quests & Trophy Shelf */}
-      <h2 className="pr-section-title mt-14">Daily Missions &amp; Milestones</h2>
+      <h2 className="pr-section-title pr-rise mt-14" style={{ ["--i" as string]: 6 }}>Progress</h2>
       <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start">
         <Challenges quests={quests} chestClaimed={chestClaimed(progress, today)} onClaim={claimQuest} />
         <TrophyCase states={trophies} today={today} span={trophySpan} hasStarted={(progress.completedMissionDates?.length ?? 0) > 0} />

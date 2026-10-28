@@ -261,12 +261,14 @@ textarea:focus-visible {
   outline: none;
 }
 
-input,
-textarea,
-select,
-button {
-  font: inherit;
-  color: inherit;
+@layer base {
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
 }
 
 /* Removes the 300ms tap delay and double-tap zoom on controls */

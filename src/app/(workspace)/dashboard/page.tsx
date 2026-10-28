@@ -124,31 +124,13 @@ export default function DashboardPage() {
       </Header>
 
       {/*
-        One grid, three compositions:
-          phone    single column — Performance → Today → Calendar
-          tablet   single column, Today becomes a two-up card (see TodayPanel)
-          desktop  main column + sticky 21rem "Today" rail
+        Apple HIG layout:
+        - TodayPanel sits cleanly at the top: if not set yet, it prompts for today's loss limit;
+          once set, it collapses into a single-line Live Activity strip so Equity Curve and Calendar
+          enjoy 100% of the workspace width without permanent sidebar clutter.
       */}
-      <div className="grid gap-6 md:gap-8 xl:grid-cols-[minmax(0,1fr)_21rem] xl:gap-x-8">
-        <div className="min-w-0 xl:col-start-1 xl:row-start-1">
-          <Performance
-            stats={stats}
-            currency={settings.currency}
-            startingEquity={settings.startingEquity}
-            targetEquity={settings.targetEquity}
-            maxDrawdown={settings.maxDrawdown}
-            eyebrow={challenge ? `${challenge.name} · equity` : "Equity"}
-            streak={streak}
-            emptyHint={
-              challenge && stats.tradingDays === 0
-                ? "Tag trades with this challenge to track its progress."
-                : "Your curve appears after your first trading day."
-            }
-          />
-        </div>
-
+      <div className="space-y-6 md:space-y-8">
         <TodayPanel
-          className="min-w-0 xl:sticky xl:top-8 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:self-start"
           risk={{ label: risk.label, tone: risk.tone }}
           drawdownUsed={riskUsed}
           drawdown={stats.drawdown}
@@ -162,15 +144,28 @@ export default function DashboardPage() {
           onPlanTrade={() => setPlanOpen(true)}
         />
 
-        <div className="min-w-0 xl:col-start-1 xl:row-start-2">
-          <CalendarView
-            entries={entries}
-            dayLogs={dayLogs}
-            challenges={settings.challenges ?? []}
-            currency={settings.currency}
-            defaultChallengeId={challenge?.id ?? null}
-          />
-        </div>
+        <Performance
+          stats={stats}
+          currency={settings.currency}
+          startingEquity={settings.startingEquity}
+          targetEquity={settings.targetEquity}
+          maxDrawdown={settings.maxDrawdown}
+          eyebrow={challenge ? `${challenge.name} · equity` : "Equity"}
+          streak={streak}
+          emptyHint={
+            challenge && stats.tradingDays === 0
+              ? "Tag trades with this challenge to track its progress."
+              : "Your curve appears after your first trading day."
+          }
+        />
+
+        <CalendarView
+          entries={entries}
+          dayLogs={dayLogs}
+          challenges={settings.challenges ?? []}
+          currency={settings.currency}
+          defaultChallengeId={challenge?.id ?? null}
+        />
       </div>
 
       <PlanTradeFlow open={planOpen} onClose={() => setPlanOpen(false)} />

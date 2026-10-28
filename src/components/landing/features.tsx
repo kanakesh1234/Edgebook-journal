@@ -19,8 +19,8 @@ import { Reveal, EASE } from "./reveal";
 /* -------------------------------------------------------------------------- */
 
 interface StageSlide {
-  badge: string;
   step: string;
+  badge: string;
   title: string;
   italicTitle: string;
   description: string;
@@ -73,9 +73,9 @@ function ScrollPopStageCard({ slide, index }: { slide: StageSlide; index: number
           }}
         />
 
-        <div className="relative grid items-center gap-8 lg:grid-cols-[1.02fr_0.98fr]">
+        <div className="relative grid items-center gap-8 lg:grid-cols-[0.95fr_1.05fr]">
           <div>
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-gold/35 bg-gold/12 px-3 py-1 font-mono text-[11px] font-semibold text-gold">
                 {slide.step}
               </span>
@@ -89,12 +89,12 @@ function ScrollPopStageCard({ slide, index }: { slide: StageSlide; index: number
               <span className="font-serif font-normal italic text-gold-grad">{slide.italicTitle}</span>
             </h3>
 
-            <p className="mt-3.5 text-[15px] leading-relaxed text-muted">{slide.description}</p>
+            <p className="mt-3 text-[15px] leading-relaxed text-muted">{slide.description}</p>
 
-            <ul className="mt-5 space-y-2">
+            <ul className="mt-4 space-y-1.5">
               {slide.bullets.map((b) => (
-                <li key={b} className="flex items-start gap-2.5 text-[13.5px] text-ink/90">
-                  <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-profit" />
+                <li key={b} className="flex items-center gap-2 text-[13.5px] text-ink/90">
+                  <CheckIcon className="h-3.5 w-3.5 shrink-0 text-profit" />
                   <span>{b}</span>
                 </li>
               ))}
@@ -160,63 +160,61 @@ function IconTile({ children, accent = "text-gold" }: { children: React.ReactNod
 export function Features() {
   const slides: StageSlide[] = [
     {
-      step: "STAGE 01 · PRE-TRADE RITUAL",
+      step: "01 · PRE-TRADE",
       badge: "Plan → Thought → Setup",
-      title: "Stop impulsive trades before",
-      italicTitle: "you click buy.",
+      title: "Stop bad trades",
+      italicTitle: "before you enter.",
       description:
-        "Edgebook slows down FOMO with a calm 700ms delayed progressive question flow. Write your thesis, map the draw on liquidity and invalidation, check your playbook rules, and see your live historical Win-Odds before risking a dollar.",
+        "Add each 'If → Then' thought as it comes to mind. Questions unfold after a calm 700ms pause while background AI flags mistake traps and calculates live Win-Odds.",
       bullets: [
-        "AI Brain scans your thesis and emotion to pre-tag your likeliest mistake traps",
-        "Automatic 2nd-trade pause and 3rd-trade lockout modal after losses",
-        "Rule-by-rule historical PnL impact so you know which skipped rule costs you",
+        "Stream-of-consciousness 'If manipulation → I will…' thought list",
+        "Silent AI mistake tagging + 2nd/3rd-loss lockout gate",
       ],
       visual: (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between border-b border-line-soft pb-2.5">
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between border-b border-line-soft pb-2">
             <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-gold">
-              Pre-Trade Thought &amp; Win-Odds
+              Your Thoughts · Pre-Trade
             </span>
             <span className="rounded-full bg-profit/15 px-2.5 py-0.5 font-mono text-[11px] font-semibold text-profit">
-              74% Historical Win Rate
+              Win Odds 74%
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="rounded-xl border border-line bg-raised p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Draw on Liquidity</p>
-              <p className="mt-1 text-xs font-semibold text-ink">London Low Sweep → PDH</p>
+          <div className="divide-y divide-line-soft rounded-xl border border-line bg-raised text-xs">
+            <div className="flex items-center gap-2.5 px-3 py-2.5">
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-gold/15 text-[10px] font-semibold text-gold">1</span>
+              <span className="text-ink">If manipulation sweeps London high → wait for 5m close</span>
             </div>
-            <div className="rounded-xl border border-line bg-raised p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Invalidation</p>
-              <p className="mt-1 text-xs font-semibold text-ink">5m close below 18,420</p>
+            <div className="flex items-center gap-2.5 px-3 py-2.5">
+              <span className="grid h-4 w-4 place-items-center rounded-full bg-gold/15 text-[10px] font-semibold text-gold">2</span>
+              <span className="text-ink">If price chops at open → sit on hands</span>
             </div>
           </div>
-          <div className="rounded-xl border border-gold/30 bg-gold/[0.08] p-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-gold-deep dark:text-gold">AI Mistake Guardrail</span>
-              <span className="font-mono text-[11px] text-muted">Clarity 94%</span>
-            </div>
-            <p className="mt-1 text-xs text-ink">
-              Watching: <strong>Premature Entry</strong> — wait for 5m displacement body close.
-            </p>
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
+            <span className="text-faint">Watching:</span>
+            <span className="rounded-full border border-gold/40 bg-gold/12 px-2.5 py-0.5 font-medium text-gold">
+              Premature Entry · AI
+            </span>
+            <span className="rounded-full border border-line bg-raised px-2.5 py-0.5 text-muted">
+              FOMO / Chasing
+            </span>
           </div>
         </div>
       ),
     },
     {
-      step: "STAGE 02 · CINEMA REPLAYS & FEED",
-      badge: "16:9 TradingView Proportions",
-      title: "Relive every candle in a",
-      italicTitle: "full-screen 16:9 feed.",
+      step: "02 · REPLAY & FEED",
+      badge: "16:9 Cinema Replays",
+      title: "Relive every candle",
+      italicTitle: "in 16:9 clarity.",
       description:
-        "Scroll through your trade replays, video notes, and lessons like an Apple-crafted Reels feed. Click anywhere on the chart to play or pause 60fps candle interpolation, with a 2-line AI mistake summary right below every replay.",
+        "Scroll your trade replays and video notes in a full-screen Reels feed. Tap anywhere to play or pause 60fps candles, with a 2-line mistake summary beneath every replay.",
       bullets: [
-        "TradingView-proportioned candlesticks with entry, stop-loss, and target lines",
-        "Instant 2-line mistake recognition strip beneath every replay card",
-        "5-question post-trade Autopsy + multi-voter AI tagging & MINATO Sensei",
+        "TradingView-proportioned candlesticks & entry/stop/target levels",
+        "5-question Autopsy + multi-voter AI tagging & MINATO Sensei",
       ],
       visual: (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs font-semibold text-ink">NQ · Long · +2.8R (+$840)</span>
             <span className="rounded-full border border-line bg-raised px-2.5 py-0.5 font-mono text-[10.5px] text-muted">
@@ -224,22 +222,22 @@ export function Features() {
             </span>
           </div>
           <div className="overflow-hidden rounded-xl border border-line bg-canvas p-3">
-            <svg viewBox="0 0 420 135" className="w-full" aria-label="16:9 Candlestick Replay">
-              {[28, 68, 108].map((y) => (
+            <svg viewBox="0 0 420 130" className="w-full" aria-label="16:9 Candlestick Replay">
+              {[28, 65, 102].map((y) => (
                 <line key={y} x1="0" y1={y} x2="420" y2={y} stroke="var(--color-line)" strokeWidth="0.8" />
               ))}
-              <line x1="110" y1="92" x2="395" y2="92" stroke="var(--color-gold)" strokeWidth="1" strokeDasharray="4 4" />
-              <line x1="110" y1="36" x2="395" y2="36" stroke="var(--color-profit)" strokeWidth="1" strokeDasharray="4 4" />
+              <line x1="110" y1="88" x2="395" y2="88" stroke="var(--color-gold)" strokeWidth="1" strokeDasharray="4 4" />
+              <line x1="110" y1="34" x2="395" y2="34" stroke="var(--color-profit)" strokeWidth="1" strokeDasharray="4 4" />
               {[
-                { x: 35, top: 78, bh: 22, h: 70, l: 108, up: false },
-                { x: 75, top: 84, bh: 18, h: 76, l: 112, up: false },
-                { x: 115, top: 68, bh: 26, h: 60, l: 100, up: true },
-                { x: 155, top: 56, bh: 20, h: 48, l: 84, up: true },
-                { x: 195, top: 62, bh: 14, h: 55, l: 82, up: false },
-                { x: 235, top: 44, bh: 24, h: 36, l: 74, up: true },
-                { x: 275, top: 34, bh: 20, h: 26, l: 60, up: true },
-                { x: 315, top: 24, bh: 22, h: 18, l: 52, up: true },
-                { x: 355, top: 18, bh: 18, h: 12, l: 42, up: true },
+                { x: 35, top: 74, bh: 20, h: 66, l: 102, up: false },
+                { x: 75, top: 80, bh: 16, h: 72, l: 106, up: false },
+                { x: 115, top: 64, bh: 24, h: 56, l: 96, up: true },
+                { x: 155, top: 52, bh: 18, h: 44, l: 80, up: true },
+                { x: 195, top: 58, bh: 14, h: 51, l: 78, up: false },
+                { x: 235, top: 42, bh: 22, h: 34, l: 70, up: true },
+                { x: 275, top: 32, bh: 18, h: 24, l: 56, up: true },
+                { x: 315, top: 22, bh: 20, h: 16, l: 48, up: true },
+                { x: 355, top: 16, bh: 16, h: 10, l: 38, up: true },
               ].map((c, i) => {
                 const col = c.up ? "var(--color-profit)" : "var(--color-loss)";
                 return (
@@ -261,39 +259,37 @@ export function Features() {
       ),
     },
     {
-      step: "STAGE 03 · 3-MIN REVIEWS & NEURAL PRACTICE",
-      badge: "Anti-Procrastination + 5 Arenas",
-      title: "Reviews you actually finish,",
-      italicTitle: "drills that retire mistakes.",
+      step: "03 · REVIEW & PRACTICE",
+      badge: "3-Min Reviews + 5 Arenas",
+      title: "Reviews in 3 minutes,",
+      italicTitle: "drills that stick.",
       description:
-        "No 20-question essay fatigue. Weekly and Monthly reviews give you an AI Executive Brief plus 3 progressive questions with one-tap smart chips from your data. Then step into 5 Solo-Leveling Practice Arenas where mistakes drill until Box 5 mastery.",
+        "Answer 3 progressive Weekly & Monthly prompts with 1-tap smart chips from your data. Then drill your own mistake charts across 5 Solo-Leveling Arenas.",
       bullets: [
-        "3-Minute Weekly & Monthly rituals with one-tap AI smart chips & criteria heatmaps",
-        "5 Practice Arenas: Time Machine, Trade Recall, ICT Lab, Risk Math Duel, Weekend Boss",
-        "Trading Lab multi-timeframe backtesting + privacy-safe Friends process leaderboard",
+        "One-tap smart chips eliminate review procrastination",
+        "Time Machine, Trade Recall, ICT Lab, Risk Math & Week Boss",
       ],
       visual: (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="rounded-xl border border-line bg-raised p-3">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-ink">3-Min Weekly Ritual · Question 1 of 3</span>
-              <span className="font-mono text-[11px] text-gold">Auto-Saved to Drive</span>
+              <span className="font-semibold text-ink">3-Min Weekly Ritual · 1 of 3</span>
+              <span className="font-mono text-[11px] text-gold">Saved to Drive</span>
             </div>
-            <p className="mt-1.5 text-xs text-muted">What worked best this week? (Tap a smart chip)</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <span className="rounded-full bg-profit/15 px-2.5 py-1 text-[11px] font-medium text-profit">
                 + Best day (Thu +$1,120)
               </span>
               <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold">
-                + Top rule: Liquidity Sweep (84%)
+                + Liquidity Sweep (84% WR)
               </span>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
             {[
               { name: "Time Machine", sub: "Chart Replay" },
-              { name: "Trade Recall", sub: "Box 0–5 Matrix" },
-              { name: "Risk Math Duel", sub: "Position Sizing" },
+              { name: "Trade Recall", sub: "Box 0–5" },
+              { name: "Risk Math", sub: "Sizing" },
             ].map((a) => (
               <div key={a.name} className="rounded-xl border border-line bg-raised p-2.5 text-center">
                 <p className="text-xs font-semibold text-ink">{a.name}</p>
@@ -313,12 +309,12 @@ export function Features() {
         <div className="mx-auto max-w-6xl px-5 sm:px-8">
           <Reveal>
             <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">
-              Interactive 3D Product Tour
+              3D Product Tour
             </p>
-            <h2 className="mt-3 max-w-3xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
-              Scroll through the operating system{" "}
+            <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
+              Simple on the surface.{" "}
               <span className="font-serif font-normal italic text-gold-grad">
-                built for real market sessions.
+                Relentless underneath.
               </span>
             </h2>
           </Reveal>
@@ -336,11 +332,11 @@ export function Features() {
         <div className="mx-auto max-w-6xl px-5 sm:px-8">
           <Reveal>
             <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">
-              Complete Feature Record
+              Complete Architecture
             </p>
             <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
-              Everything serious traders love,{" "}
-              <span className="font-serif font-normal italic text-muted">in one calm workspace.</span>
+              Everything traders love,{" "}
+              <span className="font-serif font-normal italic text-muted">zero clutter.</span>
             </h2>
           </Reveal>
 
@@ -353,21 +349,21 @@ export function Features() {
                     <ChartLineIcon className="h-5 w-5" />
                   </IconTile>
                   <span className="rounded-full border border-gold/30 bg-gold/12 px-3 py-1 text-[11px] font-semibold text-gold">
-                    Persistent Memory in Your Google Drive
+                    Silent Background Intelligence
                   </span>
                 </div>
                 <h3 className="font-display text-xl font-semibold tracking-tight text-ink">
-                  An AI Brain that compounds with every trade
+                  An AI Brain stored privately in your Google Drive
                 </h3>
                 <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-                  Every pre-trade Plan, Thought hypothesis, Setup checklist, and post-trade Autopsy updates your personal AI Brain profile inside your own Google Drive. As your sample grows, its pre-trade mistake warnings, Win-Odds, and MINATO coaching grow sharper every single day.
+                  Every Plan, Thought, Setup, and Autopsy updates your behavioral record in your own Google Drive—quietly powering pre-trade Win-Odds, mistake tags, and MINATO coaching.
                 </p>
-                <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-4" aria-hidden>
+                <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-4" aria-hidden>
                   {[
-                    { k: "1. Plan", v: "Thesis & Emotion" },
-                    { k: "2. Thought", v: "AI Trap Guardrails" },
-                    { k: "3. Execute", v: "16:9 Chart Replay" },
-                    { k: "4. Autopsy", v: "Drive AI Sync" },
+                    { k: "01. Plan", v: "Thesis & State" },
+                    { k: "02. Thought", v: "If → Then Scenarios" },
+                    { k: "03. Replay", v: "16:9 Chart Feed" },
+                    { k: "04. Autopsy", v: "Drive AI Sync" },
                   ].map((step) => (
                     <div key={step.k} className="rounded-2xl border border-line bg-raised/80 px-3 py-2.5">
                       <p className="font-mono text-[10.5px] font-semibold text-gold">{step.k}</p>
@@ -388,12 +384,12 @@ export function Features() {
                   16:9 Replays &amp; Mistake Strip
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Full-screen Reels-style feed with TradingView-proportioned candles, 60fps Apple cubic-bezier camera glide, click-anywhere play/pause, and a 2-line mistake summary beneath every replay.
+                  Full-screen Reels-style feed with TradingView-proportioned candles, tap-anywhere play/pause, and a 2-line mistake summary beneath every replay.
                 </p>
               </CardShell>
             </Reveal>
 
-            {/* 3. Equity-Curve Benchmark Calendar & Today Panel */}
+            {/* 3. Equity-Curve Benchmark Calendar & Today Bar */}
             <Reveal delay={0.1}>
               <CardShell className="h-full">
                 <IconTile>
@@ -403,7 +399,7 @@ export function Features() {
                   Live-Scrubbing P&amp;L Calendar
                 </h3>
                 <p className="mt-1.5 mb-5 text-sm leading-relaxed text-muted">
-                  Built to the same benchmark as our Equity Curve—scrub across any day to inspect live P&amp;L, switch between Standard, Heatmap, and Cumulative modes, and track today&apos;s intraday trajectory.
+                  Hover any traded session to scrub live P&amp;L and R-multiples, paired with a Today bar that collapses once your daily limit is locked.
                 </p>
                 <div className="grid grid-cols-7 gap-1" aria-hidden>
                   {[14, 8, -6, 0, 11, -9, 0, 6, 13, 4, -4, 9, 16, 0, 7, -8, 12, 10, -5, 15, 3, 18, -3, 9, 21, 6, -7, 12].map(
@@ -431,10 +427,10 @@ export function Features() {
                   <BookOpenIcon className="h-5 w-5" />
                 </IconTile>
                 <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                  3-Minute Anti-Procrastination Reviews
+                  3-Minute Weekly &amp; Monthly Rituals
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  No 20-question walls of text. Weekly and Monthly reviews give you an instant AI Brain executive brief plus 3 progressive questions with one-tap smart chips from your data.
+                  Three progressive prompts with one-tap smart chips pre-built from your trades—so you never procrastinate on reviews.
                 </p>
               </CardShell>
             </Reveal>
@@ -446,10 +442,10 @@ export function Features() {
                   <RouteIcon className="h-5 w-5" />
                 </IconTile>
                 <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                  Neural Practice &amp; 5 Arenas
+                  5 Spaced-Repetition Arenas
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Drill your own charts in Time Machine, Trade Recall, ICT Lab, Risk Math, and Week Boss—backed by 5-axis skill telemetry and Box 0–5 spaced repetition.
+                  Drill your own charts in Time Machine, Trade Recall, ICT Lab, Risk Math, and Week Boss until every mistake reaches Box 5 mastery.
                 </p>
               </CardShell>
             </Reveal>
@@ -464,7 +460,7 @@ export function Features() {
                   Trading Lab Backtesting, Prop Guardrails &amp; Friends Leaderboard
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Backtest multi-timeframe strategies in the Trading Lab, monitor prop-firm drawdown cushions in real time, and compete with trading partners on process adherence, review streaks, and rule discipline—without exposing private dollar balances.
+                  Backtest multi-timeframe strategies in the Trading Lab, protect prop-firm drawdown cushions, and compete with friends on process discipline without exposing dollar balances.
                 </p>
               </CardShell>
             </Reveal>
@@ -476,10 +472,10 @@ export function Features() {
                   <ShieldIcon className="h-5 w-5" />
                 </IconTile>
                 <h3 className="font-display text-lg font-semibold tracking-tight text-ink">
-                  100% Owned in Your Google Drive
+                  100% Owned in Google Drive
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted">
-                  Your trades, screenshots, playbook rules, and AI Brain profile live in your private Google Drive folder (`EdgeBook/journals/journal.json`) with instant local caching and one-click JSON export.
+                  Your journal and AI Brain live in your own Google Drive (`EdgeBook/journals/journal.json`) with offline local resilience and 1-click JSON export.
                 </p>
               </CardShell>
             </Reveal>
