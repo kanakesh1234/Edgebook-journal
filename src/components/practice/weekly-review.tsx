@@ -226,7 +226,7 @@ export function WeeklyReview() {
                     <button
                       type="button"
                       onClick={() => setFocus(`Eliminate ${week.mistakes[0]!.label.toLowerCase()} by pausing 10 seconds before clicking entry.`)}
-                      className="inline-flex items-center gap-1 rounded-full bg-[#5e5ce6]/12 px-3 py-1 text-[12px] font-medium text-[#5e5ce6] transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                      className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-3 py-1 text-[12px] font-medium text-gold-deep transition-all hover:bg-gold/25 active:scale-95 dark:text-gold"
                     >
                       <Sym name="sparkles" className="h-3 w-3" />
                       <span>+ Cut {week.mistakes[0].label}</span>

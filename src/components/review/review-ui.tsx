@@ -296,7 +296,7 @@ export function AutoText({ value, onChange, placeholder, label, minRows = 2, max
                 : chip.tone === "bad"
                   ? "bg-loss/12 text-loss hover:bg-loss/20"
                   : chip.tone === "ai"
-                    ? "bg-[#5e5ce6]/12 text-[#5e5ce6] hover:bg-[#5e5ce6]/20 dark:text-[#a5a4ff]"
+                    ? "bg-gold/15 text-gold-deep hover:bg-gold/25 dark:text-gold"
                     : "bg-gold/[0.12] text-gold-deep hover:bg-gold/[0.2] dark:text-gold";
             return (
               <button

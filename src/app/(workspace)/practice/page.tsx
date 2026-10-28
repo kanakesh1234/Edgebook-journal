@@ -262,31 +262,31 @@ export default function PracticePage() {
         label: "Setup & Criteria",
         score: clamp(32 + (m["setup"] ?? 0) * 8 + (m["ict"] ?? 0) * 6 + planLinked * 5),
         note: "Pre-trade checklist & ICT recognition",
-        color: "#0A84FF",
+        color: "var(--gold-strong)",
       },
       {
         label: "Entry Timing & Patience",
         score: clamp(30 + (tmPerf?.correct ?? 0) * 5 + (m["timing"] ?? 0) * 8),
         note: "Waiting for displacement & sweep",
-        color: "#30D158",
+        color: "var(--profit)",
       },
       {
         label: "Risk & Stop Sizing",
         score: clamp(35 + (duelPerf?.correct ?? 0) * 5 + (m["risk"] ?? 0) * 8),
         note: "Position sizing, R-multiple & drawdown math",
-        color: "#FF9F0A",
+        color: "var(--info)",
       },
       {
         label: "Autopsy & Pattern Recall",
         score: clamp(28 + (matrixPerf?.correct ?? 0) * 6 + reviewedCount * 4),
         note: "Remembering lessons from past trades",
-        color: "#BF5AF2",
+        color: "var(--gold)",
       },
       {
         label: "Emotional Discipline",
         score: clamp(34 + streak * 7 + (bossPerf?.correct ?? 0) * 6),
         note: "Zero tilt after losses & rule adherence",
-        color: "#5E5CE6",
+        color: "var(--profit-deep)",
       },
     ];
   }, [progress.masteryByTag, entries, plans, tmPerf, duelPerf, matrixPerf, bossPerf, streak]);
@@ -358,19 +358,19 @@ export default function PracticePage() {
         transition={{ duration: 0.52, delay: 0.06, ease: EASE }}
         aria-label="How AI Powers Your Practice"
         className={cn(
-          "relative mt-7 overflow-hidden rounded-[28px] border border-ink/[0.08] p-6 sm:p-7",
-          "bg-gradient-to-br from-[#5e5ce6]/[0.09] via-surface to-gold/[0.08] shadow-panel",
-          "dark:border-white/10 dark:from-[#5e5ce6]/[0.16] dark:via-surface dark:to-gold/[0.09]",
+          "relative mt-7 overflow-hidden rounded-[28px] border border-line p-6 sm:p-7",
+          "bg-gradient-to-br from-gold/[0.09] via-surface to-profit/[0.06] shadow-panel",
+          "dark:border-line-strong dark:from-gold/[0.12] dark:via-surface dark:to-profit/[0.07]",
         )}
       >
         <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-center">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6] px-3 py-1 text-[11.5px] font-semibold text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.6)]">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-gold-strong px-3 py-1 text-[11.5px] font-semibold text-on-gold shadow-sm">
                 <Sym name="sparkles" className="h-3.5 w-3.5" />
                 <span>AI Brain Neural Coach</span>
               </span>
-              <span className="rounded-full bg-[#5e5ce6]/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+              <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-gold-deep dark:text-gold">
                 {aiBrain ? `${aiBrain.tier} · ${aiBrain.calibrationPct}% Calibrated` : "Adaptive Mode"}
               </span>
               <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2.5 py-0.5 text-[11px] font-semibold text-profit">
@@ -412,7 +412,7 @@ export default function PracticePage() {
                   transition={{ duration: 0.4, delay: 0.14 + idx * 0.07, ease: EASE }}
                   className="rounded-[18px] border border-line-soft bg-surface/90 px-3.5 py-3"
                 >
-                  <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[#5e5ce6] dark:text-[#a5a4ff]">
+                  <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.08em] text-gold-deep dark:text-gold">
                     {item.step}
                   </p>
                   <p className="mt-1 text-[13.5px] font-semibold text-ink">{item.title}</p>
@@ -426,7 +426,7 @@ export default function PracticePage() {
                 type="button"
                 onClick={() => void start(recommendedMode)}
                 disabled={busyMode !== null}
-                className="inline-flex h-11 items-center gap-2 rounded-full bg-gradient-to-b from-[#6e6cf0] to-[#5250d9] px-6 text-[14px] font-semibold text-white shadow-[0_10px_24px_-8px_rgb(94_92_230/0.65),inset_0_1px_0_rgb(255_255_255/0.3)] transition-all hover:brightness-105 active:scale-95 disabled:opacity-50"
+                className="inline-flex h-11 items-center gap-2 rounded-full bg-gold-strong px-6 text-[14px] font-semibold text-on-gold shadow-sm transition-all hover:bg-gold-strong-hover active:scale-95 disabled:opacity-50"
               >
                 <Sym name="sparkles" className="h-4 w-4" />
                 <span>

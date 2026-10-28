@@ -700,7 +700,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                         <p className="text-[14px] font-semibold text-ink">Next: Clarify your Thought</p>
                         <p className="mt-0.5 text-[12.5px] text-muted">Structure your liquidity draw, invalidation, and AI mistake guardrails.</p>
                       </div>
-                      <span className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5e5ce6]/12 text-[#5e5ce6] dark:text-[#9d9bff]">
+                      <span className="ml-3 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gold/15 text-gold">
                         <IconSpark />
                       </span>
                     </div>
@@ -724,21 +724,21 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                 transition={{ duration: 0.45, ease: FLOW_SMOOTH }}
                 aria-label="AI Brain pre-trade read"
                 className={cn(
-                  "relative isolate overflow-hidden rounded-[24px] border border-ink/[0.08] p-5 backdrop-blur-xl",
-                  "bg-gradient-to-br from-[#5e5ce6]/[0.08] via-surface/80 to-gold/[0.07]",
-                  "shadow-[inset_0_1px_0_rgb(255_255_255/0.8),0_12px_30px_-18px_rgb(40_35_80/0.22)]",
-                  "dark:border-white/10 dark:from-[#5e5ce6]/[0.14] dark:via-white/[0.04] dark:to-gold/[0.08]",
+                  "relative isolate overflow-hidden rounded-[24px] border border-line p-5 backdrop-blur-xl",
+                  "bg-gradient-to-br from-gold/[0.09] via-surface/90 to-profit/[0.06]",
+                  "shadow-panel",
+                  "dark:border-line-strong dark:from-gold/[0.12] dark:via-surface/90 dark:to-profit/[0.07]",
                 )}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#5e5ce6] text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.55),inset_0_1px_0_rgb(255_255_255/0.3)]">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gold-strong text-on-gold shadow-sm">
                       <IconSpark />
                     </span>
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[14px] font-semibold tracking-[-0.01em] text-ink">EdgeBook AI Brain</p>
-                        <span className="rounded-full bg-[#5e5ce6]/15 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                        <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11px] font-semibold text-gold-deep dark:text-gold">
                           {brainRead.calibration.tier} · {brainRead.calibration.calibrationPct}% calibrated
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full bg-profit/12 px-2 py-0.5 text-[10.5px] font-semibold text-profit">
@@ -940,7 +940,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     <button
                       type="button"
                       onClick={applyAiSuggestedTags}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6]/12 px-3.5 py-1.5 text-[12.5px] font-semibold text-[#5e5ce6] ring-1 ring-inset ring-[#5e5ce6]/25 transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3.5 py-1.5 text-[12.5px] font-semibold text-gold-deep ring-1 ring-inset ring-gold/30 transition-all hover:bg-gold/25 active:scale-95 dark:text-gold"
                     >
                       <IconSpark />
                       <span>Auto-tag with AI ({brainRead.suggestedWatch.length})</span>
@@ -950,7 +950,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
                 {/* Live AI-detected mistake reasons */}
                 {brainRead.suggestedWatch.length > 0 && (
-                  <div className="space-y-1.5 rounded-2xl border border-[#5e5ce6]/20 bg-[#5e5ce6]/[0.05] p-3">
+                  <div className="space-y-1.5 rounded-2xl border border-gold/25 bg-gold/[0.06] p-3">
                     {brainRead.suggestedWatch.slice(0, 3).map((s) => {
                       const isSelected = watch.includes(s.key);
                       return (
@@ -969,7 +969,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               "shrink-0 rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold transition-colors",
                               isSelected
                                 ? "bg-gold-strong text-on-gold"
-                                : "bg-[#5e5ce6]/15 text-[#5e5ce6] hover:bg-[#5e5ce6]/25 dark:text-[#a5a4ff]",
+                                : "bg-gold/15 text-gold-deep hover:bg-gold/25 dark:text-gold",
                             )}
                           >
                             {isSelected ? "Watching ✓" : "Watch"}
@@ -992,7 +992,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                       >
                         <span>{o.label}</span>
                         {o.ai && (
-                          <span className="ml-1.5 rounded-full bg-[#5e5ce6]/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                          <span className="ml-1.5 rounded-full bg-gold/20 px-1.5 py-0.2 text-[10.5px] font-semibold text-gold-deep dark:text-gold">
                             AI
                           </span>
                         )}

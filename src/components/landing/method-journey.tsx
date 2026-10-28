@@ -1,18 +1,60 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowRightIcon } from "@/components/ui/icons";
-import { Reveal, EASE } from "./reveal";
+import { ArrowRightIcon, CheckIcon } from "@/components/ui/icons";
+import { Reveal } from "./reveal";
+
+/* -------------------------------------------------------------------------- */
+/*  What Edgebook Offers Differently Than Other Trading Journals              */
+/* -------------------------------------------------------------------------- */
+
+const COMPARISONS = [
+  {
+    dimension: "Pre-Trade Protection",
+    others: "Logs trades only after you already lost money",
+    edgebook: "Plan → Thought → Setup ritual with 700ms calm reveal, live Win-Odds & 2-loss lockout gate",
+  },
+  {
+    dimension: "AI Intelligence",
+    others: "Generic chatbot prompts that forget your history",
+    edgebook: "Persistent AI Brain in your Google Drive + Multi-Voter AI Tagging + MINATO Sensei",
+  },
+  {
+    dimension: "Trade Replays & Feed",
+    others: "Static screenshots or clunky popups",
+    edgebook: "Full-screen 16:9 Reels-style feed, 60fps candle interpolation & 2-line AI mistake strip",
+  },
+  {
+    dimension: "Weekly & Monthly Reviews",
+    others: "20-question blank essays that cause procrastination",
+    edgebook: "3-Minute Ritual: AI Executive Brief + 3 progressive prompts + 1-tap smart chips",
+  },
+  {
+    dimension: "Fixing Mistakes",
+    others: "Shows a red bar chart of mistakes you keep repeating",
+    edgebook: "Auto-converts mistake trades into Box 0–5 spaced-repetition drills across 5 Practice Arenas",
+  },
+  {
+    dimension: "Calendar & Intraday Read",
+    others: "Static monthly grid with tiny numbers",
+    edgebook: "Equity-Curve-benchmarked live pointer scrubbing + Standard, Heatmap & Cumulative modes",
+  },
+  {
+    dimension: "Data Ownership & Privacy",
+    others: "$49–$79/mo cloud lock-in on someone else's database",
+    edgebook: "100% stored in your own Google Drive (`EdgeBook/journals/journal.json`) + instant JSON export",
+  },
+];
 
 const STEPS = [
   {
     n: "01",
     title: "Plan & Thought",
-    body: "Capture your thesis and emotional state. Questions unfold after a calm 700ms pause while the AI Brain flags mistake traps before you enter.",
+    body: "Capture your thesis, liquidity draw, and emotional state. Questions unfold after a calm 700ms pause while the AI Brain flags mistake traps before you enter.",
   },
   {
     n: "02",
-    title: "Execute & Replay",
+    title: "Execute & 16:9 Replay",
     body: "Log your trade in seconds and watch it back on a 16:9 cinema replay with smooth 60fps candle interpolation and a 2-line mistake summary.",
   },
   {
@@ -29,39 +71,96 @@ const STEPS = [
 
 export function Method() {
   return (
-    <section id="method" className="relative py-24 sm:py-28">
-      <div className="mx-auto max-w-6xl px-5 sm:px-8">
-        <Reveal>
-          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">The Closed-Loop Ritual</p>
-          <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
-            Four unhurried steps that turn{" "}
-            <span className="font-serif font-normal italic text-muted">raw sessions into mastery.</span>
-          </h2>
-        </Reveal>
+    <>
+      {/* ---------------- Why Edgebook vs. Other Journals ---------------- */}
+      <section id="difference" className="relative py-24 sm:py-28">
+        <div className="mx-auto max-w-6xl px-5 sm:px-8">
+          <Reveal>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">
+              What We Offer Differently
+            </p>
+            <h2 className="mt-3 max-w-3xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
+              Why traders switch from{" "}
+              <span className="font-serif font-normal italic text-gold-grad">
+                traditional journals to Edgebook.
+              </span>
+            </h2>
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-muted">
+              Other journals act like accounting ledgers after the damage is done. Edgebook is a closed-loop behavioral and execution system designed to protect your capital before entry and compound your skill after the close.
+            </p>
+          </Reveal>
 
-        <div className="relative mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-          <div
-            aria-hidden
-            className="absolute left-[10%] right-[10%] top-7 hidden border-t border-dashed border-line-strong lg:block"
-          />
-          {STEPS.map((s, i) => (
-            <Reveal key={s.n} delay={i * 0.1}>
-              <div className="panel relative h-full rounded-[24px] p-6 transition-transform duration-300 hover:-translate-y-1">
-                <motion.div
-                  whileHover={{ scale: 1.06 }}
-                  transition={{ type: "spring", stiffness: 320, damping: 18 }}
-                  className="relative z-10 mb-5 inline-grid h-12 w-12 place-items-center rounded-2xl border border-gold/35 bg-raised font-mono text-xs font-bold text-gold shadow-sm"
-                >
-                  {s.n}
-                </motion.div>
-                <h3 className="font-display text-lg font-semibold tracking-tight text-ink">{s.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-muted">{s.body}</p>
+          <Reveal delay={0.12}>
+            <div className="panel mt-12 overflow-hidden rounded-[28px] border border-line-strong">
+              <div className="grid grid-cols-1 border-b border-line bg-raised/90 px-6 py-4 text-xs font-semibold uppercase tracking-[0.14em] text-faint md:grid-cols-[0.9fr_1.05fr_1.35fr]">
+                <div>Capability</div>
+                <div className="hidden md:block">Other Trading Journals</div>
+                <div className="hidden text-gold md:block">Edgebook Operating System</div>
               </div>
-            </Reveal>
-          ))}
+              <div className="divide-y divide-line-soft">
+                {COMPARISONS.map((row, idx) => (
+                  <motion.div
+                    key={row.dimension}
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.2 }}
+                    transition={{ duration: 0.4, delay: idx * 0.04 }}
+                    className="grid grid-cols-1 gap-3 px-6 py-4 transition-colors hover:bg-ink/[0.02] md:grid-cols-[0.9fr_1.05fr_1.35fr] md:items-center md:gap-6"
+                  >
+                    <div className="font-display text-sm font-semibold text-ink">{row.dimension}</div>
+                    <div className="text-xs leading-relaxed text-muted md:text-[13.5px]">
+                      <span className="mr-1.5 inline-block font-mono text-[10px] uppercase text-faint md:hidden">
+                        Others:
+                      </span>
+                      {row.others}
+                    </div>
+                    <div className="flex items-start gap-2 text-xs font-medium leading-relaxed text-ink md:text-[13.5px]">
+                      <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-profit" />
+                      <span>{row.edgebook}</span>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </Reveal>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {/* ---------------- 4-Step Closed-Loop Ritual ---------------- */}
+      <section id="method" className="relative py-24 sm:py-28">
+        <div className="mx-auto max-w-6xl px-5 sm:px-8">
+          <Reveal>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">The Closed-Loop Ritual</p>
+            <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
+              Four unhurried steps that turn{" "}
+              <span className="font-serif font-normal italic text-muted">raw sessions into mastery.</span>
+            </h2>
+          </Reveal>
+
+          <div className="relative mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            <div
+              aria-hidden
+              className="absolute left-[10%] right-[10%] top-7 hidden border-t border-dashed border-line-strong lg:block"
+            />
+            {STEPS.map((s, i) => (
+              <Reveal key={s.n} delay={i * 0.1}>
+                <motion.div
+                  whileHover={{ y: -6, rotateX: 3, rotateY: -3 }}
+                  transition={{ type: "spring", stiffness: 280, damping: 20 }}
+                  className="panel relative h-full rounded-[24px] p-6"
+                >
+                  <div className="relative z-10 mb-5 inline-grid h-12 w-12 place-items-center rounded-2xl border border-gold/35 bg-raised font-mono text-xs font-bold text-gold shadow-sm">
+                    {s.n}
+                  </div>
+                  <h3 className="font-display text-lg font-semibold tracking-tight text-ink">{s.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">{s.body}</p>
+                </motion.div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -83,7 +182,7 @@ export function Journey() {
           <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-gold">The Equity &amp; Mastery Road</p>
           <h2 className="mt-3 font-display text-3xl font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[44px]">
             Progress you can{" "}
-            <span className="font-serif font-normal italic text-muted">feel and measure.</span>
+            <span className="font-serif font-normal italic text-gold-grad">feel and measure.</span>
           </h2>
           <p className="mt-4 text-base leading-relaxed text-muted">
             Every logged trade and completed review advances your milestone roadmap while protecting your prop-firm or personal drawdown floor.

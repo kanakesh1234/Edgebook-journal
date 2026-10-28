@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { motion } from "motion/react";
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useApp } from "@/lib/store";
 import { AuthError } from "@/lib/services/auth";
 import { useBootstrap } from "@/lib/bootstrap";
@@ -42,6 +42,7 @@ function LoginView() {
   const router = useRouter();
   const params = useSearchParams();
   const status = useApp((s) => s.status);
+  const reduce = useReducedMotion();
 
   const [mode, setMode] = useState<Mode>(params.get("mode") === "signup" ? "signup" : "signin");
   const [name, setName] = useState("");
@@ -51,6 +52,27 @@ function LoginView() {
   const [errors, setErrors] = useState<{ name?: string; email?: string; password?: string; form?: string }>({});
   const [busy, setBusy] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Subtle 3D tilt for the left brand showcase card
+  const asideRef = useRef<HTMLElement>(null);
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const sx = useSpring(mx, { stiffness: 70, damping: 20 });
+  const sy = useSpring(my, { stiffness: 70, damping: 20 });
+  const rotX = useTransform(sy, [-1, 1], [4, -4]);
+  const rotY = useTransform(sx, [-1, 1], [-5, 5]);
+
+  const onAsideMove = (e: React.MouseEvent) => {
+    if (reduce || !asideRef.current) return;
+    const r = asideRef.current.getBoundingClientRect();
+    mx.set(((e.clientX - r.left) / r.width) * 2 - 1);
+    my.set(((e.clientY - r.top) / r.height) * 2 - 1);
+  };
+
+  const onAsideLeave = () => {
+    mx.set(0);
+    my.set(0);
+  };
 
   const driveParam = params.get("drive");
   const driveMessage = !googleLoading && driveParam
@@ -104,15 +126,20 @@ function LoginView() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1.08fr_1fr]">
-      {/* ------------------------------ Apple HIG Spatial Brand Panel ------------------------------ */}
-      <aside className="relative hidden overflow-hidden border-r border-line bg-surface lg:block">
+      {/* ------------------------------ Apple HIG Editorial Brand Panel ------------------------------ */}
+      <aside
+        ref={asideRef}
+        onMouseMove={onAsideMove}
+        onMouseLeave={onAsideLeave}
+        className="relative hidden overflow-hidden border-r border-line bg-surface lg:block"
+      >
         <div className="grid-backdrop absolute inset-0 opacity-50" aria-hidden />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "radial-gradient(640px 420px at 15% 20%, rgba(94,92,230,0.10), transparent 70%), radial-gradient(540px 380px at 85% 80%, rgba(236,192,99,0.09), transparent 70%)",
+              "radial-gradient(640px 420px at 15% 20%, rgba(203,167,107,0.11), transparent 70%), radial-gradient(540px 380px at 85% 80%, rgba(116,176,140,0.08), transparent 70%)",
           }}
         />
 
@@ -124,45 +151,46 @@ function LoginView() {
             <ThemeToggle />
           </div>
 
-          <div className="my-auto py-8">
+          <div className="my-auto py-8 [perspective:1400px]">
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, ease: EASE }}
-              className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-raised/85 px-3.5 py-1 text-xs font-semibold text-muted backdrop-blur"
+              transition={{ duration: 0.6, ease: EASE }}
+              className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-raised/90 px-3.5 py-1 text-xs font-semibold text-muted backdrop-blur"
             >
               <span className="h-2 w-2 rounded-full bg-profit" />
-              <span>Google Drive Synced · AI Brain v1</span>
+              <span>Private Google Drive Ledger · AI Brain</span>
             </motion.div>
 
             <motion.h1
               initial={{ opacity: 0, y: 22 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.68, delay: 0.08, ease: EASE }}
+              transition={{ duration: 0.72, delay: 0.1, ease: EASE }}
               className="mt-5 max-w-lg font-display text-[42px] font-bold leading-[1.06] tracking-[-0.03em] text-ink xl:text-[48px]"
             >
-              Every trade trains{" "}
-              <span className="font-serif font-normal italic text-gold-grad">your personal AI Brain.</span>
+              Every session sharpens{" "}
+              <span className="font-serif font-normal italic text-gold-grad">your personal edge.</span>
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.68, delay: 0.16, ease: EASE }}
+              transition={{ duration: 0.72, delay: 0.2, ease: EASE }}
               className="mt-4 max-w-md text-[15px] leading-relaxed text-muted"
             >
-              Sign in to sync your private Google Drive journal—complete with pre-trade Thought guardrails, 16:9 trade replays, 3-minute reviews, and spaced-repetition practice arenas.
+              Sign in to open your private Google Drive journal—complete with pre-trade Thought guardrails, 16:9 trade replays, 3-minute reviews, and spaced-repetition practice arenas.
             </motion.p>
 
-            {/* Live Apple Bento Telemetry Preview Card */}
+            {/* 3D Perspective Telemetry Preview Card */}
             <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.72, delay: 0.24, ease: EASE }}
-              className="mt-8 max-w-lg space-y-3 rounded-[24px] border border-line-strong bg-raised/85 p-5 shadow-xl backdrop-blur-xl"
+              initial={{ opacity: 0, y: 28, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.8, delay: 0.3, ease: EASE }}
+              style={!reduce ? { rotateX: rotX, rotateY: rotY, transformStyle: "preserve-3d" } : undefined}
+              className="panel mt-8 max-w-lg space-y-3.5 rounded-[26px] border border-line-strong bg-raised/90 p-5 shadow-[0_32px_80px_-28px_rgba(0,0,0,0.65)] backdrop-blur-xl"
             >
               <div className="flex items-center justify-between border-b border-line-soft pb-3">
                 <div>
-                  <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[#5e5ce6] dark:text-[#a5a4ff]">
+                  <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-gold">
                     EdgeBook AI Brain · Drive Record
                   </p>
                   <p className="mt-0.5 text-sm font-semibold text-ink">
@@ -174,7 +202,34 @@ function LoginView() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5 pt-1">
+              {/* Mini animated equity sparkline inside login preview */}
+              <div className="rounded-2xl border border-line-soft bg-surface/90 px-3.5 py-2.5">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] font-medium text-muted">Session Trajectory</span>
+                  <span className="font-mono text-xs font-semibold text-profit">+$1,420 (+2.8R)</span>
+                </div>
+                <svg viewBox="0 0 360 54" className="mt-1.5 w-full" aria-hidden>
+                  <defs>
+                    <linearGradient id="login-eq" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="var(--color-profit)" />
+                      <stop offset="100%" stopColor="var(--color-gold)" />
+                    </linearGradient>
+                  </defs>
+                  <motion.path
+                    d="M4 44 C52 42 78 30 118 33 C158 36 184 20 228 22 C268 24 300 10 354 8"
+                    fill="none"
+                    stroke="url(#login-eq)"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    initial={{ pathLength: 0 }}
+                    animate={{ pathLength: 1 }}
+                    transition={{ duration: 1.3, delay: 0.45, ease: "easeInOut" }}
+                  />
+                  <circle cx="354" cy="8" r="4" fill="var(--color-gold)" />
+                </svg>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
                 <div className="rounded-2xl border border-line-soft bg-surface px-3 py-2.5">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">16:9 Replays</p>
                   <p className="mt-0.5 text-xs font-semibold text-ink">2-Line Mistake Strip</p>
@@ -185,7 +240,7 @@ function LoginView() {
                 </div>
                 <div className="rounded-2xl border border-line-soft bg-surface px-3 py-2.5">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">Practice</p>
-                  <p className="mt-0.5 text-xs font-semibold text-ink">5 Neural Arenas</p>
+                  <p className="mt-0.5 text-xs font-semibold text-ink">5 Solo Arenas</p>
                 </div>
               </div>
             </motion.div>
@@ -201,7 +256,7 @@ function LoginView() {
                 key={t}
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.36 + i * 0.08, duration: 0.45, ease: EASE }}
+                transition={{ delay: 0.42 + i * 0.09, duration: 0.5, ease: EASE }}
                 className="flex items-center gap-2.5"
               >
                 <CheckIcon className="h-4 w-4 shrink-0 text-profit" />
@@ -214,11 +269,15 @@ function LoginView() {
 
       {/* ------------------------------- Spatial Glass Auth Card ------------------------------ */}
       <main className="relative flex items-center justify-center px-5 py-12 sm:px-10">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-1/2 top-1/2 h-[360px] w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gold/[0.06] blur-[110px]"
+        />
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: EASE }}
-          className="panel relative w-full max-w-[440px] rounded-[28px] border border-line-strong/80 p-7 shadow-[0_32px_80px_-28px_rgba(0,0,0,0.45)] backdrop-blur-2xl sm:p-9"
+          initial={{ opacity: 0, y: 26, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.68, delay: 0.08, ease: EASE }}
+          className="panel relative w-full max-w-[440px] rounded-[28px] border border-line-strong/85 p-7 shadow-[0_32px_80px_-28px_rgba(0,0,0,0.5)] backdrop-blur-2xl sm:p-9"
         >
           <div className="mb-8 flex items-center justify-between lg:hidden">
             <Link href="/" aria-label="Back to home">
@@ -227,12 +286,22 @@ function LoginView() {
             <ThemeToggle />
           </div>
 
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-[11px] font-semibold text-gold">
-            <span>EdgeBook Workspace</span>
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-gold/12 px-3 py-1 text-[11px] font-semibold text-gold">
+            <span>Edgebook Workspace</span>
           </div>
 
-          <h2 className="mt-3 font-display text-[26px] font-semibold tracking-[-0.025em] text-ink">
-            {mode === "signin" ? "Welcome back" : "Create your journal"}
+          <h2 className="mt-3 font-display text-[28px] font-bold tracking-[-0.025em] text-ink">
+            {mode === "signin" ? (
+              <>
+                Welcome{" "}
+                <span className="font-serif font-normal italic text-gold-grad">back.</span>
+              </>
+            ) : (
+              <>
+                Create your{" "}
+                <span className="font-serif font-normal italic text-gold-grad">ledger.</span>
+              </>
+            )}
           </h2>
           <p className="mt-1 text-sm text-muted">
             {mode === "signin"
@@ -265,7 +334,7 @@ function LoginView() {
               window.location.assign("/api/auth/google/start?next=/dashboard");
             }}
             className={cn(
-              "group mt-6 flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-line-strong bg-raised text-[14.5px] font-semibold text-ink shadow-sm transition-all duration-200 hover:border-gold/50 hover:bg-surface hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20",
+              "group mt-6 flex h-12 w-full items-center justify-center gap-3 rounded-2xl border border-line-strong bg-raised text-[14.5px] font-semibold text-ink shadow-sm transition-all duration-200 hover:border-gold/55 hover:bg-surface hover:shadow-lift active:scale-[0.98] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/20",
               googleLoading && "pointer-events-none opacity-60",
             )}
             aria-label="Continue with Google"

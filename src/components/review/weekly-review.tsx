@@ -115,14 +115,14 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         transition={{ duration: 0.48, ease: EASE }}
         aria-label="AI Brain Weekly Synthesis"
         className={cn(
-          "relative overflow-hidden rounded-[26px] border border-ink/[0.08] p-5 sm:p-6",
-          "bg-gradient-to-br from-[#5e5ce6]/[0.08] via-surface to-gold/[0.07] shadow-panel",
-          "dark:border-white/10 dark:from-[#5e5ce6]/[0.14] dark:via-surface dark:to-gold/[0.08]",
+          "relative overflow-hidden rounded-[26px] border border-line p-5 sm:p-6",
+          "bg-gradient-to-br from-gold/[0.09] via-surface to-profit/[0.06] shadow-panel",
+          "dark:border-line-strong dark:from-gold/[0.12] dark:via-surface dark:to-profit/[0.07]",
         )}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[#5e5ce6] text-white shadow-[0_6px_16px_-4px_rgb(94_92_230/0.55)]">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gold-strong text-on-gold shadow-sm">
               <Sym name="sparkles" className="h-5 w-5" />
             </span>
             <div>
@@ -133,7 +133,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                   Synced to Google Drive
                 </span>
                 {aiBrain && (
-                  <span className="rounded-full bg-[#5e5ce6]/14 px-2.5 py-0.5 text-[11px] font-semibold text-[#5e5ce6] dark:text-[#a5a4ff]">
+                  <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11px] font-semibold text-gold-deep dark:text-gold">
                     {aiBrain.tier} · {aiBrain.calibrationPct}% calibrated
                   </span>
                 )}
@@ -194,7 +194,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
           </div>
 
           <div className="rounded-[18px] border border-line-soft bg-surface/90 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#5e5ce6] dark:text-[#a5a4ff]">Plan → Autopsy Sync</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gold-deep dark:text-gold">Plan → Autopsy Sync</p>
             <p className="mt-1 text-[14.5px] font-semibold leading-snug text-ink">
               {week.avgGrade ? `Grade ${week.avgGrade} Process` : `${week.sessions}/${week.tradingSlots} Sessions Active`}
             </p>
@@ -495,7 +495,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                             key={idx}
                             type="button"
                             onClick={() => rn.setListItem("commitments", 0, chip.text)}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-[#5e5ce6]/12 px-3 py-1 text-[12px] font-medium text-[#5e5ce6] transition-all hover:bg-[#5e5ce6]/20 active:scale-95 dark:text-[#a5a4ff]"
+                            className="inline-flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1 text-[12px] font-medium text-gold-deep transition-all hover:bg-gold/25 active:scale-95 dark:text-gold"
                           >
                             <Sym name="sparkles" className="h-3 w-3" />
                             <span>+ {chip.label}</span>
