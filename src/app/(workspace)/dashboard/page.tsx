@@ -2,20 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { useApp, sortEntriesNewestFirst } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
-import { evaluateRules } from "@/lib/rules";
 import { scopeToPrimary } from "@/lib/challenges";
 import { PlanTradeFlow } from "@/components/journal/plan-trade-flow";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
-import { TodayPanel, type RiskPosture } from "@/components/dashboard/today-panel";
-import { dayRisk as computeDayRisk } from "@/lib/risk";
+import { DailyFocusControl } from "@/components/dashboard/daily-focus-control";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { BookOpenIcon, PlusIcon, SparklesIcon } from "@/components/ui/icons";
 
 export default function DashboardPage() {
@@ -25,8 +22,6 @@ export default function DashboardPage() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const [planOpen, setPlanOpen] = useState(false);
   const dayLogs = useApp((st) => st.dayLogs);
-  const plans = useApp((st) => st.plans);
-  const todayRisk = useMemo(() => computeDayRisk(todayKey(), allEntries, plans, rawSettings.dayLimits), [allEntries, plans, rawSettings.dayLimits]);
 
   // Primary challenge scoping — one shared source of truth for the whole page.
   const { entries, settings, challenge } = useMemo(
@@ -36,19 +31,16 @@ export default function DashboardPage() {
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
-  const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   // Full Name from Settings wins over the auth/Google name.
   const displayName = settings.fullName?.trim() || user?.name || "";
   const firstName = displayName.split(" ")[0] || "trader";
-  const futureIntention = settings.practiceProgress?.futureSelfPredictions?.find((prediction) => prediction.date === todayKey());
-
   if (allEntries.length === 0) {
     return (
       <div className="space-y-7">
-        <Header greeting={greeting} firstName={firstName} />
+        <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />} />
         <EmptyState
           icon={<BookOpenIcon className="h-7 w-7" />}
           title="Your dashboard is waiting for data"
@@ -77,38 +69,12 @@ export default function DashboardPage() {
     );
   }
 
-  // Risk posture from the Trading Lab rule engine (drawdown as fallback signal)
-  const todayStr = todayKey();
-  const brokenToday = violations.filter((v) => v.date === todayStr).length;
-  const weekCutoff = (() => {
-    const d = new Date(todayStr + "T00:00:00");
-    d.setDate(d.getDate() - 7);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
-  const brokenWeek = violations.filter((v) => v.date >= weekCutoff).length;
-  const riskUsed = stats.drawdownBudgetUsed;
-  const risk: { label: string; dot: string; text: string; tone: RiskPosture["tone"] } =
-    brokenToday > 0
-      ? { label: `Rule broken today${brokenToday > 1 ? ` ×${brokenToday}` : ""}`, dot: "bg-loss", text: "text-loss", tone: "loss" }
-      : brokenWeek > 0
-        ? { label: "Rules under watch", dot: "bg-gold", text: "text-gold", tone: "gold" }
-        : riskUsed >= 0.8
-          ? { label: "Drawdown stretched", dot: "bg-loss", text: "text-loss", tone: "loss" }
-          : { label: "Risk healthy", dot: "bg-profit", text: "text-profit", tone: "profit" };
-  const recent = sortEntriesNewestFirst(entries.filter((e) => e.date === todayStr));
-
   return (
     <div className="space-y-6 md:space-y-8">
       <Header
         greeting={greeting}
         firstName={firstName}
-        status={
-          // On desktop the status lives in the Today rail; here it covers phone + tablet.
-          <span className="inline-flex items-center gap-2" role="status">
-            <span className={cn("h-1.5 w-1.5 rounded-full", risk.dot)} />
-            <span className={risk.text}>{risk.label}</span>
-          </span>
-        }
+        dailyControl={<DailyFocusControl currency={settings.currency} />}
       >
         {/* Phone: the centre tab is "Add trade", so the header carries only a compact planning CTA. */}
         <div className="flex shrink-0 items-center gap-2.5">
@@ -123,27 +89,7 @@ export default function DashboardPage() {
         </div>
       </Header>
 
-      {/*
-        Apple HIG layout:
-        - TodayPanel sits cleanly at the top: if not set yet, it prompts for today's loss limit;
-          once set, it collapses into a single-line Live Activity strip so Equity Curve and Calendar
-          enjoy 100% of the workspace width without permanent sidebar clutter.
-      */}
       <div className="space-y-6 md:space-y-8">
-        <TodayPanel
-          risk={{ label: risk.label, tone: risk.tone }}
-          drawdownUsed={riskUsed}
-          drawdown={stats.drawdown}
-          drawdownLimit={settings.maxDrawdown}
-          currency={settings.currency}
-          brokenToday={brokenToday}
-          brokenWeek={brokenWeek}
-          intention={futureIntention ? { rule: futureIntention.rule, outcome: futureIntention.outcome } : null}
-          recent={recent}
-          dayRisk={todayRisk}
-          onPlanTrade={() => setPlanOpen(true)}
-        />
-
         <Performance
           stats={stats}
           currency={settings.currency}
@@ -165,6 +111,7 @@ export default function DashboardPage() {
           challenges={settings.challenges ?? []}
           currency={settings.currency}
           defaultChallengeId={challenge?.id ?? null}
+          spacious
         />
       </div>
 
@@ -175,7 +122,7 @@ export default function DashboardPage() {
 
 /* ------------------------------- pieces -------------------------------- */
 
-function Header({ greeting, firstName, status, children }: { greeting: string; firstName: string; status?: React.ReactNode; children?: React.ReactNode }) {
+function Header({ greeting, firstName, dailyControl, children }: { greeting: string; firstName: string; dailyControl?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <header className="flex items-end justify-between gap-3 sm:gap-4">
       <div>
@@ -187,15 +134,10 @@ function Header({ greeting, firstName, status, children }: { greeting: string; f
         >
           {greeting}, <span className="text-gold">{firstName}</span>.
         </motion.h1>
-        <p className="mt-1.5 flex flex-col gap-y-1 text-[13px] text-muted sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:text-sm">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px] text-muted sm:text-sm">
           <span className="capitalize">{formatDateFull(todayKey())}</span>
-          {status && (
-            <span className="inline-flex items-center gap-3 xl:hidden">
-              <span className="hidden text-line-strong sm:inline" aria-hidden>·</span>
-              {status}
-            </span>
-          )}
-        </p>
+          {dailyControl}
+        </div>
       </div>
       {children}
     </header>

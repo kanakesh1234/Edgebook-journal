@@ -109,6 +109,7 @@ export function EquityCurve({
   rangeKey,
   onScrub,
   className,
+  spacious = false,
 }: {
   points: CurvePoint[];
   currency: CurrencyCode;
@@ -120,6 +121,8 @@ export function EquityCurve({
   rangeKey: string;
   onScrub?: (index: number | null) => void;
   className?: string;
+  /** Gives the dashboard's primary curve a little more editorial breathing room. */
+  spacious?: boolean;
 }) {
   const reduce = useReducedMotion();
   const clipId = `eq-clip-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -247,7 +250,11 @@ export function EquityCurve({
   return (
     <div
       ref={wrapRef}
-      className={cn("relative h-[260px] w-full select-none rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-line-strong sm:h-[320px]", className)}
+      className={cn(
+        "relative w-full select-none rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-line-strong",
+        spacious ? "h-[292px] sm:h-[380px]" : "h-[260px] sm:h-[320px]",
+        className,
+      )}
       style={{ touchAction: "pan-y" }}
       tabIndex={hasCurve ? 0 : -1}
       role={hasCurve ? "slider" : "img"}

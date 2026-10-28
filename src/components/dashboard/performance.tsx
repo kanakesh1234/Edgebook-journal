@@ -152,6 +152,7 @@ export function Performance({
           emptyLabel={emptyText}
           rangeKey={`${activeId}:${points.length}`}
           onScrub={setScrub}
+          spacious
         />
       </div>
 

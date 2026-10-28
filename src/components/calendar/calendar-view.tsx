@@ -30,6 +30,7 @@ export function CalendarView({
   challenges,
   currency,
   defaultChallengeId = null,
+  spacious = false,
 }: {
   entries: JournalEntry[];
   dayLogs: NoTradeLog[];
@@ -38,6 +39,8 @@ export function CalendarView({
   /** Preselect/track the primary challenge — stays in sync when it changes. */
   defaultChallengeId?: string | null;
   compact?: boolean;
+  /** Used by Home, where the calendar is an editorial destination rather than a utility view. */
+  spacious?: boolean;
 }) {
   const router = useRouter();
   const [view, setView] = useState(() => {
@@ -275,7 +278,7 @@ export function CalendarView({
 
       {/* Minimal Apple HIG Calendar Grid */}
       <div
-        className="px-4 pb-5 pt-5 sm:px-7 sm:pb-7"
+        className={cn("px-4 pt-5 sm:px-7", spacious ? "pb-7 sm:pb-9" : "pb-5 sm:pb-7")}
         onPointerLeave={() => setScrubDay(null)}
       >
         <div className="mb-2 grid grid-cols-7 gap-1.5 sm:gap-2">
@@ -304,7 +307,7 @@ export function CalendarView({
           >
             {cells.map((cell, i) => {
               if (!cell.key) {
-                return <div key={`pad-${i}`} aria-hidden className="min-h-[60px] sm:min-h-[82px]" />;
+                return <div key={`pad-${i}`} aria-hidden className={spacious ? "min-h-[72px] sm:min-h-[102px]" : "min-h-[60px] sm:min-h-[82px]"} />;
               }
 
               const day = byDay.get(cell.key);
@@ -341,7 +344,8 @@ export function CalendarView({
                   style={tintStyle}
                   aria-label={`${formatDateFull(cell.key)}${pnl !== null ? `, ${formatSignedMoney(pnl, currency)}` : ", no trades"}`}
                   className={cn(
-                    "group relative flex min-h-[60px] flex-col justify-between rounded-[14px] border p-2 text-left outline-none transition-[border-color,box-shadow,background-color] duration-200 sm:min-h-[82px] sm:rounded-[16px] sm:p-2.5",
+                    "group relative flex flex-col justify-between rounded-[14px] border p-2 text-left outline-none transition-[border-color,box-shadow,background-color] duration-200 sm:rounded-[16px] sm:p-2.5",
+                    spacious ? "min-h-[72px] sm:min-h-[102px]" : "min-h-[60px] sm:min-h-[82px]",
                     isToday
                       ? "border-gold/70 ring-1 ring-gold/30"
                       : pnl !== null && pnl > 0
