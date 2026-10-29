@@ -1,0 +1,86 @@
+/* ============================================================
+   Landing — Apple-style system on top of the Edgebook tokens.
+   Only layout/animation plumbing lives here; colour, type and
+   radii come from the shared theme variables in globals.css.
+=========================================================== */
+
+.lp-root {
+  --lp-foot: min(74svh, 580px);
+  --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Frosted bar (nav) */
+.lp-glass {
+  background: color-mix(in srgb, var(--canvas) 68%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
+}
+
+/* Continuous (squircle) corners where the browser supports them */
+.lp-sq {
+  corner-shape: squircle;
+}
+
+/* The one orchestrated page-load moment */
+@keyframes lp-rise {
+  from { opacity: 0; transform: translate3d(0, 26px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes lp-win-in {
+  from { opacity: 0; transform: translate3d(0, 70px, 0) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+.lp-rise   { animation: lp-rise 1s var(--lp-ease) both; animation-delay: var(--d, 0s); }
+.lp-win-in { animation: lp-win-in 1.3s var(--lp-ease) 0.45s both; }
+
+/* ---------------- Journey stage ---------------- */
+.lp-pinned { --lp-track: 780svh; height: var(--lp-track); }
+@media (max-width: 1023px) { .lp-pinned { --lp-track: 640svh; } }
+.lp-static { display: none; }
+
+/* Candles & levels start hidden; the scroll renderer owns them. */
+.lp-pinned [data-candle],
+.lp-pinned [data-levels],
+.lp-pinned [data-level-labels] { opacity: 0; }
+[data-candle] { transform-box: fill-box; transform-origin: 50% 50%; }
+
+.lp-pill {
+  width: calc(100% / 6);
+  transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
+  transition: transform 0.6s var(--lp-ease);
+}
+.lp-stage-tab { transition: color 0.3s ease; }
+.lp-stage-tab[data-on="true"] { color: var(--ink); }
+
+/* ---------------- Toolkit (horizontal) ---------------- */
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  .lp-toolkit-stage {
+    position: sticky; top: 0; height: 100svh; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .lp-toolkit-track { will-change: transform; }
+}
+@media (max-width: 1023px), (prefers-reduced-motion: reduce) {
+  .lp-toolkit-track {
+    overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
+    padding-inline: 1.25rem; scroll-padding-inline: 1.25rem;
+  }
+  .lp-toolkit-track::-webkit-scrollbar { display: none; }
+  .lp-toolkit-card { scroll-snap-align: start; }
+}
+
+/* Road milestones light up as the line reaches them */
+.lp-ms circle.lp-ms-dot { transition: fill 0.4s ease, stroke 0.4s ease; }
+.lp-ms[data-on="true"] circle.lp-ms-dot { fill: var(--profit); stroke: var(--profit); }
+.lp-ms[data-on="true"] circle.lp-ms-ring { opacity: 1; }
+.lp-ms circle.lp-ms-ring { opacity: 0; transition: opacity 0.5s ease; }
+.lp-ms text { transition: fill 0.4s ease; }
+.lp-ms[data-on="true"] text { fill: var(--profit); }
+
+/* ---------------- Reduced motion: no pinning, no scrubbing ---------------- */
+@media (prefers-reduced-motion: reduce) {
+  .lp-pinned { display: none; }
+  .lp-static { display: block; }
+  .lp-rise, .lp-win-in { animation: none; }
+  .lp-pill { transition: none; }
+}
