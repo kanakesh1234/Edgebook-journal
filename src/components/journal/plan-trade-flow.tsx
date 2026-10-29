@@ -245,7 +245,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   // Discipline gate: planning a 2nd (or later) trade after a loss stops at the plan until it is acknowledged.
   const today = todayKey();
   const lossesToday = useMemo(() => entries.filter((e) => e.date === today && e.pnl < 0).length, [entries, today]);
-  const tradesToday = useMemo(() => entries.filter((e) => e.date === today).length, [entries, today]);
   const [lockChecked, setLockChecked] = useState(false);
   const [lockAck, setLockAck] = useState(false);
   const lockOpen = open && step === "plan" && lossesToday >= 1 && !lockAck;
@@ -690,7 +689,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       case "plan":
         if (!thesis.trim()) return { ok: false, hint: "Write your plan to continue" };
         if (!emotion) return { ok: false, hint: "Pick how you feel" };
-        if (!emotionReason.trim()) return { ok: false, hint: "Say what's behind that feeling" };
         if (newsAnswer === null) return { ok: false, hint: "Any news or events today?" };
         if (newsAnswer && !newsEvents.some((e) => e.name.trim())) return { ok: false, hint: "Name the event, or choose No news" };
         return { ok: true, hint: null };
@@ -1038,7 +1036,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     autoFocus
                     value={thesis}
                     onChange={(e) => setThesis(e.target.value)}
-                    placeholder="Where do you expect price to go, and why?"
+                    placeholder="What do you expect, and why?"
                     className="lg:min-h-32"
                   />
                 </div>
@@ -1071,7 +1069,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   {showReason && (
                     <Reveal key="plan-reason" focus delay={0.08}>
                       <div className="space-y-2.5">
-                        <Label done={reasonReveal.settled && emotionReason.trim().length > 0} htmlFor="flow-reason">
+                        <Label hint="optional" done={reasonReveal.settled && emotionReason.trim().length > 0} htmlFor="flow-reason">
                           {emotion ? `What's behind feeling ${label(emotion).toLowerCase()}?` : "What's behind that feeling?"}
                         </Label>
                         <TextBlock id="flow-reason" maxLength={280} value={emotionReason} onChange={(e) => setEmotionReason(e.target.value)} placeholder="A few words is plenty." />
@@ -1746,7 +1744,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                 <h2 className="mt-7 text-[32px] font-semibold tracking-[-0.025em] text-ink">Logged.</h2>
                 <p className="mt-2 max-w-[22rem] text-[15px] leading-snug text-muted">
                   {isOffline
-                    ? "Saved safely in your browser cache — will sync to Google Drive automatically when internet returns."
+                    ? "Saved on this device. It syncs when you're back online."
                     : "Process noted — the outcome is just data."}
                 </p>
                 {autopsy.risk && (
@@ -1786,21 +1784,19 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
             </span>
             <div>
               <h2 className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink">
-                {thirdTrade ? "Manual lockout required in Tradovate right now" : "Pause before trade #2"}
+                {thirdTrade ? "Time to stop for today" : "Pause before trade #2"}
               </h2>
-              {thirdTrade ? (
-                <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                  You already have <strong className="text-loss">{lossesToday} losses</strong> today
-                  {tradesToday > 0 && <> across {tradesToday} trades</>}. The statistical probability of a 3rd trade winning is only{" "}
-                  <strong className="text-ink">4%–5%</strong>, whereas tomorrow&apos;s fresh A+ setup holds a{" "}
-                  <strong className="text-profit">40%–50%</strong> probability. Lock out immediately — preserving mental capital is today&apos;s final win.
-                </p>
-              ) : (
-                <p className="mt-2 text-[15px] leading-relaxed text-muted">
-                  You already have <strong className="text-loss">1 loss</strong> today. A 2nd trade straight after a loss is where revenge and tilt creep in.
-                  Reset, review that trade, and only continue if this is a fresh, planned A+ setup.
-                </p>
-              )}
+              <p className="mt-2 text-[15px] leading-snug text-muted">
+                {thirdTrade ? (
+                  <>
+                    That&apos;s <strong className="text-loss">{lossesToday} losses</strong> today. A third trade is where tilt takes over. Step away and come back fresh tomorrow.
+                  </>
+                ) : (
+                  <>
+                    You have <strong className="text-loss">1 loss</strong> today. Reset and review it first. Continue only if this is a fresh, planned setup.
+                  </>
+                )}
+              </p>
             </div>
           </div>
           <div className="mt-6">
@@ -1809,8 +1805,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
               onClick={() => setLockChecked((v) => !v)}
               title={
                 thirdTrade
-                  ? "I acknowledge this is a psychological failure point, I am trading beyond my 2-trade plan, and I accept full responsibility for breaking my own rule."
-                  : "I've reset, I'm not trying to win the loss back, and this trade follows my plan."
+                  ? "I'm trading beyond my 2-trade plan and I take responsibility."
+                  : "I've reset and this trade follows my plan."
               }
             />
           </div>

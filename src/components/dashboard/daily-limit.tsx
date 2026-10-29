@@ -25,7 +25,7 @@ import type { CurrencyCode } from "@/lib/types";
 /** Positive money only: digits and one decimal point, at most two decimals. */
 const cleanAmount = (v: string) => { const t = v.replace(/[^\d.]/g, ""); const [a = "", ...rest] = t.split("."); return rest.length ? `${a}.${rest.join("").slice(0, 2)}` : a; };
 
-export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency: CurrencyCode }) {
+export function DailyLimit({ risk, currency, compact = false }: { risk: DayRisk | null; currency: CurrencyCode; compact?: boolean }) {
   const entries = useApp((s) => s.entries);
   const rawSettings = useApp((s) => s.settings);
   const sym = currencySymbol(currency);
@@ -74,12 +74,12 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
 
   return (
     <section aria-label="Set today's loss limit" className="space-y-3">
-      <div>
+      {!compact && <div>
         <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-faint">Today&apos;s loss limit</p>
         <p className="mt-1.5 text-[13px] leading-snug text-muted">
           {carried ? "From your earlier plan today. Confirm it to lock it in." : "How much are you willing to lose today? You can set it once a day."}
         </p>
-      </div>
+      </div>}
 
       {/* Same card-as-input pattern as the plan flow: tap anywhere to type, the card shows focus. */}
       <div
@@ -109,11 +109,11 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
         <p className="mt-1 min-h-4 text-[12px] text-faint">
           {bad ? <span className="text-loss">Numbers only</span>
             : ok && account > 0 ? `${((amount / account) * 100).toFixed(2)}% of your account`
-            : "The most you'll accept losing"}
+            : compact ? "Set once per day" : "The most you'll accept losing"}
         </p>
       </div>
 
-      {downToday > 0 && (
+      {!compact && downToday > 0 && (
         <p className="px-1 text-[12.5px] text-muted">
           Today is already down <span className="num font-medium text-loss">{formatMoney(downToday, currency)}</span> at its deepest point.
           {ok && amount <= downToday ? <span className="text-loss"> That is at or past this limit.</span> : null}
@@ -124,7 +124,7 @@ export function DailyLimit({ risk, currency }: { risk: DayRisk | null; currency:
         {confirming ? (
           <motion.div key="confirm" {...swap} className="space-y-3">
             <p className="px-1 text-[13px] leading-snug text-ink">
-              Lock in <span className="num font-semibold">{formatMoney(amount, currency)}</span> for today? You won&apos;t be able to change it until tomorrow.
+              Lock in <span className="num font-semibold">{formatMoney(amount, currency)}</span>? It can&apos;t change until tomorrow.
             </p>
             <div className="flex items-center justify-end gap-2">
               <QuietButton disabled={saving} onClick={() => setConfirming(false)}>Back</QuietButton>

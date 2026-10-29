@@ -18,9 +18,9 @@ export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
 export const FLOW_SMOOTH = [0.32, 0.72, 0, 1] as const;
 /**
  * Height unfold. A tween on the iOS curve instead of a spring: a spring on `height: auto` overshoots its measured
- * height and makes the content below stutter. Slower than before (0.62s) so a new question reads as "arriving".
+ * height and makes the content below stutter. Kept brisk (0.34s) so the flow never feels like it is waiting.
  */
-export const FLOW_EXPAND = { duration: 0.62, ease: FLOW_SMOOTH } as const;
+export const FLOW_EXPAND = { duration: 0.34, ease: FLOW_SMOOTH } as const;
 /** Leaving is always quicker than arriving, so nothing lingers. */
 export const FLOW_COLLAPSE = { duration: 0.26, ease: [0.4, 0, 0.6, 1] } as const;
 /** Quick cross-fade for one-line micro feedback. */
@@ -174,7 +174,7 @@ export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: {
 /** Slide + fade between steps; direction follows forward/back. */
 export function StepTransition({ stepKey, dir, children }: { stepKey: string; dir: 1 | -1; children: React.ReactNode }) {
   const reduce = useReducedMotion();
-  const dx = reduce ? 0 : 36;
+  const dx = reduce ? 0 : 28;
   return (
     <AnimatePresence mode="wait" initial={false} custom={dir}>
       <motion.div
@@ -183,7 +183,7 @@ export function StepTransition({ stepKey, dir, children }: { stepKey: string; di
         variants={{
           enter: (d: number) => ({ opacity: 0, x: d * dx, filter: reduce ? "none" : "blur(4px)" }),
           // Arrive on the iOS curve (no spring wobble); leave fast so the next screen never waits on the last.
-          center: { opacity: 1, x: 0, filter: "blur(0px)", transition: { duration: 0.5, ease: FLOW_SMOOTH } },
+          center: { opacity: 1, x: 0, filter: "blur(0px)", transition: { duration: 0.3, ease: FLOW_SMOOTH } },
           exit: (d: number) => ({ opacity: 0, x: -d * (dx * 0.45), transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }),
         }}
         initial="enter"
@@ -255,7 +255,7 @@ export function Collapse({ children, id, className }: { children: React.ReactNod
     <motion.div
       id={id}
       initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1, transition: reduce ? { duration: 0.15 } : { height: FLOW_EXPAND, opacity: { duration: 0.42, delay: 0.1, ease: FLOW_SMOOTH } } }}
+      animate={{ height: "auto", opacity: 1, transition: reduce ? { duration: 0.15 } : { height: FLOW_EXPAND, opacity: { duration: 0.26, delay: 0.03, ease: FLOW_SMOOTH } } }}
       exit={{ height: 0, opacity: 0, transition: reduce ? { duration: 0.12 } : { height: FLOW_COLLAPSE, opacity: { duration: 0.16 } } }}
       onAnimationStart={() => setClip(true)}
       onAnimationComplete={() => setClip(false)}
@@ -280,11 +280,11 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
   useEffect(() => {
     if (!focus) return;
     // Wait until the question is mostly open, so the caret never lands in a field that is still sliding.
-    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 380 + delay * 1000);
+    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 200 + delay * 1000);
     return () => window.clearTimeout(t);
   }, [focus, delay]);
   const shut = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.3, delay } } };
+  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.22, delay } } };
   const gone = reduce ? { opacity: 0, transition: { duration: 0.12 } } : { opacity: 0, height: 0, transition: { height: FLOW_COLLAPSE, opacity: { duration: 0.14 } } };
   return (
     <motion.section
@@ -302,7 +302,7 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
       <motion.div
         className="pt-8"
         initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
-        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.55, delay: delay + 0.12, ease: FLOW_SMOOTH } }}
+        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.32, delay: delay + 0.04, ease: FLOW_SMOOTH } }}
         exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.16 } }}
       >
         {children}
@@ -322,8 +322,8 @@ export function Stagger({ children, className, delay = 0.05 }: { children: React
           className="inline-flex"
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.97 }}
           animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-          // Starts after the question's own room has begun to open (0.22s), then the chips follow one by one.
-          transition={{ duration: 0.42, ease: FLOW_SMOOTH, delay: 0.22 + Math.min(i * delay, 0.55) }}
+          // Starts after the question's own room has begun to open (0.08s), then the chips follow one by one.
+          transition={{ duration: 0.28, ease: FLOW_SMOOTH, delay: 0.08 + Math.min(i * delay, 0.24) }}
         >
           {child}
         </motion.span>

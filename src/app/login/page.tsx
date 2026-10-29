@@ -203,7 +203,7 @@ function LoginView() {
             </h2>
             <p className="mt-1.5 text-[15px] leading-snug text-muted">
               {mode === "signin"
-                ? "Sign in to open your journal and AI Brain."
+                ? "Sign in to open your journal."
                 : "One account. Private Google Drive sync included."}
             </p>
 
@@ -222,31 +222,24 @@ function LoginView() {
             )}
 
             {/* Primary: Google OAuth + Drive sync */}
-            <button
+            <Button
               type="button"
-              disabled={googleLoading || busy}
-              onClick={(e) => {
-                e.preventDefault();
+              variant="outline"
+              loading={googleLoading}
+              disabled={busy}
+              onClick={() => {
                 if (googleLoading || busy) return;
                 setGoogleLoading(true);
                 window.location.assign("/api/auth/google/start?next=/dashboard");
               }}
-              className={cn(
-                "group mt-7 flex h-12 w-full items-center justify-center gap-3 rounded-full bg-ink text-[15.5px] font-medium text-canvas transition duration-200 hover:opacity-90 active:scale-[0.985] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/25",
-                googleLoading && "pointer-events-none opacity-60",
-              )}
               aria-label="Continue with Google"
-              aria-busy={googleLoading}
+              className="mt-7 h-12 w-full gap-3 rounded-full bg-raised text-[15.5px] hover:bg-ink/[0.05] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-gold/25"
             >
-              {googleLoading ? (
-                <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-canvas/30 border-t-canvas" />
-              ) : (
-                <GoogleIcon className="h-[18px] w-[18px]" />
-              )}
-              {googleLoading ? "Connecting to Google Drive…" : "Continue with Google"}
-            </button>
+              <GoogleIcon className="h-[18px] w-[18px]" />
+              Continue with Google
+            </Button>
             <p className="mt-2.5 text-center text-[12.5px] text-faint">
-              Recommended. Syncs your journal to your own Google Drive.
+              Syncs your journal to your own Google Drive.
             </p>
 
             <div className="my-6 flex items-center gap-3 text-[12.5px] text-faint">
@@ -347,8 +340,8 @@ function LoginView() {
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-[12.5px] leading-relaxed text-faint">
-              Your journal stays private: in your own Google Drive, or locally on this device.
+            <p className="mt-6 text-center text-[12px] text-faint">
+              Private by design. For education only, not financial advice.
             </p>
           </motion.div>
         </main>

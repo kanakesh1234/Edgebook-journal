@@ -13,19 +13,34 @@ import { ChevronRightIcon, ShieldIcon } from "@/components/ui/icons";
 import { toast } from "@/components/ui/toast";
 
 const IST = "Asia/Kolkata";
-const WINDOW_START = 5 * 60;
+/** Prompt window in IST: 5:00 PM – 6:55 PM (inclusive of the 6:55 minute). */
+const WINDOW_START = 17 * 60;
 const WINDOW_END = 18 * 60 + 55;
+const DISMISS_KEY = "edgebook:limit-prompt-dismissed";
 
-function istMinuteOfDay(now: Date): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: IST,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(now);
-  const value = (type: "hour" | "minute") => Number(parts.find((part) => part.type === type)?.value ?? 0);
-  return value("hour") * 60 + value("minute");
+const istFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: IST,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** Wall-clock minute-of-day and calendar date in IST, independent of the device timezone. */
+function istNow(now: Date): { minute: number; date: string } {
+  const p: Record<string, string> = {};
+  for (const part of istFmt.formatToParts(now)) if (part.type !== "literal") p[part.type] = part.value;
+  return { minute: Number(p.hour) * 60 + Number(p.minute), date: `${p.year}-${p.month}-${p.day}` };
 }
+
+const readDismissed = (): string | null => {
+  try { return window.localStorage.getItem(DISMISS_KEY); } catch { return null; }
+};
+const writeDismissed = (date: string) => {
+  try { window.localStorage.setItem(DISMISS_KEY, date); } catch { /* private mode: fine */ }
+};
 
 const SPRING = { type: "spring" as const, stiffness: 460, damping: 32 };
 
@@ -118,33 +133,48 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [limitOpen, setLimitOpen] = useState(false);
+  const [auto, setAuto] = useState(false); // true when the sheet opened by itself (vs. from the menu)
   const [now, setNow] = useState<Date | null>(null);
-  const [dismissedDate, setDismissedDate] = useState<string | null>(null);
 
   const today = todayKey();
   const hasTraded = entries.some((entry) => entry.date === today);
   const noSetup = !hasTraded && dayLogs.some((log) => log.date === today);
-  const inLimitWindow = now != null && istMinuteOfDay(now) >= WINDOW_START && istMinuteOfDay(now) <= WINDOW_END;
+  const ist = now ? istNow(now) : null;
+  const inLimitWindow = ist != null && ist.minute >= WINDOW_START && ist.minute <= WINDOW_END;
   const shouldPrompt = inLimitWindow && !hasLimit && !noSetup;
 
   useEffect(() => {
     const tick = () => setNow(new Date());
     tick();
-    const timer = window.setInterval(tick, 60_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(tick, 30_000);
+    const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
 
+  // Open once per IST day, only inside the window, and never again after it was dismissed (survives reloads).
   useEffect(() => {
-    if (dismissedDate && dismissedDate !== today) setDismissedDate(null);
-  }, [dismissedDate, today]);
+    if (!shouldPrompt || !ist) return;
+    if (readDismissed() === ist.date) return;
+    setAuto(true);
+    setLimitOpen(true);
+  }, [shouldPrompt, ist?.date]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // An automatic prompt closes itself the moment the window ends.
+  useEffect(() => {
+    if (auto && ist && !inLimitWindow) { setLimitOpen(false); setAuto(false); }
+  }, [auto, ist, inLimitWindow]);
 
   useEffect(() => {
-    if (shouldPrompt && dismissedDate !== today) setLimitOpen(true);
-  }, [shouldPrompt, dismissedDate, today]);
-
-  useEffect(() => {
-    if (hasLimit || noSetup) setLimitOpen(false);
+    if (hasLimit || noSetup) { setLimitOpen(false); setAuto(false); }
   }, [hasLimit, noSetup]);
+
+  useEffect(() => {
+    if (!limitOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismissLimit(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -156,8 +186,9 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
   }, [menuOpen]);
 
   const dismissLimit = () => {
-    setDismissedDate(today);
+    if (auto && ist) writeDismissed(ist.date); // only an automatic prompt counts as "seen today"
     setLimitOpen(false);
+    setAuto(false);
   };
 
   const handleToggleNoSetup = async () => {
@@ -278,34 +309,38 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
 
       <AnimatePresence>
         {limitOpen && (
-          <motion.div className="fixed inset-0 z-[80] grid place-items-center p-4 sm:p-6" initial="hidden" animate="visible" exit="hidden">
+          <motion.div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-6" initial="hidden" animate="visible" exit="hidden">
             <motion.button
               type="button"
-              aria-label="Dismiss daily limit"
+              aria-label="Dismiss"
               tabIndex={-1}
               onClick={dismissLimit}
               variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
-              transition={{ duration: 0.2 }}
-              className="absolute inset-0 cursor-default bg-ink/20 backdrop-blur-sm"
+              transition={{ duration: 0.25 }}
+              className="absolute inset-0 cursor-default bg-ink/25 backdrop-blur-sm"
             />
             <motion.section
               role="dialog"
               aria-modal="true"
-              aria-label="Set daily loss limit"
+              aria-label="Set today's loss limit"
               variants={{
-                hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.98 },
+                hidden: reduce ? { opacity: 0 } : { opacity: 0, y: 28, scale: 0.98 },
                 visible: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 },
               }}
-              transition={{ duration: 0.3, ease: EASE }}
-              className="relative w-full max-w-md rounded-[28px] border border-line-strong bg-surface p-5 shadow-overlay sm:p-6"
+              transition={{ duration: 0.34, ease: EASE }}
+              className="relative max-h-[calc(100dvh-1.5rem)] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-line-strong bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 shadow-overlay sm:max-w-[380px] sm:rounded-[28px] sm:pb-6"
             >
-              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-gold-deep">Before the session</p>
-              <h2 className="mt-1 font-display text-[26px] font-semibold tracking-[-0.03em] text-ink">Set today&apos;s limit</h2>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
-                Choose your loss guardrail before trading. Tap anywhere outside this card to close it.
-              </p>
-              <div className="mt-5">
-                <DailyLimit risk={null} currency={currency} />
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={dismissLimit}
+                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-ink/[0.06] text-muted outline-none transition-[background-color,transform] duration-200 hover:rotate-90 hover:bg-ink/[0.1] hover:text-ink focus-visible:ring-2 focus-visible:ring-gold/50 active:scale-95"
+              >
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
+              </button>
+              <h2 className="pr-10 font-display text-[24px] font-semibold tracking-[-0.03em] text-ink">Today&apos;s loss limit</h2>
+              <div className="mt-4">
+                <DailyLimit risk={null} currency={currency} compact />
               </div>
             </motion.section>
           </motion.div>

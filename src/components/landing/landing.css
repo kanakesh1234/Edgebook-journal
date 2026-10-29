@@ -5,7 +5,6 @@
 =========================================================== */
 
 .lp-root {
-  --lp-foot: min(72svh, 560px);
   --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -34,8 +33,8 @@
 .lp-win-in { animation: lp-win-in 1.3s var(--lp-ease) 0.45s both; }
 
 /* ---------------- Journey stage ---------------- */
-.lp-pinned { --lp-track: 780svh; height: var(--lp-track); }
-@media (max-width: 1023px) { .lp-pinned { --lp-track: 640svh; } }
+.lp-pinned { --lp-track: 520svh; height: var(--lp-track); }
+@media (max-width: 1023px) { .lp-pinned { --lp-track: 440svh; } }
 .lp-static { display: none; }
 
 /* Candles & levels start hidden; the scroll renderer owns them. */

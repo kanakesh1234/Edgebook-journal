@@ -6,7 +6,7 @@
 /*  and validation the previous Settings page used.                    */
 /* ------------------------------------------------------------------ */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
 import { useUi, type DriveStatus } from "@/lib/ui-store";
@@ -39,7 +39,6 @@ import {
   Group,
   Row,
   SaveSlot,
-  Stepper,
   type SaveState,
 } from "./primitives";
 
@@ -72,11 +71,6 @@ export function formatBytes(bytes: number): string {
 const THEME_LABEL: Record<ThemeChoice, string> = { light: "Light", dark: "Dark", system: "Automatic" };
 export const themeLabel = (c: ThemeChoice) => THEME_LABEL[c];
 
-const REPLY_MIN = 250;
-const REPLY_MAX = 32_000;
-const REPLY_STEP = 500;
-const REPLY_DEFAULT = 4_000;
-export const clampReply = (n: number) => Math.min(REPLY_MAX, Math.max(REPLY_MIN, n));
 
 /** The name shown everywhere: Full Name from Settings wins over the auth/Google name. */
 export function useDisplayName(): string {
@@ -542,79 +536,12 @@ function AppearancePane() {
 /* ================================= MINATO ================================= */
 
 function MinatoPane() {
-  const settings = useApp((s) => s.settings);
-  const stored = clampReply(settings.aiPrefs?.responseTokenLimit ?? REPLY_DEFAULT);
-  const [draft, setDraft] = useState<number | null>(null);
-  const value = draft ?? stored;
-  const pending = useRef<number>(stored);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Every settings save rewrites the whole journal (Drive for Google users),
-  // so taps are coalesced and committed once the stepper settles.
-  const commit = useCallback((next: number) => {
-    const s = useApp.getState().settings;
-    if (clampReply(s.aiPrefs?.responseTokenLimit ?? REPLY_DEFAULT) === next) {
-      if (pending.current === next) setDraft(null);
-      return;
-    }
-    void useApp
-      .getState()
-      .updateSettings({ aiPrefs: { ...(s.aiPrefs ?? { includeNotes: true }), responseTokenLimit: next } })
-      .then(() => {
-        if (pending.current === next) setDraft(null);
-      });
-  }, []);
-
-  const step = (dir: 1 | -1) => {
-    const next = clampReply(value + dir * REPLY_STEP);
-    if (next === value) return;
-    haptic.selection();
-    pending.current = next;
-    setDraft(next);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      commit(next);
-    }, 700);
-  };
-
-  // Flush a pending change if the user navigates away mid-debounce.
-  useEffect(
-    () => () => {
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
-        commit(pending.current);
-      }
-    },
-    [commit],
-  );
-
   return (
     <Group
       title="Replies"
-      footer="Sets the largest reply MINATO will write. Longer replies take more time, and your AI provider may apply a lower ceiling."
+      footer="Minato sizes each answer to your question and keeps your conversation in mind. There is no token limit to manage."
     >
-      <Row
-        icon={<SparklesIcon />}
-        tone="gold"
-        title="Maximum reply size"
-        subtitle={`${REPLY_MIN.toLocaleString()} – ${REPLY_MAX.toLocaleString()} tokens`}
-        value={
-          <span aria-live="polite">
-            {value.toLocaleString()}
-          </span>
-        }
-        trailing={
-          <Stepper
-            label="Reply size"
-            onDecrement={() => step(-1)}
-            onIncrement={() => step(1)}
-            canDecrement={value > REPLY_MIN}
-            canIncrement={value < REPLY_MAX}
-          />
-        }
-      />
+      <Row icon={<SparklesIcon />} tone="gold" title="Reply length" subtitle="Short for quick questions, deeper when you ask" value="Adaptive" />
     </Group>
   );
 }

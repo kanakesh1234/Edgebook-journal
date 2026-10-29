@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
@@ -12,13 +12,13 @@ import { evaluateRules, adherenceSummary } from "@/lib/rules";
 import { computeInsights, topState, type MinatoState } from "@/lib/minato/insights";
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
-import { QUICK_PROMPTS } from "@/lib/minato/respond";
-import { Button } from "@/components/ui/button";
+import { todayKey } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
+import "./minato.css";
 
 const STATE_DOT: Record<MinatoState, string> = {
-  idle: "bg-faint",
+  idle: "bg-profit",
   curious: "bg-info",
   thinking: "bg-info animate-pulse",
   warning: "bg-gold",
@@ -27,42 +27,23 @@ const STATE_DOT: Record<MinatoState, string> = {
   celebration: "bg-profit",
 };
 
-const STATE_GLYPH: Record<MinatoState, string> = {
-  idle: "·",
-  curious: "?",
-  thinking: "…",
-  warning: "!",
-  firm: "!!",
-  proud: "✓",
-  celebration: "★",
-};
+const THREAD_KEY = "edgebook:minato:thread:v1";
+const THREAD_MAX = 60;
 
-/**
- * Minimal inline-markdown for MINATO's replies. The model is instructed to
- * write **bold** for emphasis, but the chat bubble was rendering messages
- * as raw text — so people were seeing literal asterisks instead of bold
- * text. This only handles **bold**; line breaks are already preserved by
- * the bubble's `whitespace-pre-wrap`, and full markdown isn't needed here.
- */
+/* ------------------------------------------------------------------ */
+/*  Light-weight reply formatting (bold, numbered findings, bullets)   */
+/* ------------------------------------------------------------------ */
+
 function renderInline(text: string) {
-  // Some providers escape Markdown punctuation (\\*\\*label\\*\\*) despite
-  // the prompt. Normalize only escaped asterisks before rendering so the
-  // chat never exposes formatting syntax to the trader.
+  // Some models escape Markdown punctuation; never show formatting syntax.
   const normalized = text.replace(/\\\*/g, "*");
-  const parts = normalized.split(/(\*\*[^*\n]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
-    }
-    return <span key={i}>{part}</span>;
-  });
+  return normalized.split(/(\*\*[^*\n]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") && part.length > 4
+      ? <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>,
+  );
 }
 
-/**
- * Give analytical answers a dependable visual hierarchy even when a model
- * returns plain text. Numbered findings become compact cards, supporting
- * bullets stay visibly subordinate, and labels retain their emphasis.
- */
 function renderMinatoText(text: string) {
   return text.replace(/\r/g, "").split("\n").map((line, i) => {
     const numbered = line.match(/^(\d+)\.\s+(.+)$/);
@@ -75,59 +56,80 @@ function renderMinatoText(text: string) {
       );
     }
     const bullet = line.match(/^\s*[-•–]\s+(.+)$/);
-    if (bullet) {
-      return <div key={i} className="minato-supporting-point"><span>•</span><span>{renderInline(bullet[1])}</span></div>;
-    }
-    if (!line.trim()) return <div key={i} className="h-2" aria-hidden />;
-    return <p key={i} className={i === 0 ? "font-medium text-ink" : undefined}>{renderInline(line)}</p>;
+    if (bullet) return <div key={i} className="minato-supporting-point"><span>•</span><span>{renderInline(bullet[1])}</span></div>;
+    if (!line.trim()) return <div key={i} className="h-1.5" aria-hidden />;
+    return <p key={i}>{renderInline(line)}</p>;
   });
 }
 
-const ANALYSIS_STEPS = [
-  "Reading your journal…",
-  "Checking patterns and plan adherence…",
-  "Preparing a focused answer…",
-] as const;
+/* ------------------------------------------------------------------ */
+/*  Icons                                                              */
+/* ------------------------------------------------------------------ */
+
+const Svg = ({ children, className = "h-[17px] w-[17px]" }: { children: React.ReactNode; className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
+);
+const CloseIcon = () => <Svg><path d="M6 6l12 12M18 6 6 18" /></Svg>;
+const ComposeIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>;
+const SendIcon = () => <Svg className="h-4 w-4"><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
+
+function Avatar({ className }: { className?: string }) {
+  return (
+    <span className={cn("grid place-items-center overflow-hidden rounded-full bg-gold/15 font-bold text-gold", className)} aria-hidden>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/minato-avatar.jpg"
+        alt=""
+        width={256}
+        height={256}
+        className="h-full w-full object-cover"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          e.currentTarget.nextElementSibling?.classList.remove("hidden");
+        }}
+      />
+      <span className="hidden text-sm">M</span>
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Minato                                                             */
+/* ------------------------------------------------------------------ */
 
 /**
- * MINATO SENSEI — floating trading companion.
- * Small, premium, quiet by default. Opens into a focused panel fed by
- * the deterministic provider; the AiCoachProvider seam swaps in an LLM
- * later without UI changes.
+ * MINATO — the trader's companion. Quiet launcher, one calm panel:
+ * greeting, a few relevant suggestions, the conversation, a composer.
+ * Everything the trader has recorded (journal, plans, practice, notes,
+ * screenshots metadata) reaches the model; the UI stays small.
  */
 export function Minato() {
   const allEntries = useApp((s) => s.entries);
   const rawSettings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
   const dayLogs = useApp((s) => s.dayLogs);
+  const plans = useApp((s) => s.plans);
   const open = useUi((s) => s.minatoOpen);
   const setOpen = useUi((s) => s.setMinatoOpen);
   const focusId = useUi((s) => s.minatoTradeId);
   const reduce = useReducedMotion();
+  const pathname = usePathname();
 
-  // MINATO follows the primary challenge — same source of truth as Home.
   const { entries, settings, challenge } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
-  const updateSettings = useApp((s) => s.updateSettings);
-  // Prefer a genuinely useful analytical answer by default. This is a request
-  // budget, not a hidden truncation of the journal; the selected model still
-  // has the final technical limit on what it can generate.
-  const responseTokenLimit = Math.min(32_000, Math.max(250, settings.aiPrefs?.responseTokenLimit ?? 4_000));
-
   const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
-  const focusEntry = useMemo(
-    () => entries.find((e) => e.id === focusId) ?? null,
-    [entries, focusId],
-  );
+  const focusEntry = useMemo(() => entries.find((e) => e.id === focusId) ?? null, [entries, focusId]);
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const discipline = useMemo(() => disciplineSummary(entries, dayLogs), [entries, dayLogs]);
   const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
   const adherence = useMemo(() => adherenceSummary(entries, settings), [entries, settings]);
 
+  const firstName = (settings.fullName?.trim() || user?.name || "").split(" ")[0] ?? "";
+
   const ctx = useMemo(
     () =>
       buildContext({
-        userFirstName: (settings.fullName?.trim() || user?.name || "").split(" ")[0] ?? "",
+        userFirstName: firstName,
         entries,
         stats,
         discipline,
@@ -136,97 +138,83 @@ export function Minato() {
         activeRules: (settings.rules?.rules ?? []).filter((r) => r.enabled),
         violations,
         focusEntry,
-        includeNotes: true, // MINATO has full access to the authenticated user's recorded context
+        includeNotes: true,
       }),
-    [entries, settings, user, focusEntry, stats, discipline, adherence, violations],
+    [entries, settings, firstName, focusEntry, stats, discipline, adherence, violations],
   );
 
   const insights = useMemo(() => computeInsights(ctx), [ctx]);
 
+  /* Practice sessions, plans and no-trade days — compact, bounded, JSON-only. */
+  const companion = useMemo(() => {
+    const pp = rawSettings.practiceProgress;
+    const scopedPlans = (plans ?? []).filter((p) => !challenge || !p.challengeId || p.challengeId === challenge.id);
+    return {
+      practice: pp
+        ? {
+            xp: pp.xp,
+            streak: pp.streak,
+            lessonsTheyWrote: (pp.seedLessons ?? []).slice(0, 8),
+            accuracyByMode: Object.entries(pp.modePerformance ?? {})
+              .filter(([, v]) => v.attempts > 0)
+              .map(([mode, v]) => ({ mode, accuracyPct: Math.round((v.correct / v.attempts) * 100), attempts: v.attempts }))
+              .sort((a, b) => a.accuracyPct - b.accuracyPct)
+              .slice(0, 10),
+            masteryByTag: Object.entries(pp.masteryByTag ?? {}).sort((a, b) => a[1] - b[1]).slice(0, 12),
+            last14Days: Object.entries(pp.dailyStats ?? {}).sort((a, b) => a[0].localeCompare(b[0])).slice(-14).map(([date, v]) => ({ date, ...v })),
+            futureSelfPredictions: (pp.futureSelfPredictions ?? []).slice(-5).map((f) => ({ date: f.date, rule: f.rule, outcome: f.outcome ?? null })),
+          }
+        : null,
+      plans: scopedPlans.slice(-20).map((p) => ({
+        date: p.date,
+        instrument: p.instrument ?? null,
+        bias: p.bias ?? null,
+        playbook: p.playbookName ?? null,
+        process: (p.preSessionProcess ?? "").slice(0, 400) || null,
+      })),
+      noTradeDays: dayLogs.slice(-30).map((d) => d.date),
+      todayLossLimit: rawSettings.dayLimits?.[todayKey()] ?? null,
+    };
+  }, [rawSettings, plans, dayLogs, challenge]);
+
+  /* ---------------- conversation (persisted across closes & reloads) ---------------- */
+  const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
   const [messages, setMessages] = useState<MinatoMessage[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [analysisStep, setAnalysisStep] = useState(0);
-  const [replySizeDraft, setReplySizeDraft] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const focusReviewed = useRef(false);
 
-  // "thinking" should reflect an actual in-flight request, not just
-  // whether the panel happens to be open — previously it showed
-  // "thinking" the entire time the panel was open, even at rest.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(threadKey);
+      const parsed = raw ? (JSON.parse(raw) as MinatoMessage[]) : [];
+      setMessages(Array.isArray(parsed) ? parsed.filter((m) => m && typeof m.text === "string") : []);
+    } catch { setMessages([]); }
+    setHydrated(true);
+  }, [threadKey]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try { window.localStorage.setItem(threadKey, JSON.stringify(messages.slice(-THREAD_MAX))); } catch { /* storage full or blocked */ }
+  }, [messages, hydrated, threadKey]);
+
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
-  /* ---------------------------------------------------------------- */
-  /*  Launcher visibility — hidden until needed.                       */
-  /*  Appears when: the panel is open · the page is scrolled to its    */
-  /*  end · the pointer visits the bottom-right corner · it receives   */
-  /*  keyboard focus. Otherwise a quiet edge handle is all you see.    */
-  /* ---------------------------------------------------------------- */
-  const pathname = usePathname();
-  const [atEnd, setAtEnd] = useState(false);
-  const [peek, setPeek] = useState(false);
-  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wasOpen = useRef(open);
-
-  const holdPeek = () => {
-    if (peekTimer.current) clearTimeout(peekTimer.current);
-    setPeek(true);
-  };
-  const releasePeek = (ms = 1400) => {
-    if (peekTimer.current) clearTimeout(peekTimer.current);
-    peekTimer.current = setTimeout(() => setPeek(false), ms);
-  };
+  // "Still working" hint only if an answer takes a while.
+  useEffect(() => {
+    if (!busy) { setSlow(false); return; }
+    const t = window.setTimeout(() => setSlow(true), 7000);
+    return () => window.clearTimeout(t);
+  }, [busy]);
 
   useEffect(() => {
-    const check = () => {
-      const el = document.documentElement;
-      const scrollable = el.scrollHeight > window.innerHeight + 40;
-      setAtEnd(scrollable && el.scrollHeight - (window.scrollY + window.innerHeight) < 160);
-    };
-    check();
-    const settle = window.setTimeout(check, 450); // after the new route has rendered
-    window.addEventListener("scroll", check, { passive: true });
-    window.addEventListener("resize", check);
-    const ro = new ResizeObserver(check);
-    ro.observe(document.body);
-    return () => {
-      window.clearTimeout(settle);
-      window.removeEventListener("scroll", check);
-      window.removeEventListener("resize", check);
-      ro.disconnect();
-    };
-  }, [pathname]);
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+  }, [messages, busy, reduce, open]);
 
-  // Mouse visiting the bottom-right corner brings the launcher in (like the Dock).
-  useEffect(() => {
-    let inCorner = false;
-    const onMove = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse") return;
-      const now = window.innerWidth - e.clientX < 170 && window.innerHeight - e.clientY < 110;
-      if (now === inCorner) return;
-      inCorner = now;
-      if (now) holdPeek();
-      else releasePeek();
-    };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    return () => window.removeEventListener("pointermove", onMove);
-  }, []);
-
-  // After closing the panel, linger briefly so the launcher doesn't vanish under the cursor.
-  useEffect(() => {
-    if (wasOpen.current && !open) {
-      holdPeek();
-      releasePeek(1800);
-    }
-    wasOpen.current = open;
-  }, [open]);
-
-  useEffect(() => () => { if (peekTimer.current) clearTimeout(peekTimer.current); }, []);
-
-  // The phone Feed uses the whole right edge for its action buttons, so the launcher stays tucked away there.
-  const feedPhone = pathname.startsWith("/feed") && typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
-  const launcherVisible = open || (!feedPhone && (peek || atEnd));
-
-  // Escape closes the panel (keyboard users, and tablets with a keyboard).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !e.isComposing) setOpen(false); };
@@ -234,70 +222,35 @@ export function Minato() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
-  // Greet on open
   useEffect(() => {
-    if (open) {
-      setMessages((m) =>
-        m.length > 0 ? m : [{ role: "buddy", text: provider.greeting(ctx) }],
-      );
+    if (open && !busy) {
+      const t = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 320);
+      return () => window.clearTimeout(t);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Trade-review context message when opened from an entry
-  useEffect(() => {
-    if (open && focusEntry && messages.length > 0 && messages[messages.length - 1]?.role === "buddy" && !focusReviewed.current) {
-      focusReviewed.current = true;
-      void ask(`Review ${focusEntry.setup || focusEntry.instrument || "this trade"}`);
-    }
-    if (!open) focusReviewed.current = false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, focusEntry]);
-
-  const focusReviewed = useRef(false);
-
-  useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: reduce ? "auto" : "smooth" });
-  }, [messages, reduce]);
-
-  useEffect(() => {
-    if (!busy) {
-      setAnalysisStep(0);
-      return;
-    }
-    const interval = window.setInterval(() => {
-      setAnalysisStep((step) => Math.min(step + 1, ANALYSIS_STEPS.length - 1));
-    }, 1100);
-    return () => window.clearInterval(interval);
-  }, [busy]);
-
-  const ask = async (text: string) => {
+  const ask = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     const next: MinatoMessage[] = [...messages, { role: "user", text: trimmed }];
     setMessages(next);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "";
     setBusy(true);
     try {
-      // Server computes deterministic facts from the persisted journal
-      // (hallucination-proof), then renders via OpenRouter when configured.
       let replyText: string | null = null;
       try {
-        // Deep journal reviews deserve time to finish. The local
-        // evidence-based provider remains available if the service is offline.
         const controller = new AbortController();
         const timeout = window.setTimeout(() => controller.abort(), 56_000);
         const res = await fetch("/api/minato/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // Send only the current primary challenge's journal. This keeps the
-          // server analysis both relevant and much smaller/faster.
           body: JSON.stringify({
             messages: next,
             entries,
             journalProvided: true,
             primaryChallenge: challenge ?? undefined,
-            responseTokenLimit,
+            companion,
           }),
           signal: controller.signal,
         });
@@ -306,9 +259,7 @@ export function Minato() {
           const json = (await res.json()) as { text?: string; fallback?: boolean };
           replyText = json.fallback ? null : json.text ?? null;
         }
-      } catch {
-        /* offline → deterministic fallback below */
-      }
+      } catch { /* offline → local provider below */ }
       if (!replyText) {
         const reply = await provider.reply({ messages: next, focusEntry }, ctx);
         replyText = reply.text;
@@ -317,105 +268,90 @@ export function Minato() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [busy, messages, entries, challenge, companion, provider, focusEntry, ctx]);
+
+  // Opened from a trade → start its review once.
+  useEffect(() => {
+    if (open && hydrated && focusEntry && !focusReviewed.current) {
+      focusReviewed.current = true;
+      void ask(`Review ${focusEntry.setup || focusEntry.instrument || "this trade"}`);
+    }
+    if (!open) focusReviewed.current = false;
+  }, [open, hydrated, focusEntry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------------- suggestions that actually fit the moment ---------------- */
+  const suggestions = useMemo(() => {
+    if (focusEntry) return ["What did I do well?", "What should I change?", "Is this a repeat of something?"];
+    if (entries.length === 0) return [];
+    const today = todayKey();
+    const todays = entries.filter((e) => e.date === today);
+    const lostToday = todays.length > 0 && todays.reduce((s, e) => s + e.pnl, 0) < 0;
+    const pp = rawSettings.practiceProgress;
+    const practised = !!pp && (pp.xp > 0 || Object.keys(pp.modePerformance ?? {}).length > 0);
+    return [
+      lostToday ? "Help me reset after today" : "How am I doing lately?",
+      "Review my last trade",
+      "What pattern keeps repeating?",
+      practised ? "What should I practise next?" : "How is my mindset?",
+    ];
+  }, [focusEntry, entries, rawSettings.practiceProgress]);
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    const part = h < 5 ? "Hi" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+    return firstName ? `${part}, ${firstName}.` : `${part}.`;
+  }, [firstName, open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const nudge = insights[0]?.message;
+  const newChat = () => { setMessages([]); setInput(""); inputRef.current?.focus(); };
+
+  const feedPhone = pathname.startsWith("/feed") && typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  const empty = messages.length === 0 && !busy;
 
   return (
     <>
-      {/* Floating companion */}
-      {/* Edge handle — the only trace of MINATO while the launcher is tucked away. */}
-      <AnimatePresence>
-        {!launcherVisible && !feedPhone && (
-          <motion.button
-            key="minato-handle"
-            type="button"
-            aria-label="Open MINATO — your trading companion"
-            onClick={() => setOpen(true)}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className="group fixed bottom-[calc(var(--tabbar-h)+5.5rem)] right-0 z-[89] flex h-14 w-6 items-center justify-end md:bottom-24"
-          >
-            <span className="block h-9 w-[4px] rounded-l-full bg-ink/20 transition-all duration-200 group-hover:w-[7px] group-hover:bg-gold/60 group-active:w-[9px]" />
-          </motion.button>
-        )}
-      </AnimatePresence>
-
-      <motion.button
-        type="button"
-        aria-label={open ? "Close MINATO" : "Open MINATO — your trading companion"}
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-          holdPeek();
-        }}
-        onPointerEnter={holdPeek}
-        onPointerLeave={() => releasePeek()}
-        onFocus={holdPeek}
-        onBlur={() => releasePeek(300)}
-        initial={false}
-        animate={
-          launcherVisible
-            ? { opacity: 1, y: 0, scale: 1 }
-            : reduce
-              ? { opacity: 0 }
-              : { opacity: 0, y: 18, scale: 0.92 }
-        }
-        whileTap={launcherVisible ? { scale: 0.95 } : undefined}
-        transition={{ type: "spring", stiffness: 380, damping: 32 }}
-        style={{ pointerEvents: launcherVisible ? "auto" : "none" }}
-        className={cn(
-          "fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[90] flex items-center gap-2 rounded-full border bg-surface py-2 pl-3 pr-4 shadow-lift transition-colors duration-200 md:bottom-5 md:right-5",
-          open ? "border-gold/50 max-md:hidden" : "border-line-strong",
-        )}
-      >
-        <span
+      {/* Launcher */}
+      {!feedPhone && (
+        <motion.button
+          type="button"
+          aria-label={open ? "Close Minato" : "Open Minato"}
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          whileTap={{ scale: 0.94 }}
+          transition={{ type: "spring", stiffness: 420, damping: 30 }}
           className={cn(
-            "grid h-8 w-8 place-items-center overflow-hidden rounded-full border text-sm font-bold",
-            open ? "border-gold/60 bg-gold/15 text-gold" : "border-line-strong bg-raised text-gold",
+            "mn-launcher fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[90] grid h-[52px] w-[52px] place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-gold/60 md:bottom-5 md:right-5",
+            open && "max-md:hidden",
           )}
-          aria-hidden
         >
-          {open ? (
-            "×"
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src="/minato-avatar.jpg"
-              alt=""
-              width={256}
-              height={256}
-              className="h-full w-full object-cover"
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-                e.currentTarget.nextElementSibling?.classList.remove("hidden");
-              }}
-            />
-          )}
-          {!open && <span className="hidden">{STATE_GLYPH[state]}</span>}
-        </span>
-        <span className="text-left">
-          <span className="block text-[11px] font-bold tracking-wide text-ink">MINATO</span>
-          <span className="flex items-center gap-1 text-[9px] font-medium uppercase tracking-wider text-faint">
-            <span className={cn("h-1.5 w-1.5 rounded-full", STATE_DOT[state])} />
-            {state === "idle" ? "sensei" : state}
-          </span>
-        </span>
-      </motion.button>
+          <AnimatePresence mode="wait" initial={false}>
+            {open ? (
+              <motion.span key="x" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={{ duration: 0.22, ease: EASE }} className="text-ink">
+                <CloseIcon />
+              </motion.span>
+            ) : (
+              <motion.span key="a" initial={{ rotate: 40, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -40, opacity: 0 }} transition={{ duration: 0.22, ease: EASE }} className="relative">
+                <Avatar className="h-[40px] w-[40px]" />
+                <span className={cn("absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--overlay)]", STATE_DOT[state])} />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.button>
+      )}
 
-      {/* Phones: tapping anywhere outside the panel closes it (the tab bar stays usable). */}
+      {/* Phones: tap outside closes (tab bar stays usable) */}
       <AnimatePresence>
         {open && (
           <motion.button
             key="minato-backdrop"
             type="button"
-            aria-label="Close MINATO"
+            aria-label="Close Minato"
             tabIndex={-1}
             onClick={() => setOpen(false)}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.25 }}
             className="fixed inset-x-0 top-0 bottom-[var(--tabbar-h)] z-[89] bg-black/25 md:hidden"
           />
         )}
@@ -426,133 +362,83 @@ export function Minato() {
         {open && (
           <motion.div
             role="dialog"
-            aria-label="MINATO — trading companion"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 24, scale: 0.97 }}
+            aria-label="Minato"
+            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.97 }}
             animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={{ duration: 0.3, ease: EASE }}
-            className="panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex max-h-[min(600px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden shadow-overlay md:inset-x-auto md:bottom-20 md:right-5 md:max-h-[min(600px,calc(100dvh-7rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.32, ease: EASE }}
+            style={{ transformOrigin: "bottom right" }}
+            className="mn-panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex h-[min(620px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden rounded-[26px] md:inset-x-auto md:bottom-[84px] md:right-5 md:h-[min(620px,calc(100dvh-7.5rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-line py-2.5 pl-4 pr-2 sm:py-3.5 sm:pl-5 sm:pr-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-gold/40 bg-gold/10 text-sm font-bold text-gold" aria-hidden>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/minato-avatar.jpg"
-                    alt=""
-                    width={256}
-                    height={256}
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                      e.currentTarget.nextElementSibling?.classList.remove("hidden");
-                    }}
-                  />
-                  <span className="hidden">M</span>
-                </span>
-                <div>
-                  <p className="text-sm font-bold tracking-wide text-ink">MINATO SENSEI</p>
-                  <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
-                    <span className={cn("h-1.5 w-1.5 rounded-full bg-profit")} />
-                    trading companion
-                  </p>
-                </div>
+            <div className="mn-head flex items-center gap-3 px-4 py-3">
+              <Avatar className="h-9 w-9 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">Minato</p>
+                <p className="flex items-center gap-1.5 truncate text-[12px] text-muted">
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT[state])} />
+                  <span className="truncate">{busy ? "Thinking…" : challenge ? challenge.name : "Your trading companion"}</span>
+                </p>
               </div>
-              <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
-              <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-faint" title="Set a custom reply budget from 250 to 32,000 tokens. Your selected model may impose a lower technical ceiling.">
-                <span className="hidden sm:inline">Reply</span>
-                <input
-                  aria-label="MINATO reply size in tokens"
-                  type="number"
-                  min={250}
-                  max={32000}
-                  step={500}
-                  value={replySizeDraft ?? responseTokenLimit}
-                  onChange={(e) => setReplySizeDraft(e.target.value)}
-                  onBlur={() => {
-                    const nextLimit = Math.min(32_000, Math.max(250, Number(replySizeDraft ?? responseTokenLimit) || responseTokenLimit));
-                    setReplySizeDraft(null);
-                    if (nextLimit !== responseTokenLimit) {
-                      void updateSettings({ aiPrefs: { ...(rawSettings.aiPrefs ?? { includeNotes: true }), responseTokenLimit: nextLimit } });
-                    }
-                  }}
-                  className="w-14 rounded border border-line bg-raised px-1 py-1 text-right text-[10px] text-ink focus:border-gold/60 focus:outline-none"
-                />
-                <span className="hidden sm:inline">tokens</span>
-              </label>
-              <button
-                type="button"
-                aria-label="Close MINATO"
-                onClick={() => setOpen(false)}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-muted outline-none transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-gold/50 active:scale-95"
-              >
-                <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
+              {messages.length > 0 && (
+                <button type="button" aria-label="New conversation" title="New conversation" onClick={newChat} className="mn-icon-btn group">
+                  <span className="transition-transform duration-300 ease-out group-hover:-rotate-12 group-active:rotate-[-24deg]"><ComposeIcon /></span>
+                </button>
+              )}
+              <button type="button" aria-label="Close Minato" onClick={() => setOpen(false)} className="mn-icon-btn group">
+                <span className="transition-transform duration-300 ease-out group-hover:rotate-90"><CloseIcon /></span>
               </button>
-              </div>
             </div>
 
-            {challenge && (
-              <div className="border-b border-line-soft bg-gold/5 px-4 py-2 text-[11px] text-muted">
-                Analysing only: <strong className="font-semibold text-ink">{challenge.name}</strong>
-              </div>
-            )}
+            {/* Conversation */}
+            <div ref={listRef} className="flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4" aria-live="polite">
+              {empty && (
+                <motion.div initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: EASE, delay: 0.08 }} className="flex h-full min-h-[180px] flex-col justify-center px-1">
+                  <p className="font-display text-[28px] font-semibold leading-[1.1] tracking-[-0.03em] text-ink">{greeting}</p>
+                  <p className="mt-2 max-w-[30ch] text-[14.5px] leading-snug text-muted">
+                    {nudge ?? (entries.length === 0 ? "Log your first trade and I’ll start learning how you trade." : "What’s on your mind about your trading?")}
+                  </p>
+                </motion.div>
+              )}
 
-            {/* Insights */}
-            {insights.length > 0 && (
-              <div className="space-y-2 border-b border-line-soft bg-raised/40 px-4 py-3">
-                {insights.slice(0, 2).map((ins) => (
-                  <div key={ins.id} className="flex items-start gap-2.5">
-                    <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT[ins.state])} aria-hidden />
-                    <p className="text-[12.5px] leading-relaxed text-muted">{ins.message}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Messages */}
-            <div ref={listRef} className="min-h-40 flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
               {messages.map((m, i) => (
-                <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                <motion.div
+                  key={i}
+                  initial={reduce ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.28, ease: EASE }}
+                  className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
+                >
                   <div
                     className={cn(
-                      "max-w-[88%] rounded-2xl px-3.5 py-3 text-[13px] leading-relaxed",
-                      m.role === "user"
-                        ? "rounded-br-md bg-ink text-canvas"
-                        : "rounded-bl-md border border-line bg-raised text-ink",
+                      "max-w-[88%] rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.45]",
+                      m.role === "user" ? "rounded-br-[6px] bg-ink text-canvas" : "rounded-bl-[6px] bg-ink/[0.06] text-ink",
                     )}
                   >
-                    {m.role === "user" ? (
-                      // The user's own words are plain text — never run through the
-                      // assistant formatter, whose first line forces dark `text-ink`
-                      // (invisible on the dark user bubble).
-                      <p className="whitespace-pre-wrap break-words text-canvas">{m.text}</p>
-                    ) : (
-                      renderMinatoText(m.text)
-                    )}
+                    {m.role === "user" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <div className="space-y-1">{renderMinatoText(m.text)}</div>}
                   </div>
-                </div>
+                </motion.div>
               ))}
+
               {busy && (
                 <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-line bg-raised px-3.5 py-2.5 text-[12px] text-muted">
-                    <span className="minato-thinking-dot" aria-hidden />
-                    <span>{reduce ? "Analyzing your journal…" : ANALYSIS_STEPS[analysisStep]}</span>
+                  <div className="flex items-center gap-2.5 rounded-[20px] rounded-bl-[6px] bg-ink/[0.06] px-4 py-3">
+                    <span className="mn-typing" aria-label="Minato is thinking"><i /><i /><i /></span>
+                    {slow && <span className="text-[12px] text-muted">Going through your journal…</span>}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Quick prompts */}
-            {QUICK_PROMPTS.length > 0 && (
-              <div className="flex gap-1.5 overflow-x-auto border-t border-line-soft px-4 py-2.5 [scrollbar-width:none]">
-                {QUICK_PROMPTS.map((p) => (
+            {/* Suggestions — only before the conversation starts */}
+            {empty && suggestions.length > 0 && (
+              <div className="mn-chips flex gap-2 overflow-x-auto px-4 pb-2.5 pt-1 [scrollbar-width:none]">
+                {suggestions.map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => void ask(p)}
-                    disabled={busy}
-                    className="shrink-0 rounded-full border border-line bg-raised/60 px-3 py-1.5 text-[11px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+                    className="shrink-0 rounded-full bg-ink/[0.06] px-3.5 py-2 text-[13px] font-medium text-ink transition-[background-color,transform] duration-200 hover:bg-ink/[0.1] active:scale-[0.97]"
                   >
                     {p}
                   </button>
@@ -560,24 +446,32 @@ export function Minato() {
               </div>
             )}
 
-            {/* Input */}
+            {/* Composer */}
             <form
-              className="flex items-center gap-2 border-t border-line px-4 py-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void ask(input);
-              }}
+              className="px-3 pb-3 pt-1"
+              onSubmit={(e) => { e.preventDefault(); void ask(input); }}
             >
-              <input
-                aria-label="Ask MINATO"
-                placeholder="Ask about your journal…"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="min-w-0 flex-1 rounded-control border border-line bg-raised px-3 py-2 text-[13px] text-ink placeholder:text-faint focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10"
-              />
-              <Button type="submit" variant="gold" size="sm" disabled={busy || !input.trim()}>
-                Ask
-              </Button>
+              <div className="mn-field flex items-end gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  aria-label="Message Minato"
+                  placeholder="Ask Minato…"
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    e.currentTarget.style.height = "auto";
+                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 120)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void ask(input); }
+                  }}
+                  className="max-h-[120px] min-h-[28px] flex-1 resize-none self-center bg-transparent py-[3px] text-[15px] leading-[22px] text-ink outline-none placeholder:text-faint"
+                />
+                <button type="submit" aria-label="Send" disabled={busy || !input.trim()} className="mn-send group">
+                  <span className="transition-transform duration-300 ease-out group-enabled:group-hover:-translate-y-px"><SendIcon /></span>
+                </button>
+              </div>
             </form>
           </motion.div>
         )}

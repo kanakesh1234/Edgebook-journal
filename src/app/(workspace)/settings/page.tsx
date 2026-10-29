@@ -14,7 +14,6 @@ import { Avatar, BackButton, Group, Row } from "@/components/settings/primitives
 import {
   PANE_TITLES,
   PaneView,
-  clampReply,
   formatBytes,
   isPaneId,
   themeLabel,
@@ -151,7 +150,6 @@ function SettingsList({
   const displayName = useDisplayName();
   const { choice } = useTheme();
   const challenge = primaryChallenge(settings);
-  const replySize = clampReply(settings.aiPrefs?.responseTokenLimit ?? 900);
 
   const item = (id: PaneId) => ({
     title: PANE_TITLES[id],
@@ -180,7 +178,7 @@ function SettingsList({
 
       <Group>
         <Row {...item("appearance")} icon={<AppearanceGlyph />} tone="ink" value={themeLabel(choice)} />
-        <Row {...item("minato")} icon={<SparklesIcon />} tone="gold" value={replySize.toLocaleString()} />
+        <Row {...item("minato")} icon={<SparklesIcon />} tone="gold" />
         <Row {...item("trading")} icon={<CandlestickIcon />} tone="profit" value={challenge?.name} />
       </Group>
 
