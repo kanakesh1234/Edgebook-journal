@@ -35,14 +35,14 @@ const CONTACT_EMAIL = "kanakesh939264@gmail.com";
 /** Plain, in-flow footer: contact, links and a one-line disclaimer. No fixed layers, no extra scroll. */
 export function SiteFooter() {
   return (
-    <footer id="contact" className="border-t border-line bg-surface px-5 py-14 sm:px-8 sm:py-16">
+    <footer id="contact" className="border-t border-line bg-canvas px-5 py-14 sm:px-8 sm:py-16">
       <div className="mx-auto grid w-full max-w-[1200px] gap-12 md:grid-cols-[1.2fr_1fr] md:gap-16">
         <div>
           <h2 className="font-display text-[clamp(1.6rem,3vw,2.2rem)] font-semibold tracking-[-0.035em] text-ink">Contact us</h2>
           <p className="mt-2 max-w-sm text-[15px] leading-snug text-muted">Questions or feedback? We read every message.</p>
           <a
             href={`mailto:${CONTACT_EMAIL}?subject=Edgebook`}
-            className="group mt-5 inline-flex h-11 items-center gap-2.5 rounded-full border border-line-strong bg-canvas px-5 text-[14.5px] font-medium text-ink transition-[background-color,border-color,transform] duration-200 hover:border-gold/60 hover:bg-raised active:scale-[0.98]"
+            className="group mt-5 inline-flex h-11 items-center gap-2.5 rounded-full border border-line-strong bg-raised px-5 text-[14.5px] font-medium text-ink transition-[background-color,border-color,transform] duration-200 hover:border-gold/60 hover:bg-ink/[0.04] active:scale-[0.98]"
           >
             <svg viewBox="0 0 24 24" className="h-[17px] w-[17px] text-gold transition-transform duration-300 group-hover:-rotate-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <rect x="3" y="5" width="18" height="14" rx="3" />
