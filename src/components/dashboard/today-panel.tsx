@@ -15,7 +15,6 @@ import { useApp } from "@/lib/store";
 import type { CurrencyCode, JournalEntry } from "@/lib/types";
 import { formatDateMedium, formatMoney, formatSignedMoney, todayKey, weekdayShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { GlassSheen, glassPill } from "@/components/dashboard/daily-focus-control";
 import { ChevronRightIcon, LockIcon } from "@/components/ui/icons";
 import { EASE } from "@/components/landing/reveal";
 import { DailyLimit } from "./daily-limit";
@@ -300,10 +299,9 @@ export function TodayPanel({
                     <button
                       type="button"
                       onClick={() => void toggleNoTradeDay()}
-                      className={cn(glassPill, "h-8 px-3 text-[12px]", isNoTradeLogged ? "border-gold/50 text-gold-deep dark:text-gold" : "text-muted hover:text-ink")}
+                      className="rounded-full border border-line bg-raised px-3 py-1.5 text-[12px] font-medium text-muted transition-colors hover:text-ink"
                     >
-                      <GlassSheen active={isNoTradeLogged} />
-                      <span className="relative z-10">{isNoTradeLogged ? "Clear no-setup" : "No setup today"}</span>
+                      {isNoTradeLogged ? "Clear no-setup" : "No setup today"}
                     </button>
                   )}
                 </div>

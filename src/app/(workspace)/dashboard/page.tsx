@@ -10,7 +10,7 @@ import { CalendarView } from "@/components/calendar/calendar-view";
 import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
-import { DailyFocusControl, NoSetupDayButton } from "@/components/dashboard/daily-focus-control";
+import { DailyFocusControl } from "@/components/dashboard/daily-focus-control";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { BookOpenIcon, PlusIcon, SparklesIcon } from "@/components/ui/icons";
@@ -54,7 +54,6 @@ export default function DashboardPage() {
     return (
       <div className="space-y-7">
         <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
-          <NoSetupDayButton />
         </Header>
         <EmptyState
           icon={<BookOpenIcon className="h-7 w-7" />}
@@ -85,7 +84,6 @@ export default function DashboardPage() {
     <div className="space-y-6 md:space-y-8">
       <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
         <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
-          <NoSetupDayButton />
           <Button
             variant="outline"
             size="md"
