@@ -17,6 +17,13 @@ export { GUIDE, type ModelRun } from "./prompt";
  */
 export async function tagTrade(entry: JournalEntry, entries: JournalEntry[], plans: TradePlan[], inputs: TagInputs, timeoutMs = 35_000): Promise<Decision & { bundle: TagBundle }> {
   const bundle = buildBundle(entry, entries, plans, inputs);
+  try {
+    // Minato's knowledge of this trader (feelings, promises, the day's chat). Context only: it can never create a tag.
+    const { useApp } = await import("../store");
+    const { tagContextFromBrain } = await import("../minato/brain-ml");
+    const mind = tagContextFromBrain(useApp.getState().settings.aiBrain?.minato, entry);
+    if (mind) bundle.context = { ...bundle.context, traderMind: mind };
+  } catch { /* the tagger works without it */ }
   const { runs, reason } = hasWords(bundle) || bundle.facts.length > 0
     ? await askModels(bundle, timeoutMs)
     : { runs: [] as ModelRun[], reason: "There was nothing written to read yet." };

@@ -334,6 +334,8 @@ export function syncAiBrainMemory(
     setupProfile,
     planToAutopsy: b.planToAutopsy,
     dailyUnderstandings: b.dailyRecords,
+    // Minato's layer is owned by the chat; the journal sync must never wipe it.
+    minato: prevMemory?.minato,
   };
 }
 

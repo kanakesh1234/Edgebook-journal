@@ -13,7 +13,8 @@ import { computeInsights, topState, type MinatoState } from "@/lib/minato/insigh
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
-import { addNotes, detectMoods, emptyMind, loadMind, MOOD_LABEL, mindForModel, patterns, reconcile, saveMind, type Mood, type MindNote, type MindState } from "@/lib/minato/mind";
+import { loadMind, MOOD_LABEL, mindForModel, patterns, type Mood, type MindNote } from "@/lib/minato/mind";
+import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type Commitment, type MinatoBrain, type Readiness } from "@/lib/minato/brain-ml";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import "./minato.css";
@@ -30,7 +31,8 @@ const STATE_DOT: Record<MinatoState, string> = {
 
 const THREAD_KEY = "edgebook:minato:thread:v1";
 const MIND_KEY = "edgebook:minato:mind:v1";
-type ChatMsg = MinatoMessage & { noted?: Mood[] };
+type ChatMsg = MinatoMessage & { noted?: Mood[]; committed?: string[] };
+const BRAIN_MIRROR = "edgebook:minato:brain:v1";
 const THREAD_MAX = 60;
 
 /* ------------------------------------------------------------------ */
@@ -113,38 +115,107 @@ function NoteRow({ n, pending }: { n: MindNote; pending?: boolean }) {
   );
 }
 
-function MindPane({ pending, kept, habits }: { pending: MindNote[]; kept: MindNote[]; habits: ReturnType<typeof patterns> }) {
-  const empty = pending.length === 0 && kept.length === 0;
+const Heading = ({ children }: { children: React.ReactNode }) => (
+  <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">{children}</h3>
+);
+
+function ReadinessCard({ r, learning }: { r: Readiness | null; learning: { have: number; need: number } | null }) {
+  if (!r && !learning) return null;
+  if (!r && learning) {
+    return (
+      <section>
+        <Heading>Learning you</Heading>
+        <div className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
+          <p className="text-[13.5px] leading-snug text-ink">Your personal model needs {learning.need} trades before it says anything. You have {learning.have}.</p>
+          <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-ink/[0.09]"><div className="h-full rounded-full bg-gold-strong transition-[width] duration-500" style={{ width: `${Math.min(100, (learning.have / learning.need) * 100)}%` }} /></div>
+        </div>
+      </section>
+    );
+  }
+  const tone = r!.level === "high" ? "text-loss" : r!.level === "watch" ? "text-gold" : "text-profit";
+  return (
+    <section>
+      <Heading>Right now</Heading>
+      <div className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className={cn("text-[15px] font-semibold", tone)}>{r!.level === "high" ? "High slip risk" : r!.level === "watch" ? "Stay sharp" : "Steady"}</p>
+          <p className="num text-[22px] text-ink">{r!.pct}%</p>
+        </div>
+        {r!.drivers.length > 0 && <p className="mt-1.5 text-[13px] leading-snug text-muted">Because {r!.drivers.join(" and ")}.</p>}
+        <p className="mt-2 text-[11.5px] leading-snug text-faint">Chance your next trade loses, breaks a rule or carries a mistake. Learned from your last {r!.trades} trades; right {r!.holdoutAcc}% on trades it hadn&apos;t seen. Not a market call.</p>
+      </div>
+    </section>
+  );
+}
+
+function MindPane({ brain, readiness, learning, onCommit, onUnsave }: {
+  brain: MinatoBrain; readiness: Readiness | null; learning: { have: number; need: number } | null;
+  onCommit: (id: string, status: Commitment["status"]) => void; onUnsave: (id: string) => void;
+}) {
+  const today = todayKey();
+  const pending = brain.mind.notes.filter((n) => n.status === "pending");
+  const kept = brain.mind.notes.filter((n) => n.status === "kept");
+  const habits = patterns(brain.mind);
+  const commitments = brain.commitments.slice(-6).reverse();
+  const brief = brain.days[today];
+  const empty = !readiness && !learning && !brief && pending.length + kept.length + commitments.length + brain.saved.length === 0;
   return (
     <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
       {empty && (
         <div className="flex h-full min-h-[200px] flex-col justify-center px-1">
           <p className="font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">Tell me how you feel.</p>
-          <p className="mt-2 max-w-[32ch] text-[14.5px] leading-snug text-muted">
-            I hold it until your next setup, and keep it only if it turns out to matter.
-          </p>
+          <p className="mt-2 max-w-[32ch] text-[14.5px] leading-snug text-muted">I remember what matters, hold your feelings until your next setup, and keep only what proves useful.</p>
         </div>
       )}
-      {habits.length > 0 && (
+      <ReadinessCard r={readiness} learning={learning} />
+      {brief && (
         <section>
-          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Your patterns</h3>
+          <Heading>Today</Heading>
+          <p className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{brief.line}</p>
+        </section>
+      )}
+      {commitments.length > 0 && (
+        <section>
+          <Heading>Your commitments</Heading>
           <ul className="space-y-2">
-            {habits.map((h) => (
-              <li key={h.mood} className="rounded-[18px] border border-gold/30 bg-gold/[0.07] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{h.line}</li>
+            {commitments.map((c) => (
+              <li key={c.id} className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
+                <p className="text-[13.5px] leading-snug text-ink">“{c.text}”</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className={cn("text-[12px] font-medium", c.status === "kept" ? "text-profit" : c.status === "broken" ? "text-loss" : "text-faint")}>
+                    {c.status === "kept" ? "Kept" : c.status === "broken" ? "Broken" : "Open"}{c.auto ? " · checked against your trades" : ""}
+                  </span>
+                  {!c.auto && c.status === "open" && (
+                    <span className="flex gap-1.5">
+                      <button type="button" onClick={() => onCommit(c.id, "kept")} className="rounded-full bg-profit/15 px-2.5 py-1 text-[11.5px] font-medium text-profit">Kept</button>
+                      <button type="button" onClick={() => onCommit(c.id, "broken")} className="rounded-full bg-loss/15 px-2.5 py-1 text-[11.5px] font-medium text-loss">Broke it</button>
+                    </span>
+                  )}
+                </div>
+              </li>
             ))}
           </ul>
         </section>
       )}
-      {pending.length > 0 && (
+      {habits.length > 0 && (
         <section>
-          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Holding</h3>
-          <ul className="space-y-2">{pending.map((n) => <NoteRow key={n.id} n={n} pending />)}</ul>
+          <Heading>Your patterns</Heading>
+          <ul className="space-y-2">{habits.map((h) => <li key={h.mood} className="rounded-[18px] border border-gold/30 bg-gold/[0.07] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{h.line}</li>)}</ul>
         </section>
       )}
-      {kept.length > 0 && (
+      {pending.length > 0 && <section><Heading>Holding</Heading><ul className="space-y-2">{pending.map((n) => <NoteRow key={n.id} n={n} pending />)}</ul></section>}
+      {kept.length > 0 && <section><Heading>Kept because it was useful</Heading><ul className="space-y-2">{kept.slice(0, 8).map((n) => <NoteRow key={n.id} n={n} />)}</ul></section>}
+      {brain.saved.length > 0 && (
         <section>
-          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Kept because it was useful</h3>
-          <ul className="space-y-2">{kept.map((n) => <NoteRow key={n.id} n={n} />)}</ul>
+          <Heading>Saved by you</Heading>
+          <ul className="space-y-2">
+            {brain.saved.slice().reverse().map((x) => (
+              <li key={x.id} className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
+                <p className="line-clamp-4 text-[13.5px] leading-snug text-ink">{x.text}</p>
+                <div className="mt-1.5 flex items-center justify-between"><span className="text-[11.5px] text-faint">{x.date}</span><button type="button" onClick={() => onUnsave(x.id)} className="text-[11.5px] text-faint transition-colors hover:text-loss">Remove</button></div>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </div>
@@ -239,8 +310,9 @@ export function Minato() {
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [tab, setTab] = useState<"chat" | "mind">("chat");
-  const [mind, setMind] = useState<MindState>(emptyMind());
+  const [brain, setBrain] = useState<MinatoBrain>(emptyBrain());
   const [mindReady, setMindReady] = useState(false);
+  const brainKey = `${BRAIN_MIRROR}:${user?.id ?? "guest"}`;
   const mindKey = `${MIND_KEY}:${user?.id ?? "guest"}`;
   const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
@@ -264,17 +336,47 @@ export function Minato() {
     try { window.localStorage.setItem(threadKey, JSON.stringify(messages.slice(-THREAD_MAX))); } catch { /* storage full or blocked */ }
   }, [messages, hydrated, threadKey]);
 
-  useEffect(() => { setMind(loadMind(mindKey)); setMindReady(true); }, [mindKey]);
-  useEffect(() => { if (mindReady) saveMind(mindKey, mind); }, [mind, mindReady, mindKey]);
-  // Every time the journal changes, settle held feelings against the setup that was taken.
+  // Hydrate: Drive-synced brain first, then the device mirror, then the older Mind-only notes.
+  useEffect(() => {
+    let b: MinatoBrain | null = useApp.getState().settings.aiBrain?.minato ?? null;
+    if (!b) { try { const raw = window.localStorage.getItem(brainKey); if (raw) b = JSON.parse(raw) as MinatoBrain; } catch { /* ignore */ } }
+    setBrain(b ? { ...emptyBrain(), ...b } : { ...emptyBrain(), mind: loadMind(mindKey) });
+    setMindReady(true);
+  }, [brainKey, mindKey]);
+
+  // Persist: device mirror immediately, Drive (inside settings.aiBrain) shortly after changes settle.
   useEffect(() => {
     if (!mindReady) return;
-    setMind((m) => { const r = reconcile(m, allEntries, Date.now()); return r.changed ? r.state : m; });
-  }, [allEntries, mindReady]);
+    try { window.localStorage.setItem(brainKey, JSON.stringify(brain)); } catch { /* storage blocked */ }
+    const t = window.setTimeout(() => {
+      const st = useApp.getState();
+      const ai = st.settings.aiBrain;
+      if (!ai || JSON.stringify(ai.minato ?? null) === JSON.stringify(brain)) return;
+      void st.updateSettings({ aiBrain: { ...ai, minato: brain } });
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [brain, mindReady, brainKey]);
 
-  const pendingNotes = mind.notes.filter((n) => n.status === "pending");
-  const keptNotes = mind.notes.filter((n) => n.status === "kept");
-  const habits = useMemo(() => patterns(mind), [mind]);
+  // Every journal change: settle held feelings + commitments, then let the personal model learn from the new trades.
+  useEffect(() => {
+    if (!mindReady) return;
+    setBrain((b) => reconcileBrain(b, allEntries, Date.now(), todayKey()));
+    const t = window.setTimeout(() => setBrain((b) => { const net = trainNet(allEntries, plans ?? [], b.mind, b.net); return net === b.net ? b : { ...b, net }; }), 700);
+    return () => window.clearTimeout(t);
+  }, [allEntries, plans, mindReady]);
+
+  const recall = useMemo(
+    () => buildRecall(collectWords(allEntries, plans ?? [], rawSettings, brain)),
+    [allEntries, plans, rawSettings, brain.days, brain.saved], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const readiness = useMemo(() => readinessNow(brain.net, allEntries, plans ?? [], brain.mind, todayKey()), [brain.net, brain.mind, allEntries, plans]);
+  const learning = !readiness && allEntries.length > 0 && allEntries.length < 24 ? { have: allEntries.length, need: 24 } : null;
+
+  const pendingNotes = brain.mind.notes.filter((n) => n.status === "pending");
+
+  const saveInsight = (full: string) => setBrain((b) => { const text = full.slice(0, 600); return b.saved.some((x) => x.text === text) ? b : { ...b, saved: [...b.saved, { id: `s-${Date.now()}`, date: todayKey(), text, at: Date.now() }].slice(-20) }; });
+  const unsave = (id: string) => setBrain((b) => ({ ...b, saved: b.saved.filter((x) => x.id !== id) }));
+  const setCommitment = (id: string, status: Commitment["status"]) => setBrain((b) => ({ ...b, commitments: b.commitments.map((c) => c.id === id ? { ...c, status, auto: false } : c) }));
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
@@ -306,11 +408,11 @@ export function Minato() {
   const ask = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
-    const moods = detectMoods(trimmed);
     const nowMs = Date.now();
-    const mindNow = moods.length ? addNotes(mind, moods, trimmed, nowMs, todayKey()) : mind;
-    if (moods.length) setMind(mindNow);
-    const next: ChatMsg[] = [...messages, { role: "user", text: trimmed, ...(moods.length ? { noted: moods } : {}) }];
+    const applied = applyChat(brain, trimmed, nowMs, todayKey());
+    const moods = applied.moods;
+    setBrain(applied.brain);
+    const next: ChatMsg[] = [...messages, { role: "user", text: trimmed, ...(moods.length ? { noted: moods } : {}), ...(applied.commitments.length ? { committed: applied.commitments } : {}) }];
     setMessages(next);
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "";
@@ -328,7 +430,7 @@ export function Minato() {
             entries,
             journalProvided: true,
             primaryChallenge: challenge ?? undefined,
-            companion: { ...companion, mind: mindForModel(mindNow, moods, nowMs) },
+            companion: { ...companion, mind: mindForModel(applied.brain.mind, moods, nowMs), brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()) },
           }),
           signal: controller.signal,
         });
@@ -346,7 +448,7 @@ export function Minato() {
     } finally {
       setBusy(false);
     }
-  }, [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, mind]);
+  }, [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, brain, recall, readiness]);
 
   // Opened from a trade → start its review once.
   useEffect(() => {
@@ -518,7 +620,7 @@ export function Minato() {
               </div>
             </div>
 
-            {tab === "mind" && <MindPane pending={pendingNotes} kept={keptNotes} habits={habits} />}
+            {tab === "mind" && <MindPane brain={brain} readiness={readiness} learning={learning} onCommit={setCommitment} onUnsave={unsave} />}
 
             {/* Conversation */}
             <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4", tab !== "chat" && "hidden")} aria-live="polite">
@@ -551,6 +653,18 @@ export function Minato() {
                     <button type="button" onClick={() => setTab("mind")} className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold">
                       <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
                       Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}. Holding it for your next setup.
+                    </button>
+                  )}
+                  {m.committed && m.committed.length > 0 && (
+                    <button type="button" onClick={() => setTab("mind")} className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
+                      Saved your commitment. I&apos;ll check it against your trades.
+                    </button>
+                  )}
+                  {m.role === "buddy" && (
+                    <button type="button" onClick={() => saveInsight(m.text)} disabled={brain.saved.some((x) => x.text === m.text.slice(0, 600))} className="group flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold disabled:text-gold">
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 transition-transform duration-300 group-hover:-rotate-6" fill={brain.saved.some((x) => x.text === m.text.slice(0, 600)) ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden><path d="M6 4h12v17l-6-4-6 4Z" /></svg>
+                      {brain.saved.some((x) => x.text === m.text.slice(0, 600)) ? "Saved" : "Save this"}
                     </button>
                   )}
                 </motion.div>

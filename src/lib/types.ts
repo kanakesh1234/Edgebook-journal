@@ -596,6 +596,8 @@ export interface AiBrainMemory {
   };
   /** Rolling 60-day daily trader understanding log. */
   dailyUnderstandings: AiBrainDailyRecord[];
+  /** Minato's learning layer: day briefs, commitments, held feelings, saved insights and the personal risk net. */
+  minato?: import("./minato/brain-ml").MinatoBrain;
 }
 
 export interface PracticeProgress {
