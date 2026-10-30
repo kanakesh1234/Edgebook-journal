@@ -59,6 +59,22 @@ const CheckGlyph = ({ className = "h-3 w-3" }: { className?: string }) => (
   </svg>
 );
 
+/**
+ * Shared "glass pill": the app's `.glass` material with a hairline edge, a soft top highlight and a gentle lift.
+ * Children must sit in a `relative z-10` wrapper so the sheen never tints the label.
+ */
+export const glassPill =
+  "glass relative isolate inline-flex items-center overflow-hidden rounded-full border border-white/60 font-medium outline-none ring-1 ring-inset ring-black/[0.05] shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_8px_20px_-12px_rgb(48_40_24/0.4)] transition-[transform,box-shadow,color] duration-300 ease-[var(--ease-ios)] hover:-translate-y-px hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.7),0_12px_26px_-12px_rgb(48_40_24/0.5)] active:translate-y-0 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-gold-strong/50 dark:border-white/10 dark:ring-white/[0.05] dark:shadow-[inset_0_1px_0_rgb(255_255_255/0.08),0_10px_24px_-14px_rgb(0_0_0/0.8)]";
+
+export function GlassSheen({ active }: { active?: boolean }) {
+  return (
+    <>
+      <span aria-hidden className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-b from-white/45 to-transparent dark:from-white/[0.07]" />
+      <span aria-hidden className={cn("pointer-events-none absolute inset-0 rounded-full bg-gold/[0.16] transition-opacity duration-300", active ? "opacity-100" : "opacity-0")} />
+    </>
+  );
+}
+
 export async function toggleTodayNoSetup(hasTraded: boolean, noSetup: boolean): Promise<boolean> {
   const today = todayKey();
   if (hasTraded) return false;
@@ -100,22 +116,20 @@ export function NoSetupDayButton() {
       aria-checked={noSetup}
       onClick={() => void toggleTodayNoSetup(hasTraded, noSetup)}
       title={noSetup ? "No-setup day is active — tap to re-enable trading" : "Mark today as a no-setup day and lock trading"}
-      className={cn(
-        "group relative inline-flex h-10 items-center gap-2 rounded-full border px-3.5 text-[13px] font-medium outline-none transition-all duration-200 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-gold-strong/50",
-        noSetup
-          ? "border-gold/55 bg-gold/[0.14] text-gold-deep shadow-[0_4px_14px_-4px_rgb(180_130_40/0.28)] dark:text-gold"
-          : "border-line bg-surface/90 text-muted shadow-[0_1px_2px_rgb(48_40_24/0.04)] hover:border-line-strong hover:text-ink",
-      )}
+      className={cn(glassPill, "group h-10 gap-2 px-3.5 text-[13px]", noSetup ? "border-gold/50 text-gold-deep dark:border-gold/40 dark:text-gold" : "text-muted hover:text-ink")}
     >
-      <span
-        className={cn(
-          "grid h-5 w-5 shrink-0 place-items-center rounded-full transition-colors duration-200",
-          noSetup ? "bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold" : "bg-ink/[0.06] text-muted group-hover:text-ink",
-        )}
-      >
-        {noSetup ? <CheckGlyph className="h-2.5 w-2.5" /> : <HandPauseGlyph className="h-3 w-3" />}
+      <GlassSheen active={noSetup} />
+      <span className="relative z-10 inline-flex items-center gap-2">
+        <span
+          className={cn(
+            "grid h-5 w-5 shrink-0 place-items-center rounded-full transition-[background-color,transform] duration-300 ease-[var(--ease-ios)] group-hover:-rotate-12",
+            noSetup ? "rotate-0 bg-gradient-to-b from-gold-strong to-gold-deep text-on-gold" : "bg-ink/[0.06]",
+          )}
+        >
+          {noSetup ? <CheckGlyph className="h-2.5 w-2.5" /> : <HandPauseGlyph className="h-3 w-3" />}
+        </span>
+        <span className="whitespace-nowrap">{noSetup ? "No-setup day" : "No setup"}</span>
       </span>
-      <span className="whitespace-nowrap">{noSetup ? "No-setup day" : "No setup"}</span>
     </motion.button>
   );
 }
@@ -207,22 +221,20 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
             haptic.selection();
             setMenuOpen((open) => !open);
           }}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium transition-all duration-150 active:scale-[0.97]",
-            noSetup
-              ? "border-gold/45 bg-gold/[0.12] text-gold-deep dark:text-gold"
-              : "border-line bg-surface text-muted shadow-[0_1px_2px_rgb(48_40_24_/_0.04)] hover:border-line-strong hover:text-ink",
-          )}
+          className={cn(glassPill, "h-7 gap-1.5 px-2.5 text-[12px]", noSetup ? "border-gold/45 text-gold-deep dark:text-gold" : "text-muted hover:text-ink")}
         >
-          <span className={cn("h-1.5 w-1.5 rounded-full", noSetup ? "bg-gold-strong" : hasLimit ? "bg-profit" : "bg-faint")} aria-hidden />
-          <span>
-            {noSetup
-              ? "No-setup day"
-              : hasLimit
-                ? `Limit ${formatMoney(limitAmount, currency, { decimals: 0 })}`
-                : "Session"}
+          <GlassSheen active={noSetup} />
+          <span className="relative z-10 inline-flex items-center gap-1.5">
+            <span className={cn("h-1.5 w-1.5 rounded-full", noSetup ? "bg-gold-strong" : hasLimit ? "bg-profit" : "bg-faint")} aria-hidden />
+            <span className="num !font-medium">
+              {noSetup
+                ? "No-setup day"
+                : hasLimit
+                  ? `Limit ${formatMoney(limitAmount, currency, { decimals: 0 })}`
+                  : "Session"}
+            </span>
+            <ChevronRightIcon className={`h-3 w-3 transition-transform duration-300 ease-[var(--ease-ios)] ${menuOpen ? "-rotate-90" : "rotate-90"}`} />
           </span>
-          <ChevronRightIcon className={`h-3 w-3 transition-transform duration-200 ${menuOpen ? "-rotate-90" : "rotate-90"}`} />
         </button>
 
         <AnimatePresence>
@@ -328,7 +340,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
                 visible: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 },
               }}
               transition={{ duration: 0.34, ease: EASE }}
-              className="relative max-h-[calc(100dvh-1.5rem)] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-line-strong bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 shadow-overlay sm:max-w-[380px] sm:rounded-[28px] sm:pb-6"
+              className="relative max-h-[calc(100dvh-1.5rem)] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-line-strong glass px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 shadow-overlay sm:max-w-[380px] sm:rounded-[28px] sm:pb-6"
             >
               <button
                 type="button"

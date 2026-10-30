@@ -13,6 +13,7 @@ import { computeInsights, topState, type MinatoState } from "@/lib/minato/insigh
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
+import { addNotes, detectMoods, emptyMind, loadMind, MOOD_LABEL, mindForModel, patterns, reconcile, saveMind, type Mood, type MindNote, type MindState } from "@/lib/minato/mind";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import "./minato.css";
@@ -28,6 +29,8 @@ const STATE_DOT: Record<MinatoState, string> = {
 };
 
 const THREAD_KEY = "edgebook:minato:thread:v1";
+const MIND_KEY = "edgebook:minato:mind:v1";
+type ChatMsg = MinatoMessage & { noted?: Mood[] };
 const THREAD_MAX = 60;
 
 /* ------------------------------------------------------------------ */
@@ -90,6 +93,61 @@ function Avatar({ className }: { className?: string }) {
       />
       <span className="hidden text-sm">M</span>
     </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mind: what Minato has learned about how the trader feels           */
+/* ------------------------------------------------------------------ */
+
+function NoteRow({ n, pending }: { n: MindNote; pending?: boolean }) {
+  return (
+    <li className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-gold">{MOOD_LABEL[n.mood]}</span>
+        <span className="text-[11.5px] text-faint">{pending ? "Waiting for your next setup" : n.date}</span>
+      </div>
+      <p className="mt-2 line-clamp-2 text-[13.5px] leading-snug text-ink">“{n.quote}”</p>
+      {n.verdict && <p className="mt-1.5 text-[12.5px] leading-snug text-muted">{n.verdict}</p>}
+    </li>
+  );
+}
+
+function MindPane({ pending, kept, habits }: { pending: MindNote[]; kept: MindNote[]; habits: ReturnType<typeof patterns> }) {
+  const empty = pending.length === 0 && kept.length === 0;
+  return (
+    <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
+      {empty && (
+        <div className="flex h-full min-h-[200px] flex-col justify-center px-1">
+          <p className="font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">Tell me how you feel.</p>
+          <p className="mt-2 max-w-[32ch] text-[14.5px] leading-snug text-muted">
+            I hold it until your next setup, and keep it only if it turns out to matter.
+          </p>
+        </div>
+      )}
+      {habits.length > 0 && (
+        <section>
+          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Your patterns</h3>
+          <ul className="space-y-2">
+            {habits.map((h) => (
+              <li key={h.mood} className="rounded-[18px] border border-gold/30 bg-gold/[0.07] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{h.line}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {pending.length > 0 && (
+        <section>
+          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Holding</h3>
+          <ul className="space-y-2">{pending.map((n) => <NoteRow key={n.id} n={n} pending />)}</ul>
+        </section>
+      )}
+      {kept.length > 0 && (
+        <section>
+          <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">Kept because it was useful</h3>
+          <ul className="space-y-2">{kept.map((n) => <NoteRow key={n.id} n={n} />)}</ul>
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -179,7 +237,11 @@ export function Minato() {
 
   /* ---------------- conversation (persisted across closes & reloads) ---------------- */
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
-  const [messages, setMessages] = useState<MinatoMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [tab, setTab] = useState<"chat" | "mind">("chat");
+  const [mind, setMind] = useState<MindState>(emptyMind());
+  const [mindReady, setMindReady] = useState(false);
+  const mindKey = `${MIND_KEY}:${user?.id ?? "guest"}`;
   const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -191,7 +253,7 @@ export function Minato() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(threadKey);
-      const parsed = raw ? (JSON.parse(raw) as MinatoMessage[]) : [];
+      const parsed = raw ? (JSON.parse(raw) as ChatMsg[]) : [];
       setMessages(Array.isArray(parsed) ? parsed.filter((m) => m && typeof m.text === "string") : []);
     } catch { setMessages([]); }
     setHydrated(true);
@@ -201,6 +263,18 @@ export function Minato() {
     if (!hydrated) return;
     try { window.localStorage.setItem(threadKey, JSON.stringify(messages.slice(-THREAD_MAX))); } catch { /* storage full or blocked */ }
   }, [messages, hydrated, threadKey]);
+
+  useEffect(() => { setMind(loadMind(mindKey)); setMindReady(true); }, [mindKey]);
+  useEffect(() => { if (mindReady) saveMind(mindKey, mind); }, [mind, mindReady, mindKey]);
+  // Every time the journal changes, settle held feelings against the setup that was taken.
+  useEffect(() => {
+    if (!mindReady) return;
+    setMind((m) => { const r = reconcile(m, allEntries, Date.now()); return r.changed ? r.state : m; });
+  }, [allEntries, mindReady]);
+
+  const pendingNotes = mind.notes.filter((n) => n.status === "pending");
+  const keptNotes = mind.notes.filter((n) => n.status === "kept");
+  const habits = useMemo(() => patterns(mind), [mind]);
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
@@ -232,7 +306,11 @@ export function Minato() {
   const ask = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
-    const next: MinatoMessage[] = [...messages, { role: "user", text: trimmed }];
+    const moods = detectMoods(trimmed);
+    const nowMs = Date.now();
+    const mindNow = moods.length ? addNotes(mind, moods, trimmed, nowMs, todayKey()) : mind;
+    if (moods.length) setMind(mindNow);
+    const next: ChatMsg[] = [...messages, { role: "user", text: trimmed, ...(moods.length ? { noted: moods } : {}) }];
     setMessages(next);
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "";
@@ -246,11 +324,11 @@ export function Minato() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: next,
+            messages: next.map(({ role, text }) => ({ role, text })),
             entries,
             journalProvided: true,
             primaryChallenge: challenge ?? undefined,
-            companion,
+            companion: { ...companion, mind: mindForModel(mindNow, moods, nowMs) },
           }),
           signal: controller.signal,
         });
@@ -268,7 +346,7 @@ export function Minato() {
     } finally {
       setBusy(false);
     }
-  }, [busy, messages, entries, challenge, companion, provider, focusEntry, ctx]);
+  }, [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, mind]);
 
   // Opened from a trade → start its review once.
   useEffect(() => {
@@ -305,20 +383,47 @@ export function Minato() {
   const nudge = insights[0]?.message;
   const newChat = () => { setMessages([]); setInput(""); inputRef.current?.focus(); };
 
+  // Minato stays out of the way: it appears at the end of a page, after a long pause, or when opened from a trade.
+  const [nearEnd, setNearEnd] = useState(false);
+  const [dwell, setDwell] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const d = document.documentElement;
+      const scrollable = d.scrollHeight > window.innerHeight + 120;
+      const bottom = window.scrollY + window.innerHeight;
+      setNearEnd((prev) => scrollable && (bottom >= d.scrollHeight - 140 || (prev && bottom >= d.scrollHeight - 420)));
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => { window.removeEventListener("scroll", check); window.removeEventListener("resize", check); };
+  }, [pathname]);
+  useEffect(() => {
+    setDwell(false);
+    const t = window.setTimeout(() => setDwell(true), 45_000);
+    return () => window.clearTimeout(t);
+  }, [pathname]);
+  const showLauncher = open || nearEnd || dwell;
+
   const feedPhone = pathname.startsWith("/feed") && typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
   const empty = messages.length === 0 && !busy;
 
   return (
     <>
       {/* Launcher */}
-      {!feedPhone && (
+      <AnimatePresence>
+      {!feedPhone && showLauncher && (
         <motion.button
+          key="minato-launcher"
+          initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, y: 14 }}
+          animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.7, y: 10 }}
           type="button"
           aria-label={open ? "Close Minato" : "Open Minato"}
           aria-expanded={open}
           onClick={() => setOpen(!open)}
           whileTap={{ scale: 0.94 }}
-          transition={{ type: "spring", stiffness: 420, damping: 30 }}
+          transition={{ type: "spring", stiffness: 380, damping: 26 }}
           className={cn(
             "mn-launcher fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[90] grid h-[52px] w-[52px] place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-gold/60 md:bottom-5 md:right-5",
             open && "max-md:hidden",
@@ -338,6 +443,7 @@ export function Minato() {
           </AnimatePresence>
         </motion.button>
       )}
+      </AnimatePresence>
 
       {/* Phones: tap outside closes (tab bar stays usable) */}
       <AnimatePresence>
@@ -390,8 +496,32 @@ export function Minato() {
               </button>
             </div>
 
+            {/* Chat | Mind */}
+            <div className="px-4 pb-2">
+              <div role="tablist" aria-label="Minato views" className="relative grid grid-cols-2 rounded-full bg-ink/[0.06] p-0.5 text-[13px] font-medium">
+                {(["chat", "mind"] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t}
+                    onClick={() => setTab(t)}
+                    className={cn("relative h-8 rounded-full outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-gold/50", tab === t ? "text-ink" : "text-muted hover:text-ink")}
+                  >
+                    {tab === t && <motion.span layoutId="mn-tab" transition={{ type: "spring", stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
+                    <span className="relative inline-flex items-center gap-1.5">
+                      {t === "chat" ? "Chat" : "Mind"}
+                      {t === "mind" && pendingNotes.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-label={`${pendingNotes.length} held`} />}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {tab === "mind" && <MindPane pending={pendingNotes} kept={keptNotes} habits={habits} />}
+
             {/* Conversation */}
-            <div ref={listRef} className="flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4" aria-live="polite">
+            <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4", tab !== "chat" && "hidden")} aria-live="polite">
               {empty && (
                 <motion.div initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: EASE, delay: 0.08 }} className="flex h-full min-h-[180px] flex-col justify-center px-1">
                   <p className="font-display text-[28px] font-semibold leading-[1.1] tracking-[-0.03em] text-ink">{greeting}</p>
@@ -407,7 +537,7 @@ export function Minato() {
                   initial={reduce ? false : { opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.28, ease: EASE }}
-                  className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
+                  className={cn("flex flex-col gap-1", m.role === "user" ? "items-end" : "items-start")}
                 >
                   <div
                     className={cn(
@@ -417,6 +547,12 @@ export function Minato() {
                   >
                     {m.role === "user" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <div className="space-y-1">{renderMinatoText(m.text)}</div>}
                   </div>
+                  {m.noted && m.noted.length > 0 && (
+                    <button type="button" onClick={() => setTab("mind")} className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
+                      Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}. Holding it for your next setup.
+                    </button>
+                  )}
                 </motion.div>
               ))}
 
@@ -431,7 +567,7 @@ export function Minato() {
             </div>
 
             {/* Suggestions — only before the conversation starts */}
-            {empty && suggestions.length > 0 && (
+            {tab === "chat" && empty && suggestions.length > 0 && (
               <div className="mn-chips flex gap-2 overflow-x-auto px-4 pb-2.5 pt-1 [scrollbar-width:none]">
                 {suggestions.map((p) => (
                   <button
@@ -448,7 +584,7 @@ export function Minato() {
 
             {/* Composer */}
             <form
-              className="px-3 pb-3 pt-1"
+              className={cn("px-3 pb-3 pt-1", tab !== "chat" && "hidden")}
               onSubmit={(e) => { e.preventDefault(); void ask(input); }}
             >
               <div className="mn-field flex items-end gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">

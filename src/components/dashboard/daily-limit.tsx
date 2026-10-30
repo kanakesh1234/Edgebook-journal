@@ -90,7 +90,7 @@ export function DailyLimit({ risk, currency, compact = false }: { risk: DayRisk 
         )}
       >
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[20px] text-faint">{sym}</span>
+          <span className="num !font-medium text-[22px] text-faint">{sym}</span>
           <input
             id="home-daylimit"
             inputMode="decimal"
@@ -103,12 +103,12 @@ export function DailyLimit({ risk, currency, compact = false }: { risk: DayRisk 
             placeholder="0.00"
             aria-label="Daily loss limit"
             aria-invalid={bad || undefined}
-            className={cn("min-w-0 flex-1 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60", bad && "text-loss")}
+            className={cn("min-w-0 flex-1 border-0 bg-transparent p-0 num text-[28px] leading-none text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60", bad && "text-loss")}
           />
         </div>
         <p className="mt-1 min-h-4 text-[12px] text-faint">
           {bad ? <span className="text-loss">Numbers only</span>
-            : ok && account > 0 ? `${((amount / account) * 100).toFixed(2)}% of your account`
+            : ok && account > 0 ? <><span className="num !font-medium">{((amount / account) * 100).toFixed(2)}%</span> of your account</>
             : compact ? "Set once per day" : "The most you'll accept losing"}
         </p>
       </div>
@@ -137,7 +137,7 @@ export function DailyLimit({ risk, currency, compact = false }: { risk: DayRisk 
               <div className="flex flex-wrap gap-2">
                 {chips.map((c) => (
                   <Chip key={c.note} selected={ok && amount === c.value} onClick={() => { setValue(String(c.value)); setError(null); }}>
-                    {sym}{c.value.toLocaleString("en-US")} <span className="ml-1.5 text-[12.5px] font-normal opacity-70">{c.note}</span>
+                    <span className="num !font-medium">{sym}{c.value.toLocaleString("en-US")}</span> <span className="ml-1.5 text-[12.5px] font-normal opacity-70">{c.note}</span>
                   </Chip>
                 ))}
               </div>
