@@ -17,5 +17,6 @@ import "./backtesting/lse-client.test.ts";
 import "./backtesting/indicators.test.ts";
 import "./journal/tagging.test.ts";
 import "./journal/outlook.test.ts";
+import "./journal/plan-intervention.test.ts";
 import "../src/lib/csv-import.test.ts";
 import "../src/lib/practice/math/math.test.ts";

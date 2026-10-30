@@ -26,6 +26,9 @@ import { RiskMeter } from "./risk-meter";
 import { WinOddsCard } from "./win-odds-card";
 import type { PlanDraft } from "@/lib/prediction";
 import { analyzePreTradeThought } from "@/lib/ai-brain";
+import type { InterventionAction, PlanSnapshot } from "@/lib/minato/plan-intervention";
+import { PlanIntervention } from "./plan-intervention";
+import { usePlanIntervention } from "./use-plan-intervention";
 import { ruleStats, statFor } from "@/lib/rule-stats";
 import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
 import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
@@ -365,6 +368,32 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     }
   }, [step, autoWatchApplied, watch.length, brainRead.suggestedWatch]);
 
+  /** What Minato may read for the contextual popup: only what the trader has entered so far in this plan. */
+  const nudgeSnapshot = useMemo<PlanSnapshot>(
+    () => ({
+      date: today,
+      thesis,
+      thoughts: nonEmptyThoughts,
+      emotion: emotion || undefined,
+      emotionReason: emotionReason.trim() || undefined,
+      setupId: playbookId || undefined,
+      setupName: selectedPlaybook?.name,
+      rules: rules.map((r, i) => ({ text: r.text || `Rule ${i + 1}`, confirmed: ruleStates[String(i)] === "ready" })),
+      watch,
+    }),
+    [today, thesis, nonEmptyThoughts, emotion, emotionReason, playbookId, selectedPlaybook?.name, rules, ruleStates, watch],
+  );
+  // Only on the checklist step, never while picking a setup or behind the discipline lock. Silent until the journal holds enough data.
+  const nudge = usePlanIntervention({
+    active: open && step === "setup" && !!selectedPlaybook && !pickingSetup && !lockOpen,
+    sitting: open,
+    snapshot: nudgeSnapshot,
+    entries,
+    plans,
+    settings,
+    sym,
+  });
+
   const order: StepId[] = useMemo(
     () => (playbook.length ? ["plan", "thought", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "thought", "trade", "chart", "autopsy", "done"]),
     [playbook.length],
@@ -379,6 +408,12 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     return i > 0 ? order[i - 1]! : null;
   };
   const next = (s: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(s) + 1)]!;
+  const onNudgeAction = (a: InterventionAction) => {
+    if (a.id === "edit-thought") go("thought");
+    else if (a.id === "edit-plan") go("plan");
+    else if (a.id === "watch") setWatch((w) => (w.includes(a.mistakeKey) ? w : [...w, a.mistakeKey]));
+    nudge.resolve();
+  };
 
   const suggestedInstruments = useMemo(() => {
     const seen: string[] = [DEFAULT_INSTRUMENT];
@@ -1375,6 +1410,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     })}
                   </div>
                 )}
+
+                <PlanIntervention item={nudge.current} onAction={onNudgeAction} onDismiss={nudge.dismiss} onMute={nudge.mute} />
 
                 <AnimatePresence initial={false}>
                   {selectedPlaybook && rules.length > 0 && (
