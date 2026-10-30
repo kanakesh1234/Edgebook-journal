@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { prefersReducedMotion } from "./motion-utils";
+import { Eyebrow } from "./ledger";
 
 const SENTENCE =
   "Your journal is one file in your own Google Drive. Open it, export it, or walk away with it whenever you like.";
@@ -56,6 +57,7 @@ export function DriveStatement() {
               "radial-gradient(720px 360px at 12% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 70%), radial-gradient(560px 320px at 100% 100%, color-mix(in srgb, var(--profit) 8%, transparent), transparent 70%)",
           }}
         />
+        <div className="relative mb-8"><Eyebrow n="04">Your data</Eyebrow></div>
         <p
           ref={text}
           className="relative max-w-4xl font-display text-[clamp(1.9rem,4.8vw,4rem)] font-semibold leading-[1.1] tracking-[-0.035em]"

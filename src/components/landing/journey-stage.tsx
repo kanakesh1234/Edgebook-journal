@@ -121,7 +121,7 @@ function ThoughtPanel() {
         </p>
       ))}
       <p className="px-1 text-[12px] text-muted">
-        Win odds from your history: <span className="font-semibold text-profit">74%</span>
+        Win odds come from your own history, once you have enough trades.
       </p>
     </div>
   );
@@ -253,18 +253,26 @@ function HeroCopy({ rise }: { rise?: boolean }) {
   const r = (d: string) => (rise ? { className: "lp-rise", style: { "--d": d } as React.CSSProperties } : {});
   return (
     <>
+      <p
+        {...r("0s")}
+        className={`${rise ? "lp-rise " : ""}mb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11.5px] uppercase tracking-[0.14em] text-faint sm:text-[12px]`}
+      >
+        <span className="text-gold">№ 01</span>
+        <span aria-hidden className="hidden h-px w-10 bg-line-strong sm:block" />
+        <span>The trading journal that reviews with you</span>
+      </p>
       <h1
         style={rise ? ({ "--d": "0.05s" } as React.CSSProperties) : undefined}
-        className={`${rise ? "lp-rise " : ""}font-display text-[clamp(2.6rem,7.2vw,5.9rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink`}
+        className={`${rise ? "lp-rise " : ""}font-display text-[clamp(2.5rem,7vw,5.7rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink`}
       >
-        Where disciplined traders{" "}
-        <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">compound their edge.</span>
+        Most journals record the result.{" "}
+        <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">Edgebook records the decision.</span>
       </h1>
       <p
         {...r("0.18s")}
-        className={`${rise ? "lp-rise " : ""}mt-6 max-w-2xl text-[clamp(1.05rem,1.7vw,1.35rem)] leading-snug text-muted`}
+        className={`${rise ? "lp-rise " : ""}mt-6 max-w-2xl text-[clamp(1.05rem,1.7vw,1.3rem)] leading-snug text-muted`}
       >
-        Edgebook connects your plan, your trade and your review, then keeps all of it in your own Google Drive.
+        Plan the trade, replay it candle by candle, tag the mistake and practise it away. All of it stays in your own Google Drive.
       </p>
       <div
         {...r("0.3s")}
@@ -277,10 +285,18 @@ function HeroCopy({ rise }: { rise?: boolean }) {
           Start your journal
         </Link>
         <a href="#how" className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink">
-          See how it works
+          See it work
           <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
         </a>
       </div>
+      <ul
+        {...r("0.42s")}
+        className={`${rise ? "lp-rise " : ""}mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 font-mono text-[11.5px] uppercase tracking-[0.1em] text-faint`}
+      >
+        {["Your Google Drive", "Local option", "Export as JSON"].map((t) => (
+          <li key={t} className="flex items-center gap-2"><span aria-hidden className="h-1 w-1 rounded-full bg-gold" />{t}</li>
+        ))}
+      </ul>
     </>
   );
 }
@@ -465,7 +481,7 @@ export function JourneyStage() {
                   <Segmented />
                   <div className="mt-3 flex items-center justify-between px-1 sm:mt-4">
                     <p className="text-[13px] font-medium text-ink">
-                      MNQ <span className="font-normal text-faint">· Long · 5m</span>
+                      MNQ <span className="font-normal text-faint">· Long · 5m · Sample trade</span>
                     </p>
                     <span data-readout className="num text-[13px] font-semibold text-faint">Planning</span>
                   </div>

@@ -6,6 +6,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ChevronRightIcon } from "@/components/ui/icons";
 import { prefersReducedMotion } from "./motion-utils";
+import { Eyebrow } from "./ledger";
 
 const ROAD =
   "M20 185 H210 Q240 185 240 155 V105 Q240 75 270 75 H450 Q480 75 480 105 V135 Q480 165 510 165 H700 Q730 165 730 135 V95 Q730 65 760 65 H845";
@@ -73,6 +74,7 @@ export function Road() {
   return (
     <section id="road" ref={sec} className="relative overflow-hidden px-5 py-28 sm:px-8 sm:py-40">
       <div className="mx-auto max-w-[1200px] text-center">
+        <div className="mb-6 flex justify-center"><Eyebrow n="06">The road</Eyebrow></div>
         <h2 className="mx-auto max-w-3xl font-display text-[clamp(2rem,5vw,3.8rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-ink">
           Progress you can{" "}
           <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">see.</span>

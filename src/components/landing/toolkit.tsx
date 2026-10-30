@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { Eyebrow } from "./ledger";
 
 /* ---------------------------- mini interfaces ---------------------------- */
 
@@ -163,11 +164,12 @@ export function Toolkit() {
     <section id="toolkit" ref={sec} className="relative" aria-label="Everything around the journal">
       <div ref={stage} className="lp-toolkit-stage py-20 sm:py-28 lg:py-0">
         <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
+          <div className="mb-5"><Eyebrow n="05">The toolkit</Eyebrow></div>
           <h2 className="max-w-3xl font-display text-[clamp(2rem,5vw,3.8rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-ink">
             Everything around the journal.
           </h2>
           <p className="mt-4 max-w-xl text-[clamp(1rem,1.5vw,1.2rem)] leading-snug text-muted">
-            Edgebook is more than a log. The rest of the app turns what you write down into things you can practise, test and share.
+            Edgebook is more than a log. The rest of the app turns what you write down into things you can practise, test and share. Screens shown use sample data.
           </p>
         </div>
 

@@ -12,7 +12,7 @@ export function FinalCta() {
         <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">a&nbsp;ledger.</span>
       </h2>
       <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.3rem)] leading-snug text-muted">
-        Start with today&apos;s session. In a month you&apos;ll have something most traders never build: evidence.
+        Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
       </p>
       <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
         <Link

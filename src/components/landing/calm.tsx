@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { prefersReducedMotion } from "./motion-utils";
+import { Eyebrow } from "./ledger";
 
 const POINTS = [
   { t: "The feed ends.", d: "Twenty cards at most, then a clear \u201cyou\u2019re all caught up\u201d. No infinite scroll, no pull to refresh." },
@@ -33,6 +34,7 @@ export function Calm() {
   return (
     <section id="calm" ref={sec} className="px-5 py-24 sm:px-8 sm:py-36">
       <div className="mx-auto grid max-w-[1200px] gap-14 lg:grid-cols-[1fr_1.1fr] lg:gap-24">
+        <div className="lg:col-span-2 -mb-6"><Eyebrow n="07">Calm by design</Eyebrow></div>
         <h2 className="font-display text-[clamp(2.3rem,6vw,4.8rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
           <span className="font-serif text-[1.1em] font-normal italic tracking-[-0.02em] text-gold">Built to be put down.</span>
         </h2>

@@ -7,10 +7,11 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "#how", label: "How it works" },
-  { href: "#drive", label: "Your Drive" },
-  { href: "#toolkit", label: "Toolkit" },
-  { href: "#road", label: "Roadmap" },
+  { href: "#how", label: "How it works", cls: "" },
+  { href: "#minato", label: "Minato", cls: "" },
+  { href: "#drive", label: "Your Drive", cls: "" },
+  { href: "#toolkit", label: "Toolkit", cls: "hidden xl:inline" },
+  { href: "#road", label: "Roadmap", cls: "hidden xl:inline" },
 ];
 
 /** Frosted bar in the Apple tradition: quiet at the top, hairline once you scroll. */
@@ -37,9 +38,9 @@ export function LandingNav() {
           <Wordmark />
         </Link>
 
-        <div className="hidden items-center gap-8 md:flex">
+        <div className="hidden items-center gap-7 md:flex">
           {LINKS.map((l) => (
-            <a key={l.href} href={l.href} className="text-[13.5px] text-muted transition-colors duration-200 hover:text-ink">
+            <a key={l.href} href={l.href} className={cn("text-[13.5px] text-muted transition-colors duration-200 hover:text-ink", l.cls)}>
               {l.label}
             </a>
           ))}
