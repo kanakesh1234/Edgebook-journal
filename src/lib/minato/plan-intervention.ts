@@ -128,6 +128,8 @@ export const emptySession = (): NudgeSession => ({ shown: [], dismissed: [] });
 export const emptyPrefs = (): NudgePrefs => ({ snoozed: {}, muted: {} });
 
 const DAY = 86_400_000;
+/** Tapping the popup away: do not raise the same situation again today. */
+export const DISMISS_MS = DAY;
 export const SNOOZE_MS = 7 * DAY;
 export const MUTE_MS = 30 * DAY;
 export const MAX_PER_SESSION = 2;
@@ -341,6 +343,6 @@ export function pickIntervention(cands: Intervention[], session: NudgeSession, p
   return cands.find((c) => !isSuppressed(c, session, prefs, now)) ?? null;
 }
 
-export const snoozed = (prefs: NudgePrefs, id: string, now: number): NudgePrefs => ({ ...prefs, snoozed: { ...prune(prefs.snoozed, now), [id]: now + SNOOZE_MS } });
+export const snoozed = (prefs: NudgePrefs, id: string, now: number, ms = SNOOZE_MS): NudgePrefs => ({ ...prefs, snoozed: { ...prune(prefs.snoozed, now), [id]: now + ms } });
 export const mutedKind = (prefs: NudgePrefs, kind: InterventionKind, now: number): NudgePrefs => ({ ...prefs, muted: { ...prefs.muted, [kind]: now + MUTE_MS } });
 function prune(m: Record<string, number>, now: number) { return Object.fromEntries(Object.entries(m).filter(([, t]) => t > now)); }

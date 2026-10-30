@@ -5,6 +5,7 @@ import type { JournalEntry, JournalSettings, TradePlan } from "@/lib/types";
 import {
   buildInterventionIndex,
   candidateInterventions,
+  DISMISS_MS,
   emptyPrefs,
   emptySession,
   mutedKind,
@@ -39,7 +40,7 @@ const save = (key: string, prefs: NudgePrefs) => {
  *  - Re-evaluates only after the trader goes quiet, so typing and ticking are never interrupted.
  *  - At most one popup at a time, at most MAX_PER_SESSION per planning sitting, never the same one twice.
  *  - If the trader fixes what the popup was about, it folds away on its own.
- *  - Dismissing snoozes that exact situation for 7 days; "show fewer like this" mutes the kind for 30.
+ *  - Tapping it away snoozes that exact situation for a day; "show fewer like this" mutes the kind for 30.
  */
 export function usePlanIntervention(opts: {
   active: boolean;
@@ -100,7 +101,7 @@ export function usePlanIntervention(opts: {
     const c = currentRef.current;
     if (!c) return;
     session.current.dismissed.push(c.id);
-    prefs.current = snoozed(prefs.current ?? load(userKey), c.id, Date.now());
+    prefs.current = snoozed(prefs.current ?? load(userKey), c.id, Date.now(), DISMISS_MS);
     save(userKey, prefs.current);
     setCurrent(null);
   }, [userKey]);

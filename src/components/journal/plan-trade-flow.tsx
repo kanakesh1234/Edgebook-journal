@@ -24,6 +24,7 @@ import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import { RiskMeter } from "./risk-meter";
 import { WinOddsCard } from "./win-odds-card";
+import { WinOddsRing } from "./win-odds-ring";
 import type { PlanDraft } from "@/lib/prediction";
 import { analyzePreTradeThought } from "@/lib/ai-brain";
 import type { InterventionAction, PlanSnapshot } from "@/lib/minato/plan-intervention";
@@ -1377,17 +1378,22 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
 
             {step === "setup" && (
               <div className="space-y-5">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <StepTitle title={selectedPlaybook ? selectedPlaybook.name : "Pick your setup"} subtitle={selectedPlaybook ? `${confirmedRules} of ${rules.length} rules confirmed` : "Select the playbook setup you are trading."} />
-                  {playbook.length > 1 && selectedPlaybook && !pickingSetup && (
-                    <button
-                      type="button"
-                      onClick={() => setPickingSetup(true)}
-                      className="rounded-full border border-line bg-raised px-3.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
-                    >
-                      Change setup
-                    </button>
-                  )}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <StepTitle title={selectedPlaybook ? selectedPlaybook.name : "Pick your setup"} subtitle={selectedPlaybook ? `${confirmedRules} of ${rules.length} rules confirmed` : "Select the playbook setup you are trading."} />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2.5">
+                    {playbook.length > 1 && selectedPlaybook && !pickingSetup && (
+                      <button
+                        type="button"
+                        onClick={() => setPickingSetup(true)}
+                        className="rounded-full border border-line bg-raised px-3.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
+                      >
+                        Change setup
+                      </button>
+                    )}
+                    {selectedPlaybook && !pickingSetup && <WinOddsRing draft={draftPlan} entries={entries} plans={plans} />}
+                  </div>
                 </div>
 
                 {(!selectedPlaybook || pickingSetup) && (
@@ -1469,8 +1475,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                     </Collapse>
                   )}
                 </AnimatePresence>
-
-                <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />
               </div>
             )}
 

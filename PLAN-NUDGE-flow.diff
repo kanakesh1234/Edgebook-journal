@@ -1,7 +1,10 @@
 --- a/src/components/journal/plan-trade-flow.tsx	2026-10-29 05:49:54.000000000 +0000
-+++ b/src/components/journal/plan-trade-flow.tsx	2026-10-30 05:06:47.527819799 +0000
-@@ -26,6 +26,9 @@
++++ b/src/components/journal/plan-trade-flow.tsx	2026-10-30 05:16:29.704048768 +0000
+@@ -24,8 +24,12 @@
+ import { AutopsyBody, useAutopsy } from "./autopsy";
+ import { RiskMeter } from "./risk-meter";
  import { WinOddsCard } from "./win-odds-card";
++import { WinOddsRing } from "./win-odds-ring";
  import type { PlanDraft } from "@/lib/prediction";
  import { analyzePreTradeThought } from "@/lib/ai-brain";
 +import type { InterventionAction, PlanSnapshot } from "@/lib/minato/plan-intervention";
@@ -10,7 +13,7 @@
  import { ruleStats, statFor } from "@/lib/rule-stats";
  import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
  import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
-@@ -365,6 +368,32 @@
+@@ -365,6 +369,32 @@
      }
    }, [step, autoWatchApplied, watch.length, brainRead.suggestedWatch]);
  
@@ -43,7 +46,7 @@
    const order: StepId[] = useMemo(
      () => (playbook.length ? ["plan", "thought", "setup", "trade", "chart", "autopsy", "done"] : ["plan", "thought", "trade", "chart", "autopsy", "done"]),
      [playbook.length],
-@@ -379,6 +408,12 @@
+@@ -379,6 +409,12 @@
      return i > 0 ? order[i - 1]! : null;
    };
    const next = (s: StepId): StepId => order[Math.min(order.length - 1, order.indexOf(s) + 1)]!;
@@ -56,7 +59,41 @@
  
    const suggestedInstruments = useMemo(() => {
      const seen: string[] = [DEFAULT_INSTRUMENT];
-@@ -1376,6 +1411,8 @@
+@@ -1342,17 +1378,22 @@
+ 
+             {step === "setup" && (
+               <div className="space-y-5">
+-                <div className="flex flex-wrap items-end justify-between gap-3">
+-                  <StepTitle title={selectedPlaybook ? selectedPlaybook.name : "Pick your setup"} subtitle={selectedPlaybook ? `${confirmedRules} of ${rules.length} rules confirmed` : "Select the playbook setup you are trading."} />
+-                  {playbook.length > 1 && selectedPlaybook && !pickingSetup && (
+-                    <button
+-                      type="button"
+-                      onClick={() => setPickingSetup(true)}
+-                      className="rounded-full border border-line bg-raised px-3.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
+-                    >
+-                      Change setup
+-                    </button>
+-                  )}
++                <div className="flex items-start justify-between gap-3">
++                  <div className="min-w-0 flex-1">
++                    <StepTitle title={selectedPlaybook ? selectedPlaybook.name : "Pick your setup"} subtitle={selectedPlaybook ? `${confirmedRules} of ${rules.length} rules confirmed` : "Select the playbook setup you are trading."} />
++                  </div>
++                  <div className="flex shrink-0 items-center gap-2.5">
++                    {playbook.length > 1 && selectedPlaybook && !pickingSetup && (
++                      <button
++                        type="button"
++                        onClick={() => setPickingSetup(true)}
++                        className="rounded-full border border-line bg-raised px-3.5 py-1.5 text-[13px] font-medium text-muted transition-colors hover:border-line-strong hover:text-ink"
++                      >
++                        Change setup
++                      </button>
++                    )}
++                    {selectedPlaybook && !pickingSetup && <WinOddsRing draft={draftPlan} entries={entries} plans={plans} />}
++                  </div>
+                 </div>
+ 
+                 {(!selectedPlaybook || pickingSetup) && (
+@@ -1376,6 +1417,8 @@
                    </div>
                  )}
  
@@ -65,3 +102,12 @@
                  <AnimatePresence initial={false}>
                    {selectedPlaybook && rules.length > 0 && (
                      <Collapse key={selectedPlaybook.id}>
+@@ -1432,8 +1475,6 @@
+                     </Collapse>
+                   )}
+                 </AnimatePresence>
+-
+-                <WinOddsCard draft={draftPlan} entries={entries} plans={plans} />
+               </div>
+             )}
+ 

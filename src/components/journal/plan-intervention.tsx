@@ -1,30 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { Portal } from "@/components/lessons/portal";
 import type { Intervention, InterventionAction, InterventionKind } from "@/lib/minato/plan-intervention";
-import { Collapse, FLOW_SMOOTH, GlyphStop, GlyphTarget, GlyphTimer, IconCheck, IconClose, IconTile } from "./flow-ui";
+import { Collapse, FLOW_SMOOTH, GlyphStop, GlyphTarget, GlyphTimer, IconCheck } from "./flow-ui";
 
 const G = ({ children }: { children: React.ReactNode }) => (
-  <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
+  <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
 );
 const GlyphPulse = () => <G><path d="M3 12h4l2.5-6 4 12 2.5-6H21" /></G>;
 const GlyphNote = () => <G><path d="M6 4h9l4 4v12H6V4Z" /><path d="M14 4v5h5M9 13h7M9 16.5h5" /></G>;
+const big = (n: React.ReactNode) => <span className="grid place-items-center [&_svg]:h-[22px] [&_svg]:w-[22px]">{n}</span>;
 
 const GLYPH: Record<InterventionKind, React.ReactNode> = {
-  "skipped-rule": <IconCheck className="h-[17px] w-[17px]" />,
-  "bias-clash": <GlyphTarget />,
-  invalidation: <GlyphStop />,
-  "similar-plan": <GlyphTimer />,
+  "skipped-rule": big(<IconCheck className="h-[22px] w-[22px]" />),
+  "bias-clash": big(<GlyphTarget />),
+  invalidation: big(<GlyphStop />),
+  "similar-plan": big(<GlyphTimer />),
   emotion: <GlyphPulse />,
   "self-note": <GlyphNote />,
 };
 
 /**
- * Minato's one quiet word in Plan Trade. Sits directly above the setup checklist (inline, so it never covers a rule),
- * unfolds once, and leaves with a quicker fade. Heading + one sentence + at most one action; the evidence stays folded
- * until "Details" is pressed. Uses the app's own surfaces, tokens and motion curves; reduced motion gets a plain fade.
+ * Minato's one word in Plan Trade, shown full screen over a soft blurred scrim (iOS alert / sheet feel).
+ * Tap, click or press Escape ANYWHERE and it goes — it never lingers. Only its own buttons are exempt:
+ * the action (does the thing, then closes), "Details" (unfolds the evidence) and "Show fewer like this".
+ * Reduced motion gets a plain fade.
  */
 export function PlanIntervention({
   item,
@@ -38,92 +41,106 @@ export function PlanIntervention({
   onMute: () => void;
 }) {
   return (
-    <AnimatePresence initial={false}>
-      {item && (
-        <Collapse key={item.id}>
-          <Card item={item} onAction={onAction} onDismiss={onDismiss} onMute={onMute} />
-        </Collapse>
-      )}
-    </AnimatePresence>
+    <Portal>
+      <AnimatePresence>{item && <Overlay key={item.id} item={item} onAction={onAction} onDismiss={onDismiss} onMute={onMute} />}</AnimatePresence>
+    </Portal>
   );
 }
 
-function Card({ item, onAction, onDismiss, onMute }: { item: Intervention; onAction: (a: InterventionAction, i: Intervention) => void; onDismiss: () => void; onMute: () => void }) {
+function Overlay({ item, onAction, onDismiss, onMute }: { item: Intervention; onAction: (a: InterventionAction, i: Intervention) => void; onDismiss: () => void; onMute: () => void }) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
+  const card = useRef<HTMLDivElement>(null);
   const act = item.action;
   const compare = act?.id === "compare";
 
+  // Escape closes it (and never reaches the flow behind); focus moves in so screen readers announce it.
+  useEffect(() => {
+    card.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); onDismiss(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onDismiss]);
+
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const rise = (delay: number) =>
+    reduce ? {} : { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.4, delay, ease: FLOW_SMOOTH } };
+
   return (
-    <motion.section
-      role="status"
-      aria-live="polite"
-      aria-label={item.heading}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onDismiss(); } }}
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.985 }}
-      animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: reduce ? 0.15 : 0.38, delay: reduce ? 0 : 0.08, ease: FLOW_SMOOTH }}
-      className="my-1 rounded-[22px] border border-line bg-overlay/85 p-4 shadow-lift backdrop-blur-xl backdrop-saturate-150"
+    <motion.div
+      onClick={onDismiss}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: reduce ? 0.12 : 0.22 } }}
+      transition={{ duration: reduce ? 0.15 : 0.3, ease: FLOW_SMOOTH }}
+      className="fixed inset-0 z-[120] grid cursor-pointer place-items-center overflow-y-auto bg-[var(--scrim)] p-6 backdrop-blur-md backdrop-saturate-150"
     >
-      <div className="flex items-start gap-3">
-        <IconTile tile="bg-gradient-to-b from-gold-strong to-gold-deep" className="mt-px">{GLYPH[item.kind]}</IconTile>
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-semibold leading-5 tracking-[-0.01em] text-ink">{item.heading}</p>
-          <p className="mt-0.5 text-[14px] leading-[1.45] text-muted">{item.insight}</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {act && (
-              <button
-                type="button"
-                onClick={() => (compare ? setOpen(true) : onAction(act, item))}
-                className="inline-flex h-8 items-center rounded-full bg-gold-strong px-3.5 text-[13px] font-semibold text-on-gold transition-colors hover:bg-gold-strong-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
-              >
-                {act.label}
-              </button>
-            )}
+      <motion.div
+        ref={card}
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={item.heading}
+        aria-describedby={`nudge-${item.id}`}
+        tabIndex={-1}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.94 }}
+        animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+        exit={reduce ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.97, transition: { duration: 0.2 } }}
+        transition={{ duration: reduce ? 0.15 : 0.46, delay: reduce ? 0 : 0.05, ease: FLOW_SMOOTH }}
+        className="my-auto w-full max-w-[22rem] rounded-[28px] border border-white/50 bg-overlay/90 px-6 pb-5 pt-7 text-center shadow-overlay outline-none backdrop-blur-2xl backdrop-saturate-150 dark:border-white/10"
+      >
+        <motion.span {...rise(0.12)} className="mx-auto grid h-12 w-12 place-items-center rounded-[15px] bg-gradient-to-b from-gold-strong to-gold-deep text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.28)]">
+          {GLYPH[item.kind]}
+        </motion.span>
+        <motion.h2 {...rise(0.18)} className="mt-4 text-[18px] font-semibold leading-6 tracking-[-0.02em] text-ink">{item.heading}</motion.h2>
+        <motion.p {...rise(0.22)} id={`nudge-${item.id}`} className="mt-1.5 text-[15px] leading-[1.45] text-muted">{item.insight}</motion.p>
+
+        <motion.div {...rise(0.28)} className="mt-6 flex flex-col gap-1.5">
+          {act && (
             <button
               type="button"
-              aria-expanded={open}
-              onClick={() => setOpen((v) => !v)}
-              className="inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+              onClick={(e) => { stop(e); if (compare) setOpen(true); else onAction(act, item); }}
+              className="h-11 w-full rounded-2xl bg-gold-strong text-[15px] font-semibold text-on-gold transition-[background-color,transform] hover:bg-gold-strong-hover active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/50"
             >
-              Details
-              <svg viewBox="0 0 24 24" className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
+              {act.label}
             </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="Dismiss"
-          onClick={onDismiss}
-          className="relative -mr-1 -mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-faint transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
-        >
-          <span className="scale-[0.8]"><IconClose /></span>
-        </button>
-      </div>
+          )}
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={(e) => { stop(e); setOpen((v) => !v); }}
+            className="inline-flex h-10 w-full items-center justify-center gap-1 rounded-2xl text-[14px] font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40"
+          >
+            Details
+            <svg viewBox="0 0 24 24" className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        </motion.div>
 
-      <AnimatePresence initial={false}>
-        {open && (
-          <Collapse key="detail">
-            <div className="mt-3.5 space-y-2.5 border-t border-line-soft pt-3.5">
-              {item.evidence.map((ev, i) => (
-                <div key={i} className="text-[12.5px] leading-[1.45]">
-                  <p className="flex items-baseline justify-between gap-3 text-muted">
-                    <span>{ev.label}</span>
-                    {ev.date && <span className="shrink-0 tabular-nums text-faint">{ev.date}</span>}
-                  </p>
-                  {ev.quote && <p className="mt-1 border-l-2 border-gold/40 pl-2.5 text-[13px] text-ink/85">{ev.quote}</p>}
+        <AnimatePresence initial={false}>
+          {open && (
+            <Collapse key="detail">
+              <div className="space-y-3 border-t border-line-soft pt-4 text-left">
+                {item.evidence.map((ev, i) => (
+                  <div key={i} className="text-[12.5px] leading-[1.45]">
+                    <p className="flex items-baseline justify-between gap-3 text-muted">
+                      <span>{ev.label}</span>
+                      {ev.date && <span className="shrink-0 tabular-nums text-faint">{ev.date}</span>}
+                    </p>
+                    {ev.quote && <p className="mt-1 border-l-2 border-gold/40 pl-2.5 text-[13px] text-ink/85">{ev.quote}</p>}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-2 pt-1 text-[12px] text-faint">
+                  <span>{item.sample > 1 ? `Based on ${item.sample} of your entries` : "Based on one of your entries"}</span>
+                  <button type="button" onClick={(e) => { stop(e); onMute(); }} className="rounded-full px-2 py-1 font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40">
+                    Show fewer like this
+                  </button>
                 </div>
-              ))}
-              <div className="flex items-center justify-between pt-1 text-[12px] text-faint">
-                <span>{item.sample > 1 ? `Based on ${item.sample} of your entries` : "Based on one of your entries"}</span>
-                <button type="button" onClick={onMute} className="rounded-full px-2 py-1 font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/40">
-                  Show fewer like this
-                </button>
               </div>
-            </div>
-          </Collapse>
-        )}
-      </AnimatePresence>
-    </motion.section>
+            </Collapse>
+          )}
+        </AnimatePresence>
+
+        <p className="mt-3 text-[11.5px] text-faint">Tap anywhere to dismiss</p>
+      </motion.div>
+    </motion.div>
   );
 }
