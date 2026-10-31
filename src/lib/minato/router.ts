@@ -1,20 +1,26 @@
 /**
  * Context router: decides WHAT KIND of help is being asked for, so only the matching slice of the trader's data is sent.
  *
- * Deterministic on purpose: it runs on every question, must add no latency or cost, and must behave identically on the
- * client (to pick memories) and on the server (to trim facts). An ambiguous question blends the two best plans; an
- * unrecognised one falls back to a broad plan, so a routing miss costs tokens, never answer quality.
+ * Classifies both:
+ *  - High-level Read Path Category (`stats_question` | `calculation` | `journal_reflection` | `strategy_advice` | `small_talk`)
+ *  - Granular Context Plan Intent (`calculation` | `trade_review` | `technical` | `behavior` | `strategy` | `performance` | `planning` | `practice` | `memory` | `chitchat` | `general`)
+ *
+ * For `calculation` intents, deterministic math tools (`tools.ts`) are ALWAYS invoked.
  */
 import type { MemoryKind, MemoryTopic } from "./memory";
 
-export type Intent = "trade_review" | "technical" | "behavior" | "strategy" | "performance" | "planning" | "practice" | "memory" | "chitchat" | "general";
+export type IntentCategory = "stats_question" | "calculation" | "journal_reflection" | "strategy_advice" | "small_talk";
+export type Intent = "calculation" | "trade_review" | "technical" | "behavior" | "strategy" | "performance" | "planning" | "practice" | "memory" | "chitchat" | "general";
 
 export interface Route {
   intent: Intent;
+  category: IntentCategory;
   secondary: Intent | null;
   /** 0–1: how clearly one intent won. */
   confidence: number;
   inherited: boolean;
+  requiresTools: boolean;
+  toolsToCall: ("streak_probability" | "position_sizing" | "expectancy_stats")[];
   scores: Partial<Record<Intent, number>>;
 }
 
@@ -23,6 +29,13 @@ const W = (re: RegExp, w: number): [RegExp, number] => [re, w];
 const RULES: Record<Exclude<Intent, "general">, [RegExp, number][]> = {
   chitchat: [
     W(/^\s*(hi|hello|hey|yo|sup|thanks|thank you|thx|ty|ok|okay|cool|great|nice|got it|good (morning|evening|afternoon|night)|gm|gn|how are you|who are you|what can you do|help)\b[\s!.?,]*$/i, 6),
+  ],
+  calculation: [
+    W(/\b(longest losing streak|maximum (?:longest )?losing streak|max losing streak|losing streak possible|probability of (?:a )?losing streak|streak probability|monte carlo)\b/i, 6),
+    W(/\b(position siz\w*|how many contracts|contract size|size for (?:nq|mnq|es|mes)|nq micro or mini|micro or mini|exact numbers|point value)\b/i, 6),
+    W(/\b(expectancy|profit factor|payoff ratio|average r\b|avg r\b|drawdown room|risk per contract|contracts =|floor\()\b/i, 5),
+    W(/\b(losing streak|consecutive losses|losses in a row)\b.{0,35}\b(win ?rate|possible|odds|chance|probability|expect\w*)\b/i, 5.5),
+    W(/\b(win ?rate)\b.{0,45}\b(losing streak|streak|contracts|position size)\b/i, 5.5),
   ],
   trade_review: [
     W(/\b(review|autopsy|debrief|break ?down|go over|walk me through|dissect|critique)\b/i, 2),
@@ -46,14 +59,14 @@ const RULES: Record<Exclude<Intent, "general">, [RegExp, number][]> = {
     W(/\b(weakness|strength|improv\w*|blind spot|bad habit|what am i doing wrong)\b/i, 2),
   ],
   strategy: [
-    W(/\b(setup|playbook|strateg\w*|edge|rules?|checklist|backtest\w*|expectancy|r[- ]multiple|risk[- ]?reward|position siz\w*|sizing)\b/i, 2),
+    W(/\b(setup|playbook|strateg\w*|edge|rules?|checklist|backtest\w*|r[- ]multiple|risk[- ]?reward)\b/i, 2),
     W(/\b(which|what) (setup|instrument|session|time|day)\b/i, 3),
     W(/\b(best|worst) (setup|time|day|session|instrument|window)\b/i, 3),
     W(/\bwin ?rate (by|per|on)\b/i, 3),
   ],
   performance: [
     W(/\bhow am i doing\b/i, 4),
-    W(/\b(performance|p ?& ?l|pnl|profit|drawdown|equity|balance|win ?rate|stats?|statistics|numbers|progress|payout|consistency|streak|expectancy|average|total)\b/i, 2),
+    W(/\b(performance|p ?& ?l|pnl|profit|drawdown|equity|balance|win ?rate|stats?|statistics|numbers|progress|payout|consistency|streak|average|total)\b/i, 2),
     W(/\b(this|last) (week|month|year|quarter)\b/i, 2),
     W(/\b(target|challenge|account|prop)\b/i, 1.5),
   ],
@@ -76,6 +89,50 @@ const RULES: Record<Exclude<Intent, "general">, [RegExp, number][]> = {
 const BROAD = /\b(teach me|analy[sz]e (my )?(trading|journal|everything)|what should i (improve|change|work on)|overall|big picture|everything you know|full (picture|review)|look at everything)\b/i;
 const wordCount = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
 
+export function mapIntentToCategory(intent: Intent): IntentCategory {
+  switch (intent) {
+    case "calculation":
+      return "calculation";
+    case "performance":
+      return "stats_question";
+    case "trade_review":
+    case "behavior":
+    case "memory":
+      return "journal_reflection";
+    case "strategy":
+    case "technical":
+    case "planning":
+    case "practice":
+      return "strategy_advice";
+    case "chitchat":
+      return "small_talk";
+    default:
+      return "stats_question";
+  }
+}
+
+export function detectRequiredTools(text: string, intent: Intent): ("streak_probability" | "position_sizing" | "expectancy_stats")[] {
+  const tools: ("streak_probability" | "position_sizing" | "expectancy_stats")[] = [];
+  const q = text.toLowerCase();
+  if (/\b(streak|losing run|losses in a row|consecutive loss\w*|monte carlo|probability of losing)\b/i.test(q)) {
+    tools.push("streak_probability");
+  }
+  if (
+    /\b(position siz\w*|contract\w*|how many (?:contracts|micros|minis|lots)|size for|sizing|point value|stop size|nq micro or mini|micro or mini)\b/i.test(q) ||
+    (/\b(nq|mnq|es|mes)\b/i.test(q) && /\b(size|contracts?|risk|stop|pts|points)\b/i.test(q))
+  ) {
+    tools.push("position_sizing");
+  }
+  if (
+    /\b(expectancy|profit factor|average r\b|avg r\b|payoff ratio|drawdown|win ?rate|stats|how am i doing)\b/i.test(q) ||
+    intent === "calculation" ||
+    intent === "performance"
+  ) {
+    tools.push("expectancy_stats");
+  }
+  return [...new Set(tools)];
+}
+
 export function routeIntent(text: string, opts: { hasFocus?: boolean; prev?: Intent | null } = {}): Route {
   const scores: Partial<Record<Intent, number>> = {};
   for (const intent of Object.keys(RULES) as Exclude<Intent, "general">[]) {
@@ -83,25 +140,38 @@ export function routeIntent(text: string, opts: { hasFocus?: boolean; prev?: Int
     for (const [re, w] of RULES[intent]) if (re.test(text)) s += w;
     if (s > 0) scores[intent] = s;
   }
-  if (opts.hasFocus) scores.trade_review = (scores.trade_review ?? 0) + 3;
+  if (opts.hasFocus && !scores.calculation) scores.trade_review = (scores.trade_review ?? 0) + 3;
   const ranked = (Object.entries(scores) as [Intent, number][]).sort((a, b) => b[1] - a[1]);
   const [top, second] = [ranked[0], ranked[1]];
 
-  // A short follow-up ("why?", "and the one before?") belongs to the conversation, not to a fresh topic.
+  const mkRoute = (intent: Intent, secondary: Intent | null, confidence: number, inherited: boolean): Route => {
+    const toolsToCall = detectRequiredTools(text, intent);
+    return {
+      intent,
+      category: mapIntentToCategory(intent),
+      secondary,
+      confidence,
+      inherited,
+      requiresTools: intent === "calculation" || toolsToCall.length > 0,
+      toolsToCall,
+      scores,
+    };
+  };
+
+  // A short follow-up ("why?", "and with 15pt stop?") belongs to the conversation, not to a fresh topic.
   if ((!top || top[1] < 2) && wordCount(text) <= 6 && opts.prev && opts.prev !== "chitchat") {
-    return { intent: opts.prev, secondary: null, confidence: 0.5, inherited: true, scores };
+    return mkRoute(opts.prev, null, 0.5, true);
   }
   // Open-ended "look at everything" questions need the broad view, whatever keyword happened to match.
-  if (BROAD.test(text) && (!top || top[1] < 5)) return { intent: "general", secondary: null, confidence: 0.4, inherited: false, scores };
-  if (!top || top[1] < 1.5) return { intent: "general", secondary: null, confidence: 0.2, inherited: false, scores };
+  if (BROAD.test(text) && (!top || top[1] < 5)) return mkRoute("general", null, 0.4, false);
+  if (!top || top[1] < 1.5) return mkRoute("general", null, 0.2, false);
   const conf = top[1] / (top[1] + (second?.[1] ?? 0) + 1);
-  return {
-    intent: top[0],
-    secondary: second && second[1] >= top[1] * 0.6 && top[0] !== "chitchat" ? second[0] : null,
-    confidence: Math.round(conf * 100) / 100,
-    inherited: false,
-    scores,
-  };
+  return mkRoute(
+    top[0],
+    second && second[1] >= top[1] * 0.6 && top[0] !== "chitchat" ? second[0] : null,
+    Math.round(conf * 100) / 100,
+    false,
+  );
 }
 
 /* ================================ context plans ================================ */
@@ -118,7 +188,7 @@ export interface ContextPlan {
   /** rows = how many selected trades get their full written words; rowChars = cap per trade. */
   words: { rows: number; rowChars: number; recalled: number; lessons: number };
   companion: { practice: boolean; plans: boolean; noTradeDays: boolean; mind: boolean; today: boolean; recentDays: number; commitments: boolean; saved: boolean; readiness: boolean };
-  memory: { k: number; kinds: MemoryKind[] | null; topics: MemoryTopic[] | null; gaps: boolean };
+  memory: { k: number; kinds: MemoryKind[] | null; topics: MemoryTopic[] | null; gaps: boolean; tokenBudget?: number };
 }
 
 const none = { time: false, dow: false, setups: false, behavior: false, concepts: false };
@@ -127,43 +197,47 @@ const noCompanion = { practice: false, plans: false, noTradeDays: false, mind: f
 const PLANS: Record<Intent, Omit<ContextPlan, "intent">> = {
   chitchat: {
     stats: false, hold: false, patterns: false, deep: none, trades: { recent: 0, resolved: 0, detail: false }, analogs: 0, words: { rows: 0, rowChars: 0, recalled: 0, lessons: 0 },
-    companion: { ...noCompanion, today: true, mind: true, commitments: true }, memory: { k: 2, kinds: ["semantic"], topics: null, gaps: false },
+    companion: { ...noCompanion, today: true, mind: true, commitments: true }, memory: { k: 2, kinds: ["semantic"], topics: null, gaps: false, tokenBudget: 250 },
+  },
+  calculation: {
+    stats: true, hold: false, patterns: false, deep: none, trades: { recent: 5, resolved: 5, detail: true }, analogs: 0, words: { rows: 0, rowChars: 0, recalled: 0, lessons: 0 },
+    companion: { ...noCompanion, today: true, commitments: true }, memory: { k: 8, kinds: ["semantic"], topics: ["risk", "fact", "preference", "strategy"], gaps: false, tokenBudget: 800 },
   },
   trade_review: {
     stats: false, hold: false, patterns: true, deep: { ...none, behavior: true }, trades: { recent: 3, resolved: 6, detail: true }, analogs: 5, words: { rows: 4, rowChars: 1400, recalled: 4, lessons: 4 },
-    companion: { ...noCompanion, plans: true, mind: true, today: true, recentDays: 2, commitments: true }, memory: { k: 6, kinds: ["episodic", "semantic"], topics: ["execution", "risk", "emotion", "strategy", "habit", "timing"], gaps: false },
+    companion: { ...noCompanion, plans: true, mind: true, today: true, recentDays: 2, commitments: true }, memory: { k: 6, kinds: ["episodic", "semantic"], topics: ["execution", "risk", "emotion", "strategy", "habit", "timing"], gaps: false, tokenBudget: 900 },
   },
   technical: {
     stats: false, hold: true, patterns: false, deep: { ...none, time: true, setups: true, concepts: true }, trades: { recent: 8, resolved: 6, detail: true }, analogs: 4, words: { rows: 3, rowChars: 900, recalled: 3, lessons: 3 },
-    companion: { ...noCompanion, plans: true }, memory: { k: 4, kinds: null, topics: ["strategy", "timing", "execution"], gaps: false },
+    companion: { ...noCompanion, plans: true }, memory: { k: 4, kinds: null, topics: ["strategy", "timing", "execution"], gaps: false, tokenBudget: 700 },
   },
   behavior: {
     stats: true, hold: false, patterns: true, deep: { ...none, behavior: true, time: true }, trades: { recent: 10, resolved: 5, detail: false }, analogs: 0, words: { rows: 5, rowChars: 700, recalled: 6, lessons: 6 },
-    companion: { ...noCompanion, plans: false, mind: true, today: true, recentDays: 5, commitments: true, saved: true, readiness: true }, memory: { k: 8, kinds: null, topics: ["emotion", "habit", "execution", "risk", "timing", "preference"], gaps: true },
+    companion: { ...noCompanion, plans: false, mind: true, today: true, recentDays: 5, commitments: true, saved: true, readiness: true }, memory: { k: 8, kinds: null, topics: ["emotion", "habit", "execution", "risk", "timing", "preference"], gaps: true, tokenBudget: 1100 },
   },
   strategy: {
     stats: true, hold: true, patterns: true, deep: { time: true, dow: true, setups: true, behavior: true, concepts: true }, trades: { recent: 20, resolved: 10, detail: false }, analogs: 0, words: { rows: 3, rowChars: 600, recalled: 3, lessons: 5 },
-    companion: { ...noCompanion, plans: true }, memory: { k: 6, kinds: null, topics: ["strategy", "timing", "execution", "habit"], gaps: true },
+    companion: { ...noCompanion, plans: true }, memory: { k: 6, kinds: null, topics: ["strategy", "timing", "execution", "habit"], gaps: true, tokenBudget: 900 },
   },
   performance: {
     stats: true, hold: true, patterns: false, deep: { time: true, dow: true, setups: true, behavior: true, concepts: false }, trades: { recent: 15, resolved: 8, detail: false }, analogs: 0, words: { rows: 0, rowChars: 0, recalled: 0, lessons: 2 },
-    companion: { ...noCompanion, noTradeDays: true, today: true, readiness: true }, memory: { k: 3, kinds: null, topics: ["habit", "execution"], gaps: false },
+    companion: { ...noCompanion, noTradeDays: true, today: true, readiness: true }, memory: { k: 4, kinds: null, topics: ["habit", "execution", "risk", "fact"], gaps: false, tokenBudget: 600 },
   },
   planning: {
     stats: true, hold: false, patterns: true, deep: { ...none, behavior: true }, trades: { recent: 6, resolved: 4, detail: false }, analogs: 0, words: { rows: 2, rowChars: 600, recalled: 4, lessons: 5 },
-    companion: { practice: true, plans: true, noTradeDays: true, mind: true, today: true, recentDays: 3, commitments: true, saved: false, readiness: true }, memory: { k: 6, kinds: ["procedural", "semantic"], topics: null, gaps: false },
+    companion: { practice: true, plans: true, noTradeDays: true, mind: true, today: true, recentDays: 3, commitments: true, saved: false, readiness: true }, memory: { k: 6, kinds: ["procedural", "semantic"], topics: null, gaps: false, tokenBudget: 900 },
   },
   practice: {
     stats: false, hold: false, patterns: false, deep: none, trades: { recent: 5, resolved: 3, detail: false }, analogs: 0, words: { rows: 0, rowChars: 0, recalled: 3, lessons: 6 },
-    companion: { ...noCompanion, practice: true, mind: true, today: true }, memory: { k: 4, kinds: ["procedural", "semantic"], topics: ["habit", "preference", "strategy"], gaps: false },
+    companion: { ...noCompanion, practice: true, mind: true, today: true }, memory: { k: 4, kinds: ["procedural", "semantic"], topics: ["habit", "preference", "strategy"], gaps: false, tokenBudget: 600 },
   },
   memory: {
     stats: false, hold: false, patterns: true, deep: none, trades: { recent: 0, resolved: 0, detail: false }, analogs: 0, words: { rows: 0, rowChars: 0, recalled: 0, lessons: 0 },
-    companion: { ...noCompanion, mind: true, today: true, recentDays: 5, commitments: true, saved: true }, memory: { k: 24, kinds: null, topics: null, gaps: true },
+    companion: { ...noCompanion, mind: true, today: true, recentDays: 5, commitments: true, saved: true }, memory: { k: 24, kinds: null, topics: null, gaps: true, tokenBudget: 1800 },
   },
   general: {
     stats: true, hold: true, patterns: true, deep: { time: true, dow: true, setups: true, behavior: true, concepts: true }, trades: { recent: 20, resolved: 10, detail: false }, analogs: 3, words: { rows: 4, rowChars: 700, recalled: 5, lessons: 6 },
-    companion: { practice: true, plans: true, noTradeDays: true, mind: true, today: true, recentDays: 3, commitments: true, saved: true, readiness: true }, memory: { k: 8, kinds: null, topics: null, gaps: true },
+    companion: { practice: true, plans: true, noTradeDays: true, mind: true, today: true, recentDays: 3, commitments: true, saved: true, readiness: true }, memory: { k: 8, kinds: null, topics: null, gaps: true, tokenBudget: 1200 },
   },
 };
 
@@ -179,12 +253,18 @@ export function planFor(route: Route): ContextPlan {
   return {
     intent: route.intent,
     stats: a.stats || b.stats, hold: a.hold || b.hold, patterns: a.patterns || b.patterns,
-    deep: { time: a.deep.time || b.deep.time, dow: a.deep.dow || b.deep.dow, setups: a.deep.setups || b.deep.setups, behavior: a.deep.behavior || b.deep.behavior, concepts: a.deep.concepts || b.deep.concepts },
+    deep: { time: a.deep.time || b.deep.time, dow: a.deep.dow || b.deep.dow, setups: a.deep.setups || b.deep.setups, concepts: a.deep.concepts || b.deep.concepts, behavior: a.deep.behavior || b.deep.behavior },
     trades: { recent: num(a.trades.recent, b.trades.recent), resolved: num(a.trades.resolved, b.trades.resolved), detail: a.trades.detail || b.trades.detail },
     analogs: num(a.analogs, b.analogs),
     words: { rows: num(a.words.rows, b.words.rows), rowChars: num(a.words.rowChars, b.words.rowChars), recalled: num(a.words.recalled, b.words.recalled), lessons: num(a.words.lessons, b.words.lessons) },
     companion: c,
-    memory: { k: num(a.memory.k, b.memory.k), kinds: union(a.memory.kinds, b.memory.kinds), topics: union(a.memory.topics, b.memory.topics), gaps: a.memory.gaps || b.memory.gaps },
+    memory: {
+      k: num(a.memory.k, b.memory.k),
+      kinds: union(a.memory.kinds, b.memory.kinds),
+      topics: union(a.memory.topics, b.memory.topics),
+      gaps: a.memory.gaps || b.memory.gaps,
+      tokenBudget: num(a.memory.tokenBudget ?? 900, b.memory.tokenBudget ?? 900),
+    },
   };
 }
 

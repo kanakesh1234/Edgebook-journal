@@ -5,9 +5,9 @@
  *  2. EXPAND   a small trading-domain synonym list widens the query ("fomo" also finds "chased" and "urgency").
  *  3. RANK     two independent rankers over the same pool: BM25 (lexical) and the existing hashed-embedding index (`buildRecall`).
  *  4. FUSE     Reciprocal Rank Fusion (k = 60), which needs no score calibration between the two rankers.
- *  5. RERANK   multiply by what the memory is worth right now: confidence, retention (decay), evidence status, topic fit, pin.
+ *  5. RERANK   multiply by what the memory is worth right now: confidence, retention (decay), evidence status, topic fit, pin/importance.
  *              Relevance only lifts an item; a memory with no word overlap can still surface if the intent makes it important.
- *  6. DIVERSIFY Maximal Marginal Relevance so five near-identical memories never crowd out a different, useful one.
+ *  6. DIVERSIFY Maximal Marginal Relevance + Token Budget enforcement so retrieved memories always fit inside the prompt budget.
  *
  * This is a feature-based reranker, not a neural cross-encoder: nothing here calls a model.
  */
@@ -22,14 +22,14 @@ const toks = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").s
 const SYNONYMS: [RegExp, string][] = [
   [/\bfomo\b|\bmissing out\b|\bchas\w*/i, "chased early urgency missed entry"],
   [/\brevenge\b|\btilt\w*|\bmake it back\b|\bwin it back\b/i, "tilt revenge after loss urge"],
-  [/\bstop\b|\bstoploss\b|\bstop loss\b/i, "moved stop widened risk"],
-  [/\bsiz\w*|\boversiz\w*|\bcontracts?\b/i, "size sizing larger increased risk"],
-  [/\bloss(es)?\b|\blosing\b|\bdrawdown\b/i, "after loss losing"],
+  [/\bstop\b|\bstoploss\b|\bstop loss\b/i, "moved stop widened risk stop size points"],
+  [/\bsiz\w*|\boversiz\w*|\bcontracts?\b|\bmicro\b|\bmini\b|\bnq\b|\bmnq\b/i, "size sizing larger increased risk contracts stop points"],
+  [/\bloss(es)?\b|\blosing\b|\bdrawdown\b|\bstreak\b/i, "after loss losing drawdown limit"],
   [/\bmindset\b|\bfeel\w*|\bemotion\w*|\bpsycholog\w*/i, "feeling felt told anxious frustrated calm"],
   [/\bdisciplin\w*|\brules?\b|\bprocess\b/i, "process rules broke plan"],
   [/\bplan\w*|\bprep\w*/i, "plan written routine before"],
-  [/\bmorning\b|\bopen\b|\btime\b|\bsession\b/i, "time hour entered window"],
-  [/\bsetups?\b|\bplaybook\b|\bstrateg\w*/i, "setup playbook clean process"],
+  [/\bmorning\b|\bopen\b|\btime\b|\bsession\b/i, "time hour entered window session"],
+  [/\bsetups?\b|\bplaybook\b|\bstrateg\w*/i, "setup playbook clean process rule"],
   [/\bimprov\w*|\bbetter\b|\bprogress\w*|\blately\b/i, "improving trend steady recent"],
   [/\bweak\w*|\bstrength\w*|\bhabit\w*|\bpattern\w*/i, "habit pattern recurring"],
 ];
@@ -70,9 +70,21 @@ const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 export interface Retrieved { item: MemoryItem; score: number; why: string[] }
 
+export interface RetrievalDebugLog {
+  id: string;
+  at: number;
+  query: string;
+  intent: string;
+  category?: string;
+  toolsCalled: string[];
+  tokenBudget: number;
+  tokensUsed: number;
+  retrieved: { id: string; kind: MemoryKind; short: string; score: number; why: string[] }[];
+}
+
 export function retrieveMemories(store: MemoryStore | undefined | null, query: string, plan: Pick<ContextPlan, "memory">, now: number): Retrieved[] {
   const all = activeItems(store);
-  const { k, kinds, topics } = plan.memory;
+  const { k, kinds, topics, tokenBudget = 900 } = plan.memory;
   if (!all.length || k <= 0) return [];
 
   // 1. metadata filter, relaxed in steps so a narrow intent never returns nothing while useful memories exist
@@ -83,7 +95,7 @@ export function retrieveMemories(store: MemoryStore | undefined | null, query: s
   if (pool.length < Math.min(k, 3)) pool = all;
   const topicFit = (x: MemoryItem) => (!topics || topics.includes(x.topic) || x.origin === "user" ? 1 : 0.7);
 
-  // 2–4. expand, rank twice, fuse
+  // 2–4. expand, rank twice (BM25 keyword + feature-hash embedding), fuse via RRF
   const q = expandQuery(query);
   const lex = bm25(pool, q);
   const lexRank = [...lex.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
@@ -93,20 +105,28 @@ export function retrieveMemories(store: MemoryStore | undefined | null, query: s
   const why = new Map<string, string[]>();
   const fuse = (ids: string[], label: string) => ids.forEach((id, i) => { rrf.set(id, (rrf.get(id) ?? 0) + 1 / (60 + i + 1)); (why.get(id) ?? why.set(id, []).get(id)!).push(label); });
   fuse(lexRank, "keywords");
-  fuse(denseRank, "meaning");
+  fuse(denseRank, "embedding");
   const maxRrf = Math.max(1e-9, ...rrf.values());
 
-  // 5. rerank by what the memory is worth right now
+  // 5. rerank by hybrid score: relevance + confidence + recency/retention + status + importance/pin
   const scored = pool.map((it) => {
     const rel = (rrf.get(it.id) ?? 0) / maxRrf;
-    const prior = (0.4 + 0.6 * it.confidence) * (0.35 + 0.65 * retention(it, now)) * (STATUS_W[it.status] ?? 0.7) * topicFit(it) * (it.pinned ? 1.15 : 1);
-    return { it, score: (0.5 + 0.5 * rel) * prior, why: [...(why.get(it.id) ?? []), ...(topicFit(it) === 1 && topics ? ["fits this question"] : [])] };
+    const ret = retention(it, now);
+    const importanceBoost = it.origin === "user" ? 1.25 : it.pinned ? 1.15 : 1.0;
+    const prior = (0.4 + 0.6 * it.confidence) * (0.35 + 0.65 * ret) * (STATUS_W[it.status] ?? 0.7) * topicFit(it) * importanceBoost;
+    const reasons = [...(why.get(it.id) ?? [])];
+    if (topicFit(it) === 1 && topics) reasons.push("topic fit");
+    if (it.pinned || it.origin === "user") reasons.push("pinned/user fact");
+    if (ret > 0.85) reasons.push("recent");
+    return { it, score: (0.5 + 0.5 * rel) * prior, why: reasons };
   }).sort((a, b) => b.score - a.score);
 
-  // 6. MMR diversification
+  // 6. MMR diversification within tokenBudget
   const top = scored[0]?.score || 1;
   const chosen: typeof scored = [];
   const rest = [...scored];
+  let tokensUsed = 0;
+
   while (chosen.length < k && rest.length) {
     let bestI = 0, bestV = -Infinity;
     rest.forEach((c, i) => {
@@ -114,7 +134,13 @@ export function retrieveMemories(store: MemoryStore | undefined | null, query: s
       const v = 0.7 * (c.score / top) - 0.3 * sim;
       if (v > bestV) { bestV = v; bestI = i; }
     });
-    chosen.push(rest.splice(bestI, 1)[0]);
+    const candidate = rest.splice(bestI, 1)[0];
+    const itemTokens = Math.ceil((candidate.it.text.length + candidate.it.short.length + 32) / 3.7);
+    if (tokensUsed + itemTokens > tokenBudget && chosen.length > 0) {
+      continue;
+    }
+    tokensUsed += itemTokens;
+    chosen.push(candidate);
   }
   return chosen.map((c) => ({ item: c.it, score: Math.round(c.score * 1000) / 1000, why: c.why }));
 }
@@ -132,7 +158,16 @@ export interface BeliefOut {
   lastConfirmed: string;
   evidence?: string[];
 }
-export interface MemoryPayload { beliefs: BeliefOut[]; insufficient: string[] }
+export interface MemoryPayload {
+  beliefs: BeliefOut[];
+  insufficient: string[];
+  debug?: {
+    retrievedCount: number;
+    tokenBudget: number;
+    tokensUsed: number;
+    items: { id: string; kind: MemoryKind; short: string; score: number; why: string[] }[];
+  };
+}
 
 const STRENGTH: Record<string, BeliefOut["strength"]> = { hypothesis: "possible", supported: "likely", established: "established", contested: "mixed signals" };
 
@@ -144,12 +179,26 @@ export function memoryForModel(store: MemoryStore | undefined | null, query: str
     const c = store.coverage;
     if (c.trades >= 5 && c.withProcess < c.trades * 0.5) insufficient.push(`only ${c.withProcess} of ${c.trades} trades have review answers, so process patterns rest on a partial picture`);
   }
+  const beliefs: BeliefOut[] = got.map(({ item: it }) => ({
+    say: it.text, kind: it.kind, strength: STRENGTH[it.status] ?? "possible", confidence: it.confidence, basedOn: it.n,
+    stance: it.stance === "fact" ? "recorded" : "inferred", lastConfirmed: iso(it.lastReinforced),
+    ...(it.evidence.length ? { evidence: it.evidence.slice(0, 2).map((e) => `${e.date}${e.note ? `: ${e.note}` : ""}`) } : {}),
+  }));
+  const tokensUsed = Math.ceil(JSON.stringify({ beliefs, insufficient }).length / 3.7);
   return {
-    beliefs: got.map(({ item: it }) => ({
-      say: it.text, kind: it.kind, strength: STRENGTH[it.status] ?? "possible", confidence: it.confidence, basedOn: it.n,
-      stance: it.stance === "fact" ? "recorded" : "inferred", lastConfirmed: iso(it.lastReinforced),
-      ...(it.evidence.length ? { evidence: it.evidence.slice(0, 2).map((e) => `${e.date}${e.note ? `: ${e.note}` : ""}`) } : {}),
-    })),
+    beliefs,
     insufficient,
+    debug: {
+      retrievedCount: got.length,
+      tokenBudget: plan.memory.tokenBudget ?? 900,
+      tokensUsed,
+      items: got.map((g) => ({
+        id: g.item.id,
+        kind: g.item.kind,
+        short: g.item.short,
+        score: g.score,
+        why: g.why,
+      })),
+    },
   };
 }

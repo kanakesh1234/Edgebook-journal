@@ -111,7 +111,7 @@
 /* ---------- Tailwind theme mapping ---------- */
 @theme inline {
   /* Typography */
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+  --font-sans: "Inter Variable", -apple-system, "SF Pro Text", "SF Pro Display", Inter, system-ui, ui-sans-serif, sans-serif;
   --font-display: var(--font-sans);
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
   --font-serif: "Instrument Serif", Georgia, serif;
@@ -157,7 +157,7 @@
   --shadow-overlay: var(--shadow-overlay);
 
   /* Motion */
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-expo: cubic-bezier(0.32, 0.72, 0, 1);
   --animate-float: float 9s ease-in-out infinite;
   --animate-pulse-soft: pulse-soft 3s ease-in-out infinite;
 
@@ -476,8 +476,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
    md (768px) and xl (1280px) breakpoints:
 
      phone    < 768     bottom tab bar · one column · thumb-first
-     tablet   768–1279  icon rail · two-up grids · touch targets
-     desktop  ≥ 1280    full sidebar · context rail · dense grids
+     tablet   768–1279  collapsible icon rail · two-up grids · touch targets
+     desktop  ≥ 1280    full collapsible sidebar · docked Minato · 4-col stat grids
 
    Components read these variables instead of hard-coding offsets,
    so fixed elements (Minato, toasts, sheets) always clear the chrome.
@@ -492,6 +492,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   --tabbar-h: calc(4rem + var(--safe-bottom));
   --rail-w: 0px;
   --sidebar-w: 0px;
+  --minato-dock-w: 0px;
   --content-max: 72rem;
 
   /* Page gutter, shared by .app-main and any full-bleed child */
@@ -501,12 +502,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
      Equals the tab bar on phones, the safe area elsewhere. */
   --chrome-bottom: max(var(--tabbar-h), var(--safe-bottom));
 
-  /* Motion language — iOS-style decelerating curves */
+  /* Motion language — Apple HIG decelerating spring curves */
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --dur-fast: 0.16s;
   --dur-base: 0.28s;
-  --dur-slow: 0.42s;
+  --dur-slow: 0.38s;
 }
 @media (max-width: 359px) {
   :root {
@@ -528,6 +529,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     --content-max: 60rem;
     --gutter: 1.75rem;
   }
+  :root[data-tablet-expanded="true"] {
+    --rail-w: 15.5rem;
+  }
 }
 @media (min-width: 1280px) {
   :root {
@@ -535,6 +539,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     --sidebar-w: 16.5rem;
     --content-max: 72rem;
     --gutter: 2.5rem;
+  }
+  :root[data-sidebar-collapsed="true"] {
+    --sidebar-w: 5rem;
   }
 }
 /* Pages that earn extra width (dashboard's context rail) opt in. */
@@ -553,12 +560,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* The scrolling page frame. Padding, not margin, so the fixed chrome
-   (sidebar / rail / tab bar) never overlaps content at any size. */
+   (sidebar / rail / tab bar / docked Minato right panel) never overlaps content at any size. */
 .app-main {
   padding-top: 1rem;
   padding-right: calc(var(--gutter) + var(--safe-right));
   padding-left: calc(var(--gutter) + var(--safe-left));
   padding-bottom: calc(var(--tabbar-h) + 1.75rem);
+  transition:
+    padding-left 0.3s cubic-bezier(0.32, 0.72, 0, 1),
+    padding-right 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }
 /* When a fixed phone top bar is rendered, clear it automatically */
 @media (max-width: 767px) {
@@ -569,7 +579,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 @media (min-width: 768px) {
   .app-main {
     padding-top: 1.75rem;
-    padding-right: calc(var(--gutter) + var(--safe-right));
+    padding-right: calc(var(--minato-dock-w, 0px) + var(--gutter) + var(--safe-right));
     padding-left: calc(var(--rail-w) + var(--gutter) + var(--safe-left));
     padding-bottom: 3rem;
   }
@@ -577,7 +587,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 @media (min-width: 1280px) {
   .app-main {
     padding-top: 2.25rem;
-    padding-right: 2.5rem;
+    padding-right: calc(var(--minato-dock-w, 0px) + 2.5rem);
     padding-left: calc(var(--sidebar-w) + 2.5rem);
     padding-bottom: 4rem;
   }
@@ -791,15 +801,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     text-overflow: ellipsis;
   }
 
-  /* ---------- Phone tab bar ----------
-     Expected markup:
-       <nav class="m-tabbar glass" aria-label="Primary">
-         <a class="m-tab" href="…" aria-current="page">
-           <span class="m-tab-icon"><svg class="sf-icon sf-icon-lg">…</svg></span>
-           <span class="m-tab-label">Home</span>
-         </a>
-       </nav>
-     Active = aria-current="page" or data-active="true". */
+  /* ---------- Phone tab bar ---------- */
   .m-tabbar {
     position: fixed;
     inset: auto 0 0 0;
@@ -842,7 +844,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     height: 1.875rem;
     transition: transform 0.14s var(--ease-ios);
   }
-  /* Active pill: scale + fade only, so it composites on the GPU */
   .m-tab-icon::before {
     content: "";
     position: absolute;
@@ -902,7 +903,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    min-height: 2.5rem;
+    min-height: 2.75rem;
     padding: 0.5rem 0.75rem;
     border-radius: var(--radius-control);
     color: var(--muted);

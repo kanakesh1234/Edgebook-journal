@@ -7,10 +7,6 @@ import { entriesNewestFirst, formatHistoricalDate } from "../tz";
 
 /* ------------------------------------------------------------------ */
 /*  EdgeBookContext — structured, privacy-filtered context for MINATO  */
-/*                                                                      */
-/*  Deterministic retrieval: we never dump the whole journal. The       */
-/*  builder assembles only what the companion needs, and journal        */
-/*  notes/reflections are included only when the user allows it.        */
 /* ------------------------------------------------------------------ */
 
 export interface TradeReviewContext {
@@ -25,7 +21,7 @@ export interface EdgeBookContext {
   stats: JournalStats;
   discipline: DisciplineSummary;
   adherence: AdherenceSummary;
-  /** Newest-first. */
+  /** Newest-first full journal history so live data tools & date lookups never miss older trades. */
   recentTrades: JournalEntry[];
   /** Trades under the lens right now (review flow / selected day). */
   focus: TradeReviewContext | null;
@@ -123,7 +119,7 @@ export function buildContext(args: {
     stats: args.stats,
     discipline: args.discipline,
     adherence: args.adherence,
-    recentTrades: entriesNewestFirst(args.entries).slice(0, 20),
+    recentTrades: entriesNewestFirst(args.entries),
     focus:
       focusEntry
         ? {

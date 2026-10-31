@@ -135,7 +135,7 @@ function SignOutButton({ className }: { className?: string }) {
       onClick={() => void useApp.getState().signOut()}
       aria-label="Sign out"
       title="Sign out"
-      className={cn("grid h-8 w-8 place-items-center rounded-lg text-faint transition-colors hover:bg-loss/10 hover:text-loss", className)}
+      className={cn("grid h-9 w-9 min-h-[36px] min-w-[36px] place-items-center rounded-lg text-faint transition-colors hover:bg-loss/10 hover:text-loss", className)}
     >
       <LogoutIcon className="h-4 w-4" />
     </button>
@@ -168,14 +168,16 @@ function SettingsGear({ onNavigate, className }: { onNavigate?: () => void; clas
 
 /* ================================== DESKTOP =================================== */
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, collapsed = false }: { item: NavItem; active: boolean; collapsed?: boolean }) {
   const Icon = item.icon;
   return (
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
+      title={collapsed ? item.label : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
+        "group relative flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
+        collapsed && "justify-center px-2",
         active ? "text-ink" : "text-faint hover:bg-ink/[0.04] hover:text-muted",
       )}
     >
@@ -186,66 +188,93 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
           className="absolute inset-0 rounded-xl border border-line-strong bg-raised"
         />
       )}
-      <span className="relative flex items-center gap-3">
-        <Icon className={cn("h-[18px] w-[18px] transition-colors", active ? "text-gold" : "")} />
-        {item.label}
+      <span className={cn("relative flex items-center gap-3", collapsed && "justify-center")}>
+        <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "text-gold" : "")} />
+        {!collapsed && <span>{item.label}</span>}
       </span>
     </Link>
   );
 }
 
-/** ≥ xl — the full sidebar: labels, Journey progress, account. */
+/** ≥ xl — the full sidebar: labels, Journey progress, account, plus collapse toggle. */
 export function Sidebar() {
   const pathname = usePathname();
   const user = useApp((s) => s.user);
   const displayName = useDisplayName();
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const collapsed = useUi((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUi((s) => s.toggleSidebar);
   const isNoSetupToday = useIsNoSetupToday();
 
-  return (
-    <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] flex-col border-r border-line bg-surface/80 backdrop-blur xl:flex">
-      <div className="flex h-16 items-center border-b border-line px-5">
-        <Link href="/dashboard" aria-label="Edgebook dashboard">
-          <Wordmark />
-        </Link>
-      </div>
+  useEffect(() => {
+    const root = document.documentElement;
+    if (collapsed) root.setAttribute("data-sidebar-collapsed", "true");
+    else root.removeAttribute("data-sidebar-collapsed");
+    return () => root.removeAttribute("data-sidebar-collapsed");
+  }, [collapsed]);
 
-      <div className="px-4 pt-4">
+  return (
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] flex-col border-r border-line bg-surface/85 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] xl:flex">
+      <div className={cn("flex h-16 items-center justify-between border-b border-line px-4", collapsed && "justify-center px-2")}>
+        {!collapsed && (
+          <Link href="/dashboard" aria-label="Edgebook dashboard">
+            <Wordmark />
+          </Link>
+        )}
         <button
-          disabled={isNoSetupToday}
-          title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : undefined}
-          onClick={openNewEntry}
-          className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gold-strong px-4 py-2.5 text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+          type="button"
+          onClick={toggleSidebar}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="grid h-11 w-11 place-items-center rounded-xl text-muted transition-colors hover:bg-raised hover:text-ink"
         >
-          <PlusIcon className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
-          Add trade
+          <ChevronRightIcon className={cn("h-4 w-4 transition-transform duration-300", !collapsed && "rotate-180")} />
         </button>
       </div>
 
-      <nav aria-label="Primary" className="mt-5 flex-1 space-y-1 overflow-y-auto px-4">
+      <div className={cn("px-4 pt-4", collapsed && "px-2")}>
+        <button
+          disabled={isNoSetupToday}
+          title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : "Add trade"}
+          onClick={openNewEntry}
+          className={cn(
+            "group flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-gold-strong px-4 py-2.5 text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40",
+            collapsed && "px-0",
+          )}
+        >
+          <PlusIcon className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:rotate-90" />
+          {!collapsed && <span>Add trade</span>}
+        </button>
+      </div>
+
+      <nav aria-label="Primary" className={cn("mt-5 flex-1 space-y-1 overflow-y-auto px-4", collapsed && "px-2")}>
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
+          <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} collapsed={collapsed} />
         ))}
       </nav>
 
-      <JourneyCard className="mx-4 mb-3" />
+      {!collapsed && <JourneyCard className="mx-4 mb-3" />}
 
-      <div className="border-t border-line p-4">
-        <div className="flex items-center justify-between pb-3">
+      <div className={cn("border-t border-line p-4", collapsed && "flex flex-col items-center gap-2 p-2")}>
+        <div className={cn("flex items-center justify-between pb-3", collapsed && "flex-col gap-2 pb-1")}>
           <SettingsGear />
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Theme</span>
+            {!collapsed && <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-faint">Theme</span>}
             <ThemeToggle />
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Avatar />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-ink">{displayName}</p>
-            <p className="truncate text-[11px] text-faint">{user?.email}</p>
+        {!collapsed ? (
+          <div className="flex items-center gap-3">
+            <Avatar />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-ink">{displayName}</p>
+              <p className="truncate text-[11px] text-faint">{user?.email}</p>
+            </div>
+            <SignOutButton />
           </div>
-          <SignOutButton />
-        </div>
+        ) : (
+          <SignOutButton className="h-11 w-11 rounded-xl" />
+        )}
       </div>
     </aside>
   );
@@ -253,7 +282,7 @@ export function Sidebar() {
 
 /* ================================== TABLET ==================================== */
 
-function RailLink({ item, active }: { item: NavItem; active: boolean }) {
+function RailLink({ item, active, expanded = false }: { item: NavItem; active: boolean; expanded?: boolean }) {
   const Icon = item.icon;
   return (
     <Link
@@ -261,7 +290,8 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
       aria-current={active ? "page" : undefined}
       title={item.label}
       className={cn(
-        "relative flex h-14 w-full flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-medium tracking-wide transition-colors duration-200",
+        "relative flex min-h-[48px] w-full items-center gap-3 rounded-xl px-3 text-xs font-medium tracking-wide transition-colors duration-200",
+        !expanded && "h-14 flex-col justify-center gap-1 px-1 text-[10px]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60",
         active ? "text-ink" : "text-faint hover:bg-ink/[0.04] hover:text-muted active:bg-ink/[0.06]",
       )}
@@ -273,8 +303,8 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
           className="absolute inset-0 rounded-xl border border-line-strong bg-raised"
         />
       )}
-      <Icon className={cn("relative h-[22px] w-[22px] transition-colors", active ? "text-gold" : "")} />
-      <span className="relative">{item.short}</span>
+      <Icon className={cn("relative h-[22px] w-[22px] shrink-0 transition-colors", active ? "text-gold" : "")} />
+      <span className="relative truncate">{expanded ? item.label : item.short}</span>
     </Link>
   );
 }
@@ -283,33 +313,58 @@ export function TabletRail() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
   const isNoSetupToday = useIsNoSetupToday();
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (expanded) root.setAttribute("data-tablet-expanded", "true");
+    else root.removeAttribute("data-tablet-expanded");
+    return () => root.removeAttribute("data-tablet-expanded");
+  }, [expanded]);
 
   return (
     <aside
       aria-label="Sidebar"
-      className="fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col items-center border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto [@media(max-height:520px)]:*:shrink-0"
+      className={cn(
+        "fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto [@media(max-height:520px)]:*:shrink-0",
+        expanded ? "items-stretch px-3" : "items-center",
+      )}
     >
-      <Link href="/dashboard" aria-label="Edgebook dashboard" className="rounded-xl p-1">
-        <LogoMark className="h-9 w-9" />
-      </Link>
+      <div className={cn("flex items-center justify-between", expanded ? "px-1" : "flex-col gap-2")}>
+        <Link href="/dashboard" aria-label="Edgebook dashboard" className="rounded-xl p-1">
+          <LogoMark className="h-9 w-9" />
+        </Link>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "Collapse tablet sidebar" : "Expand tablet sidebar"}
+          className="grid h-11 w-11 place-items-center rounded-xl text-muted transition-colors hover:bg-raised hover:text-ink"
+        >
+          <ChevronRightIcon className={cn("h-4 w-4 transition-transform duration-300", expanded && "rotate-180")} />
+        </button>
+      </div>
 
       <button
         disabled={isNoSetupToday}
         onClick={openNewEntry}
         aria-label="Add trade"
         title={isNoSetupToday ? "Disabled — today is marked as a no-setup day" : "Add trade"}
-        className="mt-4 grid h-12 w-12 place-items-center rounded-2xl bg-gold-strong text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+        className={cn(
+          "mt-3 flex h-12 items-center justify-center gap-2 rounded-2xl bg-gold-strong text-sm font-semibold text-on-gold shadow-sm transition-all duration-200 hover:bg-gold-strong-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
+          expanded ? "w-full px-3" : "w-12",
+        )}
       >
-        <PlusIcon className="h-5 w-5" />
+        <PlusIcon className="h-5 w-5 shrink-0" />
+        {expanded && <span>Add trade</span>}
       </button>
 
-      <nav aria-label="Primary" className="no-scrollbar mt-4 flex w-full flex-1 flex-col gap-1 overflow-y-auto px-2 [@media(max-height:520px)]:flex-none [@media(max-height:520px)]:overflow-visible">
+      <nav aria-label="Primary" className="no-scrollbar mt-4 flex w-full flex-1 flex-col gap-1 overflow-y-auto px-1 [@media(max-height:520px)]:flex-none [@media(max-height:520px)]:overflow-visible">
         {NAV_ITEMS.map((item) => (
-          <RailLink key={item.href} item={item} active={isActive(pathname, item.href)} />
+          <RailLink key={item.href} item={item} active={isActive(pathname, item.href)} expanded={expanded} />
         ))}
       </nav>
 
-      <div className="flex flex-col items-center gap-2 border-t border-line px-2 pt-3 [@media(max-height:520px)]:mt-3">
+      <div className={cn("flex items-center gap-2 border-t border-line pt-3 [@media(max-height:520px)]:mt-3", expanded ? "justify-between px-1" : "flex-col px-2")}>
         <ThemeToggle className="h-11 w-11 rounded-xl" />
         <SettingsGear />
         <SignOutButton className="h-11 w-11 rounded-xl" />
@@ -486,7 +541,7 @@ function TabLink({ item, active }: { item: NavItem; active: boolean }) {
       aria-current={active ? "page" : undefined}
       onClick={() => haptic.selection()}
       className={cn(
-        "relative flex h-full flex-col items-center justify-center gap-[3px] text-[10px] font-medium tracking-wide transition-colors active:scale-95",
+        "relative flex h-full min-h-[44px] flex-col items-center justify-center gap-[3px] text-[10px] font-medium tracking-wide transition-colors active:scale-95",
         active ? "text-gold" : "text-faint",
       )}
     >

@@ -4,6 +4,13 @@ import { holdTimeStats, formatHold } from "../holdtime";
 import { timeWindowAnalytics } from "../time-patterns";
 import { mistakeIndex, mistakeOf, mistakeTagsOf } from "../mistakes";
 import { computeBrainCalibration } from "../ai-brain";
+import {
+  computeExpectancyStatsTool,
+  computePositionSizingTool,
+  computeStreakTool,
+  parseCalcQuery,
+} from "./tools";
+import type { UserSemanticParams } from "./extract";
 
 /* ------------------------------------------------------------------ */
 /*  MINATO — English-only, analytical, evidence-based.                 */
@@ -14,6 +21,13 @@ import { computeBrainCalibration } from "../ai-brain";
 export interface MinatoMessage {
   role: "buddy" | "user";
   text: string;
+}
+
+export interface RespondOptions {
+  semanticParams?: Partial<UserSemanticParams>;
+  startingEquity?: number;
+  targetEquity?: number;
+  maxDrawdown?: number;
 }
 
 /** Focused starting points for a deeper conversation. Each remains grounded
@@ -44,11 +58,143 @@ export function greet(ctx: EdgeBookContext): string {
   return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, mistakes, psychology, or edge.`;
 }
 
-export function respond(ctx: EdgeBookContext, input: string): string {
+export function respond(ctx: EdgeBookContext, input: string, opts: RespondOptions = {}): string {
   const q = input.toLowerCase().trim();
   const { stats, discipline, adherence } = ctx;
   const cal = computeBrainCalibration(ctx.recentTrades, []);
   const mistakes = mistakeIndex(ctx.recentTrades);
+  const calcParams = parseCalcQuery(input);
+  const sem = opts.semanticParams ?? {};
+
+  // --- PRIORITY 1: DETERMINISTIC TRADING MATH (Streaks, Position Sizing, Expectancy/PF/R) ---
+  // Never substitute a directional or instrument breakdown when the user asks about streaks, sizing, or math!
+  if (calcParams.wantsStreak || calcParams.wantsSizing || calcParams.wantsExpectancyOrStats) {
+    const sections: string[] = [];
+
+    const streakRes = computeStreakTool({
+      entries: ctx.recentTrades,
+      overrideWinRate: calcParams.winRateOverride,
+      horizonTrades: calcParams.horizonTrades,
+      targetK: calcParams.targetStreakK,
+      runs: 10_000,
+      seed: 42,
+    });
+
+    if (calcParams.wantsStreak) {
+      const wrPct = (streakRes.winRate * 100).toFixed(1);
+      const lossPct = (streakRes.lossRate * 100).toFixed(1);
+      const keyProbs = streakRes.monteCarlo.probabilities
+        .filter((p) => [3, 4, 5, 6, 8, 10].includes(p.k) || p.k === calcParams.targetStreakK)
+        .slice(0, 5)
+        .map((p) => `P(streak ≥ ${p.k}) = **${p.exactProbPct}%** (MC: ${p.mcProbPct}%)`)
+        .join(" · ");
+
+      sections.push(
+        `With a **${wrPct}% win rate** (${lossPct}% loss rate across ${streakRes.sampleTrades} decided trades), your expected maximum losing streak over **${streakRes.horizonTrades} trades** is **${streakRes.expectedMaxLosingStreakClosedForm} losses** (closed-form) and **${streakRes.monteCarlo.meanMaxStreak} losses** (10,000-run Monte Carlo mean; 95th percentile tail: **${streakRes.monteCarlo.p95MaxStreak} consecutive losses**, 99th percentile: **${streakRes.monteCarlo.p99MaxStreak} losses**).`,
+      );
+      sections.push(
+        `1. **Streak Probabilities in ${streakRes.horizonTrades} Trades**: ${keyProbs}`,
+      );
+      sections.push(
+        `2. **Your Actual Journal History**: Max losing streak recorded = **${streakRes.historicalMaxLosingStreak}** · Max winning streak = **${streakRes.historicalMaxWinningStreak}**`,
+      );
+      sections.push(
+        `3. **Assumptions & Caveat**: Assumes independent Bernoulli trials at ${wrPct}% win rate (10,000 seeded runs, seed=42). ${streakRes.sampleSizeCaveat}`,
+      );
+    }
+
+    if (calcParams.wantsSizing) {
+      const sizingRes = computePositionSizingTool({
+        entries: ctx.recentTrades,
+        settings: {
+          traderName: ctx.userFirstName || "Trader",
+          startingEquity: opts.startingEquity ?? stats.currentEquity - stats.totalPnl,
+          targetEquity: opts.targetEquity ?? stats.currentEquity + stats.remainingToTarget,
+          maxDrawdown: opts.maxDrawdown ?? (stats.drawdownCushion != null ? stats.drawdown + stats.drawdownCushion : 2000),
+          currency: "USD",
+        },
+        symbol: calcParams.instrument ?? "MNQ",
+        stopPoints: calcParams.stopPoints,
+        riskDollars: calcParams.riskDollars,
+        riskPct: calcParams.riskPct,
+        memoryRiskDollars: sem.riskDollars ?? null,
+        memoryRiskPct: sem.riskPct ?? null,
+        memoryStopPoints: sem.stopPoints ?? null,
+        memoryDailyLossLimit: sem.dailyLossLimit ?? null,
+        p95LosingStreak: streakRes.monteCarlo.p95MaxStreak,
+      });
+
+      const mnq = sizingRes.primary.symbol === "MNQ" ? sizingRes.primary : sizingRes.comparison;
+      const nq = sizingRes.primary.symbol === "NQ" ? sizingRes.primary : sizingRes.comparison;
+
+      const idxBase = sections.length > 0 ? 4 : 1;
+      if (sections.length === 0) {
+        sections.push(
+          `For a **$${sizingRes.effectiveRiskDollars} risk budget** (${sizingRes.riskSource}) and a **${sizingRes.stopPoints}-point stop**, your exact position size is **${mnq.contracts} MNQ (Micro)** or **${nq.contracts} NQ (Mini)** contracts.`,
+        );
+      } else {
+        sections.push(
+          `${idxBase}. **Position Sizing (MNQ Micro vs NQ Mini)** at **$${sizingRes.effectiveRiskDollars} risk** and **${sizingRes.stopPoints}-pt stop**:`,
+        );
+      }
+
+      sections.push(
+        `   - **MNQ ($2/pt)**: \`${mnq.formulaWorking}\` → **${mnq.contracts} contract${mnq.contracts === 1 ? "" : "s"}** ($${mnq.actualDollarRisk} actual risk, $${mnq.riskPerContractDollars}/contract)`,
+      );
+      sections.push(
+        `   - **NQ ($20/pt)**: \`${nq.formulaWorking}\` → **${nq.contracts} contract${nq.contracts === 1 ? "" : "s"}** ($${nq.actualDollarRisk} actual risk, $${nq.riskPerContractDollars}/contract)`,
+      );
+      if (sizingRes.drawdownRoomDollars != null) {
+        sections.push(
+          `   - **Drawdown Room Check**: $${Math.round(sizingRes.drawdownRoomDollars).toLocaleString("en-US")} drawdown cushion remaining${sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom != null ? ` (max safe risk for a ${sizingRes.safeForDrawdownStreak.p95MaxLosingStreak}-loss p95 streak: **$${sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom}/trade**)` : ""}.`,
+        );
+      }
+      if (sizingRes.safeForDrawdownStreak.warning) {
+        sections.push(`   - **Risk Warning**: ${sizingRes.safeForDrawdownStreak.warning}`);
+      }
+
+      if (sizingRes.missingInputs.length > 0) {
+        const missingLabels = sizingRes.missingInputs
+          .map((m) => (m === "stop_points" ? "typical stop size in points" : "risk per trade ($ or %)"))
+          .join(" and ");
+        sections.push(
+          `\n**Quick check**: I used ${sizingRes.stopPoints} pts and $${sizingRes.effectiveRiskDollars} risk above because your ${missingLabels} isn't saved in memory yet. Reply with your ${missingLabels} (e.g. *"My stop is 15 points and I risk $150 per trade"*) and I'll save it to memory and recalculate automatically.`,
+        );
+      } else {
+        sections.push(
+          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size?`,
+        );
+      }
+    }
+
+    if (calcParams.wantsExpectancyOrStats && !calcParams.wantsStreak && !calcParams.wantsSizing) {
+      const expRes = computeExpectancyStatsTool(ctx.recentTrades, {
+        traderName: ctx.userFirstName || "Trader",
+        startingEquity: opts.startingEquity ?? 10000,
+        targetEquity: opts.targetEquity ?? 20000,
+        maxDrawdown: opts.maxDrawdown ?? 2000,
+        currency: "USD",
+      });
+      sections.push(
+        `Across **${expRes.decidedTrades} decided trades** (${expRes.winRatePct}% win rate), your expectancy is **${money(expRes.expectancyDollarsPerTrade)} per trade**${expRes.expectancyR != null ? ` (**${expRes.expectancyR >= 0 ? "+" : ""}${expRes.expectancyR}R**)` : ""} with a profit factor of **${expRes.profitFactor ?? "—"}**.`,
+      );
+      sections.push(
+        `1. **Avg Win vs Avg Loss**: +$${expRes.avgWinDollars.toFixed(0)} vs −$${expRes.avgLossDollars.toFixed(0)} (Payoff ratio: **${expRes.payoffRatio ?? "—"}** · Avg R: **${expRes.avgR != null ? `${expRes.avgR}R` : "—"}**)`,
+      );
+      sections.push(
+        `2. **Drawdown Stats**: Max DD **$${expRes.drawdown.maxDrawdownDollars.toLocaleString("en-US")}** · Current DD **$${expRes.drawdown.currentDrawdownDollars.toLocaleString("en-US")}**${expRes.drawdown.drawdownRoomDollars != null ? ` · Drawdown room left: **$${expRes.drawdown.drawdownRoomDollars.toLocaleString("en-US")}**` : ""}`,
+      );
+      sections.push(
+        `3. **Assumptions & Caveat**: Computed directly from ${expRes.totalTrades} live journal trades (${expRes.rSampleSize} with R-multiples recorded).`,
+      );
+    }
+
+    if (sections.length > 0 && !calcParams.wantsSizing) {
+      sections.push(`\nWould you like me to calculate your exact MNQ/NQ contract size to survive a ${streakRes.monteCarlo.p95MaxStreak}-trade 95th-percentile losing streak?`);
+    }
+
+    return sections.join("\n");
+  }
 
   // --- Specific date or instrument lookup ---
   const dateMatch = q.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
@@ -71,7 +217,7 @@ export function respond(ctx: EdgeBookContext, input: string): string {
   }
 
   // --- Mistakes / leaks / why losing / biggest error ---
-  if (/mistake|leak|losing|loss|wrong|blunder|error|costing|hurt|weakness/.test(q)) {
+  if (/mistake|leak|losing|loss|wrong|blunder|error|costing|hurt|weakness/.test(q) && !/streak/.test(q)) {
     if (mistakes.length === 0) {
       const losses = ctx.recentTrades.filter((e) => e.pnl < 0);
       if (losses.length === 0) return "You have no losing trades or tagged mistakes recorded yet.";
@@ -123,6 +269,35 @@ export function respond(ctx: EdgeBookContext, input: string): string {
     if (rows.length > 1 && worst.pnl < 0) {
       parts.push(`\n**Risk trigger**: Trading while **${worst.k}** has cost ${money(worst.pnl)} (${worst.wr}% win rate). Step away or cut size when you notice this state.`);
     }
+    return parts.join("\n");
+  }
+
+  // --- Instrument / direction performance (ONLY when explicitly asking to compare instruments or long vs short) ---
+  if (/\b(compare instruments|performance by instrument|which instrument|long vs short|longs? or shorts?|direction breakdown)\b/.test(q)) {
+    const decided = ctx.recentTrades.filter((e) => e.direction);
+    if (decided.length === 0) return "Record direction (Long/Short) on your entries and I'll compare longs vs shorts and per-instrument performance.";
+    const longs = decided.filter((e) => e.direction === "long");
+    const shorts = decided.filter((e) => e.direction === "short");
+    const stat = (list: typeof decided) => {
+      const pnl = list.reduce((s, e) => s + e.pnl, 0);
+      const wins = list.filter((e) => e.pnl > 0).length;
+      const losses = list.filter((e) => e.pnl < 0).length;
+      return `${money(pnl)} · ${wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : "—"}% win rate · ${list.length} trades`;
+    };
+    const parts: string[] = ["**Directional & Instrument Breakdown**:"];
+    parts.push(`1. **Longs**: ${stat(longs)}`);
+    parts.push(`2. **Shorts**: ${stat(shorts)}`);
+    const byInstrument = new Map<string, { pnl: number; n: number; wins: number }>();
+    for (const e of ctx.recentTrades) {
+      if (!e.instrument || e.instrument === "—") continue;
+      const cur = byInstrument.get(e.instrument) ?? { pnl: 0, n: 0, wins: 0 };
+      cur.pnl += e.pnl;
+      cur.n += 1;
+      if (e.pnl > 0) cur.wins += 1;
+      byInstrument.set(e.instrument, cur);
+    }
+    const top = [...byInstrument.entries()].sort((a, b) => b[1].pnl - a[1].pnl)[0];
+    if (top) parts.push(`3. **Primary instrument (${top[0]})**: ${money(top[1].pnl)} · ${Math.round((top[1].wins / top[1].n) * 100)}% win rate (${top[1].n} trades)`);
     return parts.join("\n");
   }
 
@@ -223,35 +398,6 @@ export function respond(ctx: EdgeBookContext, input: string): string {
     return parts.join("\n");
   }
 
-  // --- Instrument / direction performance ---
-  if (/instrument|symbol|long vs short|longs? or shorts?|direction|mnq|nq|es|mes/.test(q)) {
-    const decided = ctx.recentTrades.filter((e) => e.direction);
-    if (decided.length === 0) return "Record direction (Long/Short) on your entries and I'll compare longs vs shorts and per-instrument performance.";
-    const longs = decided.filter((e) => e.direction === "long");
-    const shorts = decided.filter((e) => e.direction === "short");
-    const stat = (list: typeof decided) => {
-      const pnl = list.reduce((s, e) => s + e.pnl, 0);
-      const wins = list.filter((e) => e.pnl > 0).length;
-      const losses = list.filter((e) => e.pnl < 0).length;
-      return `${money(pnl)} · ${wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : "—"}% win rate · ${list.length} trades`;
-    };
-    const parts: string[] = ["**Directional & Instrument Breakdown**:"];
-    parts.push(`1. **Longs**: ${stat(longs)}`);
-    parts.push(`2. **Shorts**: ${stat(shorts)}`);
-    const byInstrument = new Map<string, { pnl: number; n: number; wins: number }>();
-    for (const e of ctx.recentTrades) {
-      if (!e.instrument || e.instrument === "—") continue;
-      const cur = byInstrument.get(e.instrument) ?? { pnl: 0, n: 0, wins: 0 };
-      cur.pnl += e.pnl;
-      cur.n += 1;
-      if (e.pnl > 0) cur.wins += 1;
-      byInstrument.set(e.instrument, cur);
-    }
-    const top = [...byInstrument.entries()].sort((a, b) => b[1].pnl - a[1].pnl)[0];
-    if (top) parts.push(`3. **Primary instrument (${top[0]})**: ${money(top[1].pnl)} · ${Math.round((top[1].wins / top[1].n) * 100)}% win rate (${top[1].n} trades)`);
-    return parts.join("\n");
-  }
-
   // --- Day of week ---
   if (/day of week|weekday|monday|tuesday|wednesday|thursday|friday|days?.*pattern|which day/.test(q)) {
     const byDow = new Map<string, { pnl: number; wins: number; losses: number; n: number }>();
@@ -292,7 +438,7 @@ export function respond(ctx: EdgeBookContext, input: string): string {
   }
 
   // --- Plan vs actual / rules / discipline ---
-  if (/plan.*actual|deviat|followed.*plan|following.*plan|am i following|rule|violate|violation|discipline|streak/.test(q)) {
+  if (/plan.*actual|deviat|followed.*plan|following.*plan|am i following|rule|violate|violation|discipline/.test(q)) {
     const linked = ctx.recentTrades.filter((e) => e.planId || e.review?.outcome?.followedPlan != null);
     const followed = linked.filter((e) => e.review?.outcome?.followedPlan === true).length;
     const pct = linked.length > 0 ? Math.round((followed / linked.length) * 100) : null;
@@ -347,7 +493,7 @@ export function respond(ctx: EdgeBookContext, input: string): string {
   if (lessonQuote) {
     synthesis.push(`3. **Your own recent lesson (${latestLesson!.date})**: “${lessonQuote}”`);
   }
-  synthesis.push(`\nAsk me about a specific date, setup, mistake cost, emotional state, or 15-minute NY session window for a deeper drill-down.`);
+  synthesis.push(`\nAsk me about a specific date, setup, mistake cost, losing streak probability, or position size for a deeper drill-down.`);
   return synthesis.join("\n");
 }
 

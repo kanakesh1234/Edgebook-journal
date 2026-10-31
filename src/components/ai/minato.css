@@ -1,6 +1,6 @@
 /* ==========================================================================
-   MINATO — Apple-style companion
-   Translucent material panel, iMessage-style bubbles, quiet controls.
+   MINATO — Apple HIG Docked Right Panel (Desktop) & Bottom Sheet (Mobile)
+   Translucent material panel, comfortable ~70ch typography, >=44px touch targets.
    All colours come from the app's theme tokens (light + dark).
    ========================================================================== */
 
@@ -10,34 +10,67 @@
   backdrop-filter: blur(28px) saturate(1.6);
   box-shadow:
     0 0 0 0.5px color-mix(in srgb, var(--line-strong) 80%, transparent),
-    0 24px 64px -20px rgb(0 0 0 / 0.35);
+    -16px 0 48px -20px rgb(0 0 0 / 0.22);
+  transition: width 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .mn-panel { background: var(--overlay); }
 }
 
-/* The divider sits under the header, with even air above and below the title row. */
+/* Left-edge resize handle on desktop (400–640px) */
+.mn-resize-handle {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  z-index: 20;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.mn-resize-handle:hover,
+.mn-resize-handle:active {
+  background: color-mix(in srgb, var(--gold) 35%, transparent);
+}
+
+/* Header divider */
 .mn-head {
   border-bottom: 0.5px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
 }
 
-/* Round icon buttons (options, close) */
+/* Round icon buttons (new chat, expand, close) — >=44px hit target */
 .mn-icon-btn {
   position: relative;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
   flex: none;
   place-items: center;
   border-radius: 999px;
   background: color-mix(in srgb, var(--ink) 7%, transparent);
   color: var(--muted);
-  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition:
+    background-color 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    color 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.mn-icon-btn::after { content: ""; position: absolute; inset: -6px; } /* 44px target */
-.mn-icon-btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); color: var(--ink); }
-.mn-icon-btn:active { transform: scale(0.92); }
-.mn-icon-btn[aria-expanded="true"] { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold); }
+.mn-icon-btn::after {
+  content: "";
+  position: absolute;
+  inset: -6px; /* Guarantees >= 46px touch hit area */
+}
+.mn-icon-btn:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+.mn-icon-btn:active {
+  transform: scale(0.92);
+}
+.mn-icon-btn[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+  color: var(--gold);
+}
 
 /* Launcher */
 .mn-launcher {
@@ -48,23 +81,38 @@
 }
 
 /* Composer */
-.mn-field { transition: background-color 0.2s ease, box-shadow 0.2s ease; }
+.mn-field {
+  transition:
+    background-color 0.25s cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
 .mn-field:focus-within {
   background: color-mix(in srgb, var(--ink) 9%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 45%, transparent);
 }
 .mn-send {
+  position: relative;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   flex: none;
   place-items: center;
   border-radius: 999px;
   background: var(--gold-strong);
   color: var(--on-gold);
-  transition: transform 0.15s ease, background-color 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    background-color 0.2s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.2s cubic-bezier(0.32, 0.72, 0, 1);
 }
-.mn-send:active:not(:disabled) { transform: scale(0.9); }
+.mn-send::after {
+  content: "";
+  position: absolute;
+  inset: -4px; /* 44px touch target */
+}
+.mn-send:active:not(:disabled) {
+  transform: scale(0.9);
+}
 .mn-send:disabled {
   background: color-mix(in srgb, var(--ink) 12%, transparent);
   color: var(--muted);
@@ -93,26 +141,32 @@
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-/* Structured findings inside replies: quiet tinted rows, no borders or badges */
+/* Structured findings inside replies: spacious list cards with concentric radii */
 .mn-panel .minato-finding {
-  grid-template-columns: 1rem minmax(0, 1fr);
-  gap: 0.5rem;
-  margin-top: 0.4rem;
-  padding: 0.5rem 0.65rem;
-  border: 0;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  gap: 0.65rem;
+  margin-top: 0.55rem;
+  padding: 0.65rem 0.85rem;
+  border: 0.5px solid color-mix(in srgb, var(--line-strong) 65%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
 }
 .mn-panel .minato-finding-number {
-  width: auto;
-  height: auto;
-  background: transparent;
+  width: 1.4rem;
+  height: 1.4rem;
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
   color: var(--gold);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 700;
+}
+.mn-panel .minato-supporting-point {
+  grid-template-columns: 0.65rem minmax(0, 1fr);
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.35rem 0.5rem;
+  line-height: 1.55;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .mn-typing i { animation: none; opacity: 0.7; }
-  .mn-icon-btn, .mn-send, .mn-field { transition: none; }
+  .mn-icon-btn, .mn-send, .mn-field, .mn-panel { transition: none; }
 }

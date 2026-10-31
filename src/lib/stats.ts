@@ -153,20 +153,26 @@ export function currentStreak(daily: DayResult[]): number {
 export interface MonthCell {
   key: string | null; // ISO date or null for padding cells
   day: number;
+  inMonth?: boolean;
 }
 
-export function monthGrid(year: number, month0: number): MonthCell[] {
+/**
+ * Fixed 6-row (42-cell) calendar grid so switching between 4-week, 5-week,
+ * and 6-week months never causes layout shift.
+ */
+export function monthGrid(year: number, month0: number, fixedSixRows = true): MonthCell[] {
   const first = new Date(year, month0, 1);
   const startPad = first.getDay(); // 0 = Sunday
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
 
   const cells: MonthCell[] = [];
-  for (let i = 0; i < startPad; i++) cells.push({ key: null, day: 0 });
+  for (let i = 0; i < startPad; i++) cells.push({ key: null, day: 0, inMonth: false });
 
   for (let d = 1; d <= daysInMonth; d++) {
-    cells.push({ key: dateKey(new Date(year, month0, d)), day: d });
+    cells.push({ key: dateKey(new Date(year, month0, d)), day: d, inMonth: true });
   }
 
-  while (cells.length % 7 !== 0) cells.push({ key: null, day: 0 });
+  const targetLen = fixedSixRows ? 42 : Math.ceil(cells.length / 7) * 7;
+  while (cells.length < targetLen) cells.push({ key: null, day: 0, inMonth: false });
   return cells;
 }
