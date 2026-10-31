@@ -6,6 +6,13 @@ import type { PlaybackSpeed } from "@/lib/backtesting/engine/clock";
 import { I } from "./tv-icons";
 import { useOutside } from "./tv-ui";
 import { useDraggable } from "./use-draggable";
+import { setFormationMode, useFormationMode, type FormationMode } from "@/lib/backtesting/playback-fx";
+
+const FORMATION: Array<{ id: FormationMode; label: string; hint: string }> = [
+  { id: "natural", label: "Natural", hint: "wicks + pauses" },
+  { id: "smooth", label: "Smooth", hint: "even" },
+  { id: "off", label: "Instant", hint: "no animation" },
+];
 
 const SPEEDS: PlaybackSpeed[] = [0.25, 0.5, 1, 2, 5, 10];
 
@@ -24,6 +31,7 @@ export default function ReplayToolbar({ shifted, onClose }: { shifted: boolean; 
   const prevDay = useBacktest((s) => s.navigatePrevDay);
   const dataLoading = useBacktest((s) => s.dataLoading);
 
+  const formation = useFormationMode();
   const [speedOpen, setSpeedOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const closeSpeed = useCallback(() => setSpeedOpen(false), []);
@@ -42,7 +50,7 @@ export default function ReplayToolbar({ shifted, onClose }: { shifted: boolean; 
       <button type="button" className="tv-tbtn" title="Previous day" disabled={dataLoading} onClick={() => void prevDay()}><I name="chevronLeft" size={20} /><span>Day</span></button>
       <button type="button" className="tv-tbtn" title="Step back (←)" disabled={playing} onClick={stepBack}><I name="stepBack" size={20} /></button>
       <button
-        type="button" className="tv-tbtn tv-play" title={playing ? "Pause (Space)" : "Play (Space)"} disabled={finished}
+        type="button" className={`tv-tbtn tv-play${playing ? " is-playing" : ""}`} title={playing ? "Pause (Space)" : "Play (Space)"} disabled={finished}
         onClick={() => setPlaying(!playing)}
       >
         <I name={playing ? "pause" : "play"} size={22} />
@@ -53,11 +61,18 @@ export default function ReplayToolbar({ shifted, onClose }: { shifted: boolean; 
       <div className="tv-dd" ref={ref}>
         <button type="button" className="tv-tbtn tv-speed" title="Replay speed" onClick={() => setSpeedOpen((o) => !o)}>{speed}x</button>
         {speedOpen && (
-          <div className="tv-menu" style={{ top: "calc(100% + 6px)", minWidth: 120 }}>
+          <div className="tv-menu" style={{ top: "calc(100% + 6px)", minWidth: 200 }}>
             <div className="tv-menu-head">UPDATE INTERVAL</div>
             {SPEEDS.map((s) => (
               <button key={s} type="button" className={`tv-menu-item${s === speed ? " is-active" : ""}`} onClick={() => { setSpeed(s); setSpeedOpen(false); }}>
                 <span>{s}x</span>{s === 1 && <kbd>1 bar/s</kbd>}
+              </button>
+            ))}
+            <div className="tv-menu-sep" />
+            <div className="tv-menu-head">CANDLE FORMATION</div>
+            {FORMATION.map((f) => (
+              <button key={f.id} type="button" className={`tv-menu-item${f.id === formation ? " is-active" : ""}`} onClick={() => setFormationMode(f.id)}>
+                <span>{f.label}</span><kbd>{f.hint}</kbd>
               </button>
             ))}
           </div>

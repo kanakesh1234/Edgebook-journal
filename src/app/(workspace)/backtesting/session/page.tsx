@@ -19,6 +19,7 @@ import SessionResults from "@/components/backtesting/session-results";
 import { emitChartCommand, onChartCommand } from "@/components/backtesting/chart-bus";
 import FloatingTools from "@/components/backtesting/floating-tools";
 import "@/components/backtesting/tv.css";
+import "@/components/backtesting/ej.css";
 
 const ALT_TOOLS: Record<string, "trend-line" | "horizontal-line" | "horizontal-ray" | "vertical-line" | "cross-line" | "fib-retracement"> = {
   KeyT: "trend-line", KeyH: "horizontal-line", KeyJ: "horizontal-ray", KeyV: "vertical-line", KeyC: "cross-line", KeyF: "fib-retracement",

@@ -11,6 +11,7 @@ import { fmtPrice } from "./drawings/render";
 import { I } from "./tv-icons";
 import { useOutside } from "./tv-ui";
 import IndicatorsMenu from "./indicators-menu";
+import EJMark from "./ej-mark";
 
 const QUICK_TF: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1h", "4h"];
 const TF_GROUPS: Array<{ title: string; items: Timeframe[] }> = [
@@ -99,6 +100,7 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
   return (
     <div className="tv-top">
       <button type="button" className="tv-tbtn" onClick={onBack} title="Back to sessions"><I name="back" size={22} /></button>
+      <EJMark size={22} />
       <i className="tv-sep" />
 
       {/* Symbol */}

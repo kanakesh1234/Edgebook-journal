@@ -26,6 +26,10 @@ import {
 import type { CandleData } from "@/lib/backtesting/data/types";
 import type { ChartType, DrawingObject } from "@/lib/backtesting/types";
 import { useBacktest } from "@/lib/backtesting/store";
+import { useFormationMode } from "@/lib/backtesting/playback-fx";
+import { haptic } from "@/lib/haptics";
+import { CandleAnimator } from "./candle-animator";
+import RiskHandles, { type LiveHandle } from "./risk-handles";
 import { instrumentBySymbol } from "@/lib/backtesting/instruments";
 import { candleColorsFor, paletteFor, useChartAppearance } from "@/lib/backtesting/appearance";
 import { formatMoney } from "@/lib/format";
@@ -86,12 +90,6 @@ interface DraggableLine {
   id: string; kind: DraggableKind; price: number; line: IPriceLine;
   /** Position context for SL/TP lines (live projected P&L while dragging). */
   entry?: number; long?: boolean; qty?: number;
-}
-
-/** "Stop −$300.00" / "Target +$600.00" — the P&L the trade would book if that level is hit. */
-function riskTitle(kind: "sl" | "tp", price: number, entry: number, long: boolean, qty: number, pointValue: number) {
-  const money = (long ? price - entry : entry - price) * pointValue * qty;
-  return `${kind === "sl" ? "Stop" : "Target"} ${money >= 0 ? "+" : "−"}${formatMoney(Math.abs(money))}`;
 }
 
 /** Average true range of the last `n` bars — used to size a sensible default SL/TP. */
@@ -250,11 +248,18 @@ export default function BacktestChart({
   const markersRef = useRef<{ setMarkers: (m: SeriesMarker<Time>[]) => void } | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const draggableRef = useRef<DraggableLine[]>([]);
-  const dragRef = useRef<{ id: string; kind: DraggableKind } | null>(null);
+  const dragRef = useRef<{ id: string; kind: DraggableKind; dy: number } | null>(null);
   const savedRangeRef = useRef<{ from: number; to: number } | null>(null);
   const dataKeyRef = useRef("");
   const lastSetRef = useRef<{ len: number; first: number; last: number; type: ChartType } | null>(null);
   const selectLineRef = useRef<HTMLDivElement>(null);
+  const animRef = useRef<CandleAnimator | null>(null);
+  const sellPxRef = useRef<HTMLElement>(null);
+  const buyPxRef = useRef<HTMLElement>(null);
+  const liveRef = useRef<Record<string, LiveHandle>>({});
+  const hoverRef = useRef<string | null>(null);
+  const formation = useFormationMode();
+  const formationRef = useRef(formation); formationRef.current = formation;
 
   const timesRef = useRef(allTimes); timesRef.current = allTimes;
   const candlesRef = useRef(candles); candlesRef.current = candles;
@@ -405,6 +410,7 @@ export default function BacktestChart({
 
     return () => {
       try { savedRangeRef.current = chart.timeScale().getVisibleLogicalRange(); } catch { /* chart already gone */ }
+      animRef.current?.cancel();
       detachController();
       ro.disconnect();
       chart.remove();
@@ -436,10 +442,25 @@ export default function BacktestChart({
     const appended =
       prev && prev.type === chartType && n === prev.len + 1 &&
       candles[0].time === prev.first && candles[n - 2].time === prev.last;
-    if (appended) {
-      series.update(toPoint(chartType, candles[n - 1]) as never);
+    const fx = formationRef.current;
+    const animate = appended && fx !== "off" && typeof document !== "undefined" && !document.hidden &&
+      !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (animate) {
+      // Visual only: the engine already processed the final bar; we just form it progressively.
+      if (!animRef.current) {
+        animRef.current = new CandleAnimator((px) => {
+          const t = fmtPrice(px);
+          if (sellPxRef.current) sellPxRef.current.textContent = t;
+          if (buyPxRef.current) buyPxRef.current.textContent = t;
+        });
+      }
+      const st = useBacktest.getState();
+      const interval = st.playing ? 1000 / st.speed : 900;
+      animRef.current.start(series, candles[n - 1], isPriceType(chartType), Math.min(1100, Math.max(60, interval * 0.82)), fx);
     } else {
-      series.setData(candles.map((c) => toPoint(chartType, c)) as never);
+      animRef.current?.cancel();
+      if (appended) series.update(toPoint(chartType, candles[n - 1]) as never);
+      else series.setData(candles.map((c) => toPoint(chartType, c)) as never);
     }
     lastSetRef.current = { len: n, first: candles[0].time, last: candles[n - 1].time, type: chartType };
 
@@ -482,7 +503,6 @@ export default function BacktestChart({
     priceLinesRef.current = [];
     draggableRef.current = [];
 
-    const pv = spec?.pointValue ?? 1;
     for (const pos of openPositions) {
       if (pos.symbol !== symbol) continue;
       const long = pos.side === "buy";
@@ -493,16 +513,14 @@ export default function BacktestChart({
       priceLinesRef.current.push(entry);
       if (pos.stopLoss) {
         const l = series.createPriceLine({
-          price: pos.stopLoss, color: "#F23645", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
-          title: riskTitle("sl", pos.stopLoss, pos.entryPrice, long, pos.quantity, pv),
+          price: pos.stopLoss, color: "#F23645", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, lineVisible: false, title: "",
         });
         priceLinesRef.current.push(l);
         draggableRef.current.push({ id: pos.orderId, kind: "sl", price: pos.stopLoss, line: l, entry: pos.entryPrice, long, qty: pos.quantity });
       }
       if (pos.takeProfit) {
         const l = series.createPriceLine({
-          price: pos.takeProfit, color: "#089981", lineWidth: 2, lineStyle: LineStyle.Dashed, axisLabelVisible: true,
-          title: riskTitle("tp", pos.takeProfit, pos.entryPrice, long, pos.quantity, pv),
+          price: pos.takeProfit, color: "#089981", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, lineVisible: false, title: "",
         });
         priceLinesRef.current.push(l);
         draggableRef.current.push({ id: pos.orderId, kind: "tp", price: pos.takeProfit, line: l, entry: pos.entryPrice, long, qty: pos.quantity });
@@ -512,8 +530,7 @@ export default function BacktestChart({
     for (const o of pendingOrders) {
       if (o.symbol !== symbol || !o.price) continue;
       const l = series.createPriceLine({
-        price: o.price, color: o.side === "buy" ? TV_BLUE : "#F23645", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true,
-        title: `${o.side === "buy" ? "Buy" : "Sell"} ${o.type} ${o.quantity}`,
+        price: o.price, color: o.side === "buy" ? TV_BLUE : "#F23645", lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, lineVisible: false, title: "",
       });
       priceLinesRef.current.push(l);
       draggableRef.current.push({ id: o.id, kind: "order", price: o.price, line: l });
@@ -527,38 +544,116 @@ export default function BacktestChart({
     }
   }, [openPositions, pendingOrders, alerts, symbol, epoch, spec?.pointValue]);
 
-  /* ---------------- drag SL / TP / pending-order lines ---------------- */
+  /* ---------------- drag SL / TP / pending-order handles (EJ) ---------------- */
   useEffect(() => {
     const container = containerRef.current;
     const chart = chartRef.current;
     if (!container || !chart) return;
 
+    const HIT_PX = 7;      // grab tolerance around a level
+    const MAGNET_PX = 7;   // how close (in px) a target must be to pull the level
+    let ownCursor = false;
+    const keyOf = (d: { kind: string; id: string }) => `${d.kind}:${d.id}`;
+    const tk = () => tickRef.current || 0.25;
+    const snapTick = (price: number) => Math.round(price / tk()) * tk();
+
     const near = (y: number): DraggableLine | null => {
       const series = seriesRef.current;
       if (!series) return null;
+      let best: DraggableLine | null = null, bestD = HIT_PX + 0.01;
       for (const dl of draggableRef.current) {
         const c = series.priceToCoordinate(dl.price);
-        if (c !== null && Math.abs(c - y) <= 6) return dl;
+        if (c === null) continue;
+        const d = Math.abs(c - y);
+        if (d < bestD) { best = dl; bestD = d; }
       }
-      return null;
+      return best;
     };
-    const snap = (price: number) => Math.round(price / (tickRef.current || 0.01)) * (tickRef.current || 0.01);
+
+    /** Magnetic targets: visible highs / lows, the entry, last price and round numbers. */
+    const findMagnet = (dl: DraggableLine, y: number): { price: number; label: string } | null => {
+      const series = seriesRef.current;
+      const cs = candlesRef.current;
+      if (!series || cs.length === 0) return null;
+      const lr = chart.timeScale().getVisibleLogicalRange();
+      const from = Math.max(0, Math.floor(lr?.from ?? 0));
+      const to = Math.min(cs.length - 1, Math.ceil(lr?.to ?? cs.length - 1));
+      const found: { m: { price: number; label: string; d: number } | null } = { m: null };
+      const test = (price: number, label: string, bias = 0) => {
+        const c = series.priceToCoordinate(price);
+        if (c === null) return;
+        const d = Math.abs(c - y) + bias;
+        if (d <= MAGNET_PX && (!found.m || d < found.m.d)) found.m = { price, label, d };
+      };
+      const step = Math.max(1, Math.ceil((to - from) / 700));
+      for (let i = from; i <= to; i += step) { test(cs[i].high, "High"); test(cs[i].low, "Low"); }
+      if (dl.entry !== undefined) test(dl.entry, "Entry", -1.5);
+      test(cs[cs.length - 1].close, "Last", -0.5);
+      const ref = cs[cs.length - 1].close;
+      const rs = ref >= 10000 ? 100 : ref >= 1000 ? 50 : ref >= 100 ? 5 : 1;
+      const raw = series.coordinateToPrice(y);
+      if (raw !== null) test(Math.round(raw / rs) * rs, "Round", 2.5);
+      const m = found.m as { price: number; label: string; d: number } | null;
+      return m ? { price: m.price, label: m.label } : null;
+    };
+
+    const find = (d: { id: string; kind: DraggableKind }) =>
+      draggableRef.current.find((x) => x.id === d.id && x.kind === d.kind);
+
+    const restoreInteractions = (e?: PointerEvent) => {
+      chart.applyOptions({
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      });
+      if (e) { try { container.releasePointerCapture(e.pointerId); } catch { /* ignore */ } }
+      container.style.cursor = "";
+      ownCursor = false;
+    };
+
+    const finish = (commit: boolean, e?: PointerEvent) => {
+      const dragging = dragRef.current;
+      if (!dragging) return;
+      const dl = find(dragging);
+      const key = keyOf(dragging);
+      const live = liveRef.current[key];
+      if (dl && live) {
+        if (!commit) {
+          dl.price = live.origin;
+          dl.line.applyOptions({ price: live.origin });
+          delete liveRef.current[key];
+        } else if (Math.abs(dl.price - live.origin) > 1e-9) {
+          live.dragging = false; live.magnet = null; live.settleAt = performance.now();
+          if (dl.kind === "sl") riskCbRef.current?.(dl.id, { stopLoss: dl.price });
+          else if (dl.kind === "tp") riskCbRef.current?.(dl.id, { takeProfit: dl.price });
+          else orderCbRef.current?.(dl.id, dl.price);
+          // If the store rejects the change, drop the held value so the handle returns home.
+          window.setTimeout(() => { if (liveRef.current[key] === live) delete liveRef.current[key]; }, 700);
+        } else {
+          delete liveRef.current[key];
+        }
+      }
+      dragRef.current = null;
+      restoreInteractions(e);
+    };
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
       const r = container.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
-      const paneW = chart.paneSize().width;
-      if (x > paneW) return;
+      if (x > chart.paneSize().width) return;
       const hit = near(y);
       if (!hit) return;
       e.preventDefault();
       e.stopPropagation();
-      dragRef.current = { id: hit.id, kind: hit.kind };
+      const lineY = seriesRef.current?.priceToCoordinate(hit.price) ?? y;
+      dragRef.current = { id: hit.id, kind: hit.kind, dy: y - lineY };
+      liveRef.current[keyOf(hit)] = { price: hit.price, origin: hit.price, dragging: true, magnet: null, settleAt: 0 };
       chart.applyOptions({ handleScroll: false, handleScale: false });
       try { container.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-      container.style.cursor = "ns-resize";
+      container.style.cursor = "grabbing";
+      ownCursor = true;
     };
+
     const move = (e: PointerEvent) => {
       const r = container.getBoundingClientRect();
       const y = e.clientY - r.top;
@@ -567,58 +662,62 @@ export default function BacktestChart({
       if (!dragging || !series) {
         if (e.buttons === 0 && !controllerRef.current?.isCreating) {
           const t = useBacktest.getState().activeDrawingTool;
-          if (t === "cursor" || t === "crosshair" || t === "dot" || t === "pointer") {
-            const hit = near(y);
-            if (hit) container.style.cursor = "ns-resize";
-          }
+          const free = t === "cursor" || t === "crosshair" || t === "dot" || t === "pointer";
+          const hit = free && e.clientX - r.left <= chart.paneSize().width ? near(y) : null;
+          hoverRef.current = hit ? keyOf(hit) : null;
+          if (hit) { container.style.cursor = "ns-resize"; ownCursor = true; }
+          else if (ownCursor) { container.style.cursor = ""; ownCursor = false; }
         }
         return;
       }
-      const raw = series.coordinateToPrice(y);
+      const dl = find(dragging);
+      const live = liveRef.current[keyOf(dragging)];
+      if (!dl || !live) return;
+      const yy = y - dragging.dy;
+      const raw = series.coordinateToPrice(yy);
       if (raw === null) return;
-      let price = snap(raw);
-      const dl = draggableRef.current.find((d) => d.id === dragging.id && d.kind === dragging.kind);
-      if (dl) {
-        // Keep SL on the losing side and TP on the winning side of the current
-        // price, otherwise the very next bar would close the trade instantly.
-        const lastPx = candlesRef.current.at(-1)?.close;
-        const tk = tickRef.current || 0.25;
-        if (lastPx !== undefined && dl.long !== undefined && dl.kind !== "order") {
-          const below = (dl.kind === "sl") === dl.long; // long SL / short TP live below price
-          price = below ? Math.min(price, lastPx - tk) : Math.max(price, lastPx + tk);
-        }
-        dl.price = price;
-        if (dl.kind !== "order" && dl.entry !== undefined && dl.long !== undefined && dl.qty !== undefined) {
-          dl.line.applyOptions({ price, title: riskTitle(dl.kind, price, dl.entry, dl.long, dl.qty, pointValueRef.current) });
-        } else {
-          dl.line.applyOptions({ price });
-        }
+
+      let price = snapTick(raw);
+      let magnet: { price: number; label: string } | null = null;
+      if (!e.altKey) { // hold Alt for free, tick-only movement
+        magnet = findMagnet(dl, yy);
+        if (magnet) price = snapTick(magnet.price);
       }
-    };
-    const up = (e: PointerEvent) => {
-      const dragging = dragRef.current;
-      if (!dragging) return;
-      const dl = draggableRef.current.find((d) => d.id === dragging.id && d.kind === dragging.kind);
-      if (dl) {
-        if (dl.kind === "sl") riskCbRef.current?.(dl.id, { stopLoss: dl.price });
-        else if (dl.kind === "tp") riskCbRef.current?.(dl.id, { takeProfit: dl.price });
-        else orderCbRef.current?.(dl.id, dl.price);
+      // Keep SL on the losing side and TP on the winning side of the current price,
+      // otherwise the very next bar would close the trade instantly.
+      const lastPx = candlesRef.current.at(-1)?.close;
+      if (lastPx !== undefined && dl.long !== undefined && dl.kind !== "order") {
+        const below = (dl.kind === "sl") === dl.long;
+        const clamped = below ? Math.min(price, lastPx - tk()) : Math.max(price, lastPx + tk());
+        if (clamped !== price) { price = clamped; magnet = null; }
       }
-      dragRef.current = null;
-      chart.applyOptions({
-        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
-      });
-      try { container.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-      container.style.cursor = "";
+      if ((magnet?.label ?? "") !== (live.magnet?.label ?? "") || (magnet && live.magnet && magnet.price !== live.magnet.price)) {
+        if (magnet) haptic.selection();
+      }
+      live.price = price;
+      live.magnet = magnet;
+      dl.price = price;
+      dl.line.applyOptions({ price }); // keeps the price-axis label glued to the handle
     };
+
+    const up = (e: PointerEvent) => finish(true, e);
+    const cancel = (e: PointerEvent) => finish(false, e);
+    const leave = () => { hoverRef.current = null; if (ownCursor && !dragRef.current) { container.style.cursor = ""; ownCursor = false; } };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && dragRef.current) { e.stopPropagation(); finish(false); } };
+
     container.addEventListener("pointerdown", down);
     container.addEventListener("pointermove", move);
     container.addEventListener("pointerup", up);
+    container.addEventListener("pointercancel", cancel);
+    container.addEventListener("pointerleave", leave);
+    window.addEventListener("keydown", key, true);
     return () => {
       container.removeEventListener("pointerdown", down);
       container.removeEventListener("pointermove", move);
       container.removeEventListener("pointerup", up);
+      container.removeEventListener("pointercancel", cancel);
+      container.removeEventListener("pointerleave", leave);
+      window.removeEventListener("keydown", key, true);
     };
   }, [epoch]);
 
@@ -815,6 +914,7 @@ export default function BacktestChart({
   return (
     <div ref={wrapRef} className="tv-chart-wrap" style={{ background: pal.bg }} onContextMenu={onContextMenu}>
       <div ref={containerRef} className="tv-chart-canvas" />
+      <div className="ej-watermark" aria-hidden="true" style={{ color: pal.text }}><b>{spec?.name ?? symbol}</b><span>EdgeJournal</span></div>
       <IndicatorLayer chartRef={chartRef} candles={candles} epoch={epoch} />
 
       {/* Legend + quick trade (top-left, like TradingView) */}
@@ -849,7 +949,7 @@ export default function BacktestChart({
                 type="button" disabled={!canTrade} className="tv-pill-sell"
                 onClick={() => placeOrder("sell", orderQty)} title={`Sell ${orderQty} at market (Shift+S)`}
               >
-                <b>{fmtPrice(last)}</b><span>SELL</span>
+                <b ref={sellPxRef}>{fmtPrice(last)}</b><span>SELL</span>
               </button>
               <input
                 aria-label="Quantity" className="tv-pill-qty" type="number" min={1} value={orderQty}
@@ -859,7 +959,7 @@ export default function BacktestChart({
                 type="button" disabled={!canTrade} className="tv-pill-buy"
                 onClick={() => placeOrder("buy", orderQty)} title={`Buy ${orderQty} at market (Shift+B)`}
               >
-                <b>{fmtPrice(last)}</b><span>BUY</span>
+                <b ref={buyPxRef}>{fmtPrice(last)}</b><span>BUY</span>
               </button>
             </div>
           )}
@@ -872,6 +972,13 @@ export default function BacktestChart({
         symbol={symbol} chartRef={chartRef} seriesRef={seriesRef} candlesRef={candlesRef}
         tick={tickSize} epoch={epoch}
         onSetRisk={(id, u) => riskCbRef.current?.(id, u)}
+      />
+
+      {/* EJ risk handles: floating SL / TP / order labels, guides and zones */}
+      <RiskHandles
+        symbol={symbol} chartRef={chartRef} seriesRef={seriesRef} candlesRef={candlesRef}
+        liveRef={liveRef} hoverRef={hoverRef} pointValue={spec?.pointValue ?? 1} epoch={epoch}
+        onRemove={(id, kind) => riskCbRef.current?.(id, kind === "sl" ? { stopLoss: null } : { takeProfit: null })}
       />
 
       {/* Properties toolbar for the selected drawing */}
