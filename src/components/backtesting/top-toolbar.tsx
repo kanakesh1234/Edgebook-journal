@@ -229,8 +229,8 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
 
       {account && (
         <div className="tv-account" aria-label="Account">
-          <div><small>Balance</small><b><AnimatedNumber value={account.balance} format={formatMoney} /></b></div>
-          <div><small>P&amp;L</small><b className={account.netPnl > 0 ? "tv-up" : account.netPnl < 0 ? "tv-down" : ""}><AnimatedNumber value={account.netPnl} format={fmtPnl} /></b></div>
+          <div><small>Balance</small><b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></div>
+          <div><small>P&amp;L</small><b className={account.netPnl > 0 ? "tv-up" : account.netPnl < 0 ? "tv-down" : ""}><AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} /></b></div>
           <div><small>Trades</small><b>{account.totalTrades}</b></div>
         </div>
       )}

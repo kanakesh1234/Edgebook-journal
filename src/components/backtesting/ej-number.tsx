@@ -10,8 +10,8 @@ import { useLayoutEffect, useRef } from "react";
  * formatted `value` (animation can never leave a wrong number on screen).
  */
 export default function AnimatedNumber({
-  value, format, className, ms = 240, from,
-}: { value: number; format: (n: number) => string; className?: string; ms?: number; /** animate from this value on first paint */ from?: number }) {
+  value, format, className, ms = 240, from, tau,
+}: { value: number; format: (n: number) => string; className?: string; ms?: number; /** trailing time-constant (ms): the number glides after its target like a live ticker */ tau?: number; /** animate from this value on first paint */ from?: number }) {
   const el = useRef<HTMLSpanElement>(null);
   const shown = useRef<number | null>(from ?? null);
   const raf = useRef(0);
@@ -29,6 +29,21 @@ export default function AnimatedNumber({
       node.textContent = fmt.current(value);
       return;
     }
+    if (tau) {
+      let last = performance.now();
+      const chase = (now: number) => {
+        const dt = Math.min(100, now - last); last = now;
+        let v = shown.current ?? value;
+        v += (value - v) * (1 - Math.exp(-dt / tau));
+        const done = Math.abs(value - v) < 0.005;
+        if (done) v = value;
+        shown.current = v;
+        node.textContent = fmt.current(v);
+        if (!done) raf.current = requestAnimationFrame(chase);
+      };
+      raf.current = requestAnimationFrame(chase);
+      return () => cancelAnimationFrame(raf.current);
+    }
     const t0 = performance.now();
     const step = (now: number) => {
       const k = Math.min(1, (now - t0) / ms);
@@ -45,7 +60,7 @@ export default function AnimatedNumber({
     };
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
-  }, [value, ms]);
+  }, [value, ms, tau]);
 
   return <span ref={el} className={className} />;
 }

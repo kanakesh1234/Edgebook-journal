@@ -39,9 +39,9 @@ export default function PaperPanel() {
         </button>
         {account && (
           <div className="tv-paper-stats">
-            <span>Balance<b><AnimatedNumber value={account.balance} format={formatMoney} /></b></span>
-            <span>Equity<b><AnimatedNumber value={account.equity} format={formatMoney} /></b></span>
-            <span>Open P&amp;L<b className={pnlCls(account.openPnl)}><AnimatedNumber value={account.openPnl} format={signed} /></b></span>
+            <span>Balance<b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></span>
+            <span>Equity<b><AnimatedNumber tau={320} value={account.equity} format={formatMoney} /></b></span>
+            <span>Open P&amp;L<b className={pnlCls(account.openPnl)}><AnimatedNumber tau={320} value={account.openPnl} format={signed} /></b></span>
           </div>
         )}
       </div>
@@ -63,11 +63,11 @@ export default function PaperPanel() {
           <div className="tv-table-wrap" id="ej-paper-body" role="tabpanel">
             {tab === "summary" && account && (
               <div className="tv-summary">
-                <div><span>Balance</span><b><AnimatedNumber value={account.balance} format={formatMoney} /></b></div>
-                <div><span>Equity</span><b><AnimatedNumber value={account.equity} format={formatMoney} /></b></div>
-                <div><span>Net P&amp;L</span><b className={pnlCls(account.netPnl)}><AnimatedNumber value={account.netPnl} format={signed} /></b></div>
+                <div><span>Balance</span><b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></div>
+                <div><span>Equity</span><b><AnimatedNumber tau={320} value={account.equity} format={formatMoney} /></b></div>
+                <div><span>Net P&amp;L</span><b className={pnlCls(account.netPnl)}><AnimatedNumber tau={320} value={account.netPnl} format={signed} /></b></div>
                 <div><span>Daily P&amp;L</span><b className={pnlCls(account.dailyPnl)}>{signed(account.dailyPnl)}</b></div>
-                <div><span>Open P&amp;L</span><b className={pnlCls(account.openPnl)}><AnimatedNumber value={account.openPnl} format={signed} /></b></div>
+                <div><span>Open P&amp;L</span><b className={pnlCls(account.openPnl)}><AnimatedNumber tau={320} value={account.openPnl} format={signed} /></b></div>
                 <div><span>Drawdown</span><b className="tv-down">{formatMoney(account.currentDrawdown)}</b></div>
                 <div><span>Win rate</span><b>{(account.winRate * 100).toFixed(0)}%</b></div>
                 <div><span>Profit factor</span><b>{account.profitFactor ? account.profitFactor.toFixed(2) : "—"}</b></div>

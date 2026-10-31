@@ -125,10 +125,14 @@ const rgba = (hex: string, a: number) => {
 /*  Position tags — live P&L pinned to each open position's entry line  */
 /* ------------------------------------------------------------------ */
 
+type LivePx = { px: number; time: number; at: number };
+
 function PositionTags({
-  symbol, chartRef, seriesRef, candlesRef, tick, epoch, onSetRisk,
+  symbol, chartRef, seriesRef, candlesRef, livePxRef, pointValue, tick, epoch, onSetRisk,
 }: {
   symbol: string;
+  livePxRef: React.MutableRefObject<LivePx | null>;
+  pointValue: number;
   chartRef: React.MutableRefObject<IChartApi | null>;
   seriesRef: React.MutableRefObject<ISeriesApi<SeriesType> | null>;
   candlesRef: React.MutableRefObject<CandleData[]>;
@@ -141,12 +145,17 @@ function PositionTags({
   const rootRef = useRef<HTMLDivElement>(null);
   const has = positions.length > 0;
 
-  // Follow the entry price as the user scrolls / zooms / the scale autoscales.
+  // Follow the entry price as the user scrolls / zooms / the scale autoscales, and let the P&L
+  // glide with the forming candle (display only — the engine's number is the target it settles on).
+  const glide = useRef(new Map<string, number>());
   useEffect(() => {
     if (!has) return;
-    let raf = 0;
+    let raf = 0, prev = performance.now();
+    const reduce = !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const TAU = 300; // ms — trailing time constant: the number follows the candle a beat behind
     const loop = () => {
       const series = seriesRef.current, chart = chartRef.current, root = rootRef.current;
+      const now = performance.now(), dt = Math.min(100, now - prev); prev = now;
       if (series && chart && root) {
         const right = chart.priceScale("right").width() + 8;
         const h = chart.paneSize().height;
@@ -155,14 +164,40 @@ function PositionTags({
           if (y === null || y < 0 || y > h) { el.style.display = "none"; continue; }
           el.style.display = "flex";
           el.style.right = `${right}px`;
-          el.style.transform = `translateY(${Math.round(y) - 13}px)`;
+          el.style.transform = `translateY(${Math.round(y) - 15}px)`;
+
+          // ---- live, delayed P&L ----
+          const id = el.dataset.id || "";
+          const engine = parseFloat(el.dataset.pnl || "0");
+          const dir = el.dataset.long === "1" ? 1 : -1;
+          const qty = parseFloat(el.dataset.qty || "1");
+          const cs = candlesRef.current, lastBar = cs[cs.length - 1];
+          const lp = livePxRef.current;
+          const live = lp && lastBar && lp.time === lastBar.time && now - lp.at < 400 ? lp.px : null;
+          // target = engine P&L (exact at rest) + how far the forming candle currently is from its final close
+          const target = live !== null && lastBar ? engine + (live - lastBar.close) * dir * pointValue * qty : engine;
+          let v = glide.current.get(id);
+          if (v === undefined || reduce || !Number.isFinite(v)) v = target;
+          else {
+            v += (target - v) * (1 - Math.exp(-dt / (live !== null ? TAU : 150))); // settles faster once the candle is done
+            if (Math.abs(target - v) < 0.005) v = target;
+          }
+          glide.current.set(id, v);
+          const cents = Math.round(v * 100) / 100;
+          const pnlEl = el.querySelector<HTMLElement>(".tv-ptag-pnl");
+          if (pnlEl) {
+            const txt = `${cents > 0 ? "+" : cents < 0 ? "−" : ""}${formatMoney(Math.abs(cents), "USD", { decimals: 2 })}`;
+            if (pnlEl.textContent !== txt) pnlEl.textContent = txt;
+            const cls = cents > 0 ? "up" : cents < 0 ? "down" : "";
+            if (pnlEl.dataset.s !== cls) { pnlEl.dataset.s = cls; pnlEl.classList.toggle("up", cls === "up"); pnlEl.classList.toggle("down", cls === "down"); }
+          }
         }
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [has, chartRef, seriesRef, epoch]);
+  }, [has, chartRef, seriesRef, candlesRef, livePxRef, pointValue, epoch]);
 
   if (!has) return null;
 
@@ -188,21 +223,19 @@ function PositionTags({
         const long = p.side === "buy";
         const pnl = p.unrealizedPnl;
         return (
-          <div key={p.orderId} data-price={p.entryPrice} className="tv-ptag">
-            <span className={`tv-ptag-pnl ${pnl > 0 ? "up" : pnl < 0 ? "down" : ""}`}>
-              {pnl >= 0 ? "+" : "−"}{formatMoney(Math.abs(pnl))}
-            </span>
-            <span className="tv-ptag-side">{long ? "Long" : "Short"} {p.quantity}</span>
+          <div key={p.orderId} data-price={p.entryPrice} data-id={p.orderId} data-pnl={pnl} data-long={long ? "1" : "0"} data-qty={p.quantity} className="tv-ptag">
+            <span className="tv-ptag-pnl" />
+            <span className="tv-ptag-side">{long ? "Long" : "Short"} <b>{p.quantity}</b></span>
             <button
               type="button" className={`tv-ptag-btn sl${p.stopLoss ? " is-on" : ""}`}
               data-tip={p.stopLoss ? "Remove stop loss" : "Add stop loss — then drag the line"} aria-label={p.stopLoss ? "Remove stop loss" : "Add stop loss"}
               onClick={() => (p.stopLoss ? onSetRisk(p.orderId, { stopLoss: null }) : addRisk(p, "sl"))}
-            >SL{p.stopLoss ? " ×" : ""}</button>
+            >SL</button>
             <button
               type="button" className={`tv-ptag-btn tp${p.takeProfit ? " is-on" : ""}`}
               data-tip={p.takeProfit ? "Remove take profit" : "Add take profit — then drag the line"} aria-label={p.takeProfit ? "Remove take profit" : "Add take profit"}
               onClick={() => (p.takeProfit ? onSetRisk(p.orderId, { takeProfit: null }) : addRisk(p, "tp"))}
-            >TP{p.takeProfit ? " ×" : ""}</button>
+            >TP</button>
             <button type="button" className="tv-ptag-btn close" data-tip="Close position at market" aria-label="Close position at market" onClick={() => closePosition(symbol, p.orderId)}><I name="close" size={12} /></button>
           </div>
         );
@@ -268,6 +301,7 @@ export default function BacktestChart({
   const candlesRef = useRef(candles); candlesRef.current = candles;
   const barSecRef = useRef(timeframeSeconds(timeframe)); barSecRef.current = timeframeSeconds(timeframe);
   const tickRef = useRef(tickSize); tickRef.current = tickSize;
+  const livePxRef = useRef<LivePx | null>(null);
   const pointValueRef = useRef(spec?.pointValue ?? 1); pointValueRef.current = spec?.pointValue ?? 1;
   const darkRef = useRef(pal.darkBg); darkRef.current = pal.darkBg;
   const symbolRef = useRef(symbol); symbolRef.current = symbol;
@@ -457,6 +491,8 @@ export default function BacktestChart({
       // Visual only: the engine already processed the final bar; we just form it progressively.
       if (!animRef.current) {
         animRef.current = new CandleAnimator((px) => {
+          const lb = candlesRef.current[candlesRef.current.length - 1];
+          if (lb) livePxRef.current = { px, time: lb.time as number, at: performance.now() };
           const t = fmtPrice(px);
           if (sellPxRef.current) sellPxRef.current.textContent = t;
           if (buyPxRef.current) buyPxRef.current.textContent = t;
@@ -1000,6 +1036,7 @@ export default function BacktestChart({
 
       {/* Live P&L tag on every open position + one-click SL / TP / close */}
       <PositionTags
+        livePxRef={livePxRef} pointValue={spec?.pointValue ?? 1}
         symbol={symbol} chartRef={chartRef} seriesRef={seriesRef} candlesRef={candlesRef}
         tick={tickSize} epoch={epoch}
         onSetRisk={(id, u) => riskCbRef.current?.(id, u)}
