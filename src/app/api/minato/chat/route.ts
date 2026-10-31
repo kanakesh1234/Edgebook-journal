@@ -17,6 +17,7 @@ import {
   parseCalcQuery,
 } from "@/lib/minato/tools";
 import { summarizeWorkingMemory, type UserSemanticParams } from "@/lib/minato/extract";
+import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName, SITE_BLUEPRINT_PROMPT_TEXT } from "@/lib/minato/blueprint";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -30,13 +31,18 @@ const HISTORY_TURNS = 30;
 const HISTORY_CHARS = 12_000;
 
 const SYSTEM_PROMPT = [
-  "You are MINATO, the EdgeBook trading companion — a warm, perceptive mentor and sharp quantitative analyst who knows this trader well. You understand their psychology, emotions, habits and decisions, and you read their journal, trades, screenshots metadata, plans, practice sessions, statistics, semantic/episodic memory, and deterministic tool outputs.",
+  "You are MINATO, the EdgeBook trading companion — a warm, perceptive mentor and sharp quantitative analyst who knows this trader well. You understand their psychology, emotions, habits and decisions, and you read their journal, trades, screenshots metadata, plans, practice sessions, statistics, semantic/episodic memory, deterministic tool outputs, and the complete EdgeBook website blueprint.",
+  "",
+  "TRADER NAME RULE:",
+  "- Always address the trader by `facts.trader` (their real first name, e.g. 'Nandigam'). NEVER address them by an email handle, username with digits (like `kanakesh939264`), or raw user ID.",
+  "",
+  SITE_BLUEPRINT_PROMPT_TEXT,
   "",
   "CRITICAL ANSWER QUALITY & DETERMINISTIC MATH RULES:",
   "1. ANSWER THE EXACT QUESTION ASKED FIRST: Lead directly with the exact answer and numbers requested. NEVER substitute a different analysis (e.g. never return a directional or instrument breakdown when asked about losing streaks or position sizing).",
   "2. NEVER DO TRADING MATH YOURSELF: When `facts.deterministicTools` is present (streak probabilities, Monte Carlo results, position sizing for NQ/MNQ/ES/MES, expectancy, profit factor, average R, drawdown room), you MUST report the exact pre-computed numbers, working formulas, assumptions, and sample-size caveats from `facts.deterministicTools`. Never recalculate or round away the tool's contract count or probabilities.",
   "3. MISSING INPUTS RULE: If `facts.deterministicTools.positionSizing.missingInputs` is non-empty, show the baseline calculation first, then ask ONCE for the missing input (e.g. default stop size in points or risk per trade) so it can be saved to memory.",
-  "4. SHOW WORKING, ASSUMPTIONS & FOLLOW-UP: State the exact numbers, show the formula working (e.g. `contracts = floor(risk_$ / (stop_points × point_value))`), state the statistical assumptions and sample-size caveat, and finish with ONE helpful follow-up.",
+  "4. SHOW WORKING, ASSUMPTIONS & FOLLOW-UP: State the exact numbers, show the formula working (e.g. `contracts = floor(risk_$ / (stop_points × point_value))`), state the statistical assumptions and sample-size caveat, and finish with ONE helpful follow-up pointing to the relevant EdgeBook section when applicable (e.g. Practise → The Matrix / ICT Lab / Math Duel, Journal → Quick Autopsy, or Trading Lab → Playbook / Backtesting).",
   "",
   "VOICE:",
   "- Friendly, calm and human. Speak to the trader like a thoughtful friend who is also a sharp analyst. Be kind about mistakes, honest about patterns, never preachy. No slang like 'bro', no empty hype.",
@@ -64,6 +70,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => ({}))) as {
+    traderName?: string | null;
     messages?: MinatoMessage[];
     entries?: Record<string, unknown>[];
     journalProvided?: boolean;
@@ -86,7 +93,11 @@ export async function POST(request: Request) {
   const semanticParams: Partial<UserSemanticParams> = body.semanticParams ?? (companion?.semanticParams as Partial<UserSemanticParams> | undefined) ?? {};
   const question = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
 
-  const traderName = session?.name.split(" ")[0] ?? "Trader";
+  // Prefer the client-supplied fullName / display name from Settings over the raw session username/email prefix
+  const traderName = resolveTraderFirstName({
+    fullName: body.traderName ?? (companion?.traderName as string | undefined) ?? null,
+    sessionName: session?.name ?? null,
+  });
 
   // ---- Load live journal data ----
   let entries: Record<string, unknown>[] = clientEntries;
@@ -113,8 +124,8 @@ export async function POST(request: Request) {
   if (entries.length === 0) {
     return NextResponse.json({
       text: selectedChallenge
-        ? `No trades are recorded for **${selectedChallenge.name}** yet. Log a trade in this challenge and I’ll analyze it on its own.`
-        : "Your journal is empty — log or import a trade first and I'll have real data to work with.",
+        ? `No trades are recorded for **${selectedChallenge.name}** yet, ${traderName}. Log a trade in **Home** or **Journal** under this challenge, or test your setup in **Trading Lab → Backtesting**.`
+        : `Your journal is empty, ${traderName} — log or import a trade in **Journal**, or explore **Practise** and **Trading Lab** to get started.`,
     });
   }
 
@@ -193,6 +204,7 @@ export async function POST(request: Request) {
       liveMarketDataAvailable: false,
     },
     trader: traderName,
+    siteBlueprint: EDGEBOOK_SITE_BLUEPRINT,
     primaryChallenge: selectedChallenge ? {
       name: selectedChallenge.name,
       startingBalance: selectedChallenge.startingBalance ?? null,
@@ -228,6 +240,7 @@ export async function POST(request: Request) {
       : null,
     companion: {
       ...companion,
+      traderName,
       semanticParams,
       workingMemorySummary: workingMem.summary,
     },
@@ -274,8 +287,6 @@ export async function POST(request: Request) {
     privacy: { includeNotes: true },
   });
 
-  // For pure calculation intents (streak probability / position sizing), if OpenRouter is not configured
-  // or if we want guaranteed zero-hallucination numbers, we inject `deterministicTools` into packed facts.
   const orConfig = getOpenRouterConfig();
   if (orConfig && entries.length > 0) {
     const plan = planFor(route);
@@ -293,6 +304,8 @@ export async function POST(request: Request) {
       memory,
       today: facts.currentContext.today,
     });
+    packed.facts.trader = traderName;
+    packed.facts.siteBlueprint = EDGEBOOK_SITE_BLUEPRINT;
     if (Object.keys(deterministicTools).length > 0) {
       packed.facts.deterministicTools = deterministicTools;
       packed.facts.precomputedToolAnswer = deterministic;

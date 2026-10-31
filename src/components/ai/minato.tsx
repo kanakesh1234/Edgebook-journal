@@ -21,6 +21,7 @@ import { applyMemoryOp, useMindView } from "@/lib/minato/bridge";
 import { sessionNudge } from "@/lib/minato/nudge";
 import { routeIntent, planFor, type Intent } from "@/lib/minato/router";
 import { applyExtractedMemories, extractStructuredMemoriesFromTurn, readUserSemanticParams } from "@/lib/minato/extract";
+import { resolveTraderFirstName } from "@/lib/minato/blueprint";
 import { cn } from "@/lib/utils";
 import "./minato.css";
 
@@ -169,7 +170,16 @@ export function Minato() {
   const violations = useMemo(() => evaluateRules(entries, settings), [entries, settings]);
   const adherence = useMemo(() => adherenceSummary(entries, settings), [entries, settings]);
 
-  const firstName = (settings.fullName?.trim() || user?.name || "").split(" ")[0] ?? "";
+  // Always resolve the real trader first name (e.g. "Nandigam") rather than raw email handles ("kanakesh939264")
+  const firstName = useMemo(
+    () =>
+      resolveTraderFirstName({
+        fullName: rawSettings.fullName || settings.fullName,
+        traderName: rawSettings.traderName || settings.traderName,
+        userName: user?.name,
+      }),
+    [rawSettings.fullName, settings.fullName, rawSettings.traderName, settings.traderName, user?.name],
+  );
 
   const ctx = useMemo(
     () =>
@@ -195,6 +205,7 @@ export function Minato() {
     const pp = rawSettings.practiceProgress;
     const scopedPlans = (plans ?? []).filter((p) => !challenge || !p.challengeId || p.challengeId === challenge.id);
     return {
+      traderName: firstName,
       practice: pp
         ? {
             xp: pp.xp,
@@ -220,7 +231,7 @@ export function Minato() {
       noTradeDays: dayLogs.slice(-30).map((d) => d.date),
       todayLossLimit: rawSettings.dayLimits?.[todayKey()] ?? null,
     };
-  }, [rawSettings, plans, dayLogs, challenge]);
+  }, [rawSettings, plans, dayLogs, challenge, firstName]);
 
   /* ---------------- conversation & memory ---------------- */
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
@@ -523,6 +534,7 @@ export function Minato() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               messages: next.map(({ role, text }) => ({ role, text })),
+              traderName: firstName,
               entries,
               journalProvided: true,
               primaryChallenge: challenge ?? undefined,
@@ -531,6 +543,7 @@ export function Minato() {
               semanticParams,
               companion: {
                 ...companion,
+                traderName: firstName,
                 semanticParams,
                 mind: mindForModel(applied.brain.mind, moods, nowMs),
                 brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()),
@@ -562,7 +575,7 @@ export function Minato() {
         setBusy(false);
       }
     },
-    [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, brain, recall, readiness, pendingSlot],
+    [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, brain, recall, readiness, pendingSlot, firstName],
   );
 
   // Opened from a trade → start its review once.
@@ -584,7 +597,7 @@ export function Minato() {
     return [
       lostToday ? "Help me reset after today" : "How am I doing lately?",
       "With my win rate, what's the max losing streak & MNQ/NQ size?",
-      "Review my last trade",
+      "Where should I practise or review today?",
       "What pattern keeps repeating?",
     ];
   }, [focusEntry, entries]);
@@ -592,7 +605,7 @@ export function Minato() {
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     const part = h < 5 ? "Hi" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
-    return firstName ? `${part}, ${firstName}.` : `${part}.`;
+    return firstName && firstName !== "Trader" ? `${part}, ${firstName}.` : `${part}.`;
   }, [firstName, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const learned = useMemo(
@@ -796,7 +809,7 @@ export function Minato() {
                     {nudge ??
                       (entries.length === 0
                         ? "Log your first trade and I’ll start learning how you trade."
-                        : "Ask me about losing streak probabilities, exact MNQ/NQ position sizing, or your journal patterns.")}
+                        : "Ask me about losing streak probabilities, exact MNQ/NQ position sizing, or where to practise and review next.")}
                   </p>
                 </motion.div>
               )}

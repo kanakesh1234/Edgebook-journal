@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
-import { primaryChallenge } from "@/lib/challenges";
+import { scopeToPrimary } from "@/lib/challenges";
 import { todayKey } from "@/lib/format";
 import { CalendarIcon, PlusIcon } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
@@ -12,16 +12,16 @@ import { EntryFormModal } from "@/components/journal/entry-form-modal";
 
 /**
  * Calendar Page — Apple Calendar-inspired full-width historical trading view.
- * Uses the unified `CalendarView` surface with fixed 6-row height, weekly P&L summary column,
- * smooth direction-aware staggered transitions, keyboard navigation (Left/Right arrows, T for Today),
- * and day inspector popover/sheet.
+ * Always reflects the active Primary Challenge directly.
  */
 export default function CalendarPage() {
-  const entries = useApp((s) => s.entries);
-  const settings = useApp((s) => s.settings);
+  const allEntries = useApp((s) => s.entries);
+  const rawSettings = useApp((s) => s.settings);
   const dayLogs = useApp((s) => s.dayLogs);
-  const challenges = useMemo(() => settings.challenges ?? [], [settings.challenges]);
-  const primaryId = primaryChallenge(settings)?.id ?? null;
+  const { entries, settings, challenge } = useMemo(
+    () => scopeToPrimary(rawSettings, allEntries),
+    [rawSettings, allEntries],
+  );
 
   const [presetDate, setPresetDate] = useState<string | null>(null);
 
@@ -30,7 +30,7 @@ export default function CalendarPage() {
     [entries],
   );
 
-  if (entries.length === 0) {
+  if (allEntries.length === 0) {
     return (
       <div className="space-y-6">
         <header>
@@ -76,9 +76,8 @@ export default function CalendarPage() {
       <CalendarView
         entries={entries}
         dayLogs={dayLogs}
-        challenges={challenges}
         currency={settings.currency}
-        defaultChallengeId={primaryId}
+        defaultChallengeId={challenge?.id ?? null}
         spacious
         onAddTradeForDate={(date) => setPresetDate(date)}
       />

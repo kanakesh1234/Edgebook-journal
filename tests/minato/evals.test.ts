@@ -1,5 +1,5 @@
 /**
- * MINATO EVALUATION & REGRESSION TEST SUITE (18 Sample Questions & Scenarios)
+ * MINATO EVALUATION & REGRESSION TEST SUITE (20 Sample Questions & Scenarios)
  *
  * Covers:
  *  1. Exact user bug reproduction ("with this win rate, what's the maximum longest losing streak possible,
@@ -11,6 +11,8 @@
  *  5. Expectancy, profit factor, average R, and drawdown room calculations.
  *  6. Semantic memory extraction, deduplication, and contradiction superseding (keeping history).
  *  7. Episodic memory & journal recall + hybrid retrieval within token budget.
+ *  8. Trader name resolution (never calling the user by email handle / digit ID like `kanakesh939264`)
+ *     and EdgeBook website blueprint navigation guidance.
  */
 
 import { strict as assert } from "node:assert";
@@ -29,6 +31,7 @@ import {
   summarizeWorkingMemory,
 } from "../../src/lib/minato/extract.ts";
 import { respond } from "../../src/lib/minato/respond.ts";
+import { resolveTraderFirstName } from "../../src/lib/minato/blueprint.ts";
 import { buildContext } from "../../src/lib/minato/context.ts";
 import { computeStats } from "../../src/lib/stats.ts";
 import { disciplineSummary } from "../../src/lib/discipline.ts";
@@ -61,7 +64,7 @@ const discipline = disciplineSummary(entries, []);
 const violations = evaluateRules(entries, settings);
 const adherence = adherenceSummary(entries, settings);
 const ctx = buildContext({
-  userFirstName: "Kanakeswara",
+  userFirstName: "NANDIGAM KANAKESWARA RAO",
   entries,
   stats,
   discipline,
@@ -441,10 +444,46 @@ const EVAL_CASES: EvalCase[] = [
       };
     },
   },
+  {
+    id: "Q19_TRADER_FIRST_NAME_NEVER_USES_EMAIL_ID",
+    question: "hi sensei (must greet by real name Nandigam, never email handle kanakesh939264)",
+    run: () => {
+      const resolvedWithFullName = resolveTraderFirstName({
+        fullName: "NANDIGAM KANAKESWARA RAO",
+        sessionName: "kanakesh939264",
+      });
+      const resolvedFromEmailOnly = resolveTraderFirstName({
+        sessionName: "kanakesh939264@gmail.com",
+      });
+      const reply = respond(ctx, "hi sensei");
+      const pass =
+        resolvedWithFullName === "Nandigam" &&
+        resolvedFromEmailOnly === "Kanakesh" &&
+        reply.includes("Nandigam") &&
+        !reply.includes("kanakesh939264");
+      return {
+        pass,
+        detail: `resolved="${resolvedWithFullName}", emailFallback="${resolvedFromEmailOnly}", greetedNandigam=${reply.includes("Nandigam")}`,
+      };
+    },
+  },
+  {
+    id: "Q20_WEBSITE_BLUEPRINT_NAVIGATION_GUIDANCE",
+    question: "Where should I practise or review my trades in EdgeBook?",
+    run: () => {
+      const reply = respond(ctx, "Where should I practise or review my trades in EdgeBook?");
+      const hasPracticeModes = reply.includes("Practise") && reply.includes("The Matrix") && reply.includes("ICT Lab");
+      const hasLabAndJournal = reply.includes("Trading Lab") && reply.includes("Journal");
+      return {
+        pass: hasPracticeModes && hasLabAndJournal,
+        detail: `hasPracticeModes=${hasPracticeModes}, hasLabAndJournal=${hasLabAndJournal}`,
+      };
+    },
+  },
 ];
 
 let passedCount = 0;
-console.log("\n=== MINATO MEMORY & DETERMINISTIC MATH EVAL SUITE (18 CASES) ===");
+console.log("\n=== MINATO MEMORY & DETERMINISTIC MATH EVAL SUITE (20 CASES) ===");
 for (const tc of EVAL_CASES) {
   const res = tc.run();
   const badge = res.pass ? "PASS" : "FAIL";

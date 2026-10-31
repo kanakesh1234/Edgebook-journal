@@ -11,6 +11,7 @@ import {
   parseCalcQuery,
 } from "./tools";
 import type { UserSemanticParams } from "./extract";
+import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName } from "./blueprint";
 
 /* ------------------------------------------------------------------ */
 /*  MINATO — English-only, analytical, evidence-based.                 */
@@ -46,25 +47,72 @@ function money(n: number): string {
 }
 
 export function greet(ctx: EdgeBookContext): string {
-  const name = ctx.userFirstName || "there";
+  const name = resolveTraderFirstName({ fullName: ctx.userFirstName });
   if (ctx.recentTrades.length === 0) {
-    return `Welcome, ${name}. Your journal is empty — log or import a trade and I'll start analyzing your process.`;
+    return `Welcome, ${name}. Your journal is empty — log a trade on **Home** or **Journal**, or explore **Practise** and **Trading Lab** to get started.`;
   }
   const cal = computeBrainCalibration(ctx.recentTrades, []);
   const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
   if (unreviewed > 3) {
-    return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Completing your ${unreviewed} unreviewed trades will sharpen pattern accuracy further.`;
+    return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Completing your ${unreviewed} unreviewed trades in **Journal → Quick Autopsy** will sharpen pattern accuracy further.`;
   }
-  return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, mistakes, psychology, or edge.`;
+  return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, losing streak odds, exact position sizing, or where to practise next.`;
 }
 
 export function respond(ctx: EdgeBookContext, input: string, opts: RespondOptions = {}): string {
   const q = input.toLowerCase().trim();
+  const name = resolveTraderFirstName({ fullName: ctx.userFirstName });
   const { stats, discipline, adherence } = ctx;
   const cal = computeBrainCalibration(ctx.recentTrades, []);
   const mistakes = mistakeIndex(ctx.recentTrades);
   const calcParams = parseCalcQuery(input);
   const sem = opts.semanticParams ?? {};
+
+  // --- PRIORITY 0: GREETINGS & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
+  if (/^\s*(hi|hello|hey|yo|good (morning|afternoon|evening)|hi sensei|hey sensei|hello sensei|hi minato|hey minato)\b[\s!.?]*$/i.test(q)) {
+    const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
+    const topLeak = mistakes[0]?.label;
+    return [
+      `Hey ${name}. I'm right here with your active challenge and journal loaded.`,
+      unreviewed > 0
+        ? `1. **Journal → Quick Autopsy**: You have **${unreviewed} unreviewed ${unreviewed === 1 ? "trade" : "trades"}** waiting for a 5-step process check.`
+        : `1. **Home → Plan a trade**: Lock your daily loss limit and pre-session checklist before taking your next setup.`,
+      topLeak
+        ? `2. **Practise → The Matrix & ICT Lab**: Run a 5-minute drill targeting **${topLeak}** so it doesn't repeat today.`
+        : `2. **Practise → Math Duel & The Matrix**: Sharpen your chart recognition or R-multiple sizing before the session.`,
+      `\nWhat would you like to look at first, ${name} — a trade autopsy, streak/position sizing math, or a practice drill?`,
+    ].join("\n");
+  }
+
+  if (/\b(where (is|do i|can i|to|should i)|how do i (use|find|navigate|practi[cs]e|backtest|review)|what sections|website|blueprint|guide me|what should i (practi[cs]e|review|do)|where should i go|in edgebook)\b/i.test(q)) {
+    const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
+    const topMistake = mistakes[0];
+    const parts: string[] = [
+      `Here is how to use EdgeBook's sections for what you need right now, ${name}:`,
+    ];
+    if (topMistake) {
+      parts.push(
+        `1. **Practise (\`/practice\`)**: Start with **Daily Mission** and **The Matrix** — it builds spaced-repetition drills directly from your #1 leak (**${topMistake.label}**, ${topMistake.count}×). Use **ICT Lab** for sweep/FVG/SMT drills and **Math Duel** for sizing reps.`,
+      );
+    } else {
+      parts.push(
+        `1. **Practise (\`/practice\`)**: Run **The Matrix** (timed chart scenario drills), **ICT Lab** (liquidity sweeps, FVG, SMT), or **Math Duel** (R-multiple and position sizing speed drills).`,
+      );
+    }
+    parts.push(
+      `2. **Journal & Quick Autopsy (\`/journal\`)**: ${unreviewed > 0 ? `Complete your **${unreviewed} unreviewed trades** via **Autopsy →** to grade process vs outcome` : "Filter your trades by setup/mistake"} or click **Replay** to step through candles.`,
+    );
+    parts.push(
+      `3. **Trading Lab (\`/lab\`)**: Refine your **Playbook Setups**, adjust **Rule Set** guardrails (max daily loss, max trades/day), manage your **Primary Challenge**, or launch **Backtesting** (\`/backtesting/create\`) for multi-timeframe historical replay.`,
+    );
+    parts.push(
+      `4. **Home (\`/dashboard\`) & Feed (\`/feed\`)**: Lock your daily loss limit, run **Plan a trade** before market open, or swipe through your best chart replays in **Feed**.`,
+    );
+    parts.push(
+      `\nTell me which area you want to focus on and I'll pull the exact trades or numbers for you.`,
+    );
+    return parts.join("\n");
+  }
 
   // --- PRIORITY 1: DETERMINISTIC TRADING MATH (Streaks, Position Sizing, Expectancy/PF/R) ---
   // Never substitute a directional or instrument breakdown when the user asks about streaks, sizing, or math!
@@ -107,7 +155,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       const sizingRes = computePositionSizingTool({
         entries: ctx.recentTrades,
         settings: {
-          traderName: ctx.userFirstName || "Trader",
+          traderName: name,
           startingEquity: opts.startingEquity ?? stats.currentEquity - stats.totalPnl,
           targetEquity: opts.targetEquity ?? stats.currentEquity + stats.remainingToTarget,
           maxDrawdown: opts.maxDrawdown ?? (stats.drawdownCushion != null ? stats.drawdown + stats.drawdownCushion : 2000),
@@ -162,14 +210,14 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
         );
       } else {
         sections.push(
-          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size?`,
+          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size, or practice sizing speed in **Practise → Math Duel**?`,
         );
       }
     }
 
     if (calcParams.wantsExpectancyOrStats && !calcParams.wantsStreak && !calcParams.wantsSizing) {
       const expRes = computeExpectancyStatsTool(ctx.recentTrades, {
-        traderName: ctx.userFirstName || "Trader",
+        traderName: name,
         startingEquity: opts.startingEquity ?? 10000,
         targetEquity: opts.targetEquity ?? 20000,
         maxDrawdown: opts.maxDrawdown ?? 2000,
@@ -212,6 +260,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
           lines.push(`   - Lesson: “${t.reflection?.lesson ?? t.review?.followUp?.biggestMistake}”`);
         }
       });
+      lines.push(`\nOpen this session in **Journal** (\`/journal?date=${targetDate}\`) to view screenshots or launch **Replay**.`);
       return lines.join("\n");
     }
   }
@@ -222,7 +271,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       const losses = ctx.recentTrades.filter((e) => e.pnl < 0);
       if (losses.length === 0) return "You have no losing trades or tagged mistakes recorded yet.";
       const totalLoss = losses.reduce((s, e) => s + e.pnl, 0);
-      return `You have ${losses.length} losing trade${losses.length === 1 ? "" : "s"} (${money(totalLoss)} total), but none have mistake tags yet.\n\n1. **Action needed**: Open your losing trades in the Journal and complete the Quick Autopsy.\n2. **Why it matters**: Once you tag mistakes, I calculate the exact dollar cost of each habit and warn you before you repeat it in Plan a Trade.`;
+      return `You have ${losses.length} losing trade${losses.length === 1 ? "" : "s"} (${money(totalLoss)} total), but none have mistake tags yet.\n\n1. **Action needed**: Open your losing trades in **Journal → Quick Autopsy** (\`/journal\`).\n2. **Why it matters**: Once you tag mistakes, I calculate the exact dollar cost of each habit, build spaced-repetition drills in **Practise → The Matrix**, and warn you before you repeat it in **Home → Plan a trade**.`;
     }
     const top = mistakes[0]!;
     const parts: string[] = [
@@ -231,7 +280,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     mistakes.slice(0, 4).forEach((m, i) => {
       parts.push(`${i + 1}. **${m.label}** — ${m.count} trade${m.count === 1 ? "" : "s"} · cost ${money(-m.cost)}`);
     });
-    parts.push(`\n**Takeaway**: Select **${top.label}** under “Mistakes to watch for today” in your next pre-trade Thought step to cut this leak first. (Sample: ${ctx.recentTrades.length} trades · ${cal.tier} calibration)`);
+    parts.push(`\n**Next step**: Select **${top.label}** under “Mistakes to watch for today” in **Home → Plan a trade**, and run a 5-minute drill in **Practise → The Matrix** to cut this leak first. (Sample: ${ctx.recentTrades.length} trades · ${cal.tier} calibration)`);
     return parts.join("\n");
   }
 
@@ -253,7 +302,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       byEmo.set(key, cur);
     }
     if (byEmo.size === 0) {
-      return "No emotional states are recorded on your reviewed trades yet. Pick how you feel during Plan & Record and Quick Autopsy so I can measure how your mindset impacts your win rate.";
+      return "No emotional states are recorded on your reviewed trades yet. Pick how you feel during **Home → Plan a trade** and **Journal → Quick Autopsy** so I can measure how your mindset impacts your win rate.";
     }
     const rows = [...byEmo.entries()]
       .map(([k, v]) => ({ k, ...v, wr: Math.round((v.wins / v.n) * 100) }))
@@ -267,7 +316,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       parts.push(`${i + 1}. **${r.k}** — ${r.wr}% win rate · ${money(r.pnl)} (${r.n} trade${r.n === 1 ? "" : "s"})`);
     });
     if (rows.length > 1 && worst.pnl < 0) {
-      parts.push(`\n**Risk trigger**: Trading while **${worst.k}** has cost ${money(worst.pnl)} (${worst.wr}% win rate). Step away or cut size when you notice this state.`);
+      parts.push(`\n**Risk trigger**: Trading while **${worst.k}** has cost ${money(worst.pnl)} (${worst.wr}% win rate). Lock your daily loss limit on **Home** or step into **Practise** instead of forcing a live entry when you notice this state.`);
     }
     return parts.join("\n");
   }
@@ -304,13 +353,13 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   // --- Overview / performance ---
   if (/how am i|doing|overall|performance|summary|stats|edge|accuracy|brain/.test(q)) {
     const parts: string[] = [];
-    parts.push(`Across **${stats.tradingDays} trading days** (${ctx.recentTrades.length} trades), your net P&L is **${money(stats.totalPnl)}** with a **${Math.round(stats.winRate * 100)}%** win rate.`);
+    parts.push(`Across **${stats.tradingDays} trading days** (${ctx.recentTrades.length} trades), ${name}, your net P&L is **${money(stats.totalPnl)}** with a **${Math.round(stats.winRate * 100)}%** win rate.`);
     parts.push(`1. **Average day P&L**: ${money(stats.avgDayPnl)} · Max drawdown: ${money(stats.drawdown)}`);
     if (adherence.cleanDayRate != null) {
       parts.push(`2. **Clean-plan days**: ${Math.round(adherence.cleanDayRate * 100)}%`);
     }
     if (mistakes[0]) {
-      parts.push(`3. **Primary leak**: ${mistakes[0].label} (${mistakes[0].count}× · ${money(-mistakes[0].cost)})`);
+      parts.push(`3. **Primary leak**: ${mistakes[0].label} (${mistakes[0].count}× · ${money(-mistakes[0].cost)}) — drill this in **Practise → The Matrix**`);
     }
     parts.push(`4. **AI Brain calibration**: ${cal.calibrationPct}% (${cal.tier} tier · ${cal.reviewedTrades} reviewed trades indexed)`);
     return parts.join("\n");
@@ -319,14 +368,14 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   // --- Hold time ---
   if (/hold|how long|duration/.test(q)) {
     const holds = holdTimeStats(ctx.recentTrades);
-    if (holds.sampleSize === 0) return "No entry/exit times recorded yet. Add timestamps to your trades and I'll calculate hold durations.";
+    if (holds.sampleSize === 0) return "No entry/exit times recorded yet. Add timestamps to your trades in **Journal** (or use **Settings → Data → Recover Entry Times**) and I'll calculate hold durations.";
     const parts: string[] = [];
     parts.push(`Hold time analysis (**${holds.sampleSize} trades** with timestamps):`);
     parts.push(`1. **Average winning hold**: ${formatHold(holds.avgWinMin)} (median ${formatHold(holds.medianWinMin)})`);
     parts.push(`2. **Average losing hold**: ${formatHold(holds.avgLossMin)} (median ${formatHold(holds.medianLossMin)})`);
     parts.push(`3. **Longest win vs shortest loss**: ${formatHold(holds.longestWinMin)} vs ${formatHold(holds.shortestLossMin)}`);
     if (holds.avgWinMin != null && holds.avgLossMin != null && holds.avgWinMin < holds.avgLossMin) {
-      parts.push(`\nYou're cutting winners shorter than losers — watch for premature exits on valid setups.`);
+      parts.push(`\nYou're cutting winners shorter than losers — review exit management in **Trading Lab → Playbook** or step through your exits in **Feed**.`);
     } else if (holds.avgWinMin != null && holds.avgLossMin != null) {
       parts.push(`\nYou're letting winners run longer than losers — healthy execution asymmetry.`);
     }
@@ -337,7 +386,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   if (/best time|worst time|best window|worst window|time window|best session|when.*best|when.*worst|perform best|perform worst|time.*perform|session|hour|morning/.test(q)) {
     const tw = timeWindowAnalytics(ctx.recentTrades);
     if (tw.sparse) {
-      return `1. **Sample size**\n   - Only ${tw.totalSample} trade${tw.totalSample === 1 ? "" : "s"} have entry timestamps — add entry/exit times to more trades to unlock 15-minute session edge windows.`;
+      return `1. **Sample size**\n   - Only ${tw.totalSample} trade${tw.totalSample === 1 ? "" : "s"} have entry timestamps — add entry/exit times to more trades in **Journal** to unlock 15-minute session edge windows.`;
     }
     const qualified = [...tw.windows]
       .filter((w) => w.trades >= 2)
@@ -363,7 +412,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   if (/highest.*rr|rr.*window|rr.*best|risk.*reward|r multiple/.test(q)) {
     const tw = timeWindowAnalytics(ctx.recentTrades);
     const byR = [...tw.windows].filter((w) => w.avgR != null && w.trades >= 2).sort((a, b) => (b.avgR ?? 0) - (a.avgR ?? 0));
-    if (byR.length === 0) return "No R-multiple data available for time window analysis yet. Record entry, stop, and exit prices on your trades.";
+    if (byR.length === 0) return "No R-multiple data available for time window analysis yet. Record entry, stop, and exit prices on your trades in **Journal**.";
     const top = byR[0]!;
     const topR = top.avgR ?? 0;
     return `Your highest-R window is **${top.label} NY** (${topR >= 0 ? "+" : ""}${topR}R avg across ${top.trades} trades).\n\n1. **Average R**: ${topR >= 0 ? "+" : ""}${topR}R\n2. **Win rate**: ${top.winRate ?? "—"}%\n3. **Total R**: ${top.totalR != null ? `${top.totalR >= 0 ? "+" : ""}${top.totalR}R` : "—"}`;
@@ -383,9 +432,9 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       if (e.rr != null && Number.isFinite(e.rr)) cur.rr.push(e.rr);
       bySetup.set(key, cur);
     }
-    if (bySetup.size === 0) return "No setups recorded yet. Name a playbook setup and tag your trades with it — then I can rank them.";
+    if (bySetup.size === 0) return "No setups recorded yet. Define a setup in **Trading Lab → Playbook** and tag your trades with it — then I can rank them.";
     const rows = [...bySetup.entries()]
-      .map(([name, v]) => ({ name, ...v, winRate: v.wins + v.losses > 0 ? Math.round((v.wins / (v.wins + v.losses)) * 100) : null }))
+      .map(([nameKey, v]) => ({ name: nameKey, ...v, winRate: v.wins + v.losses > 0 ? Math.round((v.wins / (v.wins + v.losses)) * 100) : null }))
       .sort((a, b) => b.pnl - a.pnl);
     const parts: string[] = [`Your top setup is **${rows[0]!.name}** (${money(rows[0]!.pnl)} across ${rows[0]!.n} trades):`];
     rows.slice(0, 4).forEach((r, i) => {
@@ -393,7 +442,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     });
     const worst = rows[rows.length - 1]!;
     if (rows.length > 1 && worst.pnl < 0) {
-      parts.push(`\n**"${worst.name}"** is underperforming (${money(worst.pnl)} over ${worst.n} trades). Tighten its confirmation rules in the Trading Lab.`);
+      parts.push(`\n**"${worst.name}"** is underperforming (${money(worst.pnl)} over ${worst.n} trades). Tighten its confirmation checklist in **Trading Lab → Playbook** or test it in **Trading Lab → Backtesting**.`);
     }
     return parts.join("\n");
   }
@@ -427,13 +476,14 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   // --- Patterns ---
   if (/pattern|recurring|same mistake|habit/.test(q)) {
     const pats = ctx.recurringPatterns;
-    if (pats.length === 0 && mistakes.length === 0) return "No recurring patterns detected yet. Patterns surface after at least two occurrences in your reviews.";
-    const parts: string[] = [`Detected recurring patterns across your journal:`];
+    if (pats.length === 0 && mistakes.length === 0) return "No recurring patterns detected yet. Complete **Journal → Quick Autopsy** on your trades so I can surface repeating habits.";
+    const parts: string[] = [`Detected recurring patterns across your journal, ${name}:`];
     if (pats.length > 0) {
       pats.forEach((p, i) => parts.push(`${i + 1}. **${p.pattern}** — ${p.count} occurrences`));
     } else {
       mistakes.slice(0, 3).forEach((m, i) => parts.push(`${i + 1}. **${m.label}** — ${m.count} occurrences (${money(-m.cost)})`));
     }
+    parts.push(`\nHead to **Practise → The Matrix** to drill these specific patterns or document a rule in **Lessons**.`);
     return parts.join("\n");
   }
 
@@ -447,7 +497,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
         ? `Plan adherence is **${pct}%** (${followed} of ${linked.length} reviewed trades followed the plan).`
         : `Discipline completion rate is **${Math.round(discipline.completionRate * 100)}%** across ${stats.tradingDays} trading days.`,
       `1. **Clean-plan days**: ${adherence.cleanDayRate != null ? `${Math.round(adherence.cleanDayRate * 100)}%` : "—"}`,
-      `2. **Reviewed trades**: ${ctx.recentTrades.filter((e) => e.reviewStatus === "reviewed").length} of ${ctx.recentTrades.length}`,
+      `2. **Reviewed trades**: ${ctx.recentTrades.filter((e) => e.reviewStatus === "reviewed").length} of ${ctx.recentTrades.length} (review pending trades in **Journal → Quick Autopsy**)`,
       mistakes[0] ? `3. **Most common rule slip**: ${mistakes[0].label} (${mistakes[0].count}×)` : `3. **Missed journal days**: ${discipline.missedDays}`,
     ].join("\n");
   }
@@ -470,6 +520,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       `2. **Mistakes tagged**: ${tags.length > 0 ? tags.map((t) => t.label).join(", ") : "None flagged"}`,
     ];
     if (lesson) parts.push(`3. **Recorded takeaway**: “${lesson}”`);
+    parts.push(`\nYou can open this trade's full **Quick Autopsy** (\`/review/${focus.id}\`) or step through it in **Feed → Replay**.`);
     return parts.join("\n");
   }
 
@@ -482,18 +533,18 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   const lessonQuote = latestLesson?.review?.followUp?.biggestMistake ?? latestLesson?.reflection?.lesson;
 
   const synthesis: string[] = [
-    `Based on your **${ctx.recentTrades.length} recorded trades** (${cal.tier} calibration · ${cal.calibrationPct}%), your overall win rate is **${Math.round(stats.winRate * 100)}%** (${money(stats.totalPnl)} net).`,
+    `Based on your **${ctx.recentTrades.length} recorded trades**, ${name} (${cal.tier} calibration · ${cal.calibrationPct}%), your overall win rate is **${Math.round(stats.winRate * 100)}%** (${money(stats.totalPnl)} net).`,
     `1. **Recent momentum (last ${recent5.length} trades)**: ${recentWins}/${recent5.length} won (${money(recentPnl)})`,
   ];
   if (topMistake) {
-    synthesis.push(`2. **Biggest mistake to eliminate**: ${topMistake.label} (${topMistake.count} occurrences · cost ${money(-topMistake.cost)})`);
+    synthesis.push(`2. **Biggest mistake to eliminate**: ${topMistake.label} (${topMistake.count} occurrences · cost ${money(-topMistake.cost)}) — practice this in **Practise → The Matrix**`);
   } else {
     synthesis.push(`2. **Average day P&L**: ${money(stats.avgDayPnl)} · Max drawdown: ${money(stats.drawdown)}`);
   }
   if (lessonQuote) {
     synthesis.push(`3. **Your own recent lesson (${latestLesson!.date})**: “${lessonQuote}”`);
   }
-  synthesis.push(`\nAsk me about a specific date, setup, mistake cost, losing streak probability, or position size for a deeper drill-down.`);
+  synthesis.push(`\nAsk me about losing streak probabilities, exact MNQ/NQ position sizing, a specific trade date, or what to drill next in **Practise** or **Trading Lab**.`);
   return synthesis.join("\n");
 }
 
@@ -517,4 +568,4 @@ function verdictLabel(verdict: string): string {
   }
 }
 
-export { findSimilarTrades, histDate, strategyForEntry };
+export { findSimilarTrades, histDate, strategyForEntry, EDGEBOOK_SITE_BLUEPRINT };

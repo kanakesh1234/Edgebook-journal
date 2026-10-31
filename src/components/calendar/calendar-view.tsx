@@ -12,7 +12,7 @@ import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "@/components/ui/ico
 import { cn } from "@/lib/utils";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const SPRING_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
+const SPRING_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 interface MonthDataSnapshot {
   year: number;
@@ -106,20 +106,19 @@ function buildMonthData(filtered: JournalEntry[], year: number, month: number): 
 
 /**
  * CalendarView — Apple Calendar-Inspired Desktop & Mobile Surface:
+ *  - Always scoped to the active Primary Challenge (no square native <select> box).
  *  - Fixed 6-row height (42 cells) so switching months never shifts layout.
  *  - Desktop: 7 day columns + 8th Weekly P&L summary column (`Wk 1`..`Wk 6`), day number top-left,
  *    today highlighted with a filled circle, tabular P&L centered/bottom with soft green/red tints.
- *  - Direction-aware slide + fade (next goes left, prev goes right), old month exits while new month enters,
- *    staggered per-row/cell cascade (~28ms), count-up animated header total, adjacent month prefetch,
- *    and debounced rapid-click queueing.
- *  - Keyboard shortcuts: Left/Right arrows change month, "T" jumps to Today, plus a "Today" button.
+ *  - Unhurried, choreographed month switching: direction-aware slide + fade (old month glides out
+ *    while new month glides in) with a staggered per-row/cell cascade (~42ms per row + 14ms per cell),
+ *    count-up animated header total, adjacent month prefetch, and debounced rapid-click queueing.
  *  - Clicking a day opens a translucent popover/inspector on desktop or a draggable bottom sheet on mobile.
  *  - Mobile: compact month grid with dots/colored markers and horizontal swipe left/right to change month.
  */
 export function CalendarView({
   entries,
   dayLogs,
-  challenges,
   currency,
   defaultChallengeId = null,
   spacious = false,
@@ -127,7 +126,7 @@ export function CalendarView({
 }: {
   entries: JournalEntry[];
   dayLogs: NoTradeLog[];
-  challenges: Challenge[];
+  challenges?: Challenge[];
   currency: CurrencyCode;
   defaultChallengeId?: string | null;
   compact?: boolean;
@@ -143,7 +142,6 @@ export function CalendarView({
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const [dir, setDir] = useState<number>(1);
-  const [challengeFilter, setChallengeFilter] = useState("all");
   const [scrubDay, setScrubDay] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
@@ -156,13 +154,10 @@ export function CalendarView({
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
 
-  useEffect(() => {
-    setChallengeFilter(defaultChallengeId ?? "all");
-  }, [defaultChallengeId]);
-
+  // Always reflect the active Primary Challenge stats
   const filtered = useMemo(
-    () => (challengeFilter === "all" ? entries : entries.filter((e) => e.challengeId === challengeFilter)),
-    [entries, challengeFilter],
+    () => (defaultChallengeId ? entries.filter((e) => e.challengeId === defaultChallengeId) : entries),
+    [entries, defaultChallengeId],
   );
   const byDay = useMemo(() => groupByDay(filtered), [filtered]);
   const noTradeDays = useMemo(() => new Set(dayLogs.map((d) => d.date)), [dayLogs]);
@@ -193,8 +188,8 @@ export function CalendarView({
     (delta: number) => {
       const nowMs = performance.now();
       const elapsed = nowMs - lastNavRef.current;
-      if (elapsed < 150) {
-        // Queue rapid clicks cleanly instead of dropping or janking
+      if (elapsed < 220) {
+        // Queue rapid clicks cleanly so choreographed month transitions play smoothly
         queuedDeltaRef.current = (queuedDeltaRef.current ?? 0) + delta;
         if (!navTimerRef.current) {
           navTimerRef.current = window.setTimeout(() => {
@@ -205,7 +200,7 @@ export function CalendarView({
               lastNavRef.current = performance.now();
               applyNavDelta(q);
             }
-          }, 155 - elapsed);
+          }, 225 - elapsed);
         }
         return;
       }
@@ -255,7 +250,7 @@ export function CalendarView({
   }, [navigate, jumpToToday, selectedDay]);
 
   // Count-up animated month P&L header total
-  const animatedMonthPnl = useCountUp(monthStats.monthPnl, reduce ? 0 : 480, !reduce);
+  const animatedMonthPnl = useCountUp(monthStats.monthPnl, reduce ? 0 : 560, !reduce);
 
   const scrubbedEntries = scrubDay ? monthStats.entriesByDate.get(scrubDay) ?? [] : [];
   const isScrubbingActiveDay = scrubDay !== null && scrubbedEntries.length > 0;
@@ -347,44 +342,26 @@ export function CalendarView({
             </p>
           </div>
 
-          {/* Controls: Challenge Filter + < Month Year > + Today Button */}
+          {/* Controls: Apple HIG Pill < Month Year > + Today Button */}
           <div className="flex flex-wrap items-center gap-2 self-start">
-            {challenges.length > 0 && (
-              <select
-                aria-label="Filter by challenge"
-                value={challengeFilter}
-                onChange={(e) => setChallengeFilter(e.target.value)}
-                className="h-10 min-h-[40px] rounded-full border border-line bg-surface px-3.5 text-[12.5px] font-medium text-ink transition-colors hover:border-line-strong focus:border-gold/60 focus:outline-none"
-              >
-                <option value="all">All challenges</option>
-                {challenges.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
             <div className="inline-flex h-10 items-center gap-0.5 rounded-full border border-line bg-surface p-1">
               <button
                 type="button"
                 onClick={() => navigate(-1)}
-                aria-label="Previous month (Left arrow)"
-                title="Previous month (←)"
+                aria-label="Previous month"
                 className="hit-44 grid h-8 w-8 place-items-center rounded-full text-muted transition-all hover:bg-raised hover:text-ink active:scale-90"
               >
                 <ChevronLeftIcon className="h-4 w-4" />
               </button>
 
-              <div className="relative min-w-[128px] overflow-hidden px-2 text-center">
-                <AnimatePresence mode="popLayout" initial={false} custom={dir}>
+              <div className="relative min-w-[132px] overflow-hidden px-2 text-center">
+                <AnimatePresence mode="wait" initial={false} custom={dir}>
                   <motion.span
                     key={`${view.year}-${view.month}`}
                     custom={dir}
-                    initial={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? 18 : -18 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? -18 : 18 }}
-                    transition={{ duration: 0.26, ease: SPRING_EASE }}
+                    initial={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? 22 : -22 }}
+                    animate={{ opacity: 1, x: 0, transition: { duration: 0.34, ease: SPRING_EASE } }}
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? -22 : 22, transition: { duration: 0.18, ease: SPRING_EASE } }}
                     className="block font-display text-[13.5px] font-semibold tracking-[-0.01em] text-ink"
                     aria-live="polite"
                   >
@@ -396,8 +373,7 @@ export function CalendarView({
               <button
                 type="button"
                 onClick={() => navigate(1)}
-                aria-label="Next month (Right arrow)"
-                title="Next month (→)"
+                aria-label="Next month"
                 className="hit-44 grid h-8 w-8 place-items-center rounded-full text-muted transition-all hover:bg-raised hover:text-ink active:scale-90"
               >
                 <ChevronRightIcon className="h-4 w-4" />
@@ -407,7 +383,6 @@ export function CalendarView({
             <button
               type="button"
               onClick={jumpToToday}
-              title="Jump to Today (Shortcut: T)"
               className="hit-44 h-10 rounded-full border border-line bg-surface px-4 text-[12.5px] font-semibold text-gold transition-all hover:border-gold/50 hover:bg-raised active:scale-95"
             >
               Today
@@ -454,16 +429,29 @@ export function CalendarView({
           </div>
         </div>
 
-        {/* Fixed 6-Row Animated Container (No Layout Shift Between Months) */}
+        {/* Fixed 6-Row Choreographed Animated Container (Silky Glide + Cascading Stagger) */}
         <div className="relative overflow-hidden">
-          <AnimatePresence mode="popLayout" initial={false} custom={dir}>
+          <AnimatePresence mode="wait" initial={false} custom={dir}>
             <motion.div
               key={`${view.year}-${view.month}`}
               custom={dir}
-              initial={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? 38 : -38 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? -38 : 38 }}
-              transition={{ duration: 0.32, ease: SPRING_EASE }}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? 48 : -48, scale: 0.992 }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                scale: 1,
+                transition: { duration: 0.46, ease: SPRING_EASE },
+              }}
+              exit={
+                reduce
+                  ? { opacity: 0 }
+                  : {
+                      opacity: 0,
+                      x: dir > 0 ? -38 : 38,
+                      scale: 0.992,
+                      transition: { duration: 0.22, ease: SPRING_EASE },
+                    }
+              }
               style={{ willChange: "transform, opacity" }}
               className="grid grid-rows-6 gap-1.5 sm:gap-2"
             >
@@ -479,11 +467,17 @@ export function CalendarView({
                         ? "h-[60px] sm:h-[96px]"
                         : "h-[54px] sm:h-[84px]";
 
+                      // Silky per-row + per-column cascade (~42ms per row + ~14ms per cell)
+                      const staggerDelay = reduce ? 0 : rowIdx * 0.042 + colIdx * 0.014;
+
                       if (!cell.key) {
                         return (
-                          <div
+                          <motion.div
                             key={`pad-${rowIdx}-${colIdx}`}
                             aria-hidden
+                            initial={reduce ? false : { opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 0.36, delay: staggerDelay, ease: SPRING_EASE }}
                             className={cn(
                               "rounded-[12px] border border-transparent bg-ink/[0.015] sm:rounded-[14px]",
                               cellHeight,
@@ -513,9 +507,6 @@ export function CalendarView({
                             }
                           : undefined;
 
-                      // Staggered per-row/cell cascade (~28ms per row + 8ms per col)
-                      const staggerDelay = reduce ? 0 : rowIdx * 0.028 + colIdx * 0.008;
-
                       return (
                         <motion.button
                           key={cell.key}
@@ -523,9 +514,9 @@ export function CalendarView({
                           onClick={() => setSelectedDay(cell.key)}
                           onPointerEnter={() => setScrubDay(hasTrades ? cell.key : null)}
                           onFocus={() => setScrubDay(hasTrades ? cell.key : null)}
-                          initial={reduce ? false : { opacity: 0, y: 5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.26, delay: staggerDelay, ease: SPRING_EASE }}
+                          initial={reduce ? false : { opacity: 0, y: 9, scale: 0.965 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          transition={{ duration: 0.42, delay: staggerDelay, ease: SPRING_EASE }}
                           style={tintStyle}
                           aria-label={`${formatDateFull(cell.key)}${pnl !== null ? `, ${formatSignedMoney(pnl, currency)}` : ", no trades"}`}
                           aria-pressed={isSelected}
@@ -600,9 +591,9 @@ export function CalendarView({
 
                     {/* 8th Column: Weekly P&L Summary (Desktop lg+) */}
                     <motion.div
-                      initial={reduce ? false : { opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.26, delay: reduce ? 0 : rowIdx * 0.028 + 0.06, ease: SPRING_EASE }}
+                      initial={reduce ? false : { opacity: 0, y: 7, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ duration: 0.42, delay: reduce ? 0 : rowIdx * 0.042 + 0.09, ease: SPRING_EASE }}
                       className={cn(
                         "hidden flex-col justify-between rounded-[14px] border border-line-soft bg-raised/45 px-3 py-2.5 text-right lg:flex",
                         spacious ? "h-[96px]" : "h-[84px]",
@@ -640,23 +631,16 @@ export function CalendarView({
           </AnimatePresence>
         </div>
 
-        {/* Subtle Footer Legend & Keyboard Hint */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line-soft pt-3.5 text-[11.5px] text-faint">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-profit" /> Reviewed
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-gold" /> Review pending
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full border border-gold" /> No-trade day
-            </span>
-          </div>
-          <span className="hidden text-[11px] text-faint sm:inline">
-            Shortcuts: <kbd className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px]">←</kbd>{" "}
-            <kbd className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px]">→</kbd> month ·{" "}
-            <kbd className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px]">T</kbd> today
+        {/* Subtle Footer Legend */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft pt-3.5 text-[11.5px] text-faint">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-profit" /> Reviewed
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-gold" /> Review pending
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full border border-gold" /> No-trade day
           </span>
         </div>
       </div>
