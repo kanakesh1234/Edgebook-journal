@@ -125,7 +125,8 @@ export function mistakeOf(e: JournalEntry): TradeMistake | null {
 /** Every FILED tag on a trade, primary first. Falls back to the single bucket for trades tagged before multi-tagging existed. */
 export function mistakeTagsOf(e: JournalEntry): { key: MistakeKey; label: string; primary: boolean }[] {
   const tags = e.review?.followUp?.tags ?? [];
-  const filed = tags.flatMap((t) => { const key = coerceKey(t.key); return key ? [{ key, label: mistakeLabel(key), primary: !!t.primary }] : []; });
+  const seen = new Set<MistakeKey>(); // one chip per category, even if the same tag was stored twice
+  const filed = tags.flatMap((t) => { const key = coerceKey(t.key); if (!key || seen.has(key)) return []; seen.add(key); return [{ key, label: mistakeLabel(key), primary: !!t.primary }]; });
   if (filed.length > 0) return filed;
   const m = mistakeOf(e);
   return m && !m.pending ? [{ key: m.key, label: m.label, primary: true }] : [];

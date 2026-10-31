@@ -54,7 +54,7 @@ export function TradeReviewFlow({ open, entry, onClose }: { open: boolean; entry
 
   const rail: Rail = {
     title: "Trade review",
-    steps: [{ id: "review", label: "Review" }, { id: "tags", label: "AI tags" }],
+    steps: [{ id: "review", label: "Review" }, { id: "tags", label: "Tags" }],
     current: step === "review" ? "review" : "done", // "done" is not a rail step: every step shows complete
     aside: (
       <>
@@ -83,7 +83,7 @@ export function TradeReviewFlow({ open, entry, onClose }: { open: boolean; entry
   );
 }
 
-/** The green "complete" moment: a check that draws itself, a soft ripple, then the tags the AI settled on. */
+/** The green "complete" moment: a check that draws itself, a soft ripple, then the tags it settled on. */
 function ReviewDone({ entry, before, currency, risk, onTalk }: { entry: JournalEntry; before: string[]; currency: ReturnType<typeof useApp.getState>["settings"]["currency"]; risk: ReturnType<typeof useAutopsy>["risk"]; onTalk: () => void }) {
   const tags = mistakeTagsOf(entry);
   const tagging = entry.review?.followUp?.tagging;
@@ -119,7 +119,7 @@ function ReviewDone({ entry, before, currency, risk, onTalk }: { entry: JournalE
               ))}
             </ul>
             <p className="mt-2.5 text-[13px] leading-snug text-muted">
-              {tagging?.degraded ? `The AI didn't answer${tagging.reason ? ` (${tagging.reason})` : ""}, so your notes and data were read.` : "Updated by the AI from everything you've written on this trade."}
+              Tags updated from everything you wrote on this trade.
               {changed && before.length > 0 && <> {added.length > 0 && <>Added: <span className="text-ink">{added.join(", ")}</span>. </>}{removed.length > 0 && <>Removed: <span className="text-ink">{removed.join(", ")}</span>.</>}</>}
             </p>
           </>

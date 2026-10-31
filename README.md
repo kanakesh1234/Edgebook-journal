@@ -1,22 +1,13 @@
-# edgebook fixes — copy each file to the SAME path in your project
+# Trade sheet redesign
 
-NEW (3)
-- src/app/api/drive/backtests/route.ts
-- src/lib/plan-review.ts
-- src/components/journal/plan-vs-trade.tsx
+Unzip into your project root (same paths, overwrite when asked). No new packages, no database changes. Then run `npm run dev`.
 
-REPLACE (9)
-- src/lib/backtesting/persistence.ts
-- src/lib/backtesting/store.ts
-- src/app/(workspace)/backtesting/session/page.tsx
-- src/components/journal/replay-trade.tsx
-- src/components/journal/entry-detail-modal.tsx
-- src/components/journal/plan-trade-flow.tsx
-- src/components/journal/win-odds-card.tsx
-- src/components/journal/flow-ui.tsx
-- src/lib/prediction/outlook.ts
+| File | What changed |
+|---|---|
+| `src/components/journal/entry-detail-modal.tsx` | Full redesign of the trade sheet |
+| `src/components/journal/tag-panel.tsx` | Tags show results only. Tagging runs silently in the background |
+| `src/lib/mistakes.ts` | One chip per category (fixes duplicate tags) |
+| `src/components/journal/trade-review-flow.tsx` | "AI tags" and "Updated by the AI" wording removed |
+| `src/components/journal/autopsy.tsx` | "Category · AI" and "AI noticed" wording removed |
 
-DELETE (optional, as DELETED.txt already says): src/components/journal/outlook-card.tsx
-
-No new packages, no env changes. `npx tsc --noEmit` and `npm test` pass with all of these in place.
-If you edited any replaced file after zipping, merge instead of overwriting.
+Nothing else is touched. The sheet keeps the same props, so `journal/page.tsx` needs no changes.

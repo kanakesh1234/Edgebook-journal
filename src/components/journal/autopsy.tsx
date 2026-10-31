@@ -389,7 +389,7 @@ function AnswerList({ a }: { a: AutopsyState }) {
           label={`Category: ${a.sorting && !a.category ? "sorting" : categoryOf(a.category?.key)?.label}. Change`}
           icon={<span className={cn(a.sorting && !a.category && "animate-pulse")}><GlyphSpark /></span>}
           tile="bg-[#5e5ce6]"
-          title={a.category?.suggested ? "Category · suggested" : a.category?.source === "ai" ? "Category · AI" : "Category"}
+          title={a.category?.suggested ? "Category · suggested" : "Category"}
           value={a.sorting && !a.category ? "Sorting…" : categoryOf(a.category?.key)?.label ?? "—"}
           onClick={() => a.setEditing("category")}
         />
@@ -481,7 +481,7 @@ export function AutopsyBody({ a, onAddChart }: { a: AutopsyState; onAddChart?: (
                   <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={FLOW_FADE} className="mb-4 flex items-start gap-3 rounded-2xl bg-[#5e5ce6]/[0.09] p-3.5 ring-1 ring-inset ring-[#5e5ce6]/20">
                     <span className="mt-0.5 grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[9px] bg-[#5e5ce6] text-white"><GlyphSpark /></span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-ink">{a.audit.objective ? "Spotted from your data" : "AI noticed"} · {auditLabel(a.audit)}</p>
+                      <p className="text-[13px] font-semibold text-ink">{a.audit.objective ? "Spotted from your data" : "Noticed"} · {auditLabel(a.audit)}</p>
                       <p className="mt-0.5 text-[13.5px] leading-snug text-muted">{a.audit.reason}</p>
                       <div className="mt-2.5 flex items-center gap-4 text-[13.5px] font-medium">
                         <button type="button" onClick={a.acceptAudit} className="text-[#5e5ce6] hover:underline dark:text-[#9d9bff]">Use this</button>
