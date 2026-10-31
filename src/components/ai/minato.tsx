@@ -13,8 +13,13 @@ import { computeInsights, topState, type MinatoState } from "@/lib/minato/insigh
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
-import { loadMind, MOOD_LABEL, mindForModel, patterns, type Mood, type MindNote } from "@/lib/minato/mind";
-import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type Commitment, type MinatoBrain, type Readiness } from "@/lib/minato/brain-ml";
+import { loadMind, MOOD_LABEL, mindForModel, type Mood } from "@/lib/minato/mind";
+import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type Commitment, type MinatoBrain } from "@/lib/minato/brain-ml";
+import { evolveMemory, applyDirectives } from "@/lib/minato/evolve";
+import { memoryForModel } from "@/lib/minato/retrieve";
+import { rejectMemory, restoreMemory, pinMemory, emptyMemory } from "@/lib/minato/memory";
+import { routeIntent, planFor, type Intent } from "@/lib/minato/router";
+import { MindPane } from "./mind-pane";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import "./minato.css";
@@ -95,130 +100,6 @@ function Avatar({ className }: { className?: string }) {
       />
       <span className="hidden text-sm">M</span>
     </span>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Mind: what Minato has learned about how the trader feels           */
-/* ------------------------------------------------------------------ */
-
-function NoteRow({ n, pending }: { n: MindNote; pending?: boolean }) {
-  return (
-    <li className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="rounded-full bg-gold/15 px-2.5 py-0.5 text-[11.5px] font-semibold text-gold">{MOOD_LABEL[n.mood]}</span>
-        <span className="text-[11.5px] text-faint">{pending ? "Waiting for your next setup" : n.date}</span>
-      </div>
-      <p className="mt-2 line-clamp-2 text-[13.5px] leading-snug text-ink">“{n.quote}”</p>
-      {n.verdict && <p className="mt-1.5 text-[12.5px] leading-snug text-muted">{n.verdict}</p>}
-    </li>
-  );
-}
-
-const Heading = ({ children }: { children: React.ReactNode }) => (
-  <h3 className="mb-2 px-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-faint">{children}</h3>
-);
-
-function ReadinessCard({ r, learning }: { r: Readiness | null; learning: { have: number; need: number } | null }) {
-  if (!r && !learning) return null;
-  if (!r && learning) {
-    return (
-      <section>
-        <Heading>Learning you</Heading>
-        <div className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
-          <p className="text-[13.5px] leading-snug text-ink">Your personal model needs {learning.need} trades before it says anything. You have {learning.have}.</p>
-          <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-ink/[0.09]"><div className="h-full rounded-full bg-gold-strong transition-[width] duration-500" style={{ width: `${Math.min(100, (learning.have / learning.need) * 100)}%` }} /></div>
-        </div>
-      </section>
-    );
-  }
-  const tone = r!.level === "high" ? "text-loss" : r!.level === "watch" ? "text-gold" : "text-profit";
-  return (
-    <section>
-      <Heading>Right now</Heading>
-      <div className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className={cn("text-[15px] font-semibold", tone)}>{r!.level === "high" ? "High slip risk" : r!.level === "watch" ? "Stay sharp" : "Steady"}</p>
-          <p className="num text-[22px] text-ink">{r!.pct}%</p>
-        </div>
-        {r!.drivers.length > 0 && <p className="mt-1.5 text-[13px] leading-snug text-muted">Because {r!.drivers.join(" and ")}.</p>}
-        <p className="mt-2 text-[11.5px] leading-snug text-faint">Chance your next trade loses, breaks a rule or carries a mistake. Learned from your last {r!.trades} trades; right {r!.holdoutAcc}% on trades it hadn&apos;t seen. Not a market call.</p>
-      </div>
-    </section>
-  );
-}
-
-function MindPane({ brain, readiness, learning, onCommit, onUnsave }: {
-  brain: MinatoBrain; readiness: Readiness | null; learning: { have: number; need: number } | null;
-  onCommit: (id: string, status: Commitment["status"]) => void; onUnsave: (id: string) => void;
-}) {
-  const today = todayKey();
-  const pending = brain.mind.notes.filter((n) => n.status === "pending");
-  const kept = brain.mind.notes.filter((n) => n.status === "kept");
-  const habits = patterns(brain.mind);
-  const commitments = brain.commitments.slice(-6).reverse();
-  const brief = brain.days[today];
-  const empty = !readiness && !learning && !brief && pending.length + kept.length + commitments.length + brain.saved.length === 0;
-  return (
-    <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
-      {empty && (
-        <div className="flex h-full min-h-[200px] flex-col justify-center px-1">
-          <p className="font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">Tell me how you feel.</p>
-          <p className="mt-2 max-w-[32ch] text-[14.5px] leading-snug text-muted">I remember what matters, hold your feelings until your next setup, and keep only what proves useful.</p>
-        </div>
-      )}
-      <ReadinessCard r={readiness} learning={learning} />
-      {brief && (
-        <section>
-          <Heading>Today</Heading>
-          <p className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{brief.line}</p>
-        </section>
-      )}
-      {commitments.length > 0 && (
-        <section>
-          <Heading>Your commitments</Heading>
-          <ul className="space-y-2">
-            {commitments.map((c) => (
-              <li key={c.id} className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
-                <p className="text-[13.5px] leading-snug text-ink">“{c.text}”</p>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className={cn("text-[12px] font-medium", c.status === "kept" ? "text-profit" : c.status === "broken" ? "text-loss" : "text-faint")}>
-                    {c.status === "kept" ? "Kept" : c.status === "broken" ? "Broken" : "Open"}{c.auto ? " · checked against your trades" : ""}
-                  </span>
-                  {!c.auto && c.status === "open" && (
-                    <span className="flex gap-1.5">
-                      <button type="button" onClick={() => onCommit(c.id, "kept")} className="rounded-full bg-profit/15 px-2.5 py-1 text-[11.5px] font-medium text-profit">Kept</button>
-                      <button type="button" onClick={() => onCommit(c.id, "broken")} className="rounded-full bg-loss/15 px-2.5 py-1 text-[11.5px] font-medium text-loss">Broke it</button>
-                    </span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {habits.length > 0 && (
-        <section>
-          <Heading>Your patterns</Heading>
-          <ul className="space-y-2">{habits.map((h) => <li key={h.mood} className="rounded-[18px] border border-gold/30 bg-gold/[0.07] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{h.line}</li>)}</ul>
-        </section>
-      )}
-      {pending.length > 0 && <section><Heading>Holding</Heading><ul className="space-y-2">{pending.map((n) => <NoteRow key={n.id} n={n} pending />)}</ul></section>}
-      {kept.length > 0 && <section><Heading>Kept because it was useful</Heading><ul className="space-y-2">{kept.slice(0, 8).map((n) => <NoteRow key={n.id} n={n} />)}</ul></section>}
-      {brain.saved.length > 0 && (
-        <section>
-          <Heading>Saved by you</Heading>
-          <ul className="space-y-2">
-            {brain.saved.slice().reverse().map((x) => (
-              <li key={x.id} className="rounded-[18px] bg-ink/[0.05] px-3.5 py-3">
-                <p className="line-clamp-4 text-[13.5px] leading-snug text-ink">{x.text}</p>
-                <div className="mt-1.5 flex items-center justify-between"><span className="text-[11.5px] text-faint">{x.date}</span><button type="button" onClick={() => onUnsave(x.id)} className="text-[11.5px] text-faint transition-colors hover:text-loss">Remove</button></div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
   );
 }
 
@@ -365,6 +246,13 @@ export function Minato() {
     return () => window.clearTimeout(t);
   }, [allEntries, plans, mindReady]);
 
+  // Long-term memory: fold the journal into episodic / semantic / procedural memory. Deterministic, no model calls, skipped when nothing changed.
+  useEffect(() => {
+    if (!mindReady) return;
+    const t = window.setTimeout(() => setBrain((b) => evolveMemory(b, allEntries, plans ?? [], Date.now())), 1100);
+    return () => window.clearTimeout(t);
+  }, [allEntries, plans, mindReady, brain.mind.stats, brain.mind.notes]);
+
   const recall = useMemo(
     () => buildRecall(collectWords(allEntries, plans ?? [], rawSettings, brain)),
     [allEntries, plans, rawSettings, brain.days, brain.saved], // eslint-disable-line react-hooks/exhaustive-deps
@@ -377,6 +265,12 @@ export function Minato() {
   const saveInsight = (full: string) => setBrain((b) => { const text = full.slice(0, 600); return b.saved.some((x) => x.text === text) ? b : { ...b, saved: [...b.saved, { id: `s-${Date.now()}`, date: todayKey(), text, at: Date.now() }].slice(-20) }; });
   const unsave = (id: string) => setBrain((b) => ({ ...b, saved: b.saved.filter((x) => x.id !== id) }));
   const setCommitment = (id: string, status: Commitment["status"]) => setBrain((b) => ({ ...b, commitments: b.commitments.map((c) => c.id === id ? { ...c, status, auto: false } : c) }));
+
+  const withMemory = (fn: (m: ReturnType<typeof emptyMemory>) => ReturnType<typeof emptyMemory>) => setBrain((b) => (b.memory ? { ...b, memory: fn(b.memory) } : b));
+  const rejectBelief = (id: string) => withMemory((m) => rejectMemory(m, id, Date.now()));
+  const restoreBelief = (id: string) => withMemory((m) => restoreMemory(m, id, Date.now()));
+  const pinBelief = (id: string, pinned: boolean) => withMemory((m) => pinMemory(m, id, pinned));
+  const lastIntent = useRef<Intent | null>(null);
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
@@ -409,7 +303,11 @@ export function Minato() {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     const nowMs = Date.now();
-    const applied = applyChat(brain, trimmed, nowMs, todayKey());
+    const dir = applyDirectives(brain, trimmed, nowMs); // "remember that…" / "forget…"
+    const applied = applyChat(dir.brain, trimmed, nowMs, todayKey());
+    const route = routeIntent(trimmed, { hasFocus: !!focusEntry, prev: lastIntent.current });
+    lastIntent.current = route.intent;
+    const memory = memoryForModel(applied.brain.memory, trimmed, planFor(route), nowMs);
     const moods = applied.moods;
     setBrain(applied.brain);
     const next: ChatMsg[] = [...messages, { role: "user", text: trimmed, ...(moods.length ? { noted: moods } : {}), ...(applied.commitments.length ? { committed: applied.commitments } : {}) }];
@@ -430,7 +328,9 @@ export function Minato() {
             entries,
             journalProvided: true,
             primaryChallenge: challenge ?? undefined,
-            companion: { ...companion, mind: mindForModel(applied.brain.mind, moods, nowMs), brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()) },
+            focusTradeId: focusEntry?.id ?? null,
+            prevIntent: lastIntent.current,
+            companion: { ...companion, mind: mindForModel(applied.brain.mind, moods, nowMs), brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()), memory },
           }),
           signal: controller.signal,
         });
@@ -579,7 +479,7 @@ export function Minato() {
             className="mn-panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex h-[min(620px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden rounded-[26px] md:inset-x-auto md:bottom-[84px] md:right-5 md:h-[min(620px,calc(100dvh-7.5rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
-            <div className="mn-head flex items-center gap-3 px-4 py-3">
+            <div className="flex items-center gap-3 px-4 pb-1 pt-4">
               <Avatar className="h-9 w-9 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">Minato</p>
@@ -599,8 +499,8 @@ export function Minato() {
             </div>
 
             {/* Chat | Mind */}
-            <div className="px-4 pb-2">
-              <div role="tablist" aria-label="Minato views" className="relative grid grid-cols-2 rounded-full bg-ink/[0.06] p-0.5 text-[13px] font-medium">
+            <div className="mn-tabs px-4 pb-3.5 pt-3">
+              <div role="tablist" aria-label="Minato views" className="relative grid grid-cols-2 rounded-full bg-ink/[0.06] p-[3px] text-[13px] font-medium">
                 {(["chat", "mind"] as const).map((t) => (
                   <button
                     key={t}
@@ -608,7 +508,7 @@ export function Minato() {
                     role="tab"
                     aria-selected={tab === t}
                     onClick={() => setTab(t)}
-                    className={cn("relative h-8 rounded-full outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-gold/50", tab === t ? "text-ink" : "text-muted hover:text-ink")}
+                    className={cn("relative h-[34px] rounded-full outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-gold/50", tab === t ? "text-ink" : "text-muted hover:text-ink")}
                   >
                     {tab === t && <motion.span layoutId="mn-tab" transition={{ type: "spring", stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
                     <span className="relative inline-flex items-center gap-1.5">
@@ -620,7 +520,7 @@ export function Minato() {
               </div>
             </div>
 
-            {tab === "mind" && <MindPane brain={brain} readiness={readiness} learning={learning} onCommit={setCommitment} onUnsave={unsave} />}
+            {tab === "mind" && <MindPane brain={brain} readiness={readiness} learning={learning} onCommit={setCommitment} onUnsave={unsave} onReject={rejectBelief} onRestore={restoreBelief} onPin={pinBelief} />}
 
             {/* Conversation */}
             <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4", tab !== "chat" && "hidden")} aria-live="polite">

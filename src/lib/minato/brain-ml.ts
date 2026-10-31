@@ -17,6 +17,7 @@
  */
 import type { JournalEntry, JournalSettings, TradePlan } from "../types";
 import { addNotes, detectMoods, emptyMind, isPositive, reconcile, MOOD_LABEL, type MindState, type Mood } from "./mind";
+import type { MemoryStore } from "./memory";
 
 /* ================================ types ================================ */
 
@@ -56,6 +57,8 @@ export interface MinatoBrain {
   commitments: Commitment[];
   saved: SavedInsight[];
   net?: NetSnapshot;
+  /** Long-term memory tiers (episodic / semantic / procedural). Optional so older journals load unchanged. */
+  memory?: MemoryStore;
 }
 export const emptyBrain = (): MinatoBrain => ({ v: 1, mind: emptyMind(), days: {}, commitments: [], saved: [] });
 

@@ -45,6 +45,9 @@ const PATTERN_DEFS: { id: string; label: string; keys: string[] }[] = [
   { id: "early-exit", label: "Premature exit", keys: ["exited early", "closed early", "too soon", "breakeven", "panic exit"] },
 ];
 
+/** Ids of every pattern the engine can test (lets callers know which beliefs were actually evaluated). */
+export const PATTERN_IDS = PATTERN_DEFS.map((d) => d.id);
+
 function excerpt(text: string, len = 120): string {
   return text.length > len ? `${text.slice(0, len).trim()}…` : text;
 }
