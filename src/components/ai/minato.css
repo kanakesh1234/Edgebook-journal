@@ -16,8 +16,8 @@
   .mn-panel { background: var(--overlay); }
 }
 
-/* The divider sits under the Chat | Mind switcher, so the switcher has air above and below it. */
-.mn-tabs {
+/* The divider sits under the header, with even air above and below the title row. */
+.mn-head {
   border-bottom: 0.5px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
 }
 

@@ -4,6 +4,8 @@ import { understand, probGreater, wilson, evidenceLevel } from "../../src/lib/mi
 import { emptyMemory, observe, decayPass, retention, rejectMemory, restoreMemory, consolidate, activeItems, undoLast, compact, MAX_ACTIVE, type Observation } from "../../src/lib/minato/memory.ts";
 import { evolveMemory, applyDirectives } from "../../src/lib/minato/evolve.ts";
 import { emptyBrain, applyChat, reconcileBrain, brainForModel, collectWords, buildRecall } from "../../src/lib/minato/brain-ml.ts";
+import { applyMemoryOp } from "../../src/lib/minato/bridge.ts";
+import { sessionNudge } from "../../src/lib/minato/nudge.ts";
 import { routeIntent, planFor, parseTradeRefs } from "../../src/lib/minato/router.ts";
 import { retrieveMemories, memoryForModel } from "../../src/lib/minato/retrieve.ts";
 import { packFacts } from "../../src/lib/minato/context-pack.ts";
@@ -159,6 +161,31 @@ const obs = (over: Partial<Observation> = {}): Observation => ({
   ok(brainForModel(b, buildRecall([]), "q", null, "2026-10-28").recentDays.length === 0, "past-day briefs never sent to the model");
   ok(collectWords([], [], {} as never, b, "2026-10-28").every((w) => w.kind !== "chat"), "past chat not in recall");
   ok(collectWords([], [], {} as never, b, "2026-10-26").some((w) => w.kind === "chat"), "today's chat is recalled");
+}
+
+// ---- the Mind tab is gone: Minato volunteers a line only when it is relevant, and the trader can still correct/clear it
+{
+  const entries = journal({ days: 45, breakAfterLoss: 0.8, breakBase: 0.1, seed: 11 });
+  const brain = evolveMemory(emptyBrain(), entries, [], NOW);
+  const lossToday = (pnl: number) => [{ ...entries[0], id: "today1", date: "2026-10-30", pnl, createdAt: NOW } as never];
+  const base = { memory: brain.memory, readiness: null, commitments: [], today: "2026-10-30" };
+  ok(sessionNudge({ ...base, entries: lossToday(-100) })?.text.includes("just took a loss"), "just lost + known after-loss pattern → nudge");
+  ok(sessionNudge({ ...base, entries: lossToday(150) }) === null, "a winning day → silence");
+  ok(sessionNudge({ ...base, entries: [] }) === null, "no trades today → silence");
+  ok(sessionNudge({ memory: emptyMemory(), readiness: null, commitments: [], today: "2026-10-30", entries: lossToday(-100) }) === null, "nothing learned yet → silence");
+  ok(!/\b(you are|you're a)\b/i.test(sessionNudge({ ...base, entries: lossToday(-100) })!.text), "nudge states no trait");
+  const withCommit = sessionNudge({ ...base, entries: [], commitments: [{ id: "c1", date: "2026-10-30", text: "stop after two losses", status: "open", auto: false } as never] });
+  ok(withCommit?.text.includes("stop after two losses"), "open commitment is surfaced");
+
+  const id = "sem:post-loss:slips-after-loss";
+  const rejected = applyMemoryOp(brain, { type: "reject", id }, NOW);
+  ok(rejected.memory!.items[id].status === "retired", "Settings: 'Not accurate' retires the belief");
+  ok(applyMemoryOp(rejected, { type: "restore", id }, NOW).memory!.items[id].status !== "retired", "Settings: Restore brings it back");
+  let withNote = applyChat(brain, "I am so frustrated today", NOW, "2026-10-30").brain;
+  ok(withNote.mind.notes.length > 0, "feeling held");
+  const cleared = applyMemoryOp(withNote, { type: "clear" }, NOW);
+  ok(Object.keys(cleared.memory!.items).length === 0 && cleared.mind.notes.length === 0, "Clear removes beliefs and held feelings");
+  ok(evolveMemory(cleared, entries, [], NOW + 1000).memory!.items[id] === undefined, "a cleared belief does not instantly reappear");
 }
 
 // ---- directives

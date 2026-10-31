@@ -356,6 +356,16 @@ export function restoreMemory(store: MemoryStore, id: string, now: number): Memo
   };
 }
 
+/**
+ * "Clear what Minato remembers": everything is removed except what the trader stated themselves is also removed.
+ * The ids are remembered as rejected, so a belief only returns if the journal later shows materially more evidence for it.
+ */
+export function clearMemory(store: MemoryStore, now: number): MemoryStore {
+  const rejected = { ...store.rejected };
+  for (const it of Object.values(store.items)) if (it.origin !== "user") rejected[it.id] = { at: now, n: it.n };
+  return { ...store, items: {}, rejected, gaps: [], updatedAt: now };
+}
+
 export function pinMemory(store: MemoryStore, id: string, pinned: boolean): MemoryStore {
   const it = store.items[id];
   if (!it || !!it.pinned === pinned) return store;

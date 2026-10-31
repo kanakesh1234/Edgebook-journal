@@ -18,6 +18,7 @@ import { haptic } from "@/lib/haptics";
 import { toast } from "@/components/ui/toast";
 import type { JournalSettings } from "@/lib/types";
 import { LogoMark } from "@/components/landing/logo";
+import { MinatoMemory } from "./minato-memory";
 import {
   CandlestickIcon,
   CheckIcon,
@@ -537,12 +538,15 @@ function AppearancePane() {
 
 function MinatoPane() {
   return (
-    <Group
-      title="Replies"
-      footer="Minato sizes each answer to your question and keeps your conversation in mind. There is no token limit to manage."
-    >
-      <Row icon={<SparklesIcon />} tone="gold" title="Reply length" subtitle="Short for quick questions, deeper when you ask" value="Adaptive" />
-    </Group>
+    <>
+      <Group
+        title="Replies"
+        footer="Minato sizes each answer to your question. Each day's conversation starts fresh; it learns from your journal, not from yesterday's chat."
+      >
+        <Row icon={<SparklesIcon />} tone="gold" title="Reply length" subtitle="Short for quick questions, deeper when you ask" value="Adaptive" />
+      </Group>
+      <MinatoMemory />
+    </>
   );
 }
 

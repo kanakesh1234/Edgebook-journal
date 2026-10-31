@@ -14,12 +14,12 @@ import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
 import { loadMind, MOOD_LABEL, mindForModel, type Mood } from "@/lib/minato/mind";
-import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type Commitment, type MinatoBrain } from "@/lib/minato/brain-ml";
+import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type MinatoBrain } from "@/lib/minato/brain-ml";
 import { evolveMemory, applyDirectives } from "@/lib/minato/evolve";
 import { memoryForModel } from "@/lib/minato/retrieve";
-import { rejectMemory, restoreMemory, pinMemory, emptyMemory } from "@/lib/minato/memory";
+import { applyMemoryOp, useMindView } from "@/lib/minato/bridge";
+import { sessionNudge } from "@/lib/minato/nudge";
 import { routeIntent, planFor, type Intent } from "@/lib/minato/router";
-import { MindPane } from "./mind-pane";
 import { cn } from "@/lib/utils";
 import { EASE } from "@/components/landing/reveal";
 import "./minato.css";
@@ -190,7 +190,6 @@ export function Minato() {
   /* ---------------- conversation (persisted across closes & reloads) ---------------- */
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [tab, setTab] = useState<"chat" | "mind">("chat");
   const [brain, setBrain] = useState<MinatoBrain>(emptyBrain());
   const [mindReady, setMindReady] = useState(false);
   const brainKey = `${BRAIN_MIRROR}:${user?.id ?? "guest"}`;
@@ -260,18 +259,15 @@ export function Minato() {
     [allEntries, plans, rawSettings, brain.days, brain.saved], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const readiness = useMemo(() => readinessNow(brain.net, allEntries, plans ?? [], brain.mind, todayKey()), [brain.net, brain.mind, allEntries, plans]);
-  const learning = !readiness && allEntries.length > 0 && allEntries.length < 24 ? { have: allEntries.length, need: 24 } : null;
-
-  const pendingNotes = brain.mind.notes.filter((n) => n.status === "pending");
 
   const saveInsight = (full: string) => setBrain((b) => { const text = full.slice(0, 600); return b.saved.some((x) => x.text === text) ? b : { ...b, saved: [...b.saved, { id: `s-${Date.now()}`, date: todayKey(), text, at: Date.now() }].slice(-20) }; });
-  const unsave = (id: string) => setBrain((b) => ({ ...b, saved: b.saved.filter((x) => x.id !== id) }));
-  const setCommitment = (id: string, status: Commitment["status"]) => setBrain((b) => ({ ...b, commitments: b.commitments.map((c) => c.id === id ? { ...c, status, auto: false } : c) }));
 
-  const withMemory = (fn: (m: ReturnType<typeof emptyMemory>) => ReturnType<typeof emptyMemory>) => setBrain((b) => (b.memory ? { ...b, memory: fn(b.memory) } : b));
-  const rejectBelief = (id: string) => withMemory((m) => rejectMemory(m, id, Date.now()));
-  const restoreBelief = (id: string) => withMemory((m) => restoreMemory(m, id, Date.now()));
-  const pinBelief = (id: string, pinned: boolean) => withMemory((m) => pinMemory(m, id, pinned));
+  // Settings → "What Minato remembers" edits this brain through the bridge (one owner of the state).
+  useEffect(() => { if (mindReady) useMindView.getState().publish(brain); }, [brain, mindReady]);
+  useEffect(() => {
+    useMindView.getState().register((op) => setBrain((b) => applyMemoryOp(b, op, Date.now())));
+    return () => useMindView.getState().register(null);
+  }, []);
   const lastIntent = useRef<Intent | null>(null);
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
@@ -384,7 +380,13 @@ export function Minato() {
     return firstName ? `${part}, ${firstName}.` : `${part}.`;
   }, [firstName, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const nudge = insights[0]?.message;
+  // Silence is the default: a line appears only when what Minato has learned is relevant to what is happening today.
+  const learned = useMemo(
+    () => sessionNudge({ memory: brain.memory, readiness, commitments: brain.commitments, today: todayKey(), entries: allEntries }),
+    [brain.memory, brain.commitments, readiness, allEntries, open], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const nudge = learned?.text ?? insights[0]?.message;
+  const chips = useMemo(() => (learned ? [learned.ask, ...suggestions].slice(0, 4) : suggestions), [learned, suggestions]);
   const newChat = () => { setMessages([]); setInput(""); inputRef.current?.focus(); };
 
   // Minato stays out of the way: it appears at the end of a page, after a long pause, or when opened from a trade.
@@ -481,7 +483,7 @@ export function Minato() {
             className="mn-panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex h-[min(620px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden rounded-[26px] md:inset-x-auto md:bottom-[84px] md:right-5 md:h-[min(620px,calc(100dvh-7.5rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
-            <div className="flex items-center gap-3 px-4 pt-5">
+            <div className="mn-head flex items-center gap-3 px-4 pb-4 pt-5">
               <Avatar className="h-9 w-9 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">Minato</p>
@@ -500,32 +502,9 @@ export function Minato() {
               </button>
             </div>
 
-            {/* Chat | Mind */}
-            <div className="mn-tabs px-4 pb-4 pt-4">
-              <div role="tablist" aria-label="Minato views" className="relative grid grid-cols-2 rounded-full bg-ink/[0.06] p-[3px] text-[13px] font-medium">
-                {(["chat", "mind"] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === t}
-                    onClick={() => setTab(t)}
-                    className={cn("relative h-[34px] rounded-full outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-gold/50", tab === t ? "text-ink" : "text-muted hover:text-ink")}
-                  >
-                    {tab === t && <motion.span layoutId="mn-tab" transition={{ type: "spring", stiffness: 420, damping: 34 }} className="absolute inset-0 rounded-full bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.12)]" />}
-                    <span className="relative inline-flex items-center gap-1.5">
-                      {t === "chat" ? "Chat" : "Mind"}
-                      {t === "mind" && pendingNotes.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-label={`${pendingNotes.length} held`} />}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {tab === "mind" && <MindPane brain={brain} readiness={readiness} learning={learning} onCommit={setCommitment} onUnsave={unsave} onReject={rejectBelief} onRestore={restoreBelief} onPin={pinBelief} />}
 
             {/* Conversation */}
-            <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-4 pt-5", tab !== "chat" && "hidden")} aria-live="polite">
+            <div ref={listRef} className={"flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-4 pt-5"} aria-live="polite">
               {empty && (
                 <motion.div initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: EASE, delay: 0.08 }} className="flex h-full min-h-[180px] flex-col justify-center px-1">
                   <p className="font-display text-[28px] font-semibold leading-[1.1] tracking-[-0.03em] text-ink">{greeting}</p>
@@ -552,16 +531,16 @@ export function Minato() {
                     {m.role === "user" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <div className="space-y-1">{renderMinatoText(m.text)}</div>}
                   </div>
                   {m.noted && m.noted.length > 0 && (
-                    <button type="button" onClick={() => setTab("mind")} className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold">
+                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
                       <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
-                      Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}. Holding it for your next setup.
-                    </button>
+                      Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}. I’ll keep it in mind for today.
+                    </p>
                   )}
                   {m.committed && m.committed.length > 0 && (
-                    <button type="button" onClick={() => setTab("mind")} className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold">
+                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
                       <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
                       Saved your commitment. I&apos;ll check it against your trades.
-                    </button>
+                    </p>
                   )}
                   {m.role === "buddy" && (
                     <button type="button" onClick={() => saveInsight(m.text)} disabled={brain.saved.some((x) => x.text === m.text.slice(0, 600))} className="group flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold disabled:text-gold">
@@ -583,9 +562,9 @@ export function Minato() {
             </div>
 
             {/* Suggestions — only before the conversation starts */}
-            {tab === "chat" && empty && suggestions.length > 0 && (
+            {empty && chips.length > 0 && (
               <div className="mn-chips flex gap-2 overflow-x-auto px-4 pb-2.5 pt-1 [scrollbar-width:none]">
-                {suggestions.map((p) => (
+                {chips.map((p) => (
                   <button
                     key={p}
                     type="button"
@@ -600,7 +579,7 @@ export function Minato() {
 
             {/* Composer */}
             <form
-              className={cn("px-3 pb-3 pt-1", tab !== "chat" && "hidden")}
+              className="px-3 pb-3 pt-1"
               onSubmit={(e) => { e.preventDefault(); void ask(input); }}
             >
               <div className="mn-field flex items-end gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
