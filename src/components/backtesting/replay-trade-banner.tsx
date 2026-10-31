@@ -43,12 +43,12 @@ export default function ReplayTradeBanner() {
       <span className="tv-rt-label">{ref.label}</span>
       <span className="tv-rt-body">{body}</span>
       {script === "pending" && (
-        <button type="button" className="tv-rt-btn" onClick={() => setTradeScript(false)} title="Skip the scripted trade and take it yourself">
+        <button type="button" className="tv-rt-btn" onClick={() => setTradeScript(false)} data-tip="Skip the scripted trade and take it yourself">
           Trade it myself
         </button>
       )}
       {script === "off" && (
-        <button type="button" className="tv-rt-btn" onClick={() => setTradeScript(true)} title="Let the replay execute your original trade">
+        <button type="button" className="tv-rt-btn" onClick={() => setTradeScript(true)} data-tip="Let the replay execute your original trade">
           Auto-play my trade
         </button>
       )}

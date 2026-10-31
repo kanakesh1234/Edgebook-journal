@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_BG, candleColorsFor, paletteFor, resetAppearance, setAppearance, useChartAppearance, type ChartAppearance,
 } from "@/lib/backtesting/appearance";
 import { useTheme } from "@/lib/theme";
 import { I } from "./tv-icons";
+import { toast } from "./ej-toast";
 
 const TABS = [
   { id: "symbol", label: "Symbol", icon: "candles" },
@@ -32,8 +33,8 @@ function Pair({ label, up, down, onUp, onDown }: { label: string; up: string; do
     <div className="tv-setrow">
       <span>{label}</span>
       <span className="tv-set-pair">
-        <input type="color" value={up} onChange={(e) => onUp(e.target.value)} title="Up" />
-        <input type="color" value={down} onChange={(e) => onDown(e.target.value)} title="Down" />
+        <input type="color" value={up} onChange={(e) => onUp(e.target.value)} aria-label="Up color" data-tip="Up" />
+        <input type="color" value={down} onChange={(e) => onDown(e.target.value)} aria-label="Down color" data-tip="Down" />
       </span>
     </div>
   );
@@ -47,17 +48,23 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
   const cc = candleColorsFor(resolved, a);
   const bg = paletteFor(resolved, a).bg;
   const cancel = () => { setAppearance(original.current); onClose(); };
+  const dlg = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    dlg.current?.querySelector<HTMLElement>(".tv-set-tab.is-on")?.focus();
+    return () => prev?.focus?.();
+  }, []);
 
   return (
     <div className="tv-modal-back" onPointerDown={cancel}>
-      <div className="tv-modal tv-settings" role="dialog" aria-label="Settings" onPointerDown={(e) => e.stopPropagation()}>
-        <header>Settings <button type="button" className="tv-tbtn" onClick={cancel} aria-label="Close"><I name="close" size={22} /></button></header>
+      <div ref={dlg} className="tv-modal tv-settings" role="dialog" aria-modal="true" aria-label="Settings" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancel(); } else if (e.key !== "Tab") e.stopPropagation(); }}>
+        <header><h2>Settings</h2><button type="button" className="tv-tbtn" onClick={cancel} aria-label="Close settings" data-tip="Close"><I name="close" size={18} /></button></header>
 
         <div className="tv-set-body">
-          <nav className="tv-set-tabs">
+          <nav className="tv-set-tabs" role="tablist" aria-orientation="vertical">
             {TABS.map((t) => (
-              <button key={t.id} type="button" className={`tv-set-tab${tab === t.id ? " is-on" : ""}`} onClick={() => setTab(t.id)}>
-                <I name={t.icon} size={20} />{t.label}
+              <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`tv-set-tab${tab === t.id ? " is-on" : ""}`} onClick={() => setTab(t.id)}>
+                <I name={t.icon} size={18} filled={tab === t.id} />{t.label}
               </button>
             ))}
           </nav>
@@ -65,24 +72,24 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           <div className="tv-set-pane">
             {tab === "symbol" && (
               <>
-                <h5>CANDLES</h5>
+                <h5>Candles</h5>
                 <Pair label="Body" up={cc.up} down={cc.down} onUp={(v) => setAppearance({ upColor: v })} onDown={(v) => setAppearance({ downColor: v })} />
                 <Pair label="Borders" up={cc.borderUp} down={cc.borderDown} onUp={(v) => setAppearance({ borderUp: v })} onDown={(v) => setAppearance({ borderDown: v })} />
                 <Pair label="Wick" up={cc.wickUp} down={cc.wickDown} onUp={(v) => setAppearance({ wickUp: v })} onDown={(v) => setAppearance({ wickDown: v })} />
-                <div className="tv-setrow"><span style={{ color: "var(--tv-muted)", fontSize: 12 }}>Left swatch = up candles, right swatch = down candles. Default: green and black.</span></div>
+                <div className="tv-setrow"><span className="ej-hint">Left swatch = up candles, right swatch = down candles. Default: green and black.</span></div>
               </>
             )}
 
             {tab === "status" && (
               <>
-                <h5>STATUS LINE</h5>
+                <h5>Status line</h5>
                 <Check label="Symbol, OHLC and change" value={a.showLegend} onChange={(v) => setAppearance({ showLegend: v })} />
               </>
             )}
 
             {tab === "scales" && (
               <>
-                <h5>GRID LINES</h5>
+                <h5>Grid lines</h5>
                 <Check label="Vertical grid lines" value={a.gridVertical} onChange={(v) => setAppearance({ gridVertical: v })} />
                 <Check label="Horizontal grid lines" value={a.gridHorizontal} onChange={(v) => setAppearance({ gridHorizontal: v })} />
               </>
@@ -90,23 +97,23 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
 
             {tab === "canvas" && (
               <>
-                <h5>BACKGROUND</h5>
+                <h5>Background</h5>
                 <div className="tv-bg-presets">
-                  <button type="button" className={`tv-bg-sw${a.background === null ? " is-on" : ""}`} title="Follow site theme (default)"
+                  <button type="button" className={`tv-bg-sw${a.background === null ? " is-on" : ""}`} aria-label="Follow site theme" data-tip="Follow site theme (default)"
                     style={{ background: `linear-gradient(135deg, ${DEFAULT_BG.light} 50%, ${DEFAULT_BG.dark} 50%)` }} onClick={() => setAppearance({ background: null })} />
                   {BG_PRESETS.map((p) => (
-                    <button key={p.label} type="button" className={`tv-bg-sw${a.background?.toLowerCase() === p.light ? " is-on" : ""}`} title={p.label}
+                    <button key={p.label} type="button" className={`tv-bg-sw${a.background?.toLowerCase() === p.light ? " is-on" : ""}`} aria-label={p.label} data-tip={p.label}
                       style={{ background: p.light }} onClick={() => setAppearance({ background: p.light })} />
                   ))}
-                  <input type="color" className="tv-bg-sw" style={{ padding: 0 }} title="Custom colour" value={/^#[0-9a-f]{6}$/i.test(bg) ? bg : "#fffefb"} onChange={(e) => setAppearance({ background: e.target.value })} />
+                  <input type="color" className="tv-bg-sw" style={{ padding: 0 }} aria-label="Custom colour" data-tip="Custom colour" value={/^#[0-9a-f]{6}$/i.test(bg) ? bg : "#fffefb"} onChange={(e) => setAppearance({ background: e.target.value })} />
                 </div>
-                <div className="tv-setrow"><span style={{ color: "var(--tv-muted)", fontSize: 12 }}>First swatch follows the site theme (light / dark). Text and grid adapt automatically.</span></div>
+                <div className="tv-setrow"><span className="ej-hint">First swatch follows the site theme (light / dark). Text and grid adapt automatically.</span></div>
               </>
             )}
 
             {tab === "trading" && (
               <>
-                <h5>ON CHART</h5>
+                <h5>On chart</h5>
                 <Check label="Buy / Sell buttons" value={a.showTradePill} onChange={(v) => setAppearance({ showTradePill: v })} />
               </>
             )}
@@ -114,7 +121,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <footer>
-          <button type="button" className="tv-btn" onClick={() => { resetAppearance(); original.current = { ...original.current }; }}>Reset to defaults</button>
+          <button type="button" className="tv-btn" onClick={() => { const now = a; resetAppearance(); original.current = { ...original.current }; toast({ kind: "info", text: "Chart settings reset", action: { label: "Undo", run: () => setAppearance(now) } }); }}>Reset to defaults</button>
           <span style={{ display: "inline-flex", gap: 8 }}>
             <button type="button" className="tv-btn" onClick={cancel}>Cancel</button>
             <button type="button" className="tv-btn primary" onClick={onClose}>Ok</button>

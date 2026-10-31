@@ -5,6 +5,7 @@ import { HistogramSeries, LineSeries, LineStyle, type IChartApi, type ISeriesApi
 import type { CandleData } from "@/lib/backtesting/data/types";
 import { useIndicators } from "@/lib/backtesting/indicator-store";
 import { CATALOG, compute, label, type IndicatorInst, type Line } from "@/lib/backtesting/indicators";
+import { I } from "./tv-icons";
 
 interface Built { inst: IndicatorInst; lines: Array<{ line: Line; series: ISeriesApi<"Line" | "Histogram"> }> }
 
@@ -120,9 +121,9 @@ export function IndicatorLegend({ candles, onOpen }: { candles: CandleData[]; on
           <span className="tv-ind-name">{label(i)}</span>
           {(values.get(i.id) ?? []).map((x, k) => <b key={k} style={{ color: x.color }}>{fmt(x.v, i.kind)}</b>)}
           <span className="tv-ind-actions">
-            <button type="button" title={i.visible ? "Hide" : "Show"} onClick={() => update(i.id, { visible: !i.visible })}>{i.visible ? "◉" : "○"}</button>
-            <button type="button" title="Settings" onClick={onOpen}>⚙</button>
-            <button type="button" title="Remove" onClick={() => remove(i.id)}>✕</button>
+            <button type="button" data-tip={i.visible ? "Hide" : "Show"} aria-label={i.visible ? "Hide indicator" : "Show indicator"} onClick={() => update(i.id, { visible: !i.visible })}>{i.visible ? <I name="eye" size={14} /> : <I name="eyeOff" size={14} />}</button>
+            <button type="button" data-tip="Settings" aria-label="Indicator settings" onClick={onOpen}><I name="settings" size={14} /></button>
+            <button type="button" data-tip="Remove" aria-label="Remove indicator" onClick={() => remove(i.id)}><I name="close" size={14} /></button>
           </span>
         </div>
       ))}

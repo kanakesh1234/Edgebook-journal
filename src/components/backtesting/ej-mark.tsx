@@ -1,7 +1,11 @@
-/** EdgeJournal monogram — a squircle with an "EJ" ligature and a tiny candle wick. */
+/** EdgeJournal monogram — a squircle with an "EJ" ligature and a tiny candle wick. Pass title="" for decorative use. */
 export default function EJMark({ size = 24, title = "EdgeJournal" }: { size?: number; title?: string }) {
+  const decorative = !title;
   return (
-    <span className="ej-mark" style={{ width: size, height: size }} title={title} aria-label={title}>
+    <span
+      className="ej-mark" style={{ width: size, height: size }}
+      {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": title, "data-tip": title })}
+    >
       <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true">
         <defs>
           <linearGradient id="ej-g" x1="0" y1="0" x2="1" y2="1">

@@ -77,7 +77,7 @@ export function useDraggable(storageKey: string) {
     onPointerUp: () => { if (drag.current) { drag.current = null; ref.current?.classList.remove("is-dragging"); save(); } },
     onPointerCancel: () => { drag.current = null; ref.current?.classList.remove("is-dragging"); save(); },
     onDoubleClick: () => { pos.current = { dx: 0, dy: 0 }; apply(); save(); },
-    title: "Drag to move · double-click to reset",
+    "data-tip": "Drag to move · double-click to reset",
     role: "separator" as const,
     "aria-label": "Move toolbar",
   };

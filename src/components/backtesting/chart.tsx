@@ -40,6 +40,7 @@ import { DrawingController } from "./drawings/controller";
 import { Projector, timeframeSeconds } from "./drawings/projector";
 import { fmtPrice, fmtSigned } from "./drawings/render";
 import { onChartCommand } from "./chart-bus";
+import { I } from "./tv-icons";
 import ChartContextMenu, { type ContextTarget } from "./context-menu";
 import DrawingToolbar from "./drawing-toolbar";
 import { IndicatorLayer, IndicatorLegend } from "./indicators-layer";
@@ -194,15 +195,15 @@ function PositionTags({
             <span className="tv-ptag-side">{long ? "Long" : "Short"} {p.quantity}</span>
             <button
               type="button" className={`tv-ptag-btn sl${p.stopLoss ? " is-on" : ""}`}
-              title={p.stopLoss ? "Remove stop loss" : "Add stop loss — then drag the line"}
+              data-tip={p.stopLoss ? "Remove stop loss" : "Add stop loss — then drag the line"} aria-label={p.stopLoss ? "Remove stop loss" : "Add stop loss"}
               onClick={() => (p.stopLoss ? onSetRisk(p.orderId, { stopLoss: null }) : addRisk(p, "sl"))}
             >SL{p.stopLoss ? " ×" : ""}</button>
             <button
               type="button" className={`tv-ptag-btn tp${p.takeProfit ? " is-on" : ""}`}
-              title={p.takeProfit ? "Remove take profit" : "Add take profit — then drag the line"}
+              data-tip={p.takeProfit ? "Remove take profit" : "Add take profit — then drag the line"} aria-label={p.takeProfit ? "Remove take profit" : "Add take profit"}
               onClick={() => (p.takeProfit ? onSetRisk(p.orderId, { takeProfit: null }) : addRisk(p, "tp"))}
             >TP{p.takeProfit ? " ×" : ""}</button>
-            <button type="button" className="tv-ptag-btn close" title="Close position at market" onClick={() => closePosition(symbol, p.orderId)}>✕</button>
+            <button type="button" className="tv-ptag-btn close" data-tip="Close position at market" aria-label="Close position at market" onClick={() => closePosition(symbol, p.orderId)}><I name="close" size={12} /></button>
           </div>
         );
       })}
@@ -945,7 +946,6 @@ export default function BacktestChart({
   return (
     <div ref={wrapRef} className="tv-chart-wrap" style={{ background: pal.bg }} onContextMenu={onContextMenu}>
       <div ref={containerRef} className="tv-chart-canvas" />
-      <div className="ej-watermark" aria-hidden="true" style={{ color: pal.text }}><b>{spec?.name ?? symbol}</b><span>EdgeJournal</span></div>
       <IndicatorLayer chartRef={chartRef} candles={candles} epoch={epoch} />
 
       {/* Legend + quick trade (top-left, like TradingView) */}
@@ -978,7 +978,7 @@ export default function BacktestChart({
             <div className="tv-pill">
               <button
                 type="button" disabled={!canTrade} className="tv-pill-sell"
-                onClick={() => placeOrder("sell", orderQty)} title={`Sell ${orderQty} at market (Shift+S)`}
+                onClick={() => placeOrder("sell", orderQty)} data-tip={`Sell ${orderQty} at market (Shift+S)`} aria-label={`Sell ${orderQty} at market`}
               >
                 <b ref={sellPxRef}>{fmtPrice(last)}</b><span>SELL</span>
               </button>
@@ -988,7 +988,7 @@ export default function BacktestChart({
               />
               <button
                 type="button" disabled={!canTrade} className="tv-pill-buy"
-                onClick={() => placeOrder("buy", orderQty)} title={`Buy ${orderQty} at market (Shift+B)`}
+                onClick={() => placeOrder("buy", orderQty)} data-tip={`Buy ${orderQty} at market (Shift+B)`} aria-label={`Buy ${orderQty} at market`}
               >
                 <b ref={buyPxRef}>{fmtPrice(last)}</b><span>BUY</span>
               </button>

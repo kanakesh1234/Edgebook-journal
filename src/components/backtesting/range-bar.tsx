@@ -37,7 +37,7 @@ export default function RangeBar() {
 
   const d = new Date(currentTime * 1000);
   const statusCls = status === "completed" ? "done" : status === "breached" ? "bad" : playing ? "live" : "paused";
-  const statusTxt = status === "completed" ? "COMPLETED" : status === "breached" ? "BREACHED" : playing ? "REPLAYING" : "PAUSED";
+  const statusTxt = status === "completed" ? "Completed" : status === "breached" ? "Breached" : playing ? "Replaying" : "Paused";
 
   const goto = () => {
     // datetime-local is entered as New York wall-clock time.
@@ -53,32 +53,32 @@ export default function RangeBar() {
   return (
     <div className="tv-range">
       {RANGES.map((r) => (
-        <button key={r.label} type="button" className="tv-tbtn" title={r.title} onClick={() => emitChartCommand({ type: "range", seconds: r.seconds })}>{r.label}</button>
+        <button key={r.label} type="button" className="tv-tbtn ej-num" data-tip={r.title} aria-label={r.title} onClick={() => emitChartCommand({ type: "range", seconds: r.seconds })}>{r.label}</button>
       ))}
       <i className="tv-sep" />
       <div className="tv-dd" ref={ref}>
-        <button type="button" className={`tv-tbtn${goOpen ? " is-on" : ""}`} title="Go to…" onClick={() => setGoOpen((o) => !o)}><I name="calendar" size={20} /></button>
+        <button type="button" className={`tv-tbtn${goOpen ? " is-on" : ""}`} data-tip="Go to date" aria-label="Go to date" aria-expanded={goOpen} onClick={() => setGoOpen((o) => !o)}><I name="calendar" size={18} /></button>
         {goOpen && (
-          <div className="tv-menu tv-goto" style={{ top: "auto" }}>
-            <div className="tv-menu-head" style={{ padding: "0 0 6px" }}>GO TO (NEW YORK TIME)</div>
+          <div className="tv-menu tv-goto" role="dialog" aria-label="Go to date" style={{ top: "auto" }} onKeyDown={(e) => e.stopPropagation()}>
+            <div className="tv-menu-head">Go to · New York time</div>
             <input type="datetime-local" value={goVal} onChange={(e) => setGoVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && goto()} />
             <button type="button" className="tv-btn primary" style={{ marginTop: 8, width: "100%" }} onClick={goto}>Go to</button>
           </div>
         )}
       </div>
-      <button type="button" className="tv-tbtn" title="Scroll to the replay position" onClick={() => emitChartCommand({ type: "reset" })}>Reset view</button>
+      <button type="button" className="tv-tbtn" data-tip="Scroll to the replay position (Alt+R)" aria-label="Reset view" onClick={() => emitChartCommand({ type: "reset" })}>Reset view</button>
 
       <span className="tv-grow" />
       <span className={`tv-status ${statusCls}`}>{statusTxt}</span>
-      <span className="tv-clock">
+      <span className="tv-clock ej-num">
         {currentTime > 0
           ? <>{nyDate.format(d)} <b>{nyTime.format(d)}</b> <em>{nyOffsetLabel(currentTime)}</em></>
           : <b>—</b>}
       </span>
       <i className="tv-sep" />
-      <button type="button" className={`tv-tbtn${scale.mode === "percent" ? " is-on" : ""}`} title="Percentage scale (Alt+P)" onClick={() => setScale({ mode: scale.mode === "percent" ? "normal" : "percent" })}>%</button>
-      <button type="button" className={`tv-tbtn${scale.mode === "log" ? " is-on" : ""}`} title="Logarithmic scale (Alt+L)" onClick={() => setScale({ mode: scale.mode === "log" ? "normal" : "log" })}>log</button>
-      <button type="button" className={`tv-tbtn${scale.auto ? " is-on" : ""}`} title="Auto-fit price scale" onClick={() => setScale({ auto: !scale.auto })}>auto</button>
+      <button type="button" className={`tv-tbtn${scale.mode === "percent" ? " is-on" : ""}`} data-tip="Percentage scale (Alt+P)" aria-label="Percentage scale" aria-pressed={scale.mode === "percent"} onClick={() => setScale({ mode: scale.mode === "percent" ? "normal" : "percent" })}>%</button>
+      <button type="button" className={`tv-tbtn${scale.mode === "log" ? " is-on" : ""}`} data-tip="Logarithmic scale (Alt+L)" aria-label="Logarithmic scale" aria-pressed={scale.mode === "log"} onClick={() => setScale({ mode: scale.mode === "log" ? "normal" : "log" })}>log</button>
+      <button type="button" className={`tv-tbtn${scale.auto ? " is-on" : ""}`} data-tip="Auto-fit price scale" aria-label="Auto-fit price scale" aria-pressed={scale.auto} onClick={() => setScale({ auto: !scale.auto })}>auto</button>
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { useBacktest } from "@/lib/backtesting/store";
 import { formatMoney, formatPct, formatSignedMoney } from "@/lib/format";
 import { generateTradesCsv, downloadCsv } from "@/lib/backtesting/csv-export";
+import EJMark from "./ej-mark";
+import AnimatedNumber from "./ej-number";
 import { GlassIconButton, IconClose, PrimaryButton, QuietButton } from "@/components/journal/flow-ui";
 
 interface SessionResultsProps {
@@ -92,17 +94,12 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    isBreached ? "bg-loss" : "bg-gold-strong",
-                  )}
-                />
-                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-faint">
+                <EJMark size={20} title="" />
+                <p className={cn("text-[12px] font-semibold tracking-[-0.005em]", isBreached ? "text-loss" : "text-faint")}>
                   {isBreached ? "Account breached" : "Session complete"}
                 </p>
               </div>
-              <h2 className="mt-2 truncate text-[22px] font-semibold tracking-[-0.02em]">
+              <h2 className="mt-2 line-clamp-2 break-words text-[22px] font-semibold tracking-[-0.02em]">
                 {config.sessionName}
               </h2>
             </div>
@@ -115,7 +112,7 @@ export default function SessionResults({ onReturnToSessions }: SessionResultsPro
           <div className="mt-7 text-center">
             <p className="text-[12px] font-medium text-faint">Net P&amp;L</p>
             <p className={cn("mt-1 text-[52px] font-semibold leading-none tracking-[-0.04em] tabular-nums", toneText)}>
-              {formatSignedMoney(net)}
+              <AnimatedNumber value={net} from={0} ms={250} format={(n) => formatSignedMoney(n)} />
             </p>
             <div className="mt-3 flex items-center justify-center gap-2">
               <span className={cn("rounded-full px-2.5 py-1 text-[12px] font-semibold tabular-nums", tonePill)}>

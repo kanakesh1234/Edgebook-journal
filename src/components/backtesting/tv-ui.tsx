@@ -27,3 +27,23 @@ export function nyOffsetLabel(epochSec: number): string {
     return "UTC-5";
   }
 }
+
+/** Shared keyboard path for menus: ↑↓ Home End move, Esc closes (and never leaks to the workspace shortcuts). */
+export function onMenuKeyDown(e: { key: string; preventDefault(): void; stopPropagation(): void }, root: HTMLElement | null, close: () => void) {
+  if (!root) return;
+  const k = e.key;
+  if (k === "Escape") { e.preventDefault(); e.stopPropagation(); close(); return; }
+  if (k !== "ArrowDown" && k !== "ArrowUp" && k !== "Home" && k !== "End") return;
+  const items = Array.from(root.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)'));
+  if (!items.length) return;
+  e.preventDefault(); e.stopPropagation();
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  const n = k === "Home" ? 0 : k === "End" ? items.length - 1 : k === "ArrowDown" ? i + 1 : i < 0 ? items.length - 1 : i - 1;
+  items[(n + items.length) % items.length].focus();
+}
+
+/** Focus the first (or checked) menu item when a menu opens. */
+export function focusFirstItem(root: HTMLElement | null) {
+  if (!root) return;
+  (root.querySelector<HTMLElement>('[aria-checked="true"], .is-active, .is-on[role^="menuitem"]') ?? root.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)'))?.focus({ preventScroll: true });
+}

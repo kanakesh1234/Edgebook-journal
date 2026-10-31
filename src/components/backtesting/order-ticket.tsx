@@ -35,14 +35,14 @@ export default function OrderTicket({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="tv-ticket" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="tv-ticket" role="dialog" aria-label="Order ticket" onKeyDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
       <h4>
         <span>{symbol} <small>{spec ? `$${spec.tickValue}/tick` : ""}</small></span>
-        <button type="button" className="tv-tbtn" style={{ height: 24, minWidth: 24 }} onClick={onClose} aria-label="Close"><I name="close" size={16} /></button>
+        <button type="button" className="tv-tbtn" style={{ height: 28, minWidth: 28 }} onClick={onClose} aria-label="Close order ticket" data-tip="Close"><I name="close" size={16} /></button>
       </h4>
-      <div className="tv-seg">
+      <div className="tv-seg" role="radiogroup" aria-label="Order type">
         {(["market", "limit", "stop"] as OrderType[]).map((t) => (
-          <button key={t} type="button" className={type === t ? "is-on" : ""} onClick={() => setType(t)}>{t}</button>
+          <button key={t} type="button" role="radio" aria-checked={type === t} className={type === t ? "is-on" : ""} onClick={() => setType(t)}>{t}</button>
         ))}
       </div>
       {needsPrice && (
@@ -52,9 +52,9 @@ export default function OrderTicket({ onClose }: { onClose: () => void }) {
       )}
       <label className="tv-field"><span>Units</span>
         <div className="tv-qty">
-          <button type="button" onClick={() => setQty(qty - 1)}>−</button>
+          <button type="button" aria-label="Decrease units" onClick={() => setQty(qty - 1)}>−</button>
           <input type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
-          <button type="button" onClick={() => setQty(qty + 1)}>+</button>
+          <button type="button" aria-label="Increase units" onClick={() => setQty(qty + 1)}>+</button>
         </div>
       </label>
       <div className="tv-row">

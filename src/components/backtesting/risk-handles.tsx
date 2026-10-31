@@ -183,7 +183,7 @@ export default function RiskHandles({ symbol, chartRef, seriesRef, candlesRef, l
             <span className="ej-rh-pts" />
             {it.kind !== "order" && (
               <button
-                type="button" className="ej-rh-x" title={it.kind === "sl" ? "Remove stop loss" : "Remove take profit"}
+                type="button" className="ej-rh-x" data-tip={it.kind === "sl" ? "Remove stop loss" : "Remove take profit"} aria-label={it.kind === "sl" ? "Remove stop loss" : "Remove take profit"}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => onRemove(it.id, it.kind as "sl" | "tp")}
               >×</button>

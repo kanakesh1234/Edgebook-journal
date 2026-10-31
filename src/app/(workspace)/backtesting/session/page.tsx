@@ -18,8 +18,14 @@ import SettingsDialog from "@/components/backtesting/settings-dialog";
 import SessionResults from "@/components/backtesting/session-results";
 import { emitChartCommand, onChartCommand } from "@/components/backtesting/chart-bus";
 import FloatingTools from "@/components/backtesting/floating-tools";
+import FavoritesBar from "@/components/backtesting/favorites-bar";
+import TooltipLayer from "@/components/backtesting/ej-tooltip";
+import ToastHost, { toast } from "@/components/backtesting/ej-toast";
+import EJMark from "@/components/backtesting/ej-mark";
+import { I } from "@/components/backtesting/tv-icons";
 import "@/components/backtesting/tv.css";
 import "@/components/backtesting/ej.css";
+import "@/components/backtesting/ej-tools.css";
 
 const ALT_TOOLS: Record<string, "trend-line" | "horizontal-line" | "horizontal-ray" | "vertical-line" | "cross-line" | "fib-retracement"> = {
   KeyT: "trend-line", KeyH: "horizontal-line", KeyJ: "horizontal-ray", KeyV: "vertical-line", KeyC: "cross-line", KeyF: "fib-retracement",
@@ -77,30 +83,24 @@ function BacktestWorkspaceInner() {
   const [ticketOpen, setTicketOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelsHidden, setPanelsHidden] = useState(false);
-  const [hint, setHint] = useState(false);
 
   // TradingView "fullscreen": hide every panel, go browser-fullscreen, Esc brings them back.
   const hidePanels = () => {
-    setPanelsHidden(true); setHint(true);
+    setPanelsHidden(true);
+    toast({ kind: "info", text: "Panels hidden — press Esc to show them", ms: 3500 });
     void document.documentElement.requestFullscreen?.().catch(() => {});
   };
   const showPanels = () => {
-    setPanelsHidden(false); setHint(false);
+    setPanelsHidden(false);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   };
   const togglePanels = () => (panelsRef.current.hidden ? showPanels() : hidePanels());
   const panelsRef = useRef({ hidden: false, toggle: () => {} });
   panelsRef.current = { hidden: panelsHidden, toggle: togglePanels };
 
-  useEffect(() => {
-    if (!hint) return;
-    const id = setTimeout(() => setHint(false), 3500);
-    return () => clearTimeout(id);
-  }, [hint]);
-
   // Browser Esc / exiting fullscreen also restores the panels.
   useEffect(() => {
-    const on = () => { if (!document.fullscreenElement) { setPanelsHidden(false); setHint(false); } };
+    const on = () => { if (!document.fullscreenElement) setPanelsHidden(false); };
     document.addEventListener("fullscreenchange", on);
     return () => document.removeEventListener("fullscreenchange", on);
   }, []);
@@ -241,9 +241,10 @@ function BacktestWorkspaceInner() {
     return () => clearInterval(timer);
   }, [config, saveSession]);
 
-  // Alert toast fades on its own.
+  // Alert notice → toast (the store notice itself still clears on its own timer, as before).
   useEffect(() => {
     if (!alertNotice) return;
+    toast({ kind: "warn", text: alertNotice.text, ms: 7000 });
     const id = setTimeout(() => useBacktest.getState().clearAlertNotice(), 7000);
     return () => clearTimeout(id);
   }, [alertNotice]);
@@ -269,9 +270,12 @@ function BacktestWorkspaceInner() {
   if (!config) {
     return (
       <div className="tv-root" data-tv-theme={theme} style={{ placeItems: "center", display: "grid" }}>
-        <div style={{ textAlign: "center" }}>
-          <p style={{ color: "var(--tv-muted)", marginBottom: 12 }}>No backtesting session configured.</p>
-          <button type="button" className="tv-btn" onClick={() => router.push("/lab#backtesting")}>Back to sessions</button>
+        <TooltipLayer /><ToastHost />
+        <div className="ej-state">
+          <EJMark size={44} title="" />
+          <h2>No session open</h2>
+          <p>Pick a backtest from your sessions to start replaying.</p>
+          <button type="button" className="tv-btn primary" onClick={() => router.push("/lab#backtesting")}>Back to sessions</button>
         </div>
       </div>
     );
@@ -305,22 +309,26 @@ function BacktestWorkspaceInner() {
             />
 
             <ReplayTradeBanner />
-            {panelsHidden && <FloatingTools onExit={showPanels} />}
+            {panelsHidden ? <FloatingTools onExit={showPanels} /> : <FavoritesBar />}
             {replayOpen && <ReplayToolbar shifted={!!selectedDrawingId} onClose={() => setReplayOpen(false)} />}
             {ticketOpen && <OrderTicket onClose={() => setTicketOpen(false)} />}
 
             {dataLoading && (
-              <div className="tv-cover">
-                <div><div className="tv-spinner" /><p style={{ color: "var(--tv-muted)" }}>Loading market data…</p></div>
+              <div className="tv-cover" role="status" aria-live="polite" aria-label="Loading market data">
+                <div className="ej-skel" aria-hidden="true">
+                  {Array.from({ length: 28 }, (_, i) => <i key={i} style={{ height: `${28 + ((i * 37) % 46)}%`, animationDelay: `${(i % 7) * 70}ms` }} />)}
+                </div>
+                <div className="ej-loading"><EJMark size={34} title="" /><b>Loading market data</b><span>Preparing your replay…</span></div>
               </div>
             )}
 
             {dataError && !dataLoading && (
               <div className="tv-cover">
-                <div style={{ maxWidth: 420 }}>
-                  <p style={{ color: "var(--tv-down)", fontWeight: 600, marginBottom: 6 }}>No data to replay</p>
-                  <p style={{ color: "var(--tv-muted)", lineHeight: 1.5, marginBottom: 14 }}>{dataError}</p>
-                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <div className="ej-state" role="alert">
+                  <span className="ej-state-ic is-bad"><I name="alert" size={22} filled /></span>
+                  <h2>No data to replay</h2>
+                  <p>{dataError}</p>
+                  <div className="ej-state-actions">
                     <button type="button" className="tv-btn primary" onClick={() => setRetryNonce((n) => n + 1)}>Retry</button>
                     <button type="button" className="tv-btn" onClick={() => router.push("/backtesting/create")}>Change session</button>
                   </div>
@@ -329,14 +337,16 @@ function BacktestWorkspaceInner() {
             )}
 
             {dataWarning && !dataError && (
-              <div className="tv-banner">
+              <div className="tv-banner is-warn" role="status">
+                <I name="alert" size={16} filled />
                 <span>{dataWarning}</span>
-                <button type="button" onClick={() => setDataWarning(null)} aria-label="Dismiss">✕</button>
+                <button type="button" onClick={() => setDataWarning(null)} aria-label="Dismiss" data-tip="Dismiss"><I name="close" size={14} /></button>
               </div>
             )}
 
             {(status === "completed" || status === "breached") && !showResults && (
               <div className={`tv-banner ${status === "completed" ? "ok" : "bad"}`}>
+                <EJMark size={20} title="" />
                 <b>{status === "completed" ? "Session complete" : "Account breached"}</b>
                 <button type="button" className="tv-linkbtn" onClick={() => useBacktest.getState().setShowResults(true)}>View results</button>
               </div>
@@ -348,16 +358,8 @@ function BacktestWorkspaceInner() {
         </div>
       </div>
 
-      {panelsHidden && hint && (
-        <div className="tv-toast tv-toast-info" role="status"><span>Panels hidden. Press ESC to show panels.</span></div>
-      )}
-
-      {alertNotice && (
-        <div className="tv-toast" role="status">
-          <b style={{ color: "#ff9800" }}>Alert</b><span>{alertNotice.text}</span>
-          <button type="button" onClick={() => useBacktest.getState().clearAlertNotice()} aria-label="Dismiss">✕</button>
-        </div>
-      )}
+      <TooltipLayer />
+      <ToastHost />
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
 
@@ -370,7 +372,7 @@ function BacktestWorkspaceInner() {
 
 export default function BacktestSessionPage() {
   return (
-    <Suspense fallback={<div className="tv-root" style={{ placeItems: "center", display: "grid" }}><div className="tv-spinner" /></div>}>
+    <Suspense fallback={<div className="tv-root" style={{ placeItems: "center", display: "grid" }}><div className="ej-loading"><EJMark size={34} title="" /><span>Loading workspace…</span></div></div>}>
       <BacktestWorkspaceInner />
     </Suspense>
   );

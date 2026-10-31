@@ -6,6 +6,8 @@ import { uid } from "@/lib/utils";
 import { TOOLS } from "@/lib/backtesting/drawings/tools";
 import { emitChartCommand } from "./chart-bus";
 import { fmtPrice } from "./drawings/render";
+import { focusFirstItem, onMenuKeyDown } from "./tv-ui";
+import { toast } from "./ej-toast";
 
 export interface ContextTarget {
   price: number;
@@ -30,6 +32,7 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
   const canTrade = st.status === "paused" || st.status === "running";
   const drawing = target.drawingId ? (st.drawings[symbol] || []).find((d) => d.id === target.drawingId) : null;
 
+  useEffect(() => { focusFirstItem(ref.current); }, []);
   useEffect(() => {
     const away = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -80,11 +83,11 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
   }
 
   items.push(
-    { label: `Copy price ${price}`, onClick: run(() => { void navigator.clipboard?.writeText(p.toFixed(2)).catch(() => {}); }) },
+    { label: `Copy price ${price}`, onClick: run(() => { void navigator.clipboard?.writeText(p.toFixed(2)).then(() => toast({ text: `Copied ${price}` })).catch(() => {}); }) },
     "sep",
     {
       label: `Add alert on ${symbol} at ${price}`, 
-      onClick: run(() => st.addAlert(symbol, p, lastPrice !== null && p < lastPrice ? "down" : "up")),
+      onClick: run(() => { st.addAlert(symbol, p, lastPrice !== null && p < lastPrice ? "down" : "up"); toast({ text: `Alert set · ${symbol} at ${price}` }); }),
     },
     {
       label: `Draw horizontal line at ${price}`,
@@ -98,7 +101,7 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
     { label: st.drawingsHidden ? "Show all drawings" : "Hide all drawings", onClick: run(() => st.setDrawingsHidden(!st.drawingsHidden)) },
   );
   const drawCount = (st.drawings[symbol] || []).length;
-  if (drawCount > 0) items.push({ label: `Remove ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, danger: true, onClick: run(() => st.clearDrawings(symbol)) });
+  if (drawCount > 0) items.push({ label: `Remove ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, danger: true, onClick: run(() => { st.clearDrawings(symbol); toast({ kind: "info", text: `Removed ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, action: { label: "Undo", run: () => useBacktest.getState().undoDrawing(symbol) } }); }) });
   items.push("sep", { label: "Settings…", onClick: run(() => emitChartCommand({ type: "settings" })) });
 
   // Keep the menu on screen.
@@ -106,11 +109,11 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
   const top = Math.min(y, (ref.current?.parentElement?.clientHeight ?? 800) - items.length * 30 - 20);
 
   return (
-    <div ref={ref} className="tv-menu tv-ctx" style={{ left: Math.max(4, left), top: Math.max(4, top) }} onContextMenu={(e) => e.preventDefault()}>
+    <div ref={ref} className="tv-menu tv-ctx" role="menu" aria-label="Chart actions" onKeyDown={(e) => onMenuKeyDown(e, ref.current, onClose)} style={{ left: Math.max(4, left), top: Math.max(4, top) }} onContextMenu={(e) => e.preventDefault()}>
       {items.map((it, i) =>
-        it === "sep" ? <div key={i} className="tv-menu-sep" /> : (
-          <button key={i} type="button" className={`tv-menu-item${it.danger ? " is-danger" : ""}`} disabled={it.disabled} onClick={it.onClick}>
-            <span>{it.label}</span>
+        it === "sep" ? <div key={i} className="tv-menu-sep" role="separator" /> : (
+          <button key={i} type="button" role="menuitem" className={`tv-menu-item${it.danger ? " is-danger" : ""}`} disabled={it.disabled} onClick={it.onClick}>
+            <span className="ej-clip" data-tip={it.label.length > 34 ? it.label : undefined}>{it.label}</span>
             {it.hint && <kbd>{it.hint}</kbd>}
           </button>
         ),
