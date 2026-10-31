@@ -176,7 +176,7 @@ export function MindPane({ brain, readiness, learning, onCommit, onUnsave, onRej
   }
 
   return (
-    <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 pb-6 pt-3">
+    <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 pb-6 pt-5">
       <Reveal i={i++} className="px-1">
         <p className="font-display text-[24px] font-semibold leading-[1.15] tracking-[-0.03em] text-ink">{line}</p>
         {sub && <p className="mt-1.5 text-[13px] text-muted">{sub}</p>}
@@ -242,7 +242,7 @@ export function MindPane({ brain, readiness, learning, onCommit, onUnsave, onRej
         <Group title="Feelings and habits" count={habits.length} hint={habits[0]?.line}>
           {habits.map((h) => <p key={h.mood} className="rounded-[14px] border border-gold/30 bg-gold/[0.07] px-3.5 py-3 text-[13.5px] leading-snug text-ink">{h.line}</p>)}
         </Group>
-        <Group title="Holding for your next setup" count={pending.length}>
+        <Group title="Holding for your next setup today" count={pending.length} hint="Cleared tonight if no trade follows">
           <ul className="space-y-2">{pending.map((n) => <NoteRow key={n.id} n={n} pending />)}</ul>
         </Group>
         <Group title="Kept because it was useful" count={kept.length}>

@@ -205,16 +205,18 @@ export function Minato() {
 
   useEffect(() => {
     try {
+      // The conversation belongs to the day it happened. A new day starts a clean thread (older saves, which had no day, are dropped once).
       const raw = window.localStorage.getItem(threadKey);
-      const parsed = raw ? (JSON.parse(raw) as ChatMsg[]) : [];
-      setMessages(Array.isArray(parsed) ? parsed.filter((m) => m && typeof m.text === "string") : []);
+      const parsed = raw ? (JSON.parse(raw) as { day?: string; messages?: ChatMsg[] } | ChatMsg[]) : null;
+      const sameDay = parsed && !Array.isArray(parsed) && parsed.day === todayKey() && Array.isArray(parsed.messages);
+      setMessages(sameDay ? (parsed as { messages: ChatMsg[] }).messages.filter((m) => m && typeof m.text === "string") : []);
     } catch { setMessages([]); }
     setHydrated(true);
   }, [threadKey]);
 
   useEffect(() => {
     if (!hydrated) return;
-    try { window.localStorage.setItem(threadKey, JSON.stringify(messages.slice(-THREAD_MAX))); } catch { /* storage full or blocked */ }
+    try { window.localStorage.setItem(threadKey, JSON.stringify({ day: todayKey(), messages: messages.slice(-THREAD_MAX) })); } catch { /* storage full or blocked */ }
   }, [messages, hydrated, threadKey]);
 
   // Hydrate: Drive-synced brain first, then the device mirror, then the older Mind-only notes.
@@ -479,7 +481,7 @@ export function Minato() {
             className="mn-panel fixed inset-x-3 bottom-[calc(var(--tabbar-h)+0.75rem)] z-[90] flex h-[min(620px,calc(100dvh-var(--tabbar-h)-var(--topbar-h)-1.5rem))] flex-col overflow-hidden rounded-[26px] md:inset-x-auto md:bottom-[84px] md:right-5 md:h-[min(620px,calc(100dvh-7.5rem))] md:w-[min(400px,calc(100vw-2.5rem))]"
           >
             {/* Header */}
-            <div className="flex items-center gap-3 px-4 pb-1 pt-4">
+            <div className="flex items-center gap-3 px-4 pt-5">
               <Avatar className="h-9 w-9 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">Minato</p>
@@ -499,7 +501,7 @@ export function Minato() {
             </div>
 
             {/* Chat | Mind */}
-            <div className="mn-tabs px-4 pb-3.5 pt-3">
+            <div className="mn-tabs px-4 pb-4 pt-4">
               <div role="tablist" aria-label="Minato views" className="relative grid grid-cols-2 rounded-full bg-ink/[0.06] p-[3px] text-[13px] font-medium">
                 {(["chat", "mind"] as const).map((t) => (
                   <button
@@ -523,7 +525,7 @@ export function Minato() {
             {tab === "mind" && <MindPane brain={brain} readiness={readiness} learning={learning} onCommit={setCommitment} onUnsave={unsave} onReject={rejectBelief} onRestore={restoreBelief} onPin={pinBelief} />}
 
             {/* Conversation */}
-            <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 py-4", tab !== "chat" && "hidden")} aria-live="polite">
+            <div ref={listRef} className={cn("flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-4 pb-4 pt-5", tab !== "chat" && "hidden")} aria-live="polite">
               {empty && (
                 <motion.div initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: EASE, delay: 0.08 }} className="flex h-full min-h-[180px] flex-col justify-center px-1">
                   <p className="font-display text-[28px] font-semibold leading-[1.1] tracking-[-0.03em] text-ink">{greeting}</p>

@@ -144,13 +144,16 @@ export function applyChat(brain: MinatoBrain, text: string, now: number, date: s
 
 /** Settle held feelings and commitments against the journal. Returns the same object when nothing changed. */
 export function reconcileBrain(brain: MinatoBrain, entries: JournalEntry[], now: number, today: string): MinatoBrain {
-  const r = reconcile(brain.mind, entries, now);
+  const r = reconcile(brain.mind, entries, now, today);
+  // Chat briefs are per day. Yesterday's conversation is not kept to colour today's.
+  const days = Object.fromEntries(Object.entries(brain.days).filter(([d]) => d === today));
+  const prunedDays = Object.keys(days).length !== Object.keys(brain.days).length;
   const verified = verifyCommitments(brain.commitments, entries, today);
   // open commitments older than a week are quietly retired
   const week = 7 * 86_400_000;
   const kept = verified.filter((c) => c.status !== "open" || now - new Date(`${c.date}T12:00:00`).getTime() < week);
-  const changed = r.changed || JSON.stringify(kept) !== JSON.stringify(brain.commitments);
-  return changed ? { ...brain, mind: r.changed ? r.state : brain.mind, commitments: kept } : brain;
+  const changed = r.changed || prunedDays || JSON.stringify(kept) !== JSON.stringify(brain.commitments);
+  return changed ? { ...brain, mind: r.changed ? r.state : brain.mind, commitments: kept, days } : brain;
 }
 
 /* ================================ 3. recall ================================ */
@@ -213,7 +216,9 @@ export function buildRecall(items: RecallItem[]): Recall {
 }
 
 /** Everything the trader has put into words, across the whole site. */
-export function collectWords(entries: JournalEntry[], plans: TradePlan[], settings: JournalSettings, brain: MinatoBrain): RecallItem[] {
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+export function collectWords(entries: JournalEntry[], plans: TradePlan[], settings: JournalSettings, brain: MinatoBrain, today: string = localToday()): RecallItem[] {
   const out: RecallItem[] = [];
   const add = (id: string, date: string, kind: RecallItem["kind"], text?: string | null) => {
     const t = text?.replace(/\s+/g, " ").trim();
@@ -240,7 +245,8 @@ export function collectWords(entries: JournalEntry[], plans: TradePlan[], settin
     add(`${p.id}:s`, p.date, "plan", p.preSessionProcess);
   }
   (settings.practiceProgress?.seedLessons ?? []).forEach((l, i) => add(`lesson:${i}`, new Date().toISOString().slice(0, 10), "lesson", l));
-  for (const d of Object.values(brain.days)) d.said.forEach((s, i) => add(`chat:${d.date}:${i}`, d.date, "chat", s));
+  // Only TODAY's conversation is recalled; earlier days' chat is deliberately not carried forward.
+  for (const d of Object.values(brain.days)) if (d.date === today) d.said.forEach((s, i) => add(`chat:${d.date}:${i}`, d.date, "chat", s));
   for (const s of brain.saved) add(s.id, s.date, "saved", s.text);
   return out.slice(-400);
 }
@@ -410,10 +416,9 @@ export function tagContextFromBrain(brain: MinatoBrain | undefined, entry: { dat
 /* ============================ what the model sees ============================ */
 
 export function brainForModel(brain: MinatoBrain, recall: Recall, question: string, readiness: Readiness | null, today: string) {
-  const recent = Object.values(brain.days).filter((d) => d.date !== today).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   return {
     today: brain.days[today]?.line ?? null,
-    recentDays: recent.map((d) => ({ date: d.date, summary: d.line })),
+    recentDays: [] as { date: string; summary: string }[], // past days' chat is never sent; each day starts clean
     commitments: brain.commitments.filter((c) => c.status !== "kept").slice(-5).map((c) => ({ date: c.date, said: c.text, status: c.status })),
     keptCommitments: brain.commitments.filter((c) => c.status === "kept").length,
     brokenCommitments: brain.commitments.filter((c) => c.status === "broken").length,

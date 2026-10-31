@@ -3,7 +3,7 @@ import { journal } from "./fixtures.ts";
 import { understand, probGreater, wilson, evidenceLevel } from "../../src/lib/minato/understanding.ts";
 import { emptyMemory, observe, decayPass, retention, rejectMemory, restoreMemory, consolidate, activeItems, undoLast, compact, MAX_ACTIVE, type Observation } from "../../src/lib/minato/memory.ts";
 import { evolveMemory, applyDirectives } from "../../src/lib/minato/evolve.ts";
-import { emptyBrain } from "../../src/lib/minato/brain-ml.ts";
+import { emptyBrain, applyChat, reconcileBrain, brainForModel, collectWords, buildRecall } from "../../src/lib/minato/brain-ml.ts";
 import { routeIntent, planFor, parseTradeRefs } from "../../src/lib/minato/router.ts";
 import { retrieveMemories, memoryForModel } from "../../src/lib/minato/retrieve.ts";
 import { packFacts } from "../../src/lib/minato/context-pack.ts";
@@ -137,6 +137,28 @@ const obs = (over: Partial<Observation> = {}): Observation => ({
   ok(up.shift?.direction === "improving" && up.observations.some((o) => o.pole === "improving"), "improving process recognised");
   const down = understand([...good, ...journal({ days: 45, startDay: 90, breakAfterLoss: 0.5, breakBase: 0.5, seed: 63, idPrefix: "w" })], [], null);
   ok(down.shift?.direction === "worsening", "worsening process recognised");
+}
+
+// ---- each day starts clean: yesterday's chat is never linked to today
+{
+  const mon = Date.UTC(2026, 9, 26, 9), wed = Date.UTC(2026, 9, 28, 15);
+  let b = applyChat(emptyBrain(), "I am so frustrated, my internet keeps dropping", mon, "2026-10-26").brain;
+  ok(b.mind.notes.some((n) => n.status === "pending") && Object.keys(b.days).length === 1, "feeling held and day brief created on Monday");
+  const trade = (date: string, createdAt: number) => ({ id: "x", date, pnl: -50, rr: -1, instrument: "MNQ", direction: "long", notes: "", images: [], createdAt, updatedAt: createdAt }) as never;
+  // Wednesday trade must NOT settle Monday's feeling
+  const wedState = reconcileBrain(b, [trade("2026-10-28", wed)], wed, "2026-10-28");
+  ok(wedState.mind.notes.length === 0 && !Object.keys(wedState.mind.stats).length, "Monday's feeling expires; it is not tied to Wednesday's trade");
+  ok(Object.keys(wedState.days).length === 0, "Monday's chat brief is pruned");
+  // same-day trade still settles it
+  const same = reconcileBrain(b, [trade("2026-10-26", mon + 2 * 3600_000)], mon + 3 * 3600_000, "2026-10-26");
+  ok(same.mind.notes.some((n) => n.status === "kept") && Object.values(same.mind.stats)[0]?.seen === 1, "same-day trade still settles the feeling");
+  // a quiet day keeps it only until the day ends
+  ok(reconcileBrain(b, [], mon + 3600_000, "2026-10-26").mind.notes.length === 1, "kept for the rest of the same day");
+  ok(reconcileBrain(b, [], wed, "2026-10-28").mind.notes.length === 0, "dropped once the day is over");
+  // nothing from past days reaches the model or the recall index
+  ok(brainForModel(b, buildRecall([]), "q", null, "2026-10-28").recentDays.length === 0, "past-day briefs never sent to the model");
+  ok(collectWords([], [], {} as never, b, "2026-10-28").every((w) => w.kind !== "chat"), "past chat not in recall");
+  ok(collectWords([], [], {} as never, b, "2026-10-26").some((w) => w.kind === "chat"), "today's chat is recalled");
 }
 
 // ---- directives

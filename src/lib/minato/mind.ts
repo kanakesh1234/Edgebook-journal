@@ -41,7 +41,6 @@ export interface MindState {
 export const emptyMind = (): MindState => ({ notes: [], stats: {} });
 
 const HOUR = 3_600_000;
-const PENDING_TTL = 36 * HOUR;
 const MAX_KEPT = 40;
 const MAX_PENDING = 6;
 
@@ -118,11 +117,16 @@ function join(bits: string[]) {
   return bits.length <= 1 ? bits[0] ?? "" : `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
 }
 
+const localDay = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+/** A trade logged this soon after a feeling still belongs to the same sitting, even across midnight. */
+const SAME_SITTING = 4 * HOUR;
+
 /**
- * Settle pending notes against the first setup taken after they were written.
- * Useful → kept (and counted). Not useful, or no setup within 36h → dropped.
+ * Settle pending notes against the first setup taken after they were written, on THE SAME DAY.
+ * Useful → kept (and counted). A feeling is about that day: once the day is over with no setup, it is dropped, so what
+ * the trader said on Monday is never tied to a trade on Wednesday.
  */
-export function reconcile(state: MindState, entries: JournalEntry[], now: number): { state: MindState; changed: boolean } {
+export function reconcile(state: MindState, entries: JournalEntry[], now: number, today: string = localDay(now)): { state: MindState; changed: boolean } {
   let changed = false;
   const stats = { ...state.stats };
   const next: MindNote[] = [];
@@ -130,9 +134,9 @@ export function reconcile(state: MindState, entries: JournalEntry[], now: number
 
   for (const note of state.notes) {
     if (note.status !== "pending") { next.push(note); continue; }
-    const trade = byTime.find((e) => e.createdAt > note.at);
+    const trade = byTime.find((e) => e.createdAt > note.at && (e.date === note.date || e.createdAt - note.at <= SAME_SITTING));
     if (!trade) {
-      if (now - note.at > PENDING_TTL) changed = true; // no setup came: nothing was learned, let it go
+      if (note.date < today) changed = true; // the day ended with no setup: nothing was learned, let it go
       else next.push(note);
       continue;
     }
