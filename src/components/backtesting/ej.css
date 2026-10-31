@@ -19,7 +19,7 @@
 /* ---------- brand ---------- */
 .ej-mark { display: inline-flex; flex: none; margin: 0 4px 0 2px; border-radius: 7px; box-shadow: 0 1px 2px rgba(10,132,255,.35), 0 0 0 .5px rgba(255,255,255,.25) inset; transition: transform .35s var(--ej-spring), filter .2s; }
 .ej-mark:hover { transform: scale(1.08) rotate(-3deg); filter: brightness(1.08); }
-.ej-watermark { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; text-align: center; opacity: .05; display: flex; flex-direction: column; gap: 4px; }
+.ej-watermark { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 1; pointer-events: none; text-align: center; opacity: .028; display: flex; flex-direction: column; gap: 4px; }
 .ej-watermark b { font-size: clamp(28px, 5vw, 56px); font-weight: 700; letter-spacing: -.03em; }
 .ej-watermark span { font-size: 13px; font-weight: 600; letter-spacing: .32em; text-transform: uppercase; }
 
@@ -33,7 +33,9 @@
 /* ---------- replay bar ---------- */
 .tv-replay { border-radius: 18px; }
 .tv-replay .tv-play { background: var(--ej-grad); box-shadow: 0 2px 8px rgba(10,132,255,.35); transition: transform .3s var(--ej-spring), box-shadow .2s, filter .15s; }
-.tv-replay .tv-play:hover:not(:disabled) { transform: scale(1.06); filter: brightness(1.06); }
+.tv-replay .tv-tbtn.tv-play, .tv-replay .tv-tbtn.tv-play:hover:not(:disabled), .tv-replay .tv-tbtn.tv-play:active:not(:disabled) { background: var(--ej-grad); color: #fff; }
+.tv-replay .tv-tbtn.tv-play:disabled { background: var(--ej-grad); opacity: .45; }
+.tv-replay .tv-play:hover:not(:disabled) { transform: scale(1.06); filter: brightness(1.08); }
 .tv-replay .tv-play:active:not(:disabled) { transform: scale(.94); }
 .tv-replay .tv-play.is-playing { animation: ej-breathe 2.4s ease-in-out infinite; }
 @keyframes ej-breathe { 0%,100% { box-shadow: 0 2px 8px rgba(10,132,255,.35); } 50% { box-shadow: 0 2px 16px rgba(124,122,255,.65); } }

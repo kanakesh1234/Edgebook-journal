@@ -88,7 +88,7 @@ export function buildPath(c: Ohlc, seed: number, m: "smooth" | "natural"): Price
   return { pts, cum };
 }
 
-const ease = (t: number) => 0.5 - 0.5 * Math.cos(Math.PI * t);
+const ease = (t: number) => t * t * t * (t * (t * 6 - 15) + 10); // smootherstep: zero velocity AND acceleration at each turn
 
 /** Forming bar at progress p ∈ [0,1]: running high/low always include everything printed so far. */
 export function sampleBar(c: Ohlc, path: PricePath, p: number): Ohlc {

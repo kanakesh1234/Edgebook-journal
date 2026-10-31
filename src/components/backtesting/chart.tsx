@@ -258,6 +258,8 @@ export default function BacktestChart({
   const buyPxRef = useRef<HTMLElement>(null);
   const liveRef = useRef<Record<string, LiveHandle>>({});
   const hoverRef = useRef<string | null>(null);
+  const glideRef = useRef(0);
+  const glideToRef = useRef<number | null>(null);
   const formation = useFormationMode();
   const formationRef = useRef(formation); formationRef.current = formation;
 
@@ -310,7 +312,7 @@ export default function BacktestChart({
         rightOffset: 12,
         barSpacing: 8,
         minBarSpacing: 0.4,
-        shiftVisibleRangeOnNewBar: true,
+        shiftVisibleRangeOnNewBar: false, // EJ: the shift is done below, eased
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
@@ -411,6 +413,7 @@ export default function BacktestChart({
     return () => {
       try { savedRangeRef.current = chart.timeScale().getVisibleLogicalRange(); } catch { /* chart already gone */ }
       animRef.current?.cancel();
+      cancelAnimationFrame(glideRef.current); glideToRef.current = null;
       detachController();
       ro.disconnect();
       chart.remove();
@@ -443,8 +446,12 @@ export default function BacktestChart({
       prev && prev.type === chartType && n === prev.len + 1 &&
       candles[0].time === prev.first && candles[n - 2].time === prev.last;
     const fx = formationRef.current;
+    const ts = chart.timeScale();
     const animate = appended && fx !== "off" && typeof document !== "undefined" && !document.hidden &&
       !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    // Was the latest bar in view? (then the view follows the new bar, like TradingView)
+    const sp = glideToRef.current ?? ts.scrollPosition();
+    const follow = !!appended && sp !== null && sp >= 0;
     if (animate) {
       // Visual only: the engine already processed the final bar; we just form it progressively.
       if (!animRef.current) {
@@ -455,12 +462,36 @@ export default function BacktestChart({
         });
       }
       const st = useBacktest.getState();
-      const interval = st.playing ? 1000 / st.speed : 900;
-      animRef.current.start(series, candles[n - 1], isPriceType(chartType), Math.min(1100, Math.max(60, interval * 0.82)), fx);
+      const interval = st.playing ? 1000 / st.speed : 1600;
+      // Use (almost) the whole bar interval so one candle melts into the next, no dead gap.
+      const dur = Math.min(8000, Math.max(80, interval * 0.97));
+      animRef.current.start(series, candles[n - 1], isPriceType(chartType), dur, fx);
+      if (follow && sp !== null) {
+        const ms = Math.min(900, Math.max(0, dur * 0.7));
+        if (ms < 160) { cancelAnimationFrame(glideRef.current); glideToRef.current = null; ts.scrollToPosition(sp, false); }
+        else {
+          cancelAnimationFrame(glideRef.current);
+          const from = sp - 1, to = sp, t0 = performance.now();
+          let expected = from;
+          glideToRef.current = to;
+          ts.scrollToPosition(from, false);
+          const step = (now: number) => {
+            if (Math.abs(ts.scrollPosition() - expected) > 0.6) { glideToRef.current = null; return; } // user took over
+            const k = Math.min(1, (now - t0) / ms);
+            expected = from + (to - from) * (0.5 - 0.5 * Math.cos(Math.PI * k)); // smooth in-out
+            ts.scrollToPosition(expected, false);
+            if (k < 1) glideRef.current = requestAnimationFrame(step); else glideToRef.current = null;
+          };
+          glideRef.current = requestAnimationFrame(step);
+        }
+      }
     } else {
       animRef.current?.cancel();
-      if (appended) series.update(toPoint(chartType, candles[n - 1]) as never);
-      else series.setData(candles.map((c) => toPoint(chartType, c)) as never);
+      cancelAnimationFrame(glideRef.current); glideToRef.current = null;
+      if (appended) {
+        series.update(toPoint(chartType, candles[n - 1]) as never);
+        if (follow && sp !== null) ts.scrollToPosition(sp, false);
+      } else series.setData(candles.map((c) => toPoint(chartType, c)) as never);
     }
     lastSetRef.current = { len: n, first: candles[0].time, last: candles[n - 1].time, type: chartType };
 
