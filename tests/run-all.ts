@@ -10,6 +10,7 @@ import "./friends/state.test.ts";
 import "./feed/feed.test.ts";
 import "./journal/weekly-review.test.ts";
 import "./backtesting/drawings.test.ts";
+import "./backtesting/mobile-utils.test.ts";
 import "./backtesting/order-engine.test.ts";
 import "./backtesting/replay-trading.test.ts";
 import "./backtesting/journal-replay.test.ts";

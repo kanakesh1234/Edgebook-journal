@@ -33,7 +33,9 @@ export default function PaperPanel() {
   return (
     <div className="tv-paper">
       <div className="tv-paper-bar">
-        <button type="button" className="tv-paper-title" aria-expanded={open} aria-controls="ej-paper-body" data-tip={open ? "Collapse panel" : "Expand panel"} onClick={() => setOpen(!open)}>
+        {/* Mobile drag handle */}
+        <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "4px auto 0", flexShrink: 0 }} />
+        <button type="button" className="tv-paper-title" aria-expanded={open} aria-controls="ej-paper-body" data-tip={open ? "Collapse panel" : "Expand panel"} style={{ touchAction: "manipulation" }} onClick={() => setOpen(!open)}>
           <EJMark size={18} title="" />Paper Trading
           <I name="chevronDown" size={16} className="ej-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }} />
         </button>
@@ -55,7 +57,7 @@ export default function PaperPanel() {
               ["orders", "Orders", orders.length],
               ["history", "Order History", trades.length],
             ] as Array<[Tab, string, number | null]>).map(([id, label, n]) => (
-              <button key={id} type="button" role="tab" aria-selected={tab === id} className={`tv-tab${tab === id ? " is-on" : ""}`} onClick={() => pick(id)}>
+              <button key={id} type="button" role="tab" aria-selected={tab === id} className={`tv-tab${tab === id ? " is-on" : ""}`} style={{ touchAction: "manipulation" }} onClick={() => pick(id)}>
                 {label}{n !== null && <em>{n}</em>}
               </button>
             ))}
@@ -84,15 +86,15 @@ export default function PaperPanel() {
                 <tbody>
                   {positions.map((p) => (
                     <tr key={p.orderId}>
-                      <td><b>{p.symbol}</b></td>
-                      <td className={p.side === "buy" ? "tv-up" : "tv-down"}>{p.side === "buy" ? "Long" : "Short"}</td>
-                      <td className="num">{p.quantity}</td>
-                      <td className="num">{fmtPrice(p.entryPrice)}</td>
-                      <td className="num">{lastOf(p.symbol) !== undefined ? fmtPrice(lastOf(p.symbol)!) : "—"}</td>
-                      <td className="num">{p.stopLoss ? fmtPrice(p.stopLoss) : "—"}</td>
-                      <td className="num">{p.takeProfit ? fmtPrice(p.takeProfit) : "—"}</td>
-                      <td className={`num ${pnlCls(p.unrealizedPnl)}`}>{signed(p.unrealizedPnl)}</td>
-                      <td className="num"><button type="button" className="tv-linkbtn" aria-label={`Close ${p.symbol} position`} onClick={() => closePosition(p.symbol, p.orderId)}>Close</button></td>
+                      <td data-label="Symbol"><b>{p.symbol}</b></td>
+                      <td data-label="Side" className={p.side === "buy" ? "tv-up" : "tv-down"}>{p.side === "buy" ? "Long" : "Short"}</td>
+                      <td data-label="Qty" className="num">{p.quantity}</td>
+                      <td data-label="Avg fill" className="num">{fmtPrice(p.entryPrice)}</td>
+                      <td data-label="Last" className="num">{lastOf(p.symbol) !== undefined ? fmtPrice(lastOf(p.symbol)!) : "—"}</td>
+                      <td data-label="Stop" className="num">{p.stopLoss ? fmtPrice(p.stopLoss) : "—"}</td>
+                      <td data-label="Target" className="num">{p.takeProfit ? fmtPrice(p.takeProfit) : "—"}</td>
+                      <td data-label="P&L" className={`num ${pnlCls(p.unrealizedPnl)}`}>{signed(p.unrealizedPnl)}</td>
+                      <td data-label="" className="num"><button type="button" className="tv-linkbtn" style={{ touchAction: "manipulation", minHeight: 44, minWidth: 44 }} aria-label={`Close ${p.symbol} position`} onClick={() => closePosition(p.symbol, p.orderId)}>Close</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -105,14 +107,14 @@ export default function PaperPanel() {
                 <tbody>
                   {orders.map((o) => (
                     <tr key={o.id}>
-                      <td><b>{o.symbol}</b></td>
-                      <td className={o.side === "buy" ? "tv-up" : "tv-down"}>{o.side === "buy" ? "Buy" : "Sell"}</td>
-                      <td style={{ textTransform: "capitalize" }}>{o.type}</td>
-                      <td className="num">{o.quantity}</td>
-                      <td className="num">{o.price != null ? fmtPrice(o.price) : "Market"}</td>
-                      <td className="num">{o.stopLoss ? fmtPrice(o.stopLoss) : "—"}</td>
-                      <td className="num">{o.takeProfit ? fmtPrice(o.takeProfit) : "—"}</td>
-                      <td className="num"><button type="button" className="tv-linkbtn" aria-label={`Cancel ${o.symbol} order`} onClick={() => cancelOrder(o.symbol, o.id)}>Cancel</button></td>
+                      <td data-label="Symbol"><b>{o.symbol}</b></td>
+                      <td data-label="Side" className={o.side === "buy" ? "tv-up" : "tv-down"}>{o.side === "buy" ? "Buy" : "Sell"}</td>
+                      <td data-label="Type" style={{ textTransform: "capitalize" }}>{o.type}</td>
+                      <td data-label="Qty" className="num">{o.quantity}</td>
+                      <td data-label="Price" className="num">{o.price != null ? fmtPrice(o.price) : "Market"}</td>
+                      <td data-label="Stop" className="num">{o.stopLoss ? fmtPrice(o.stopLoss) : "—"}</td>
+                      <td data-label="Target" className="num">{o.takeProfit ? fmtPrice(o.takeProfit) : "—"}</td>
+                      <td data-label="" className="num"><button type="button" className="tv-linkbtn" style={{ touchAction: "manipulation", minHeight: 44, minWidth: 44 }} aria-label={`Cancel ${o.symbol} order`} onClick={() => cancelOrder(o.symbol, o.id)}>Cancel</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -125,14 +127,14 @@ export default function PaperPanel() {
                 <tbody>
                   {[...trades].reverse().map((t) => (
                     <tr key={t.orderId + t.entryTime}>
-                      <td><b>{t.symbol}</b></td>
-                      <td className={t.side === "buy" ? "tv-up" : "tv-down"}>{t.side === "buy" ? "Long" : "Short"}</td>
-                      <td className="num">{t.quantity}</td>
-                      <td className="num">{fmtPrice(t.entryPrice)}</td>
-                      <td className="num">{t.exitPrice != null ? fmtPrice(t.exitPrice) : "—"}</td>
-                      <td>{nyStamp.format(new Date(t.entryTime * 1000))}</td>
-                      <td>{t.exitTime ? fmtDuration(t.exitTime - t.entryTime) : "—"}</td>
-                      <td className={`num ${pnlCls(t.netPnl)}`}>{signed(t.netPnl)}</td>
+                      <td data-label="Symbol"><b>{t.symbol}</b></td>
+                      <td data-label="Side" className={t.side === "buy" ? "tv-up" : "tv-down"}>{t.side === "buy" ? "Long" : "Short"}</td>
+                      <td data-label="Qty" className="num">{t.quantity}</td>
+                      <td data-label="Entry" className="num">{fmtPrice(t.entryPrice)}</td>
+                      <td data-label="Exit" className="num">{t.exitPrice != null ? fmtPrice(t.exitPrice) : "—"}</td>
+                      <td data-label="Opened">{nyStamp.format(new Date(t.entryTime * 1000))}</td>
+                      <td data-label="Held">{t.exitTime ? fmtDuration(t.exitTime - t.entryTime) : "—"}</td>
+                      <td data-label="P&L" className={`num ${pnlCls(t.netPnl)}`}>{signed(t.netPnl)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -8,6 +8,7 @@ import { haptic } from "@/lib/haptics";
 import { I } from "./tv-icons";
 import { toast } from "./ej-toast";
 import { GROUPS, ITEM_BY_TOOL, SECTION_ORDER, SECTION_TITLES, isCursorTool, type ToolGroup, type ToolItem } from "./tool-catalog";
+import MobileSheet from "./mobile-sheet";
 
 type Fly = { id: string; top: number; left: number; oy: number };
 
@@ -61,6 +62,16 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
   const triggerRef = useRef<HTMLElement | null>(null);
   const close = useCallback(() => setOpen(null), []);
 
+  const [dockMoreOpen, setDockMoreOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse) and (max-width: 820px), (max-width: 480px)");
+    setMobile(mq.matches);
+    const h = () => setMobile(mq.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+
   // Outside-press closes the flyout — except on its own trigger (that click toggles it).
   useEffect(() => {
     if (!open) return;
@@ -82,8 +93,14 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
   }, [tool]);
 
   const openFly = (id: string, trigger: HTMLElement) => {
-    const r = trigger.getBoundingClientRect();
     triggerRef.current = trigger;
+    // On touch/mobile, CSS overrides to bottom-sheet; skip coordinate calc.
+    const isMobile = window.matchMedia("(pointer: coarse), (max-width: 820px)").matches;
+    if (isMobile) {
+      setOpen((o) => (o?.id === id ? null : { id, top: 0, left: 0, oy: 0 }));
+      return;
+    }
+    const r = trigger.getBoundingClientRect();
     setOpen((o) => (o?.id === id ? null : { id, top: r.top - 6, left: r.right + 8, oy: r.height / 2 + 6 }));
   };
 
@@ -182,6 +199,7 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
   const flyGroup = open && open.id !== "magnet" && open.id !== "emoji" ? GROUPS.find((x) => x.id === open.id) : undefined;
 
   return (
+    <>
     <div className={`ej-rail-wrap${rail === "hidden" ? " is-hidden" : ""}`}>
       <nav className="ej-rail" aria-label="Drawing tools" inert={rail === "hidden"} onScroll={close}>
         {SECTION_ORDER.map((sec, i) => (
@@ -320,5 +338,51 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
         </div>
       )}
     </div>
+
+    {/* Mobile bottom dock — shows on phones (≤480px or pointer:coarse+small) */}
+    {mobile && (
+      <div className="ej-mobile-dock" role="toolbar" aria-label="Drawing tools">
+        <button type="button" className={`ej-dock-btn${isCursorTool(tool) ? " is-on" : ""}`} aria-label="Cursor" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setTool("cursor"); }}>
+          <I name="arrow" size={22} />
+        </button>
+        <button type="button" className={`ej-dock-btn${tool === "trend-line" ? " is-on" : ""}`} aria-label="Trend line" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setTool("trend-line"); }}>
+          <I name="trendLine" size={22} />
+        </button>
+        <button type="button" className={`ej-dock-btn${tool === "horizontal-line" ? " is-on" : ""}`} aria-label="Horizontal line" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setTool("horizontal-line"); }}>
+          <I name="hLine" size={22} />
+        </button>
+        <button type="button" className={`ej-dock-btn${tool === "long-position" ? " is-on" : ""}`} aria-label="Long position" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setTool("long-position"); }}>
+          <I name="longPos" size={22} />
+        </button>
+        <button type="button" className={`ej-dock-btn${tool === "short-position" ? " is-on" : ""}`} aria-label="Short position" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setTool("short-position"); }}>
+          <I name="shortPos" size={22} />
+        </button>
+        <button type="button" className="ej-dock-btn" aria-label="More drawing tools" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setDockMoreOpen(true); }}>
+          <I name="more" size={22} />
+        </button>
+        <MobileSheet open={dockMoreOpen} onClose={() => setDockMoreOpen(false)} title="Drawing tools">
+          <div role="menu">
+            {SECTION_ORDER.map((sec) => {
+              const sectionGroups = GROUPS.filter((g) => g.section === sec);
+              if (!sectionGroups.length) return null;
+              return (
+                <div key={sec}>
+                  <div style={{ padding: "8px 16px 4px", fontSize: 12, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{SECTION_TITLES[sec]}</div>
+                  {sectionGroups.flatMap((g) => g.items).map((it: ToolItem) => (
+                    <button key={it.tool} type="button" role="menuitem" className={`ej-sheet-row${tool === it.tool ? " is-on" : ""}`} style={{ touchAction: "manipulation" }}
+                      onClick={() => { haptic.selection(); setTool(it.tool); setDockMoreOpen(false); }}>
+                      <I name={it.icon} size={20} />
+                      <span style={{ flex: 1 }}>{it.label}</span>
+                      {tool === it.tool && <I name="check" size={16} />}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </MobileSheet>
+      </div>
+    )}
+    </>
   );
 }

@@ -14,6 +14,7 @@ import { toast } from "./ej-toast";
 import AnimatedNumber from "./ej-number";
 import IndicatorsMenu from "./indicators-menu";
 import EJMark from "./ej-mark";
+import MobileSheet from "./mobile-sheet";
 
 const QUICK_TF: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1h", "4h"];
 const TF_GROUPS: Array<{ title: string; items: Timeframe[] }> = [
@@ -34,24 +35,53 @@ const CHART_TYPES: Array<{ id: ChartType; label: string; icon: string }> = [
   { id: "baseline", label: "Baseline", icon: "baseline" },
 ];
 
+/** Returns true when we should use sheet UI instead of inline dropdown. */
+function useMobileUI() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse), (max-width: 820px)");
+    setMobile(mq.matches);
+    const h = () => setMobile(mq.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  return mobile;
+}
+
 function Dropdown({
-  button, children, align = "left", title, active,
-}: { button: React.ReactNode; children: (close: () => void) => React.ReactNode; align?: "left" | "right"; title: string; active?: boolean }) {
+  button, children, align = "left", title, active, sheetTitle, searchable,
+}: {
+  button: React.ReactNode;
+  children: (close: () => void) => React.ReactNode;
+  align?: "left" | "right";
+  title: string;
+  active?: boolean;
+  sheetTitle?: string;
+  searchable?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
-  useOutside(ref, open, close);
-  useEffect(() => { if (open) focusFirstItem(menuRef.current); }, [open]);
+  const mobile = useMobileUI();
+  useOutside(ref, open && !mobile, close);
+  useEffect(() => { if (open && !mobile) focusFirstItem(menuRef.current); }, [open, mobile]);
   return (
     <div className="tv-dd" ref={ref}>
       <button
         type="button" data-tip={title} aria-label={title} aria-haspopup="menu" aria-expanded={open}
-        className={`tv-tbtn${open || active ? " is-on" : ""}`} onClick={() => setOpen((o) => !o)}
+        className={`tv-tbtn${open || active ? " is-on" : ""}`}
+        style={{ touchAction: "manipulation" }}
+        onClick={() => setOpen((o) => !o)}
       >{button}</button>
-      {open && (
+      {mobile ? (
+        <MobileSheet open={open} onClose={close} title={sheetTitle ?? title} searchable={searchable}>
+          {(q) => <div className="ej-sheet-scroll" role="menu">{children(close)}</div>}
+        </MobileSheet>
+      ) : open && (
         <div
-          ref={menuRef} className="tv-menu" role="menu" aria-label={title} style={align === "right" ? { left: "auto", right: 0 } : undefined}
+          ref={menuRef} className="tv-menu" role="menu" aria-label={title}
+          style={align === "right" ? { left: "auto", right: 0 } : undefined}
           onKeyDown={(e) => { onMenuKeyDown(e, menuRef.current, () => { close(); (ref.current?.querySelector("button") as HTMLElement | null)?.focus(); }); }}
         >
           {children(close)}
@@ -103,6 +133,9 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
   const myAlerts = alerts.filter((a) => a.symbol === active && !a.triggered);
   const curType = CHART_TYPES.find((c) => c.id === chartType) ?? CHART_TYPES[1];
 
+  const mobile = useMobileUI();
+  const [moreOpen, setMoreOpen] = useState(false);
+
   const handleEnd = async () => {
     endSession();
     await saveSession();
@@ -116,7 +149,7 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       <i className="tv-sep" />
 
       {/* Symbol */}
-      <Dropdown title="Symbol" button={<span className="tv-symbol">{active || "—"}</span>}>
+      <Dropdown title="Change symbol" sheetTitle="Select symbol" searchable button={<span className="tv-symbol">{active || "—"}</span>}>
         {(close) => (
           <>
             <div className="tv-menu-head">Session instruments</div>
@@ -187,8 +220,8 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
             <div className="tv-row ej-alertrow">
               <input
                 className="ej-input" aria-label="Alert price" onKeyDown={(e) => e.stopPropagation()}
-                type="number" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
-                value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)}
+                type="number" inputMode="decimal" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
+                value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)} style={{ fontSize: 16 }}
               />
               <button
                 type="button" className="tv-btn primary" style={{ flex: "none" }}
@@ -222,36 +255,82 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       </button>
       <i className="tv-sep" />
 
-      <button type="button" className="tv-tbtn" data-tip="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onClick={() => undo(active)}><I name="undo" size={20} /></button>
-      <button type="button" className="tv-tbtn" data-tip="Redo (Ctrl+Y)" aria-label="Redo" disabled={!canRedo} onClick={() => redo(active)}><I name="redo" size={20} /></button>
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onClick={() => undo(active)}><I name="undo" size={20} /></button>}
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Redo (Ctrl+Y)" aria-label="Redo" disabled={!canRedo} onClick={() => redo(active)}><I name="redo" size={20} /></button>}
 
       <span className="tv-grow" />
 
-      {account && (
+      {/* Mobile: ••• overflow sheet */}
+      {mobile && (
+        <>
+          <button
+            type="button" className="ej-more-btn tv-tbtn" aria-label="More options"
+            style={{ touchAction: "manipulation" }}
+            onClick={() => setMoreOpen(true)}
+          >•••</button>
+          <MobileSheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More options">
+            <div role="menu">
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { emitChartCommand({ type: "screenshot", mode: "download" }); toast({ text: "Chart image saved" }); setMoreOpen(false); }}>
+                <I name="camera" size={20} />Screenshot
+              </button>
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { undo(active); setMoreOpen(false); }} disabled={!canUndo}>
+                <I name="undo" size={20} />Undo
+              </button>
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { redo(active); setMoreOpen(false); }} disabled={!canRedo}>
+                <I name="redo" size={20} />Redo
+              </button>
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { setThemeChoice(theme === "dark" ? "light" : "dark"); setMoreOpen(false); }}>
+                <I name={theme === "dark" ? "sun" : "moon"} size={20} />{theme === "dark" ? "Light mode" : "Dark mode"}
+              </button>
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { onOpenSettings(); setMoreOpen(false); }}>
+                <I name="settings" size={20} />Settings
+              </button>
+              <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { onToggleFocus(); setMoreOpen(false); }}>
+                <I name="fullscreen" size={20} />Focus mode
+              </button>
+            </div>
+          </MobileSheet>
+        </>
+      )}
+
+      {/* P&L chip (mobile) / full account stats (desktop) */}
+      {account && mobile ? (
+        <button
+          type="button"
+          className={`ej-pnl-chip${account.netPnl > 0 ? " is-up" : account.netPnl < 0 ? " is-dn" : ""}`}
+          aria-label={`Net P&L ${fmtPnl(account.netPnl)}`}
+          style={{ touchAction: "manipulation" }}
+          onClick={() => {
+            toast({ kind: account.netPnl >= 0 ? "info" : "warn", text: `Balance ${formatMoney(account.balance)} · P&L ${fmtPnl(account.netPnl)} · ${account.totalTrades} trade${account.totalTrades === 1 ? "" : "s"}`, ms: 4000 });
+          }}
+        >
+          <AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} />
+        </button>
+      ) : account ? (
         <div className="tv-account" aria-label="Account">
           <div><small>Balance</small><b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></div>
           <div><small>P&amp;L</small><b className={account.netPnl > 0 ? "tv-up" : account.netPnl < 0 ? "tv-down" : ""}><AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} /></b></div>
           <div><small>Trades</small><b>{account.totalTrades}</b></div>
         </div>
-      )}
+      ) : null}
       <i className="tv-sep" />
       <span className="tv-session-name" data-tip={config?.sessionName ?? "Session"}>{config?.sessionName ?? "Session"}</span>
 
-      <button type="button" className="tv-tbtn" data-tip="Settings" aria-label="Settings" onClick={onOpenSettings}><I name="settings" size={20} /></button>
-      <button type="button" className="tv-tbtn" data-tip="Toggle light / dark" aria-label="Toggle light or dark theme" onClick={() => setThemeChoice(theme === "dark" ? "light" : "dark")}>
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Settings" aria-label="Settings" onClick={onOpenSettings}><I name="settings" size={20} /></button>}
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Toggle light / dark" aria-label="Toggle light or dark theme" onClick={() => setThemeChoice(theme === "dark" ? "light" : "dark")}>
         <I name={theme === "dark" ? "sun" : "moon"} size={20} />
-      </button>
-      <button type="button" className="tv-tbtn" data-tip="Fullscreen — hide panels (Shift+F)" aria-label="Hide panels" onClick={onToggleFocus}><I name="fullscreen" size={20} /></button>
-      <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={20} />}>
+      </button>}
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Fullscreen — hide panels (Shift+F)" aria-label="Hide panels" onClick={onToggleFocus}><I name="fullscreen" size={20} /></button>}
+      {!mobile && <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={20} />}>
         {(close) => (
           <>
             <button type="button" role="menuitem" className="tv-menu-item" onClick={() => { emitChartCommand({ type: "screenshot", mode: "download" }); toast({ text: "Chart image saved" }); close(); }}><span>Download image</span><kbd>Alt+S</kbd></button>
             <button type="button" role="menuitem" className="tv-menu-item" onClick={() => { emitChartCommand({ type: "screenshot", mode: "copy" }); toast({ text: "Chart image copied" }); close(); }}><span>Copy image</span></button>
           </>
         )}
-      </Dropdown>
-      <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} data-tip="Order ticket" aria-pressed={ticketOpen}>Trade</button>
-      <button type="button" className="tv-end" onClick={handleEnd}>End Session</button>
+      </Dropdown>}
+      <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} data-tip="Order ticket" aria-pressed={ticketOpen} style={{ touchAction: "manipulation" }}>Trade</button>
+      <button type="button" className="tv-end" onClick={handleEnd} style={{ touchAction: "manipulation" }}>End Session</button>
     </div>
   );
 }

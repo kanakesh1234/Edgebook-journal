@@ -414,3 +414,20 @@ kbd, .tv-menu-item kbd {
 .ej-rh.is-hover .ej-rh-pts, .ej-rh.is-drag .ej-rh-pts { display: inline; }
 .ej-rh-pts:empty { display: none !important; }
 .ej-rh-line { opacity: .5; }
+
+
+/* ================================================================== */
+/*  Mobile additions — appended by EJ mobile pass                      */
+/* ================================================================== */
+
+/* Inputs in ticket/alert: >=16px to prevent iOS zoom */
+@media (pointer: coarse), (max-width: 820px) {
+  .tv-field input, .ej-input, .tv-goto input, .ej-alertpop input { font-size: 16px !important; }
+  .tv-ticket-actions button { height: 52px; font-size: 17px; border-radius: var(--ej-r3); }
+  .tv-qty button { width: 44px; height: 44px; }
+  .tv-seg button { height: 36px; }
+  .tv-set-cb { min-height: 48px; }
+  .tv-set-tab { min-height: 44px; }
+  .ej-rh-x { opacity: 1 !important; transform: none !important; width: 32px; height: 32px; font-size: 18px; }
+  .ej-rh-label { pointer-events: auto; }
+}

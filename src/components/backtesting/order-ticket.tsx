@@ -36,36 +36,38 @@ export default function OrderTicket({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="tv-ticket" role="dialog" aria-label="Order ticket" onKeyDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+      {/* Mobile drag handle */}
+      <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "0 auto 8px", flexShrink: 0 }} />
       <h4>
         <span>{symbol} <small>{spec ? `$${spec.tickValue}/tick` : ""}</small></span>
-        <button type="button" className="tv-tbtn" style={{ height: 28, minWidth: 28 }} onClick={onClose} aria-label="Close order ticket" data-tip="Close"><I name="close" size={16} /></button>
+        <button type="button" className="tv-tbtn" style={{ height: 44, minWidth: 44, touchAction: "manipulation" }} onClick={onClose} aria-label="Close order ticket" data-tip="Close"><I name="close" size={16} /></button>
       </h4>
       <div className="tv-seg" role="radiogroup" aria-label="Order type">
         {(["market", "limit", "stop"] as OrderType[]).map((t) => (
-          <button key={t} type="button" role="radio" aria-checked={type === t} className={type === t ? "is-on" : ""} onClick={() => setType(t)}>{t}</button>
+          <button key={t} type="button" role="radio" aria-checked={type === t} className={type === t ? "is-on" : ""} style={{ touchAction: "manipulation" }} onClick={() => setType(t)}>{t}</button>
         ))}
       </div>
       {needsPrice && (
         <label className="tv-field"><span>{type === "limit" ? "Limit price" : "Stop price"}</span>
-          <input type="number" step={step} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Price" />
+          <input type="number" inputMode="decimal" step={step} value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Price" style={{ fontSize: 16 }} />
         </label>
       )}
       <label className="tv-field"><span>Units</span>
         <div className="tv-qty">
           <button type="button" aria-label="Decrease units" onClick={() => setQty(qty - 1)}>−</button>
-          <input type="number" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} />
+          <input type="number" inputMode="decimal" min={1} value={qty} onChange={(e) => setQty(Number(e.target.value))} style={{ fontSize: 16 }} />
           <button type="button" aria-label="Increase units" onClick={() => setQty(qty + 1)}>+</button>
         </div>
       </label>
       <div className="tv-row">
-        <label className="tv-field"><span>Stop loss</span><input type="number" step={step} value={sl} onChange={(e) => setSl(e.target.value)} placeholder="Price" /></label>
-        <label className="tv-field"><span>Take profit</span><input type="number" step={step} value={tp} onChange={(e) => setTp(e.target.value)} placeholder="Price" /></label>
+        <label className="tv-field"><span>Stop loss</span><input type="number" inputMode="decimal" step={step} value={sl} onChange={(e) => setSl(e.target.value)} placeholder="Price" style={{ fontSize: 16 }} /></label>
+        <label className="tv-field"><span>Take profit</span><input type="number" inputMode="decimal" step={step} value={tp} onChange={(e) => setTp(e.target.value)} placeholder="Price" style={{ fontSize: 16 }} /></label>
       </div>
       <div className="tv-ticket-actions">
-        <button type="button" className="tv-btn-sell" disabled={!canTrade || !priceOk} onClick={() => submit("sell")}>Sell</button>
-        <button type="button" className="tv-btn-buy" disabled={!canTrade || !priceOk} onClick={() => submit("buy")}>Buy</button>
+        <button type="button" className="tv-btn-sell" style={{ touchAction: "manipulation" }} disabled={!canTrade || !priceOk} onClick={() => submit("sell")}>Sell</button>
+        <button type="button" className="tv-btn-buy" style={{ touchAction: "manipulation" }} disabled={!canTrade || !priceOk} onClick={() => submit("buy")}>Buy</button>
       </div>
-      {hasPosition && <button type="button" className="tv-btn-flat" onClick={() => flatten(symbol)}>Close position</button>}
+      {hasPosition && <button type="button" className="tv-btn-flat" style={{ touchAction: "manipulation" }} onClick={() => flatten(symbol)}>Close position</button>}
     </div>
   );
 }
