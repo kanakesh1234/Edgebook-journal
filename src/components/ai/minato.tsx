@@ -27,9 +27,11 @@ import {
   resolveMinatoTasks,
   type MinatoAction,
 } from "@/lib/minato/actions";
-import { useMinatoReminders } from "@/lib/minato/reminders";
+import { formatReminderDue, useMinatoReminders } from "@/lib/minato/reminders";
 import { fetchMajorForexFactoryNews } from "@/components/journal/use-forexfactory-news";
 import { MinatoReminderPopup } from "./minato-reminder-popup";
+import { MinatoMessageBody } from "./minato-message";
+import { minatoPlainText } from "@/lib/minato/format";
 import { planJournalReplay } from "@/lib/backtesting/journal-replay";
 import { useBacktest } from "@/lib/backtesting/store";
 import { defaultRuleSet } from "@/lib/types";
@@ -61,51 +63,20 @@ type ChatMsg = MinatoMessage & {
 const BRAIN_MIRROR = "edgebook:minato:brain:v1";
 const THREAD_MAX = 60;
 
-/* ------------------------------------------------------------------ */
-/*  Light-weight reply formatting (bold, numbered findings, bullets)   */
-/* ------------------------------------------------------------------ */
+/** Actions that already ran when the reply arrived — no point showing them as buttons. */
+const HIDE_AFTER_RUN = new Set<MinatoAction["kind"]>([
+  "save_reminder",
+  "set_theme",
+  "panel_control",
+  "set_daily_loss_limit",
+  "log_no_trade_day",
+  "update_rule",
+  "switch_challenge",
+  "open_new_trade",
+]);
 
-function renderInline(text: string) {
-  const normalized = text.replace(/\\\*/g, "*");
-  return normalized.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g).map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={i} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      return (
-        <code key={i} className="rounded bg-ink/[0.08] px-1.5 py-0.5 font-mono text-[12.5px] text-ink">
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
-}
-
-function renderMinatoText(text: string) {
-  return text.replace(/\r/g, "").split("\n").map((line, i) => {
-    const numbered = line.match(/^(\d+)\.\s+(.+)$/);
-    if (numbered) {
-      return (
-        <div key={i} className="minato-finding">
-          <span className="minato-finding-number">{numbered[1]}</span>
-          <span className="min-w-0 leading-[1.55]">{renderInline(numbered[2])}</span>
-        </div>
-      );
-    }
-    const bullet = line.match(/^\s*[-•–]\s+(.+)$/);
-    if (bullet) {
-      return (
-        <div key={i} className="minato-supporting-point">
-          <span>•</span>
-          <span className="min-w-0 leading-[1.55]">{renderInline(bullet[1])}</span>
-        </div>
-      );
-    }
-    if (!line.trim()) return <div key={i} className="h-2" aria-hidden />;
-    return <p key={i} className="leading-[1.58]">{renderInline(line)}</p>;
-  });
-}
+type Chip = { label: string; ask: string };
+const chipFor = (ask: string): Chip => ({ label: ask.length > 34 ? `${ask.slice(0, 31).trim()}…` : ask, ask });
 
 /* ------------------------------------------------------------------ */
 /*  Icons                                                              */
@@ -131,6 +102,12 @@ const BoltIcon = () => (
   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
     <path d="M13 2 3 14h8l-1 8 10-12h-8l1-8Z" />
   </svg>
+);
+const CopyIcon = () => (
+  <Svg className="h-3.5 w-3.5"><rect x="9" y="9" width="11" height="11" rx="2.5" /><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15" /></Svg>
+);
+const CheckIcon = () => (
+  <Svg className="h-3.5 w-3.5"><path d="m5 12.5 4.5 4.5L19 7.5" /></Svg>
 );
 const ExpandIcon = ({ expanded }: { expanded: boolean }) =>
   expanded ? (
@@ -270,6 +247,7 @@ export function Minato() {
   const [pendingSlot, setPendingSlot] = useState<"stop_points" | "risk_per_trade" | "both" | null>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -424,9 +402,13 @@ export function Minato() {
           }
 
           case "save_reminder": {
-            useMinatoReminders.getState().upsertReminder(action.reminder, true);
-            setSavedBanner(`Reminder saved · ${action.reminder.text}`);
-            return `Reminder saved · ${action.reminder.text}`;
+            // Timed reminders stay silent until they're due; the chat reply is the confirmation.
+            const timed = action.reminder.trigger === "timed";
+            useMinatoReminders.getState().upsertReminder(action.reminder, !timed);
+            const when = formatReminderDue(action.reminder);
+            const label = when ? `Reminder set · ${when}` : "Reminder saved";
+            setSavedBanner(label);
+            return label;
           }
 
           case "check_forexfactory_news": {
@@ -862,17 +844,25 @@ export function Minato() {
   }, [open, hydrated, focusEntry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------- suggestions ---------------- */
-  const suggestions = useMemo(() => {
-    if (focusEntry) return ["Replay this trade", "What did I do well?", "What should I change?"];
+  const suggestions = useMemo<Chip[]>(() => {
+    if (focusEntry) {
+      return [
+        { label: "Replay this trade", ask: "Replay this trade" },
+        { label: "What did I do well?", ask: "What did I do well?" },
+        { label: "What should I change?", ask: "What should I change?" },
+      ];
+    }
     if (entries.length === 0) return [];
     const today = todayKey();
     const todays = entries.filter((e) => e.date === today);
     const lostToday = todays.length > 0 && todays.reduce((s, e) => s + e.pnl, 0) < 0;
     return [
-      lostToday ? "Help me reset after today" : "How am I doing lately?",
-      "Replay my last trade",
-      "With my win rate, what's the max losing streak & MNQ/NQ size?",
-      "Start The Matrix drill",
+      lostToday
+        ? { label: "Reset after today", ask: "Help me reset after today" }
+        : { label: "How am I doing?", ask: "How am I doing lately?" },
+      { label: "Replay last trade", ask: "Replay my last trade" },
+      { label: "Streak & sizing", ask: "With my win rate, what's the max losing streak & MNQ/NQ size?" },
+      { label: "Start The Matrix", ask: "Start The Matrix drill" },
     ];
   }, [focusEntry, entries]);
 
@@ -887,7 +877,13 @@ export function Minato() {
     [brain.memory, brain.commitments, readiness, allEntries, open], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const nudge = learned?.text ?? insights[0]?.message;
-  const chips = useMemo(() => (learned ? [learned.ask, ...suggestions].slice(0, 4) : suggestions), [learned, suggestions]);
+  const chips = useMemo<Chip[]>(() => (learned ? [chipFor(learned.ask), ...suggestions].slice(0, 4) : suggestions), [learned, suggestions]);
+  const copyReply = (idx: number, text: string) => {
+    void navigator.clipboard?.writeText(minatoPlainText(text)).then(() => {
+      setCopiedIdx(idx);
+      window.setTimeout(() => setCopiedIdx((cur) => (cur === idx ? null : cur)), 1600);
+    });
+  };
   const newChat = () => {
     setMessages([]);
     setInput("");
@@ -1074,138 +1070,134 @@ export function Minato() {
                   initial={reduce ? false : { opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.35, ease: SPRING_EASE, delay: 0.05 }}
-                  className="mx-auto flex h-full min-h-[200px] max-w-[65ch] flex-col justify-center px-1"
+                  className="mx-auto flex h-full min-h-[200px] max-w-[62ch] flex-col justify-center px-1"
                 >
                   <p className="font-display text-[28px] font-semibold leading-[1.12] tracking-[-0.03em] text-ink">
                     {greeting}
                   </p>
-                  <p className="mt-2.5 max-w-[54ch] text-[15px] leading-[1.55] text-muted">
+                  <p className="mt-2.5 line-clamp-2 max-w-[46ch] text-[15px] leading-[1.5] text-muted">
                     {nudge ??
                       (entries.length === 0
                         ? "Log your first trade and I’ll start learning how you trade."
-                        : "Ask me about losing streak probabilities, exact MNQ/NQ position sizing, or tell me to replay a trade or launch a drill.")}
+                        : "What are we working on?")}
                   </p>
                 </motion.div>
               )}
 
-              {messages.map((m, i) => (
-                <motion.div
-                  key={i}
-                  initial={reduce ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.26, ease: SPRING_EASE }}
-                  className={cn(
-                    "mx-auto flex w-full max-w-[70ch] flex-col gap-1.5",
-                    m.role === "user" ? "items-end" : "items-start",
-                  )}
-                >
-                  <div
+              {messages.map((m, i) => {
+                const isLatest = i === messages.length - 1;
+                const shownActions = (m.actions ?? []).filter((a) => !(a.autoExecute && HIDE_AFTER_RUN.has(a.kind))).slice(0, 3);
+                const saved = brain.saved.some((x) => x.text === m.text.slice(0, 600));
+                return (
+                  <motion.div
+                    key={i}
+                    data-latest={isLatest ? "" : undefined}
+                    initial={reduce ? false : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.26, ease: SPRING_EASE }}
                     className={cn(
-                      "rounded-[20px] px-4 py-3 text-[14.5px] leading-[1.58]",
-                      m.role === "user"
-                        ? "max-w-[88%] rounded-br-[6px] bg-ink text-canvas"
-                        : "w-full max-w-[68ch] rounded-bl-[6px] bg-ink/[0.055] text-ink",
+                      "mn-msg mx-auto flex w-full max-w-[62ch] flex-col gap-1",
+                      m.role === "user" ? "items-end" : "items-start",
                     )}
                   >
                     {m.role === "user" ? (
-                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                      <div className="mn-user max-w-[88%] px-4 py-2.5 text-[14.5px] leading-[1.5]">
+                        <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                      </div>
                     ) : (
-                      <div className="space-y-2">{renderMinatoText(m.text)}</div>
-                    )}
+                      <div className="w-full">
+                        <MinatoMessageBody text={m.text} animate={isLatest && !reduce} />
 
-                    {/* Jarvis / Siri Interactive Action Pills inside Buddy Message */}
-                    {m.role === "buddy" && m.actions && m.actions.length > 0 && (
-                      <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
-                        {m.actions.map((act, actIdx) => {
-                          const actKey = `${act.kind}:${act.label}`;
-                          const isPrimary = actIdx === 0 || act.kind === "replay_trade";
-                          const isRunning = runningActionId === actKey;
-                          return (
-                            <button
-                              key={`${act.kind}-${actIdx}`}
-                              type="button"
-                              disabled={isRunning}
-                              onClick={() => void executeMinatoAction(act)}
-                              className={cn(
-                                "inline-flex min-h-[34px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-all active:scale-[0.97] disabled:opacity-50",
-                                isPrimary
-                                  ? "bg-gold-strong text-on-gold shadow-xs hover:opacity-92"
-                                  : "border border-line bg-surface/85 text-ink hover:border-gold/50 hover:text-gold",
-                              )}
+                        {m.executedTask && (
+                          <p className="mn-done">
+                            <CheckIcon />
+                            {m.executedTask}
+                          </p>
+                        )}
+
+                        {/* One-tap actions — quiet outlines; only the main one is filled */}
+                        {shownActions.length > 0 && (
+                          <div className="mn-actions">
+                            {shownActions.map((act, actIdx) => {
+                              const actKey = `${act.kind}:${act.label}`;
+                              const isRunning = runningActionId === actKey;
+                              return (
+                                <button
+                                  key={`${act.kind}-${actIdx}`}
+                                  type="button"
+                                  disabled={isRunning}
+                                  data-primary={actIdx === 0 && (act.kind === "replay_trade" || shownActions.length === 1) ? "" : undefined}
+                                  onClick={() => void executeMinatoAction(act)}
+                                  className="mn-action"
+                                >
+                                  {act.kind === "replay_trade" ? <PlayIcon /> : <ArrowUpRightIcon />}
+                                  <span>{isRunning ? "Opening…" : act.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="mn-tools mt-1.5">
+                          <button type="button" className="mn-tool" onClick={() => copyReply(i, m.text)} aria-label="Copy reply">
+                            {copiedIdx === i ? <CheckIcon /> : <CopyIcon />}
+                            <span>{copiedIdx === i ? "Copied" : "Copy"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="mn-tool"
+                            data-on={saved ? "" : undefined}
+                            onClick={() => saveInsight(m.text)}
+                            disabled={saved}
+                            aria-label={saved ? "Saved to memory" : "Save insight to memory"}
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-3.5 w-3.5"
+                              fill={saved ? "currentColor" : "none"}
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinejoin="round"
+                              aria-hidden
                             >
-                              {act.kind === "replay_trade" ? (
-                                <PlayIcon />
-                              ) : act.autoExecute ? (
-                                <BoltIcon />
-                              ) : (
-                                <ArrowUpRightIcon />
-                              )}
-                              <span>{isRunning ? "Opening…" : act.label}</span>
-                            </button>
-                          );
-                        })}
+                              <path d="M6 4h12v17l-6-4-6 4Z" />
+                            </svg>
+                            <span>{saved ? "Saved" : "Save"}</span>
+                          </button>
+                        </div>
                       </div>
                     )}
-                  </div>
 
-                  {m.executedTask && (
-                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] font-medium text-profit">
-                      <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
-                      Task executed · {m.executedTask}
-                    </p>
-                  )}
-                  {m.savedFacts && m.savedFacts.length > 0 && (
-                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] font-medium text-profit">
-                      <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
-                      Saved to memory: {m.savedFacts.join(" · ")}
-                    </p>
-                  )}
-                  {m.noted && m.noted.length > 0 && (
-                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
-                      <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
-                      Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}. I’ll keep it in mind for today.
-                    </p>
-                  )}
-                  {m.committed && m.committed.length > 0 && (
-                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
-                      <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
-                      Saved your commitment. I&apos;ll check it against your trades.
-                    </p>
-                  )}
-                  {m.role === "buddy" && (
-                    <button
-                      type="button"
-                      onClick={() => saveInsight(m.text)}
-                      disabled={brain.saved.some((x) => x.text === m.text.slice(0, 600))}
-                      className="group flex min-h-[32px] items-center gap-1.5 px-1.5 text-[11.5px] text-faint transition-colors hover:text-gold disabled:text-gold"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-3.5 w-3.5 transition-transform duration-300 group-hover:-rotate-6"
-                        fill={brain.saved.some((x) => x.text === m.text.slice(0, 600)) ? "currentColor" : "none"}
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinejoin="round"
-                        aria-hidden
-                      >
-                        <path d="M6 4h12v17l-6-4-6 4Z" />
-                      </svg>
-                      {brain.saved.some((x) => x.text === m.text.slice(0, 600)) ? "Saved to memory" : "Save insight"}
-                    </button>
-                  )}
-                </motion.div>
-              ))}
+                    {m.savedFacts && m.savedFacts.length > 0 && (
+                      <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] font-medium text-profit">
+                        <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
+                        Saved to memory · {m.savedFacts.join(" · ")}
+                      </p>
+                    )}
+                    {m.noted && m.noted.length > 0 && (
+                      <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
+                        <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden />
+                        Noted {m.noted.map((x) => MOOD_LABEL[x].toLowerCase()).join(" · ")}
+                      </p>
+                    )}
+                    {m.committed && m.committed.length > 0 && (
+                      <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] text-faint">
+                        <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
+                        Commitment saved
+                      </p>
+                    )}
+                  </motion.div>
+                );
+              })}
 
               {busy && (
-                <div className="mx-auto flex w-full max-w-[70ch] justify-start">
-                  <div className="flex items-center gap-2.5 rounded-[20px] rounded-bl-[6px] bg-ink/[0.06] px-4 py-3">
-                    <span className="mn-typing" aria-label="Minato is thinking">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                    {slow && <span className="text-[12px] text-muted">Running calculations & checking journal…</span>}
-                  </div>
+                <div className="mx-auto flex w-full max-w-[62ch] items-center gap-2.5 py-1">
+                  <span className="mn-typing" aria-label="Minato is thinking">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  {slow && <span className="text-[12.5px] text-muted">Checking your journal…</span>}
                 </div>
               )}
             </div>
@@ -1213,14 +1205,9 @@ export function Minato() {
             {/* Suggestions — before conversation starts */}
             {empty && chips.length > 0 && (
               <div className="mn-chips flex shrink-0 gap-2 overflow-x-auto px-4 pb-2.5 pt-1 md:px-5 [scrollbar-width:none]">
-                {chips.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => void ask(p)}
-                    className="min-h-[40px] shrink-0 rounded-full bg-ink/[0.06] px-4 py-2 text-[13px] font-medium text-ink transition-[background-color,transform] duration-200 hover:bg-ink/[0.1] active:scale-[0.97]"
-                  >
-                    {p}
+                {chips.map((c) => (
+                  <button key={c.ask} type="button" onClick={() => void ask(c.ask)} className="mn-chip shrink-0">
+                    {c.label}
                   </button>
                 ))}
               </div>
@@ -1234,15 +1221,15 @@ export function Minato() {
                 void ask(input);
               }}
             >
-              <div className="mn-field mx-auto flex max-w-[70ch] items-end gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
+              <div className="mn-field mx-auto flex max-w-[62ch] items-end gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
                 <textarea
                   ref={inputRef}
                   rows={1}
                   aria-label="Message Minato"
                   placeholder={
                     pendingSlot
-                      ? "Reply with your stop size (pts) & risk ($ or %)…"
-                      : "Ask Minato or tell him to replay a trade, open a section…"
+                      ? "Your stop (pts) and risk ($ or %)…"
+                      : "Ask Minato…"
                   }
                   value={input}
                   onChange={(e) => {

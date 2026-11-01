@@ -22,7 +22,7 @@
 import type { JournalEntry } from "../types";
 import { holdMinutes, formatHold } from "../holdtime";
 import { resolveTraderFirstName } from "./blueprint";
-import { parseRememberOrRemindCommand, type MinatoReminderItem } from "./reminders";
+import { formatReminderDue, parseRememberOrRemindCommand, type MinatoReminderItem } from "./reminders";
 
 export type MinatoAction =
   | {
@@ -265,6 +265,12 @@ interface ResolvedRoute {
   label: string;
 }
 
+/** True when the reply is inviting the trader to go/open/start something (not just naming a feature). */
+function suggestsNavigation(text: string): boolean {
+  return /\b(open(?:ing)?|launch(?:ing)?|head\s+(?:to|over)|go\s+to|take\s+you|taking\s+you|jump\s+(?:to|into)|navigate|start(?:ing)?|try|run|drill|practi[cs]e\s+(?:in|with)|see\s+(?:it\s+)?in)\b/i.test(text)
+    && !/\b(?:i\s+(?:can(?:'|’)?t|cannot|don(?:'|’)?t\s+have)|unable\s+to|not\s+able\s+to)\b/i.test(text);
+}
+
 function matchSectionFromText(text: string): ResolvedRoute | null {
   const t = text.toLowerCase();
 
@@ -379,30 +385,22 @@ export function resolveMinatoTasks(params: {
   const remParsed = parseRememberOrRemindCommand(q);
   if (remParsed.matched && remParsed.item) {
     const remItem = remParsed.item;
-    const timingNote =
-      remItem.trigger === "timed" && remItem.clockTime
-        ? `at **${remItem.clockTime}**`
-        : remItem.trigger === "timed" && remItem.dueAt
-          ? `at the scheduled time`
-          : `whenever you open **Plan a trade** or **Log a trade**`;
+    const due = formatReminderDue(remItem);
+    const confirm = due
+      ? `Done, ${name} — I'll remind you **${due}**.`
+      : `Saved, ${name}. I'll show this whenever you open **Plan a trade** or **Add trade**.`;
     return {
       isDirectCommand: true,
       resolvedTrade: null,
       actions: [
         {
           kind: "save_reminder",
-          label: `Pop up Reminder · ${remItem.text.slice(0, 32)}${remItem.text.length > 32 ? "…" : ""}`,
+          label: `Reminder · ${remItem.text.slice(0, 32)}${remItem.text.length > 32 ? "…" : ""}`,
           reminder: remItem,
           autoExecute: true,
         },
-        {
-          kind: "navigate",
-          label: "View in Minato Memory",
-          href: "/settings?pane=minato",
-          section: "Settings → Minato Memory",
-        },
       ],
-      directReply: `Locked in, ${name} — **“${remItem.text}”** is saved to memory and active reminders. I'll pop up a clean reminder ${timingNote}.`,
+      directReply: `${confirm}\n\n> ${remItem.text}`,
     };
   }
 
@@ -852,7 +850,9 @@ export function enrichActionsFromReplyText(
   }
 
   const hasNavAction = out.some((a) => a.kind === "navigate");
-  if (!hasNavAction) {
+  // Only attach a section button when the reply actually points the trader somewhere —
+  // merely mentioning "backtesting" or "journal" in passing must not add a stray button.
+  if (!hasNavAction && suggestsNavigation(replyText)) {
     const sec = matchSectionFromText(replyText);
     if (sec) {
       out.push({
@@ -864,5 +864,5 @@ export function enrichActionsFromReplyText(
     }
   }
 
-  return out.slice(0, 4);
+  return out.slice(0, 3);
 }

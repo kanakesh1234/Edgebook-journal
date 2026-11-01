@@ -1,0 +1,18 @@
+MINATO UPGRADE — unzip at the project root (the folder containing package.json) and overwrite.
+
+REPLACE (existing files)
+  src/app/api/minato/chat/route.ts        new short-answer system prompt, 2,400-token ceiling
+  src/components/ai/minato.tsx            new reply cards, quieter actions, shorter chips, timed reminders
+  src/components/ai/minato.css            reply-card styles (light + dark)
+  src/lib/minato/actions.ts               reminder confirmation reply, stray-button fix
+  src/lib/minato/reminders.ts             understands "I want you to remind me in 2 minutes about ..."
+  src/lib/minato/respond.ts               compact streak / sizing / expectancy / greeting / guide answers
+  tests/run-all.ts                        registers the new test
+
+NEW (add these)
+  src/components/ai/minato-message.tsx    reply renderer
+  src/lib/minato/format.ts                reply parser (lead / metric rows / note / folded working)
+  tests/minato/format.test.ts             13 assertions for the parser
+
+No new dependencies. No database changes. Delete nothing.
+Verify:  npm test   (25/25 Minato evals + format tests)   and   npm run typecheck

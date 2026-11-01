@@ -88,51 +88,40 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
     const topLeak = mistakes[0]?.label;
     return [
-      `Hey ${name}. I'm right here with your active challenge and journal loaded.`,
+      `Hey ${name} — your journal is loaded.`,
       unreviewed > 0
-        ? `1. **Journal → Quick Autopsy**: You have **${unreviewed} unreviewed ${unreviewed === 1 ? "trade" : "trades"}** waiting for a 5-step process check.`
-        : `1. **Home → Plan a trade**: Lock your daily loss limit and pre-session checklist before taking your next setup.`,
+        ? `- **Journal** · ${unreviewed} unreviewed ${unreviewed === 1 ? "trade" : "trades"} waiting for Quick Autopsy`
+        : `- **Home** · Lock today's loss limit before your next setup`,
       topLeak
-        ? `2. **Practise → The Matrix & ICT Lab**: Run a 5-minute drill targeting **${topLeak}** so it doesn't repeat today.`
-        : `2. **Practise → Math Duel & The Matrix**: Sharpen your chart recognition or R-multiple sizing before the session.`,
-      `\nWhat would you like me to do first, ${name} — replay a trade, run streak/sizing math, or take you to a practice drill?`,
+        ? `- **Practise** · A 5-minute drill on **${topLeak}**`
+        : `- **Practise** · The Matrix or Math Duel warm-up`,
+      `What should we start with?`,
     ].join("\n");
   }
 
   if (/\b(where (is|do i|can i|to|should i)|how do i (use|find|navigate|practi[cs]e|backtest|review)|what sections|website|blueprint|guide me|what should i (practi[cs]e|review|do)|where should i go|in edgebook)\b/i.test(q)) {
     const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
     const topMistake = mistakes[0];
-    const parts: string[] = [
-      `Here is how to use EdgeBook's sections for what you need right now, ${name}:`,
-    ];
-    if (topMistake) {
-      parts.push(
-        `1. **Practise (\`/practice\`)**: Start with **Daily Mission** and **The Matrix** — it builds spaced-repetition drills directly from your #1 leak (**${topMistake.label}**, ${topMistake.count}×). Use **ICT Lab** for sweep/FVG/SMT drills and **Math Duel** for sizing reps.`,
-      );
-    } else {
-      parts.push(
-        `1. **Practise (\`/practice\`)**: Run **The Matrix** (timed chart scenario drills), **ICT Lab** (liquidity sweeps, FVG, SMT), or **Math Duel** (R-multiple and position sizing speed drills).`,
-      );
-    }
-    parts.push(
-      `2. **Journal & Quick Autopsy (\`/journal\`)**: ${unreviewed > 0 ? `Complete your **${unreviewed} unreviewed trades** via **Autopsy →** to grade process vs outcome` : "Filter your trades by setup/mistake"} or click **Replay** to step through candles.`,
-    );
-    parts.push(
-      `3. **Trading Lab (\`/lab\`)**: Refine your **Playbook Setups**, adjust **Rule Set** guardrails (max daily loss, max trades/day), manage your **Primary Challenge**, or launch **Backtesting** (\`/backtesting/create\`) for multi-timeframe historical replay.`,
-    );
-    parts.push(
-      `4. **Home (\`/dashboard\`) & Feed (\`/feed\`)**: Lock your daily loss limit, run **Plan a trade** before market open, or swipe through your best chart replays in **Feed**.`,
-    );
-    parts.push(
-      `\nJust say *"take me to The Matrix"*, *"open Trading Lab"*, or *"replay my last trade"* and I'll take you there immediately.`,
-    );
-    return parts.join("\n");
+    return [
+      `Here's where to go, ${name}:`,
+      topMistake
+        ? `- **Practise** · The Matrix, ICT Lab and Math Duel — start with drills on **${topMistake.label}** (${topMistake.count}×)`
+        : `- **Practise** · The Matrix, ICT Lab and Math Duel drills`,
+      `- **Journal** · ${unreviewed > 0 ? `Quick Autopsy for ${unreviewed} unreviewed ${unreviewed === 1 ? "trade" : "trades"}` : "Filter by setup or mistake"}, or Replay any trade`,
+      `- **Trading Lab** · Playbook setups, rule guardrails and Backtesting`,
+      `- **Home & Feed** · Daily loss limit, Plan a trade, chart replays`,
+      ``,
+      `Say *"take me to The Matrix"* and I'll open it.`,
+    ].join("\n");
   }
 
   // --- PRIORITY 1: DETERMINISTIC TRADING MATH (Streaks, Position Sizing, Expectancy/PF/R) ---
   // Never substitute a directional or instrument breakdown when the user asks about streaks, sizing, or math!
   if (calcParams.wantsStreak || calcParams.wantsSizing || calcParams.wantsExpectancyOrStats) {
-    const sections: string[] = [];
+    // Answer first (a headline + a few metric rows). Formulas, assumptions and sample-size
+    // caveats live below a `---` divider, which the UI folds behind "Show working".
+    const visible: string[] = [];
+    const working: string[] = [];
 
     const streakRes = computeStreakTool({
       entries: ctx.recentTrades,
@@ -146,23 +135,21 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     if (calcParams.wantsStreak) {
       const wrPct = (streakRes.winRate * 100).toFixed(1);
       const lossPct = (streakRes.lossRate * 100).toFixed(1);
-      const keyProbs = streakRes.monteCarlo.probabilities
-        .filter((p) => [3, 4, 5, 6, 8, 10].includes(p.k) || p.k === calcParams.targetStreakK)
-        .slice(0, 5)
-        .map((p) => `P(streak ≥ ${p.k}) = **${p.exactProbPct}%** (MC: ${p.mcProbPct}%)`)
-        .join(" · ");
+      const wanted = new Set<number>([3, 5, 8, ...(calcParams.targetStreakK ? [calcParams.targetStreakK] : [])]);
+      const probs = streakRes.monteCarlo.probabilities.filter((p) => wanted.has(p.k)).slice(0, 4);
 
-      sections.push(
-        `With a **${wrPct}% win rate** (${lossPct}% loss rate across ${streakRes.sampleTrades} decided trades), your expected maximum losing streak over **${streakRes.horizonTrades} trades** is **${streakRes.expectedMaxLosingStreakClosedForm} losses** (closed-form) and **${streakRes.monteCarlo.meanMaxStreak} losses** (10,000-run Monte Carlo mean; 95th percentile tail: **${streakRes.monteCarlo.p95MaxStreak} consecutive losses**, 99th percentile: **${streakRes.monteCarlo.p99MaxStreak} losses**).`,
+      visible.push(
+        `At a **${wrPct}% win rate**, your expected maximum losing streak over **${streakRes.horizonTrades} trades** is about **${streakRes.monteCarlo.meanMaxStreak} losses**. A bad run (95th percentile) reaches **${streakRes.monteCarlo.p95MaxStreak}**.`,
       );
-      sections.push(
-        `1. **Streak Probabilities in ${streakRes.horizonTrades} Trades**: ${keyProbs}`,
+      for (const p of probs) visible.push(`- **${p.k}+ losses in a row** · ${p.exactProbPct}%`);
+      visible.push(
+        `- **Your journal** · ${streakRes.historicalMaxLosingStreak} losses / ${streakRes.historicalMaxWinningStreak} wins in a row at most`,
       );
-      sections.push(
-        `2. **Your Actual Journal History**: Max losing streak recorded = **${streakRes.historicalMaxLosingStreak}** · Max winning streak = **${streakRes.historicalMaxWinningStreak}**`,
-      );
-      sections.push(
-        `3. **Assumptions & Caveat**: Assumes independent Bernoulli trials at ${wrPct}% win rate (10,000 seeded runs, seed=42). ${streakRes.sampleSizeCaveat}`,
+
+      working.push(
+        `- Assumes independent trades at a ${wrPct}% win rate (${lossPct}% loss rate, ${streakRes.sampleTrades} decided trades).`,
+        `- Closed-form expected max ${streakRes.expectedMaxLosingStreakClosedForm}; 10,000-run Monte Carlo mean ${streakRes.monteCarlo.meanMaxStreak}, p95 ${streakRes.monteCarlo.p95MaxStreak}, p99 ${streakRes.monteCarlo.p99MaxStreak} (seed 42).`,
+        `- ${streakRes.sampleSizeCaveat}`,
       );
     }
 
@@ -189,43 +176,46 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
 
       const mnq = sizingRes.primary.symbol === "MNQ" ? sizingRes.primary : sizingRes.comparison;
       const nq = sizingRes.primary.symbol === "NQ" ? sizingRes.primary : sizingRes.comparison;
+      const sizeRow = (label: string, r: typeof mnq) =>
+        `- **${label}** · ${
+          r.contracts === 0
+            ? `Too big — 1 contract risks $${r.riskPerContractDollars}`
+            : `${r.contracts} contract${r.contracts === 1 ? "" : "s"} · $${r.actualDollarRisk} risk`
+        }`;
 
-      const idxBase = sections.length > 0 ? 4 : 1;
-      if (sections.length === 0) {
-        sections.push(
-          `For a **$${sizingRes.effectiveRiskDollars} risk budget** (${sizingRes.riskSource}) and a **${sizingRes.stopPoints}-point stop**, your exact position size is **${mnq.contracts} MNQ (Micro)** or **${nq.contracts} NQ (Mini)** contracts.`,
-        );
+      if (calcParams.wantsStreak) {
+        visible.push(``, `**Position size** at **$${sizingRes.effectiveRiskDollars}** risk, **${sizingRes.stopPoints}-pt stop**`);
       } else {
-        sections.push(
-          `${idxBase}. **Position Sizing (MNQ Micro vs NQ Mini)** at **$${sizingRes.effectiveRiskDollars} risk** and **${sizingRes.stopPoints}-pt stop**:`,
+        visible.push(
+          `At **$${sizingRes.effectiveRiskDollars}** risk and a **${sizingRes.stopPoints}-pt stop**, size **${mnq.contracts} MNQ** or **${nq.contracts} NQ** contracts.`,
         );
       }
+      visible.push(sizeRow("MNQ ($2/pt)", mnq), sizeRow("NQ ($20/pt)", nq));
 
-      sections.push(
-        `   - **MNQ ($2/pt)**: \`${mnq.formulaWorking}\` → **${mnq.contracts} contract${mnq.contracts === 1 ? "" : "s"}** ($${mnq.actualDollarRisk} actual risk, $${mnq.riskPerContractDollars}/contract)`,
-      );
-      sections.push(
-        `   - **NQ ($20/pt)**: \`${nq.formulaWorking}\` → **${nq.contracts} contract${nq.contracts === 1 ? "" : "s"}** ($${nq.actualDollarRisk} actual risk, $${nq.riskPerContractDollars}/contract)`,
-      );
       if (sizingRes.drawdownRoomDollars != null) {
-        sections.push(
-          `   - **Drawdown Room Check**: $${Math.round(sizingRes.drawdownRoomDollars).toLocaleString("en-US")} drawdown cushion remaining${sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom != null ? ` (max safe risk for a ${sizingRes.safeForDrawdownStreak.p95MaxLosingStreak}-loss p95 streak: **$${sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom}/trade**)` : ""}.`,
-        );
+        visible.push(`- **Drawdown room** · $${Math.round(sizingRes.drawdownRoomDollars).toLocaleString("en-US")} left`);
+        if (sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom != null) {
+          visible.push(
+            `- **Max safe risk** · $${sizingRes.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom}/trade (survives a ${sizingRes.safeForDrawdownStreak.p95MaxLosingStreak}-loss streak)`,
+          );
+        }
       }
       if (sizingRes.safeForDrawdownStreak.warning) {
-        sections.push(`   - **Risk Warning**: ${sizingRes.safeForDrawdownStreak.warning}`);
+        visible.push(`> ${sizingRes.safeForDrawdownStreak.warning}`);
       }
+
+      working.push(
+        `- MNQ ($2/pt): \`${mnq.formulaWorking}\``,
+        `- NQ ($20/pt): \`${nq.formulaWorking}\``,
+        `- Risk source: ${sizingRes.riskSource}.`,
+      );
 
       if (sizingRes.missingInputs.length > 0) {
         const missingLabels = sizingRes.missingInputs
           .map((m) => (m === "stop_points" ? "typical stop size in points" : "risk per trade ($ or %)"))
           .join(" and ");
-        sections.push(
-          `\n**Quick check**: I used ${sizingRes.stopPoints} pts and $${sizingRes.effectiveRiskDollars} risk above because your ${missingLabels} isn't saved in memory yet. Reply with your ${missingLabels} (e.g. *"My stop is 15 points and I risk $150 per trade"*) and I'll save it to memory and recalculate automatically.`,
-        );
-      } else {
-        sections.push(
-          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size, or launch **Practise → Math Duel** for you?`,
+        visible.push(
+          `> **Quick check** — I assumed ${sizingRes.stopPoints} pts and $${sizingRes.effectiveRiskDollars} risk because your ${missingLabels} isn't saved in memory yet. Reply with e.g. *"15 points, $150 per trade"* and I'll save it and recalculate.`,
         );
       }
     }
@@ -238,25 +228,23 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
         maxDrawdown: opts.maxDrawdown ?? 2000,
         currency: "USD",
       });
-      sections.push(
-        `Across **${expRes.decidedTrades} decided trades** (${expRes.winRatePct}% win rate), your expectancy is **${money(expRes.expectancyDollarsPerTrade)} per trade**${expRes.expectancyR != null ? ` (**${expRes.expectancyR >= 0 ? "+" : ""}${expRes.expectancyR}R**)` : ""} with a profit factor of **${expRes.profitFactor ?? "—"}**.`,
+      visible.push(
+        `Across **${expRes.decidedTrades} decided trades** (${expRes.winRatePct}% win rate), your expectancy is **${money(expRes.expectancyDollarsPerTrade)} per trade**${expRes.expectancyR != null ? ` (**${expRes.expectancyR >= 0 ? "+" : ""}${expRes.expectancyR}R**)` : ""}, with a profit factor of **${expRes.profitFactor ?? "—"}**.`,
+        `- **Avg win / loss** · +$${expRes.avgWinDollars.toFixed(0)} / −$${expRes.avgLossDollars.toFixed(0)}`,
+        `- **Payoff ratio** · ${expRes.payoffRatio ?? "—"}`,
+        `- **Avg R** · ${expRes.avgR != null ? `${expRes.avgR}R` : "—"}`,
+        `- **Max drawdown** · $${expRes.drawdown.maxDrawdownDollars.toLocaleString("en-US")}`,
       );
-      sections.push(
-        `1. **Avg Win vs Avg Loss**: +$${expRes.avgWinDollars.toFixed(0)} vs −$${expRes.avgLossDollars.toFixed(0)} (Payoff ratio: **${expRes.payoffRatio ?? "—"}** · Avg R: **${expRes.avgR != null ? `${expRes.avgR}R` : "—"}**)`,
-      );
-      sections.push(
-        `2. **Drawdown Stats**: Max DD **$${expRes.drawdown.maxDrawdownDollars.toLocaleString("en-US")}** · Current DD **$${expRes.drawdown.currentDrawdownDollars.toLocaleString("en-US")}**${expRes.drawdown.drawdownRoomDollars != null ? ` · Drawdown room left: **$${expRes.drawdown.drawdownRoomDollars.toLocaleString("en-US")}**` : ""}`,
-      );
-      sections.push(
-        `3. **Assumptions & Caveat**: Computed directly from ${expRes.totalTrades} live journal trades (${expRes.rSampleSize} with R-multiples recorded).`,
+      if (expRes.drawdown.drawdownRoomDollars != null) {
+        visible.push(`- **Drawdown room** · $${expRes.drawdown.drawdownRoomDollars.toLocaleString("en-US")} left`);
+      }
+      working.push(
+        `- Computed from ${expRes.totalTrades} live journal trades (${expRes.rSampleSize} with R-multiples recorded).`,
+        `- Current drawdown $${expRes.drawdown.currentDrawdownDollars.toLocaleString("en-US")}.`,
       );
     }
 
-    if (sections.length > 0 && !calcParams.wantsSizing) {
-      sections.push(`\nWould you like me to calculate your exact MNQ/NQ contract size to survive a ${streakRes.monteCarlo.p95MaxStreak}-trade 95th-percentile losing streak?`);
-    }
-
-    return sections.join("\n");
+    return [...visible, ...(working.length > 0 ? ["", "---", "**Working**", ...working] : [])].join("\n");
   }
 
   // --- Specific date or instrument lookup ---

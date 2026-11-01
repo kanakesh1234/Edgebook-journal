@@ -23,3 +23,4 @@ import "../src/lib/csv-import.test.ts";
 import "../src/lib/practice/math/math.test.ts";
 import "./minato/mind-engine.test.ts";
 import "./minato/evals.test.ts";
+import "./minato/format.test.ts";
