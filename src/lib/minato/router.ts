@@ -28,7 +28,7 @@ const W = (re: RegExp, w: number): [RegExp, number] => [re, w];
 
 const RULES: Record<Exclude<Intent, "general">, [RegExp, number][]> = {
   chitchat: [
-    W(/^\s*(hi|hello|hey|yo|sup|thanks|thank you|thx|ty|ok|okay|cool|great|nice|got it|good (morning|evening|afternoon|night)|gm|gn|how are you|who are you|what can you do|help)\b[\s!.?,]*$/i, 6),
+    W(/^\s*(hi|hello|hey|yo|sup|thanks|thank you|thx|ty|ok|okay|cool|great|nice|got it|good (morning|evening|afternoon|night|day)|morning|gm|gn|howdy|hola|namaste|how are you|how'?s it going|who are you|what can you do|help)\b(?:\s+[\p{L}']+){0,3}[\s!.?,]*$/iu, 6),
   ],
   calculation: [
     W(/\b(longest losing streak|maximum (?:longest )?losing streak|max losing streak|losing streak possible|probability of (?:a )?losing streak|streak probability|monte carlo)\b/i, 6),

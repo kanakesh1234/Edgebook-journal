@@ -13,6 +13,7 @@ import { computeInsights, topState, type MinatoState } from "@/lib/minato/insigh
 import { buildContext } from "@/lib/minato/context";
 import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
+import { classifyLane, type Lane } from "@/lib/minato/lane";
 import { loadMind, MOOD_LABEL, mindForModel, type Mood } from "@/lib/minato/mind";
 import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type MinatoBrain } from "@/lib/minato/brain-ml";
 import { evolveMemory, applyDirectives } from "@/lib/minato/evolve";
@@ -231,6 +232,22 @@ export function Minato() {
       todayLossLimit: rawSettings.dayLimits?.[todayKey()] ?? null,
     };
   }, [rawSettings, plans, dayLogs, challenge, firstName]);
+
+  /* A handful of numbers for the model's awareness on chat lanes — never the journal. */
+  const glance = useMemo(() => {
+    const today = todayKey();
+    const todays = entries.filter((e) => e.date === today);
+    return {
+      trades: entries.length,
+      totalPnl: Math.round(stats.totalPnl),
+      winRatePct: Math.round(stats.winRate * 100),
+      todayTrades: todays.length,
+      todayPnl: Math.round(todays.reduce((sum, e) => sum + e.pnl, 0)),
+      drawdownRoom: stats.drawdownCushion != null ? Math.round(stats.drawdownCushion) : null,
+      drawdownUsedPct: Math.round((stats.drawdownBudgetUsed ?? 0) * 100),
+      challenge: challenge?.name ?? null,
+    };
+  }, [entries, stats, challenge]);
 
   /* ---------------- conversation & memory ---------------- */
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
@@ -575,6 +592,7 @@ export function Minato() {
     return () => useMindView.getState().register(null);
   }, []);
   const lastIntent = useRef<Intent | null>(null);
+  const lastLane = useRef<Lane | null>(null);
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
@@ -653,9 +671,15 @@ export function Minato() {
       const applied = applyChat(afterExtract.brain, trimmed, nowMs, todayKey());
 
       // 4. Route intent & retrieve hybrid memories within token budget
-      const route = routeIntent(trimmed, { hasFocus: !!focusEntry, prev: lastIntent.current });
+      const prevIntent = lastIntent.current;
+      const route = routeIntent(trimmed, { hasFocus: !!focusEntry, prev: prevIntent });
       lastIntent.current = route.intent;
       const plan = planFor(route);
+
+      // 4b. Lane: normal chat and ideal calculations never upload the journal.
+      const prevLane = lastLane.current;
+      const laneRes = classifyLane(trimmed, { hasFocus: !!focusEntry, prevLane });
+      lastLane.current = laneRes.lane;
       const memory = memoryForModel(applied.brain.memory, trimmed, plan, nowMs);
       const semanticParams = readUserSemanticParams(applied.brain.memory);
 
@@ -738,38 +762,63 @@ export function Minato() {
         let replyText: string | null = null;
         let replyActions: MinatoAction[] = clientTask.actions;
         try {
-          const controller = new AbortController();
-          const timeout = window.setTimeout(() => controller.abort(), 56_000);
-          const res = await fetch("/api/minato/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messages: next.map(({ role, text: t }) => ({ role, text: t })),
-              traderName: firstName,
-              entries,
-              journalProvided: true,
-              primaryChallenge: challenge ?? undefined,
-              focusTradeId: focusEntry?.id ?? null,
-              prevIntent: lastIntent.current,
-              semanticParams,
-              companion: {
-                ...companion,
-                traderName: firstName,
-                semanticParams,
-                mind: mindForModel(applied.brain.mind, moods, nowMs),
-                brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()),
-                memory,
-              },
-            }),
-            signal: controller.signal,
-          });
-          window.clearTimeout(timeout);
-          if (res.ok) {
-            const json = (await res.json()) as {
-              text?: string;
-              fallback?: boolean;
-              actions?: MinatoAction[];
-            };
+          const thread = next.map(({ role, text: t }) => ({ role, text: t }));
+          const post = async (lane: Lane) => {
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 56_000);
+            try {
+              // Slim for chat / calc: a few turns, a tiny glance, no entries, no memory.
+              const slim = lane !== "data";
+              const res = await fetch("/api/minato/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(
+                  slim
+                    ? {
+                        lane,
+                        prevLane,
+                        messages: thread.slice(-8),
+                        traderName: firstName,
+                        entries: [],
+                        journalProvided: true,
+                        focusTradeId: focusEntry?.id ?? null,
+                        semanticParams,
+                        glance,
+                      }
+                    : {
+                        lane: "data",
+                        messages: thread,
+                        traderName: firstName,
+                        entries,
+                        journalProvided: true,
+                        primaryChallenge: challenge ?? undefined,
+                        focusTradeId: focusEntry?.id ?? null,
+                        prevIntent,
+                        semanticParams,
+                        companion: {
+                          ...companion,
+                          traderName: firstName,
+                          semanticParams,
+                          mind: mindForModel(applied.brain.mind, moods, nowMs),
+                          brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()),
+                          memory,
+                        },
+                      },
+                ),
+                signal: controller.signal,
+              });
+              return res.ok
+                ? ((await res.json()) as { text?: string; fallback?: boolean; needs?: string; actions?: MinatoAction[] })
+                : null;
+            } finally {
+              window.clearTimeout(timeout);
+            }
+          };
+
+          let json = await post(laneRes.lane);
+          // The model decided this one needs the trader's real data → send it once, now.
+          if (json?.needs === "journal") json = await post("data");
+          if (json) {
             replyText = json.fallback ? null : json.text ?? null;
             if (Array.isArray(json.actions) && json.actions.length > 0) {
               replyActions = json.actions;
@@ -831,6 +880,7 @@ export function Minato() {
       pendingSlot,
       firstName,
       executeMinatoAction,
+      glance,
     ],
   );
 
@@ -1197,7 +1247,7 @@ export function Minato() {
                     <i />
                     <i />
                   </span>
-                  {slow && <span className="text-[12.5px] text-muted">Checking your journal…</span>}
+                  {slow && <span className="text-[12.5px] text-muted">Still on it…</span>}
                 </div>
               )}
             </div>

@@ -119,7 +119,7 @@ export function packFacts(inp: PackInput): { facts: Record<string, unknown>; met
       note: "referencedTrades / recentTrades / similarPastTrades hold only the trades relevant to THIS question, not the whole journal. If the trader asks about a trade that is not shown, say you cannot see it in this view and ask for its date or instrument. Never claim a trade does not exist.",
     },
   };
-  if (plan.stats) out.totals = { trades: f.trades, totalPnl: f.totalPnl, winRatePct: f.winRatePct, avgDayPnl: f.avgDayPnl, drawdown: f.drawdown, processScore: f.processScore, reviewedCount: f.reviewedCount, planVsActual: f.planVsActual };
+  if (plan.stats) out.totals = { trades: f.trades, tradingDays: f.tradingDays, totalPnl: f.totalPnl, winRatePct: f.winRatePct, avgDayPnl: f.avgDayPnl, drawdown: f.drawdown, processScore: f.processScore, reviewedCount: f.reviewedCount, planVsActual: f.planVsActual };
   if (plan.hold) out.hold = f.hold;
   if (plan.patterns) out.patterns = f.patterns;
   const d = f.deep ?? {};

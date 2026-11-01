@@ -412,3 +412,41 @@
   .mn-icon-btn, .mn-send, .mn-field, .mn-panel, .mn-working-body, .mn-action, .mn-chip, .mn-tools { transition: none; }
   .mn-animate > .mn-block { animation: none; }
 }
+
+/* ==========================================================================
+   PREMIUM POLISH — additive. Conversational replies read like Messages,
+   analytical replies keep the card. Theme tokens only; no new colours/fonts.
+   ========================================================================== */
+
+/* A reply that is just one short line (a greeting, a thank-you) stays calm, not headline-sized. */
+.mn-prose > .mn-lead:only-child {
+  font-size: 15.5px;
+  font-weight: 450;
+  line-height: 1.55;
+  letter-spacing: -0.008em;
+}
+.mn-prose > .mn-lead:only-child .mn-strong { font-weight: 650; }
+
+/* Lead sentence tucks closer to the rows that explain it. */
+.mn-prose > .mn-lead + .mn-kv { margin-top: 0.8rem; }
+
+/* Thinking dots: softer, a touch larger, with a gentle breathing glow instead of a hard bounce. */
+.mn-typing { gap: 5px; }
+.mn-typing i {
+  width: 6px;
+  height: 6px;
+  background: color-mix(in srgb, var(--ink) 38%, transparent);
+  animation: mn-breathe 1.35s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+@keyframes mn-breathe {
+  0%, 70%, 100% { opacity: 0.3; transform: scale(0.82); }
+  35% { opacity: 1; transform: scale(1); }
+}
+
+/* Clean, readable measure on wide docks; selection stays on-brand. */
+.mn-prose { max-width: 62ch; -webkit-font-smoothing: antialiased; }
+.mn-prose ::selection { background: color-mix(in srgb, var(--gold) 28%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mn-typing i { animation: none; opacity: 0.7; transform: none; }
+}

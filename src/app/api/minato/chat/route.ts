@@ -17,8 +17,14 @@ import {
   parseCalcQuery,
 } from "@/lib/minato/tools";
 import { summarizeWorkingMemory, type UserSemanticParams } from "@/lib/minato/extract";
-import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName, SITE_BLUEPRINT_PROMPT_TEXT } from "@/lib/minato/blueprint";
+import { resolveTraderFirstName, SITE_BLUEPRINT_PROMPT_TEXT } from "@/lib/minato/blueprint";
 import { enrichActionsFromReplyText, resolveMinatoTasks } from "@/lib/minato/actions";
+import { classifyLane, quickReply, type Lane } from "@/lib/minato/lane";
+import { marketClock, type MarketClock } from "@/lib/minato/market-clock";
+import { computeIdeal } from "@/lib/minato/ideal-calc";
+import {
+  CALC_PROMPT, CHAT_PROMPT, NEED_JOURNAL, callModel, cleanReply, leanContext, leanHistory, sanitizeGlance, type Glance,
+} from "@/lib/minato/lean";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -46,14 +52,19 @@ const SYSTEM_PROMPT = [
   "COMPARISONS across 3+ items or 2+ attributes: use a compact Markdown table (max 5 rows) instead of bullets.",
   "Use +/− signs on dollar and R results (e.g. **+$215**, **−0.4R**) so gains and losses read at a glance. Use plain `$` amounts for sizes and limits.",
   "",
+  "SCOPE (most important): answer exactly what was asked — nothing more. A greeting, thanks or small talk is NOT a request for a report: reply in one friendly line and never recite stats, trades, process scores or memory unprompted. Only bring up a number when it changes the answer.",
+  "- If you cannot tell which trade, period or metric the trader means, ask ONE short question and stop. Never guess.",
+  "- Never hand work back to the trader that you can do: if they ask for a plan, checklist or summary, WRITE it (compact, from their own rules, limits and setups). Never end with a request that they write it.",
+  "- Never mention market data, feeds, streaming or 'no live data'. `facts.currentContext.market` tells you whether futures are open — use it only if the trader asks about the market or session timing.",
+  "- Basis: `winRatePct` and `avgDayPnl` are per trading DAY (they match the dashboard). `trades` is the number of trades; `tradingDays` the number of days.",
+  "- Drawdown: `totals.drawdown.room` is what is LEFT before the limit, `used` is what is already gone, `usedPct` the share consumed. Never swap them.",
+  "",
   "TRADER NAME: address the trader by `facts.trader` (their real first name) — sparingly, only when it adds warmth (e.g. the first line of an emotional reply). NEVER use an email handle, username with digits, or raw user ID.",
   "",
   "TASKS & REMINDERS: you can act in EdgeBook — launch Trade Replay, open a trade in Journal or Quick Autopsy, navigate to any section or Practise drill, set today's daily loss limit, log a no-trade day, change guardrail rules, log a trade, switch theme/challenge, and set timed or pre-trade reminders. The app runs these actions and attaches the tap buttons itself, so just confirm in one short line ('Opening your replay.') instead of explaining how to click around.",
   "- NEVER say you cannot set reminders or timers, and never offer a menu of 'what I can do instead'. If a reminder request reaches you, confirm it in one line and ask only for a missing time.",
   "- NEVER output placeholder paths like `/journal/review/[id]`. Every trade in `facts.recentTrades`, `facts.referencedTrades` and `facts.hold.longestHoldTrade` has its exact `id`.",
   "- Don't mention features or sections the trader didn't ask about.",
-  "",
-  SITE_BLUEPRINT_PROMPT_TEXT,
   "",
   "MATH & ACCURACY:",
   "- Answer the exact question first with the exact numbers asked for. Never swap in a different analysis.",
@@ -83,7 +94,11 @@ export async function POST(request: Request) {
     messages?: MinatoMessage[];
     entries?: Record<string, unknown>[];
     journalProvided?: boolean;
-    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode"> | null;
+    primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode" | "trailingBasis" | "drawdownFloor"> | null;
+    /** Forced by the client when it re-sends a question after the model asked for the journal. */
+    lane?: Lane | null;
+    prevLane?: Lane | null;
+    glance?: unknown;
     companion?: Record<string, unknown> | null;
     focusTradeId?: string | null;
     prevIntent?: Intent | null;
@@ -109,6 +124,25 @@ export async function POST(request: Request) {
     sessionName: session?.name ?? null,
   });
 
+  // ---- Lane gate: decide in microseconds what this message needs ----
+  const now = new Date();
+  const clock = marketClock(now);
+  const laneIn = body.lane === "data"
+    ? { lane: "data" as Lane, reason: "forced" }
+    : classifyLane(question, { hasFocus: !!body.focusTradeId, prevLane: body.prevLane ?? null });
+
+  if (laneIn.lane !== "data") {
+    const lean = await leanLane({
+      lane: laneIn.lane, reason: laneIn.reason, question, messages, traderName, clock,
+      semanticParams, glance: sanitizeGlance(body.glance),
+    });
+    if (lean !== "escalate") return lean;
+    // The model said it needs the trader's data. A slim client holds it back until asked for.
+    if (body.journalProvided && clientEntries.length === 0) {
+      return NextResponse.json({ needs: "journal", meta: { lane: "chat", escalated: true } });
+    }
+  }
+
   // ---- Load live journal data ----
   let entries: Record<string, unknown>[] = clientEntries;
   if (session && entries.length === 0 && !body.journalProvided) {
@@ -132,7 +166,6 @@ export async function POST(request: Request) {
   }
 
   // ---- Check Jarvis / Siri / Bixby Task Engine First ----
-  const now = new Date();
   const todayIso = now.toISOString().slice(0, 10);
   const taskRes = resolveMinatoTasks({
     query: question,
@@ -171,8 +204,14 @@ export async function POST(request: Request) {
     traderName,
     startingEquity: selectedChallenge?.startingBalance ?? 10000,
     targetEquity: selectedChallenge?.targetBalance ?? 20000,
-    maxDrawdown: semanticParams.drawdownLimit ?? selectedChallenge?.maxDrawdown ?? 1000,
+    // Same source of truth as the dashboard: the challenge's own limit and drawdown model.
+    maxDrawdown: (selectedChallenge?.maxDrawdown && selectedChallenge.maxDrawdown > 0 ? selectedChallenge.maxDrawdown : null) ?? semanticParams.drawdownLimit ?? 1000,
     currency: "USD",
+    ...(selectedChallenge ? {
+      drawdownMode: selectedChallenge.drawdownMode ?? "static",
+      trailingBasis: selectedChallenge.trailingBasis ?? null,
+      drawdownFloor: selectedChallenge.drawdownFloor ?? null,
+    } : {}),
   };
 
   // ---- Deterministic facts & tools (backend-computed, hallucination-proof) ----
@@ -236,12 +275,11 @@ export async function POST(request: Request) {
   const facts = {
     currentContext: {
       today: todayIso,
-      weekday: now.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" }),
-      nyTime: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" }),
-      liveMarketDataAvailable: false,
+      weekday: clock.weekday,
+      nyTime: clock.time,
+      market: clock.summary,
     },
     trader: traderName,
-    siteBlueprint: EDGEBOOK_SITE_BLUEPRINT,
     primaryChallenge: selectedChallenge ? {
       name: selectedChallenge.name,
       startingBalance: selectedChallenge.startingBalance ?? null,
@@ -249,11 +287,17 @@ export async function POST(request: Request) {
       maxDrawdown: selectedChallenge.maxDrawdown ?? null,
       drawdownMode: selectedChallenge.drawdownMode ?? "static",
     } : null,
-    trades: stats.tradingDays,
+    trades: entries.length,
+    tradingDays: stats.tradingDays,
     totalPnl: Math.round(stats.totalPnl),
     winRatePct: Math.round(stats.winRate * 100),
     avgDayPnl: Math.round(stats.avgDayPnl),
-    drawdown: Math.round(stats.drawdown),
+    drawdown: {
+      used: Math.round(stats.drawdown),
+      limit: Math.round(effectiveSettings.maxDrawdown),
+      room: Math.round(stats.drawdownCushion ?? Math.max(0, effectiveSettings.maxDrawdown - stats.drawdown)),
+      usedPct: Math.round((stats.drawdownBudgetUsed ?? 0) * 100),
+    },
     hold: {
       avgWin: formatHold(holds.avgWinMin),
       avgLoss: formatHold(holds.avgLossMin),
@@ -293,7 +337,8 @@ export async function POST(request: Request) {
   };
 
   // ---- Deterministic answer path (always available, used directly for pure calculation or fallback) ----
-  const deterministic = respond(
+  let deterministicMemo: string | null = null;
+  const getDeterministic = () => (deterministicMemo ??= respond(
     {
       userFirstName: traderName,
       stats,
@@ -315,9 +360,9 @@ export async function POST(request: Request) {
       history: priorHistory,
       focusTradeId: body.focusTradeId ?? null,
     },
-  );
+  ));
 
-  const greetingText = greet({
+  const getGreeting = () => greet({
     userFirstName: traderName,
     stats,
     discipline: { disciplineStreak: 0 } as never,
@@ -348,13 +393,13 @@ export async function POST(request: Request) {
       today: facts.currentContext.today,
     });
     packed.facts.trader = traderName;
-    packed.facts.siteBlueprint = EDGEBOOK_SITE_BLUEPRINT;
-    packed.facts.hold = facts.hold;
+    if (plan.hold || route.intent === "general") packed.facts.hold = facts.hold;
     if (Object.keys(deterministicTools).length > 0) {
       packed.facts.deterministicTools = deterministicTools;
-      packed.facts.precomputedToolAnswer = deterministic;
+      packed.facts.precomputedToolAnswer = getDeterministic();
     }
-    const rawText = await callOpenRouterWithFallback(orConfig, workingMem.recentMessages, JSON.stringify(packed.facts), maxTokens);
+    const system = needsBlueprint(question) ? `${SYSTEM_PROMPT}\n\n${SITE_BLUEPRINT_PROMPT_TEXT}` : SYSTEM_PROMPT;
+    const rawText = await callOpenRouterWithFallback(orConfig, system, workingMem.recentMessages, JSON.stringify(packed.facts), maxTokens);
     if (rawText) {
       // Sanitize any accidental [id] or [trade-id] placeholders if a specific trade was resolved
       const finalActions = enrichActionsFromReplyText(rawText, taskRes.actions, entries as unknown as JournalEntry[]);
@@ -362,17 +407,19 @@ export async function POST(request: Request) {
         taskRes.resolvedTrade?.id ??
         (finalActions.find((a) => "tradeId" in a) as { tradeId?: string } | undefined)?.tradeId ??
         null;
+      const modelText = cleanReply(rawText);
       const cleanedText = primaryTradeId
-        ? rawText
+        ? modelText
             .replace(/\/journal\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
             .replace(/\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
-        : rawText;
+        : modelText;
 
       return NextResponse.json({
         text: cleanedText,
         actions: finalActions,
         meta: {
           deterministic: false,
+          lane: "data",
           provider: orConfig.model,
           intent: route.intent,
           category: route.category,
@@ -383,13 +430,14 @@ export async function POST(request: Request) {
     }
   }
 
-  const text = question ? deterministic : greetingText;
+  const text = question ? getDeterministic() : getGreeting();
   const finalActions = enrichActionsFromReplyText(text, taskRes.actions, entries as unknown as JournalEntry[]);
   return NextResponse.json({
     text,
     actions: finalActions,
     meta: {
       deterministic: true,
+      lane: "data",
       provider: "deterministic",
       intent: route.intent,
       category: route.category,
@@ -411,6 +459,7 @@ function sanitizeCompanion(value: unknown): Record<string, unknown> | null {
 
 async function callOpenRouterWithFallback(
   config: OpenRouterConfig,
+  system: string,
   history: MinatoMessage[],
   factsJson: string,
   maxTokens: number,
@@ -439,7 +488,7 @@ async function callOpenRouterWithFallback(
             max_tokens: effectiveTokens,
             ...(plain ? {} : { reasoning: { effort: "low" } }),
             messages: [
-              { role: "system", content: SYSTEM_PROMPT },
+              { role: "system", content: system },
               { role: "user", content: `DETERMINISTIC FACTS & TOOL OUTPUTS (source of truth for this whole conversation):\n${factsJson}` },
               { role: "assistant", content: "Understood — I'll treat those facts and pre-computed tool outputs as exact ground truth for everything below." },
               ...conversation,
@@ -465,4 +514,54 @@ async function callOpenRouterWithFallback(
     }
   }
   return null;
+}
+
+/** Product-help questions need the site map; nothing else should pay for it. */
+function needsBlueprint(q: string): boolean {
+  return /\b(where|how (do|can|to)|open|go to|take me|navigate|show me|feature|section|page|tab|settings?|profile|set ?up|import|export|connect|friends?|lessons?|practi[cs]e|matrix|lab|backtest\w*|feed|calendar|journal)\b/i.test(q);
+}
+
+/**
+ * Chat & ideal-calculation lanes: no journal, no memory dump, no blueprint.
+ * Returns the finished response, or "escalate" when the model says it needs the trader's data.
+ */
+async function leanLane(a: {
+  lane: Lane;
+  reason: string;
+  question: string;
+  messages: MinatoMessage[];
+  traderName: string;
+  clock: MarketClock;
+  semanticParams: Partial<UserSemanticParams>;
+  glance: Glance | null;
+}): Promise<NextResponse | "escalate"> {
+  const sp = a.semanticParams as { riskDollars?: number | null; riskPct?: number | null; stopPoints?: number | null };
+  const ideal = a.lane === "calc" ? computeIdeal(a.question, { riskDollars: sp.riskDollars ?? null, riskPct: sp.riskPct ?? null, stopPoints: sp.stopPoints ?? null }) : null;
+  const lane: Lane = ideal ? "calc" : "chat";
+  const meta = { lane, reason: a.reason, deterministic: false, tokensIn: "lean" };
+
+  const config = getOpenRouterConfig();
+  if (config) {
+    const raw = await callModel({
+      config,
+      system: ideal ? CALC_PROMPT : CHAT_PROMPT,
+      context: leanContext({
+        name: a.traderName, clock: a.clock, glance: ideal ? null : a.glance,
+        calc: ideal ? { inputs: ideal.inputs, results: ideal.results, missing: ideal.missing, assumptions: ideal.assumptions, fallbackText: ideal.fallbackText } : undefined,
+      }),
+      conversation: leanHistory(a.messages),
+      maxTokens: ideal ? 650 : 320,
+    });
+    if (raw) {
+      const text = cleanReply(raw);
+      if (text.includes(NEED_JOURNAL)) return "escalate";
+      if (text) return NextResponse.json({ text, meta: { ...meta, provider: config.model } });
+    }
+  }
+
+  // No model reachable — still instant, still clean, never a stats dump.
+  if (ideal) return NextResponse.json({ text: ideal.fallbackText, meta: { ...meta, deterministic: true, provider: "ideal-calc" } });
+  const quick = quickReply(a.question, a.traderName);
+  if (quick) return NextResponse.json({ text: quick, meta: { ...meta, deterministic: true, provider: "quick-reply" } });
+  return NextResponse.json({ fallback: true, text: "", meta });
 }
