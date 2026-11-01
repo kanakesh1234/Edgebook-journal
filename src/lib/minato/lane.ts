@@ -77,14 +77,14 @@ const SELF_CONTAINED = /\d+(?:\.\d+)?\s*(?:%|percent)\s*(?:win|wr|accuracy)|win 
 /* ---------------------------------- plain chat ---------------------------------- */
 
 const GREETING =
-  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you|how'?s it going|who are you|what can you do|help)\b/;
+  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help)\b/;
 
 export function classifyLane(text: string, opts: LaneOptions = {}): LaneResult {
   const t = norm(text);
   if (!t) return { lane: "chat", reason: "empty" };
 
   // 1. Plain greetings / thanks / acknowledgements — with ANY trailing address ("good morning sensei").
-  if (GREETING.test(t) && words(t) <= 6 && !DATA.some((re) => re.test(t))) {
+  if (GREETING.test(t) && words(t) <= 8 && !DATA.some((re) => re.test(t))) {
     return { lane: "chat", reason: "greeting" };
   }
 
@@ -117,6 +117,15 @@ export function quickReply(text: string, name: string): string | null {
   if (/^good evening\b/.test(t)) return `Good evening${who}. What are we working on?`;
   if (/^(good night|gn|bye|see you|later)\b/.test(t)) return `Rest well${who}. I'll be here.`;
   if (/^(thanks|thank you|thx|ty|cheers)\b/.test(t)) return "Anytime.";
+  if (/\b(what are you (doing|up to)|what('?re| are) you doing)\b/.test(t)) {
+    return `I'm right here${who} — ready whenever you want to review a trade, sharpen a concept, build a routine, or just talk through what's on your mind.`;
+  }
+  if (/^(how are you( doing)?|how'?s it going|are you there)\b/.test(t)) {
+    return `Doing well${who} — ready whenever you want to review a trade, run numbers, or talk through what's on your mind.`;
+  }
+  if (/^(who are you|what can you do|help)\b/.test(t)) {
+    return `I'm Minato, your trading companion${who}. Ask me about a setup or calculation, or tell me to replay a trade, set a reminder, or open any section.`;
+  }
   if (/^(hi|hii+|hello|hey+|yo|sup|hola|namaste|howdy|what'?s up|wassup)\b/.test(t)) return `Hey${who}. What's on your mind?`;
   if (/^(ok|okay|cool|great|nice|awesome|perfect|got it|understood|sure)\b/.test(t)) return "Got it.";
   return null;

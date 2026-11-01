@@ -38,6 +38,8 @@ ok(lane("what went wrong here", { hasFocus: true }) === "data", "focus trade →
 
 // ---- quick replies never dump stats
 ok(/good morning, nandigam/i.test(quickReply("good morning sensei", "Nandigam") ?? ""), "quick morning reply");
+ok(/ready whenever you want/i.test(quickReply("what are you doing", "Nandigam") ?? ""), "what are you doing gets a conversational reply, never a stats dump");
+ok(routeIntent("what are you doing").intent === "chitchat", "router treats 'what are you doing' as chitchat");
 ok(quickReply("explain fvg", "Nandigam") === null, "no quick reply for real questions");
 
 // ---- ideal math (exact, no journal)

@@ -83,20 +83,13 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     return taskRes.directReply;
   }
 
-  // --- PRIORITY 0B: GREETINGS & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
+  // --- PRIORITY 0B: GREETINGS, SMALL TALK & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
+  if (/\b(what are you (doing|up to)|what('?re| are) you doing|how are you( doing)?|how'?s it going|are you there)\b/i.test(q)) {
+    return `I'm right here, ${name} — ready whenever you want to review a trade, sharpen a concept, build a routine, or just talk through what's on your mind.`;
+  }
+
   if (/^\s*(hi|hello|hey|yo|good (morning|afternoon|evening)|hi sensei|hey sensei|hello sensei|hi minato|hey minato)\b[\s!.?]*$/i.test(q)) {
-    const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
-    const topLeak = mistakes[0]?.label;
-    return [
-      `Hey ${name} — your journal is loaded.`,
-      unreviewed > 0
-        ? `- **Journal** · ${unreviewed} unreviewed ${unreviewed === 1 ? "trade" : "trades"} waiting for Quick Autopsy`
-        : `- **Home** · Lock today's loss limit before your next setup`,
-      topLeak
-        ? `- **Practise** · A 5-minute drill on **${topLeak}**`
-        : `- **Practise** · The Matrix or Math Duel warm-up`,
-      `What should we start with?`,
-    ].join("\n");
+    return `Hey, ${name}. What's on your mind?`;
   }
 
   if (/\b(where (is|do i|can i|to|should i)|how do i (use|find|navigate|practi[cs]e|backtest|review)|what sections|website|blueprint|guide me|what should i (practi[cs]e|review|do)|where should i go|in edgebook)\b/i.test(q)) {
@@ -377,8 +370,8 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     return parts.join("\n");
   }
 
-  // --- Overview / performance ---
-  if (/how am i|doing|overall|performance|summary|stats|edge|accuracy|brain/.test(q)) {
+  // --- Overview / performance (only when asking about the trader's own performance, never bare "doing") ---
+  if (/\b(how am i( doing| trading| performing)?|how('?s| is) my trading|overall|performance|summary|stats|statistics|my edge|accuracy|brain)\b/.test(q)) {
     const parts: string[] = [];
     parts.push(`Across **${stats.tradingDays} trading days** (${ctx.recentTrades.length} trades), ${name}, your net P&L is **${money(stats.totalPnl)}** with a **${Math.round(stats.winRate * 100)}%** win rate.`);
     parts.push(`1. **Average day P&L**: ${money(stats.avgDayPnl)} · Max drawdown: ${money(stats.drawdown)}`);
