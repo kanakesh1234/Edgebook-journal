@@ -61,6 +61,12 @@ const DATA: RegExp[] = [
   /\bwith this win ?rate\b|\bat (my|this|the current) win ?rate\b|\bwith my (win ?rate|stats|numbers|average)\b/,
   /\b(following|followed|follow) (the |my )?plan\b/,
   /\bdrawdown (room|left|limit|used)|daily (loss )?limit|loss limit\b/,
+  // "A+" is a review verdict the trader assigns to their own trades — it can only be answered from the journal.
+  /(?:^|[^\p{L}\p{N}])a\s?\+|\ba[- ]plus\b/u,
+  // Ranking questions over the trader's own categories, with or without "my": "best setup", "worst session".
+  /\b(best|worst|top|strongest|weakest|most profitable|least profitable|most consistent)\b.{0,24}\b(setups?|instruments?|sessions?|windows?|days?|times?|hours?|trades?)\b/,
+  // First-person trade verbs: "the setup I took", "what I traded", "the trade I lost".
+  /\b(i|we) (took|traded|entered|exited|risked|lost|won|broke|followed|skipped|missed)\b/,
 ];
 
 /* ------------------------------- ideal calculations ------------------------------- */
@@ -77,7 +83,7 @@ const SELF_CONTAINED = /\d+(?:\.\d+)?\s*(?:%|percent)\s*(?:win|wr|accuracy)|win 
 /* ---------------------------------- plain chat ---------------------------------- */
 
 const GREETING =
-  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help)\b/;
+  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help$)\b/;
 
 export function classifyLane(text: string, opts: LaneOptions = {}): LaneResult {
   const t = norm(text);
@@ -123,7 +129,7 @@ export function quickReply(text: string, name: string): string | null {
   if (/^(how are you( doing)?|how'?s it going|are you there)\b/.test(t)) {
     return `Doing well${who} — ready whenever you want to review a trade, run numbers, or talk through what's on your mind.`;
   }
-  if (/^(who are you|what can you do|help)\b/.test(t)) {
+  if (/^(who are you|what can you do|help$)\b/.test(t)) {
     return `I'm Minato, your trading companion${who}. Ask me about a setup or calculation, or tell me to replay a trade, set a reminder, or open any section.`;
   }
   if (/^(hi|hii+|hello|hey+|yo|sup|hola|namaste|howdy|what'?s up|wassup)\b/.test(t)) return `Hey${who}. What's on your mind?`;

@@ -7,6 +7,7 @@
  */
 import type { OpenRouterConfig } from "@/lib/services/ai";
 import type { MarketClock } from "./market-clock";
+import { callChat, logModelFailure } from "./provider";
 
 export const NEED_JOURNAL = "[[JOURNAL]]";
 export const LEAN_HISTORY_TURNS = 8;
@@ -92,7 +93,7 @@ export function leanContext(opts: { name: string; clock: MarketClock; glance: Gl
   return JSON.stringify(ctx);
 }
 
-/** One OpenRouter call with model fallback. Plain (no reasoning) first — fastest and cheapest. */
+/** One model call via the shared provider (retries, classified failures, logged). Plain (no reasoning) — fastest and cheapest. */
 export async function callModel(opts: {
   config: OpenRouterConfig;
   system: string;
@@ -102,38 +103,21 @@ export async function callModel(opts: {
   budgetMs?: number;
   perCallMs?: number;
 }): Promise<string | null> {
-  const models = opts.config.models ?? [opts.config.model, ...(opts.config.fallbackModel ? [opts.config.fallbackModel] : [])];
-  const deadline = Date.now() + (opts.budgetMs ?? 24_000);
-  for (const model of models.slice(0, 4)) {
-    const remaining = deadline - Date.now();
-    if (remaining < 2_500) return null;
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${opts.config.apiKey}`, "Content-Type": "application/json", "X-Title": "EdgeBook" },
-        body: JSON.stringify({
-          model,
-          max_tokens: opts.maxTokens,
-          temperature: 0.4,
-          messages: [
-            { role: "system", content: opts.system },
-            { role: "user", content: `CONTEXT (facts for you, not for quoting):\n${opts.context}` },
-            { role: "assistant", content: "Understood." },
-            ...opts.conversation,
-          ],
-        }),
-        signal: AbortSignal.timeout(Math.min(opts.perCallMs ?? 12_000, remaining)),
-      });
-      if (!res.ok) continue;
-      const json = (await res.json()) as { choices?: { message?: { content?: string | null } }[]; error?: unknown };
-      if (json.error) continue;
-      const text = json.choices?.[0]?.message?.content?.trim();
-      if (text) return text;
-    } catch {
-      /* try the next model */
-    }
-  }
-  return null;
+  const r = await callChat({
+    config: opts.config,
+    maxTokens: opts.maxTokens,
+    temperature: 0.4,
+    budgetMs: opts.budgetMs ?? 24_000,
+    perCallMs: opts.perCallMs ?? 12_000,
+    messages: [
+      { role: "system", content: opts.system },
+      { role: "user", content: `CONTEXT (facts for you, not for quoting):\n${opts.context}` },
+      { role: "assistant", content: "Understood." },
+      ...opts.conversation,
+    ],
+  });
+  logModelFailure("lean", r);
+  return r.text;
 }
 
 /** Strip artefacts free models sometimes add: think-tags, stray fences, a leading "Minato:" label. */

@@ -25,3 +25,5 @@ import "./minato/mind-engine.test.ts";
 import "./minato/evals.test.ts";
 import "./minato/format.test.ts";
 import "./minato/lane.test.ts";
+import "./minato/brain2.test.ts";
+import "./minato/route.test.ts";

@@ -13,6 +13,7 @@ import {
 import type { UserSemanticParams } from "./extract";
 import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName } from "./blueprint";
 import { resolveMinatoTasks, type SimpleChatTurn } from "./actions";
+import { aPlusSummary, newestFirst, setupBreakdown, wantsSetupAnalysis, THIN_SAMPLE } from "./setup-analytics";
 
 /* ------------------------------------------------------------------ */
 /*  MINATO — English-only, analytical, evidence-based + Jarvis Tasks.  */
@@ -32,6 +33,8 @@ export interface RespondOptions {
   maxDrawdown?: number;
   history?: SimpleChatTurn[];
   focusTradeId?: string | null;
+  /** Set when the AI model was asked first and failed — shapes the honest fallback wording. */
+  degraded?: string | null;
 }
 
 /** Focused starting points for a deeper conversation. Each remains grounded
@@ -62,7 +65,10 @@ export function greet(ctx: EdgeBookContext): string {
   return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, losing streak odds, exact position sizing, or tell me to open a trade replay or section.`;
 }
 
-export function respond(ctx: EdgeBookContext, input: string, opts: RespondOptions = {}): string {
+export function respond(rawCtx: EdgeBookContext, input: string, opts: RespondOptions = {}): string {
+  // Callers pass entries in whatever order they hold them. Every "last N / recent / momentum" answer below assumes
+  // newest-first, so enforce it once here instead of trusting each caller.
+  const ctx: EdgeBookContext = { ...rawCtx, recentTrades: newestFirst(rawCtx.recentTrades) };
   const q = input.toLowerCase().trim();
   const name = resolveTraderFirstName({ fullName: ctx.userFirstName });
   const { stats, discipline, adherence } = ctx;
@@ -259,6 +265,12 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       lines.push(`\nTap **Replay** or **Open in Journal** below — or say *"replay this trade"* and I'll launch it right now.`);
       return lines.join("\n");
     }
+  }
+
+  // --- Setups and A+ trades (A+ is a review verdict; see setup-analytics.ts) ---
+  const setupQ = wantsSetupAnalysis(q);
+  if (setupQ.aPlus || (setupQ.setups && !/\b(last|latest|previous) (trade|entry)\b/.test(q))) {
+    return answerSetups(ctx, name, setupQ.aPlus);
   }
 
   // --- Hold time (including "what is my largest holding time and which trade it is") ---
@@ -527,28 +539,56 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     return parts.join("\n");
   }
 
-  // --- Comprehensive Adaptive Brain synthesis for any open-ended question ---
-  const recent5 = ctx.recentTrades.slice(0, 5);
-  const recentWins = recent5.filter((e) => e.pnl > 0).length;
-  const recentPnl = recent5.reduce((s, e) => s + e.pnl, 0);
-  const topMistake = mistakes[0];
-  const latestLesson = ctx.recentTrades.find((e) => e.review?.followUp?.biggestMistake || e.reflection?.lesson);
-  const lessonQuote = latestLesson?.review?.followUp?.biggestMistake ?? latestLesson?.reflection?.lesson;
+  // --- No deterministic answer exists for this question ---
+  // This used to print a generic overview (win rate, last 5 trades, top mistake) for ANY unmatched question, which made
+  // every different question look like the same answer. Say plainly what happened instead.
+  const why = opts.degraded ? ` (my reasoning engine ${opts.degraded})` : "";
+  return [
+    `I can't answer that one reliably right now${why}, and I won't guess from your journal.`,
+    `- **I can answer now** · setups, A+ trades, mistakes, hold time, streak odds, sizing`,
+    `> Ask again in a minute, or rephrase around one of those.`,
+  ].join("\n");
+}
 
-  const synthesis: string[] = [
-    `Based on your **${ctx.recentTrades.length} recorded trades**, ${name} (${cal.tier} calibration · ${cal.calibrationPct}%), your overall win rate is **${Math.round(stats.winRate * 100)}%** (${money(stats.totalPnl)} net).`,
-    `1. **Recent momentum (last ${recent5.length} trades)**: ${recentWins}/${recent5.length} won (${money(recentPnl)})`,
+function answerSetups(ctx: EdgeBookContext, name: string, aPlusAsked: boolean): string {
+  const trades = ctx.recentTrades;
+  if (trades.length === 0) return "No trades recorded yet — log a few in **Journal** and I can rank your setups.";
+
+  if (aPlusAsked) {
+    const a = aPlusSummary(trades);
+    if (a.count === 0) {
+      const best = setupBreakdown(trades).rows[0];
+      return [
+        `None of your ${a.total} trades is marked **A+** yet, ${name} — ${a.rated === 0 ? "none has a process verdict at all" : `${a.rated} have a process verdict, but not A+`}.`,
+        best ? `- **Best setup, all trades** · ${best.setup} ${money(best.netPnl)} (${best.trades})` : `- **Setups** · none recorded`,
+        `> Mark trades **A+ trade** in **Journal → Quick Autopsy** and I'll rank them.`,
+      ].join("\n");
+    }
+    const best = a.best!;
+    const lines = [
+      `Your best A+ setup is **${best.setup}**: **${money(best.netPnl)}** across **${best.trades}** A+ trade${best.trades === 1 ? "" : "s"}${best.winRatePct != null ? ` (${best.winRatePct}% win rate)` : ""}.`,
+      `- **All A+ trades** · ${a.count} · ${money(a.netPnl)}${a.winRatePct != null ? ` · ${a.winRatePct}% win rate` : ""}`,
+    ];
+    for (const r of a.bySetup.filter((r) => r.setup !== best.setup).slice(0, 2)) {
+      lines.push(`- **${r.setup}** · ${money(r.netPnl)} · ${r.trades} A+ trade${r.trades === 1 ? "" : "s"}${r.avgR != null ? ` · ${r.avgR}R avg` : ""}`);
+    }
+    if (a.bySetup.every((r) => r.thin)) lines.push(`> Small sample — fewer than ${THIN_SAMPLE} A+ trades per setup, so treat the ranking as early.`);
+    else if (a.count < a.rated) lines.push(`> ${a.count} of ${a.rated} rated trades are A+; ${a.total - a.rated} have no process verdict yet.`);
+    return lines.join("\n");
+  }
+
+  const t = setupBreakdown(trades);
+  const rows = t.rows.filter((r) => r.setup !== "(no setup recorded)");
+  if (rows.length === 0) return "No setups recorded yet. Define a setup in **Trading Lab → Playbook** and tag your trades with it — then I can rank them.";
+  const top = rows[0]!;
+  const lines = [
+    `Your top setup is **${top.setup}**: **${money(top.netPnl)}** over **${top.trades}** trade${top.trades === 1 ? "" : "s"}${top.winRatePct != null ? ` (${top.winRatePct}% win rate)` : ""}.`,
   ];
-  if (topMistake) {
-    synthesis.push(`2. **Biggest mistake to eliminate**: ${topMistake.label} (${topMistake.count} occurrences · cost ${money(-topMistake.cost)}) — practice this in **Practise → The Matrix**`);
-  } else {
-    synthesis.push(`2. **Average day P&L**: ${money(stats.avgDayPnl)} · Max drawdown: ${money(stats.drawdown)}`);
+  for (const r of rows.slice(1, 4)) {
+    lines.push(`- **${r.setup}** · ${money(r.netPnl)} · ${r.winRatePct ?? "—"}% win · ${r.trades} trade${r.trades === 1 ? "" : "s"}${r.avgR != null ? ` · ${r.avgR}R avg` : ""}`);
   }
-  if (lessonQuote) {
-    synthesis.push(`3. **Your own recent lesson (${latestLesson!.date})**: “${lessonQuote}”`);
-  }
-  synthesis.push(`\nAsk me about losing streak probabilities, exact MNQ/NQ position sizing, or tell me to replay a trade or open any section.`);
-  return synthesis.join("\n");
+  if (rows.every((r) => r.thin)) lines.push(`> Small samples — fewer than ${THIN_SAMPLE} trades per setup.`);
+  return lines.join("\n");
 }
 
 function executionVerdict(entry: EdgeBookContext["recentTrades"][number]): string {

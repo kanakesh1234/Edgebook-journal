@@ -11,6 +11,8 @@ import path from "node:path";
 const root = ${JSON.stringify(root)};
 const tryExt = (p) => [p, p + ".ts", p + ".tsx", p + "/index.ts"].find((c) => existsSync(c) && !c.endsWith("/") && /\\.(ts|tsx)$/.test(c));
 export async function resolve(spec, ctx, next) {
+  if (spec === "next/server") return { url: pathToFileURL(path.join(root, "tests", "_shims", "next-server.mjs")).href, shortCircuit: true };
+  if (spec === "server-only") return { url: pathToFileURL(path.join(root, "tests", "_shims", "empty.mjs")).href, shortCircuit: true };
   let base = null;
   if (spec.startsWith("@/")) base = path.join(root, "src", spec.slice(2));
   else if ((spec.startsWith("./") || spec.startsWith("../")) && ctx.parentURL?.startsWith("file:")) base = path.resolve(path.dirname(fileURLToPath(ctx.parentURL)), spec);

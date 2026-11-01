@@ -22,6 +22,10 @@ import { enrichActionsFromReplyText, resolveMinatoTasks } from "@/lib/minato/act
 import { classifyLane, quickReply, type Lane } from "@/lib/minato/lane";
 import { marketClock, type MarketClock } from "@/lib/minato/market-clock";
 import { computeIdeal } from "@/lib/minato/ideal-calc";
+import { callChat, failureWording, logModelFailure, summarizeAttempts, type ChatMessage, type FailureKind, type ModelResult } from "@/lib/minato/provider";
+import { sanitizeEntries } from "@/lib/minato/sanitize";
+import { newestFirst, setupToolResult, wantsSetupAnalysis } from "@/lib/minato/setup-analytics";
+import { correctionPrompt, verifyReply, withUnverifiedNote, type Verification } from "@/lib/minato/verify";
 import {
   CALC_PROMPT, CHAT_PROMPT, NEED_JOURNAL, callModel, cleanReply, leanContext, leanHistory, sanitizeGlance, type Glance,
 } from "@/lib/minato/lean";
@@ -82,7 +86,17 @@ const SYSTEM_PROMPT = [
   "TRADING RULES: a winning trade with broken rules is a process failure; a losing trade with clean rules is a valid loss. No buy/sell signals, predictions or guarantees. When `facts.primaryChallenge` is present, analyse ONLY that challenge. Use **bold** only for key numbers and the lead; never escape asterisks.",
 ].join("\n");
 
+/** Error boundary: whatever goes wrong inside, the client gets a clean signal to use its local provider — never a stack trace. */
 export async function POST(request: Request) {
+  try {
+    return await handle(request);
+  } catch (error) {
+    console.error("[minato:route] unhandled error:", error instanceof Error ? `${error.name}: ${error.message}` : "unknown");
+    return NextResponse.json({ error: "internal", fallback: true, text: "", meta: { lane: "data", degraded: { kind: "internal" } } }, { status: 500 });
+  }
+}
+
+async function handle(request: Request) {
   const session = sessionOf(request);
   if (requiresAuth() && !session) return NextResponse.json({ error: "not_logged_in", text: "Please sign in to talk to Minato." }, { status: 401 });
   if (rateLimited(`minato:${clientKey(request, session?.email)}`, 30, 5 * 60_000)) {
@@ -109,7 +123,7 @@ export async function POST(request: Request) {
     .filter((m): m is MinatoMessage => !!m && typeof m === "object" && (m.role === "user" || m.role === "buddy") && typeof m.text === "string")
     .slice(-HISTORY_TURNS)
     .map((m) => ({ ...m, text: m.text.slice(0, HISTORY_CHARS) }));
-  const clientEntries = (Array.isArray(body.entries) ? body.entries : []).slice(0, 5000);
+  const { entries: clientEntries, dropped: droppedEntries } = sanitizeEntries(body.entries);
   const selectedChallenge = body.primaryChallenge ?? null;
   const maxTokens = REPLY_TOKENS;
   const companion = sanitizeCompanion(body.companion);
@@ -154,7 +168,7 @@ export async function POST(request: Request) {
         const doc = (await readJournalDoc(authed.drive.accessToken, authed.drive.folders)) as
           | { entries?: Record<string, unknown>[] }
           | null;
-        entries = doc?.entries ?? [];
+        entries = sanitizeEntries(doc?.entries).entries;
       } catch {
         entries = [];
       }
@@ -164,6 +178,9 @@ export async function POST(request: Request) {
   if (selectedChallenge) {
     entries = entries.filter((entry) => entry.challengeId === selectedChallenge.id);
   }
+  // One deterministic order for everything downstream ("last 5", "recent", "momentum"). The client sends entries in
+  // whatever order its store holds them, which is why identical questions used to give different recent-trade numbers.
+  entries = newestFirst(entries as { date?: string; entryTime?: string; createdAt?: number; id?: string }[]) as Record<string, unknown>[];
 
   // ---- Check Jarvis / Siri / Bixby Task Engine First ----
   const todayIso = now.toISOString().slice(0, 10);
@@ -260,6 +277,10 @@ export async function POST(request: Request) {
     );
   }
 
+  if (wantsSetupAnalysis(question).setups) {
+    deterministicTools.setupPerformance = setupToolResult(entries as unknown as JournalEntry[]);
+  }
+
   const concepts = [...new Set(
     (entries as { review?: { concepts?: { used?: string[] } } }[]).flatMap((e) => e.review?.concepts?.used ?? []),
   )];
@@ -338,6 +359,7 @@ export async function POST(request: Request) {
 
   // ---- Deterministic answer path (always available, used directly for pure calculation or fallback) ----
   let deterministicMemo: string | null = null;
+  let degradedReason: string | null = null;
   const getDeterministic = () => (deterministicMemo ??= respond(
     {
       userFirstName: traderName,
@@ -359,6 +381,7 @@ export async function POST(request: Request) {
       maxDrawdown: effectiveSettings.maxDrawdown,
       history: priorHistory,
       focusTradeId: body.focusTradeId ?? null,
+      degraded: degradedReason,
     },
   ));
 
@@ -375,6 +398,7 @@ export async function POST(request: Request) {
     privacy: { includeNotes: true },
   });
 
+  let modelFailure: { kind: FailureKind | null; diagnostics: string } | null = null;
   const orConfig = getOpenRouterConfig();
   if (orConfig && entries.length > 0) {
     const plan = planFor(route);
@@ -399,15 +423,43 @@ export async function POST(request: Request) {
       packed.facts.precomputedToolAnswer = getDeterministic();
     }
     const system = needsBlueprint(question) ? `${SYSTEM_PROMPT}\n\n${SITE_BLUEPRINT_PROMPT_TEXT}` : SYSTEM_PROMPT;
-    const rawText = await callOpenRouterWithFallback(orConfig, system, workingMem.recentMessages, JSON.stringify(packed.facts), maxTokens);
+    const factsJson = JSON.stringify(packed.facts);
+    const t0 = Date.now();
+    const call = await callDataModel(orConfig, system, workingMem.recentMessages, factsJson, maxTokens, [], 38_000);
+    logModelFailure("data", call);
+    let rawText = call.text;
+    let verification: { checked: number; unverified: string[]; retried: boolean } | null = null;
+    let finalModelText: string | null = null;
     if (rawText) {
+      // Every $, % and R figure must trace back to the facts, the tool output or the trader's own words.
+      const sources = [packed.facts, deterministicTools, messages.filter((m) => m.role === "user").map((m) => m.text)];
+      let current = cleanReply(rawText);
+      let v: Verification = verifyReply(current, sources);
+      let retried = false;
+      const msLeft = 55_000 - (Date.now() - t0);
+      if (v.unverified.length > 0 && msLeft > 8_000) {
+        retried = true;
+        const again = await callDataModel(orConfig, system, workingMem.recentMessages, factsJson, maxTokens, [
+          { role: "assistant", content: rawText },
+          { role: "user", content: correctionPrompt(v) },
+        ], Math.min(20_000, msLeft - 3_000));
+        if (again.text) {
+          const cleaned = cleanReply(again.text);
+          const v2 = verifyReply(cleaned, sources);
+          if (v2.unverified.length <= v.unverified.length) { current = cleaned; v = v2; rawText = again.text; }
+        }
+      }
+      verification = { checked: v.checked, unverified: v.unverified.map((c) => c.raw), retried };
+      finalModelText = withUnverifiedNote(current, v);
+    }
+    if (rawText && finalModelText) {
       // Sanitize any accidental [id] or [trade-id] placeholders if a specific trade was resolved
       const finalActions = enrichActionsFromReplyText(rawText, taskRes.actions, entries as unknown as JournalEntry[]);
       const primaryTradeId =
         taskRes.resolvedTrade?.id ??
         (finalActions.find((a) => "tradeId" in a) as { tradeId?: string } | undefined)?.tradeId ??
         null;
-      const modelText = cleanReply(rawText);
+      const modelText = finalModelText;
       const cleanedText = primaryTradeId
         ? modelText
             .replace(/\/journal\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
@@ -420,14 +472,22 @@ export async function POST(request: Request) {
         meta: {
           deterministic: false,
           lane: "data",
-          provider: orConfig.model,
+          provider: call.model ?? orConfig.model,
           intent: route.intent,
           category: route.category,
-          toolsCalled: route.toolsToCall,
+          toolsCalled: [...route.toolsToCall, ...Object.keys(deterministicTools).filter((k) => k === "setupPerformance")],
           context: packed.meta,
+          verification,
+          droppedEntries,
+          diagnostics: summarizeAttempts(call.attempts),
         },
       });
     }
+    degradedReason = failureWording(call.failure);
+    modelFailure = { kind: call.failure, diagnostics: summarizeAttempts(call.attempts) };
+  } else if (!orConfig) {
+    degradedReason = failureWording("no_key");
+    modelFailure = { kind: "no_key", diagnostics: "no API key configured" };
   }
 
   const text = question ? getDeterministic() : getGreeting();
@@ -441,7 +501,9 @@ export async function POST(request: Request) {
       provider: "deterministic",
       intent: route.intent,
       category: route.category,
-      toolsCalled: route.toolsToCall,
+      toolsCalled: [...route.toolsToCall, ...Object.keys(deterministicTools).filter((k) => k === "setupPerformance")],
+      degraded: modelFailure,
+      droppedEntries,
     },
   });
 }
@@ -457,63 +519,33 @@ function sanitizeCompanion(value: unknown): Record<string, unknown> | null {
   }
 }
 
-async function callOpenRouterWithFallback(
+/** The data-lane model call: facts first, then the conversation, optionally followed by a correction turn. */
+async function callDataModel(
   config: OpenRouterConfig,
   system: string,
   history: MinatoMessage[],
   factsJson: string,
   maxTokens: number,
-): Promise<string | null> {
-  const models = config.models ?? [config.model, ...(config.fallbackModel ? [config.fallbackModel] : [])];
-  const conversation = history.slice(-HISTORY_TURNS).map((m) => ({
+  extra: ChatMessage[],
+  budgetMs: number,
+): Promise<ModelResult> {
+  const conversation: ChatMessage[] = history.slice(-HISTORY_TURNS).map((m) => ({
     role: m.role === "user" ? ("user" as const) : ("assistant" as const),
     content: m.text,
   }));
-  const effectiveTokens = maxTokens;
-  const deadline = Date.now() + 52_000;
-  for (const model of models.slice(0, 4)) {
-    for (const plain of [false, true]) {
-      const remaining = deadline - Date.now();
-      if (remaining < 4_000) return null;
-      try {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "Content-Type": "application/json",
-            "X-Title": "EdgeBook",
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: effectiveTokens,
-            ...(plain ? {} : { reasoning: { effort: "low" } }),
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: `DETERMINISTIC FACTS & TOOL OUTPUTS (source of truth for this whole conversation):\n${factsJson}` },
-              { role: "assistant", content: "Understood — I'll treat those facts and pre-computed tool outputs as exact ground truth for everything below." },
-              ...conversation,
-            ],
-          }),
-          signal: AbortSignal.timeout(Math.min(28_000, remaining)),
-        });
-        if (!res.ok) {
-          if ((res.status === 400 || res.status === 422) && !plain) continue;
-          break;
-        }
-        const json = (await res.json()) as {
-          choices?: { message?: { content?: string | null } }[];
-          error?: { message?: string };
-        };
-        if (json.error) break;
-        const text = json.choices?.[0]?.message?.content?.trim();
-        if (text) return text;
-        if (!plain) continue;
-      } catch {
-        break;
-      }
-    }
-  }
-  return null;
+  return callChat({
+    config,
+    maxTokens,
+    reasoning: true,
+    budgetMs,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: `DETERMINISTIC FACTS & TOOL OUTPUTS (source of truth for this whole conversation):\n${factsJson}` },
+      { role: "assistant", content: "Understood — I'll treat those facts and pre-computed tool outputs as exact ground truth for everything below." },
+      ...conversation,
+      ...extra,
+    ],
+  });
 }
 
 /** Product-help questions need the site map; nothing else should pay for it. */
