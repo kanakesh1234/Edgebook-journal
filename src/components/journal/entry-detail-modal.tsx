@@ -30,7 +30,7 @@ import { findNearbyMajorNews } from "@/lib/minato/forexfactory";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
-type Page = "main" | "review" | "plan" | "rules" | "limit" | "lessons" | "notes";
+type Page = "main" | "review" | "plan" | "rules" | "limit" | "news" | "lessons" | "notes";
 type Replay = ReturnType<typeof useReplayTrade>;
 
 /**
@@ -508,7 +508,15 @@ function LinkedLessons({ entry, canEdit, onPick, onPeek }: { entry: JournalEntry
 /* ───────────── Right: the story ───────────── */
 const PLAN_WORD = { followed: "Followed", partly: "Partly", departed: "Left plan", unknown: "On record" } as const;
 const PLAN_TONE = { followed: "good", partly: "warn", departed: "bad", unknown: "plain" } as const;
-const TITLES: Record<Exclude<Page, "main">, string> = { review: "Review", plan: "Plan", rules: "Rules", limit: "Daily limit", lessons: "Lessons", notes: "Notes" };
+const TITLES: Record<Exclude<Page, "main">, string> = {
+  review: "Review",
+  plan: "Plan",
+  rules: "Rules",
+  limit: "Daily limit",
+  news: "Major news",
+  lessons: "Lessons",
+  notes: "Notes",
+};
 
 function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, onPeekLesson, replay, showReplayRow }: { entry: JournalEntry; page: Page; onPage: (p: Page) => void; scroll: boolean; onReflect: () => void; canEdit: boolean; onPickLesson: () => void; onPeekLesson: (id: string) => void; replay: Replay; showReplayRow: boolean }) {
   const rel = relativeDayLabel(entry.date);
@@ -521,6 +529,11 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
   const currency = useApp((s) => s.settings.currency);
   const risk = useMemo(() => dayRisk(entry.date, allEntries, plans, dayLimits), [entry.date, allEntries, plans, dayLimits]);
   const planReview = useMemo(() => reviewPlanForEntry(entry, plans, allEntries, dayLimits), [entry, plans, allEntries, dayLimits]);
+  const ff = useForexFactoryNews(entry.date, Boolean(entry.date));
+  const nearbyNews = useMemo(
+    () => (entry.entryTime ? findNearbyMajorNews(entry.entryTime, ff.events, 15) : null),
+    [entry.entryTime, ff.events],
+  );
   const answers = useMemo(() => buildAnswers(entry), [entry]);
   const prose = useMemo(() => buildProse(entry), [entry]);
   const extra = useMemo(
@@ -559,9 +572,24 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
   const hasReview = answers.length > 0 || prose.length > 0 || !!lesson || extra.length > 0;
   const lessonCount = entry.lessonIds?.length ?? 0;
 
+  const newsSummaryValue = ff.loading
+    ? "Checking…"
+    : nearbyNews
+      ? `${nearbyNews.name} (${nearbyNews.time})`
+      : ff.hasMajorNews
+        ? `${ff.events.length} red-folder`
+        : "No major news";
+  const newsSummaryTone: Tone = nearbyNews ? "bad" : ff.hasMajorNews ? "warn" : "plain";
+
   // A page that does not exist for this trade (stepping to another trade) falls back to the main screen.
   const available: Record<Exclude<Page, "main">, boolean> = {
-    review: hasReview, plan: !!planReview, rules: !!ruleScore && rules.length > 0, limit: !!risk, lessons: canEdit || lessonCount > 0, notes: !!entry.notes,
+    review: hasReview,
+    plan: !!planReview,
+    rules: !!ruleScore && rules.length > 0,
+    limit: !!risk,
+    news: true,
+    lessons: canEdit || lessonCount > 0,
+    notes: !!entry.notes,
   };
   const cur: Page = page !== "main" && available[page] ? page : "main";
   const sub = cur !== "main";
@@ -611,14 +639,12 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
                   </section>
                 )}
 
-                {/* Major-Impact News Profile (ForexFactory) */}
-                <TradeNewsProfile date={entry.date} entryTime={entry.entryTime} />
-
                 <nav aria-label="Details" className="divide-y divide-ink/[0.07] border-y border-ink/[0.07]">
                   {hasReview && <NavRow label="Review" value={verdict ?? undefined} tone={verdict ? (goodProcess ? "good" : "bad") : "plain"} onClick={() => onPage("review")} />}
                   {planReview && <NavRow label="Plan" value={PLAN_WORD[planReview.verdict]} tone={PLAN_TONE[planReview.verdict]} onClick={() => onPage("plan")} />}
                   {available.rules && ruleScore && <NavRow label="Rules" value={`${ruleScore.confirmed} of ${ruleScore.required}`} tone={ruleScore.confirmed === ruleScore.required ? "good" : "plain"} onClick={() => onPage("rules")} />}
                   {risk && <NavRow label="Daily limit" value={`${Math.round(Math.min(risk.ratio, 9.99) * 100)}%`} tone={risk.status === "ok" ? "plain" : "bad"} onClick={() => onPage("limit")} />}
+                  <NavRow label="Major news" value={newsSummaryValue} tone={newsSummaryTone} onClick={() => onPage("news")} />
                   {available.lessons && <NavRow label="Lessons" value={lessonCount > 0 ? String(lessonCount) : "Add"} onClick={() => onPage("lessons")} />}
                   {entry.notes && <NavRow label="Notes" onClick={() => onPage("notes")} />}
                   {showReplayRow && replay.plan?.ok && (
@@ -670,6 +696,16 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
 
                 {cur === "limit" && risk && <RiskMeter risk={risk} currency={currency} label={`${formatDateMedium(entry.date)} vs your limit`} />}
 
+                {cur === "news" && (
+                  <TradeNewsPage
+                    date={entry.date}
+                    entryTime={entry.entryTime}
+                    events={ff.events}
+                    hasMajorNews={ff.hasMajorNews}
+                    nearby={nearbyNews}
+                  />
+                )}
+
                 {cur === "lessons" && <LinkedLessons entry={entry} canEdit={canEdit} onPick={onPickLesson} onPeek={onPeekLesson} />}
 
                 {cur === "notes" && <p className="whitespace-pre-line text-[15.5px] leading-[1.6] text-ink">{entry.notes}</p>}
@@ -701,73 +737,72 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
 }
 
 /**
- * Profiles the trade date's Major-Impact (Red-Folder) news events and their exact NY times
- * checked by Minato from ForexFactory, and highlights if the trade entry was within ±15m of a release.
+ * Push-in subpage (like iOS Settings) for the trade date's Major-Impact (Red-Folder)
+ * ForexFactory news events and their exact NY times.
  */
-function TradeNewsProfile({ date, entryTime }: { date: string; entryTime?: string }) {
-  const ff = useForexFactoryNews(date, Boolean(date));
-  const nearby = useMemo(
-    () => (entryTime ? findNearbyMajorNews(entryTime, ff.events, 15) : null),
-    [entryTime, ff.events],
-  );
-
-  if (ff.loading) return null;
-
+function TradeNewsPage({
+  date,
+  entryTime,
+  events,
+  hasMajorNews,
+  nearby,
+}: {
+  date: string;
+  entryTime?: string;
+  events: { id: string; name: string; currency: string; time: string; timeLabel: string; forecast?: string; previous?: string }[];
+  hasMajorNews: boolean;
+  nearby: { id: string; name: string; time: string; deltaMinutes: number } | null;
+}) {
   return (
-    <section aria-label="Major news profile" className="mb-5">
-      <div className="overflow-hidden rounded-[18px] border border-line-soft bg-ink/[0.03] px-3.5 py-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                ff.hasMajorNews ? "bg-loss" : "bg-profit",
-              )}
-              aria-hidden
-            />
-            ForexFactory Major News
-          </span>
-          <span className="text-[11px] font-medium text-faint">
-            {ff.hasMajorNews ? `${ff.events.length} red-folder` : "No major news"}
-          </span>
-        </div>
+    <section aria-label="ForexFactory Major News" className="space-y-4">
+      <p className="-mt-2 text-[13px] text-muted">
+        ForexFactory high-impact (red-folder) schedule for {formatDateMedium(date)}
+      </p>
 
-        {ff.hasMajorNews ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {ff.events.map((ev) => {
-              const isNear = nearby?.id === ev.id;
-              return (
+      {nearby && (
+        <Callout
+          label="Entry near red-folder release"
+          text={`Your ${entryTime} entry was ${nearby.deltaMinutes === 0 ? "at the exact minute of" : `${nearby.deltaMinutes} min from`} ${nearby.name} (${nearby.time} NY).`}
+        />
+      )}
+
+      {hasMajorNews ? (
+        <Inset>
+          {events.map((ev) => {
+            const isNear = nearby?.id === ev.id;
+            return (
+              <div key={ev.id} className="flex min-h-[54px] items-center justify-between gap-4 px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-2 text-[15px] font-medium text-ink">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-loss" aria-hidden />
+                    <span className="truncate">{ev.name}</span>
+                  </p>
+                  {(ev.forecast || ev.previous) && (
+                    <p className="mt-0.5 pl-4 text-[12.5px] text-muted">
+                      {[ev.forecast ? `Forecast ${ev.forecast}` : null, ev.previous ? `Prev ${ev.previous}` : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                </div>
                 <span
-                  key={ev.id}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium leading-none",
-                    isNear
-                      ? "border-loss/45 bg-loss/12 text-loss"
-                      : "border-line bg-surface/80 text-ink",
+                    "num shrink-0 text-[14.5px] font-medium",
+                    isNear ? "text-loss" : "text-muted",
                   )}
                 >
-                  <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
-                  <span className="truncate max-w-[180px]">{ev.name}</span>
-                  <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
+                  {ev.time} NY
                 </span>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="mt-1 text-[12.5px] text-muted">
-            No high-impact news scheduled on ForexFactory for {date}.
-          </p>
-        )}
-
-        {nearby && (
-          <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-loss">
-            <span>⚠</span>
-            <span>
-              Entry ({entryTime}) was within 15 min of {nearby.name} ({nearby.time} NY)
-            </span>
-          </p>
-        )}
-      </div>
+              </div>
+            );
+          })}
+        </Inset>
+      ) : (
+        <ProseCard
+          label="ForexFactory"
+          text={`No major-impact (red-folder) economic releases scheduled on ForexFactory for ${formatDateMedium(date)}.`}
+        />
+      )}
     </section>
   );
 }
