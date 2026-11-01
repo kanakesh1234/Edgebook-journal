@@ -89,7 +89,11 @@ export function respond(rawCtx: EdgeBookContext, input: string, opts: RespondOpt
     return taskRes.directReply;
   }
 
-  // --- PRIORITY 0B: GREETINGS, SMALL TALK & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
+  // --- PRIORITY 0B: GREETINGS, SMALL TALK, CONVERSATIONAL OPENINGS & SITE NAVIGATION ---
+  if (/\b(i (had|have) a (doubt|question)|can i ask( a (doubt|question)| you( something)?)?|may i ask|arey i('?m| am) saying)\b/i.test(q)) {
+    return `Of course, ${name} — go ahead and ask. What's on your mind?`;
+  }
+
   if (/\b(what are you (doing|up to)|what('?re| are) you doing|how are you( doing)?|how'?s it going|are you there)\b/i.test(q)) {
     return `I'm right here, ${name} — ready whenever you want to review a trade, sharpen a concept, build a routine, or just talk through what's on your mind.`;
   }
@@ -297,8 +301,47 @@ export function respond(rawCtx: EdgeBookContext, input: string, opts: RespondOpt
     return parts.join("\n");
   }
 
+  // --- Longitudinal Period Comparison ("Am I improving psychologically?", "Am I getting better?", "Compare periods") ---
+  if (/\b(am i (improving|getting better)|improv(ing|ed) psychologically|compare.*period|progress over time)\b/.test(q)) {
+    const chrono = [...ctx.recentTrades].reverse(); // oldest -> newest
+    if (chrono.length < 4) {
+      return `You have **${chrono.length} recorded trade${chrono.length === 1 ? "" : "s"}** so far, ${name} — log at least 4 trades with Quick Autopsy reviews so I can compare your earlier vs recent psychological and process trends.`;
+    }
+    const mid = Math.floor(chrono.length / 2);
+    const early = chrono.slice(0, mid);
+    const recent = chrono.slice(mid);
+    const summarizeHalf = (slice: typeof chrono) => {
+      const wins = slice.filter((e) => e.pnl > 0).length;
+      const losses = slice.filter((e) => e.pnl < 0).length;
+      const decided = wins + losses;
+      const wr = decided > 0 ? Math.round((wins / decided) * 100) : 0;
+      const pnl = Math.round(slice.reduce((s, e) => s + e.pnl, 0));
+      const mistCount = slice.reduce((s, e) => s + mistakeTagsOf(e).length, 0);
+      const rev = slice.filter((e) => e.review?.outcome?.followedPlan != null);
+      const adh = rev.length > 0 ? Math.round((rev.filter((e) => e.review?.outcome?.followedPlan === true).length / rev.length) * 100) : null;
+      const tiltCount = slice.filter((e) => e.review?.psychology?.fomo || e.review?.psychology?.revenge).length;
+      return { n: slice.length, wr, pnl, mistCount, adh, tiltCount };
+    };
+    const eStat = summarizeHalf(early);
+    const rStat = summarizeHalf(recent);
+    const wrDelta = rStat.wr - eStat.wr;
+    const mistDelta = rStat.mistCount - eStat.mistCount;
+    const improving = wrDelta >= 0 && mistDelta <= 0;
+    return [
+      `Comparing your **recent ${rStat.n} trades** against your **earlier ${eStat.n} trades**, ${name}, your execution is **${improving ? "improving" : "still leaking discipline"}** (${eStat.wr}% → **${rStat.wr}% win rate**, ${money(eStat.pnl)} → **${money(rStat.pnl)}**).`,
+      `- **Win rate & P&L** · Earlier ${eStat.wr}% (${money(eStat.pnl)}) → Recent ${rStat.wr}% (${money(rStat.pnl)})`,
+      `- **Tagged mistakes** · ${eStat.mistCount} earlier vs ${rStat.mistCount} recent (${mistDelta <= 0 ? `${Math.abs(mistDelta)} fewer` : `+${mistDelta} more`})`,
+      `- **FOMO / Revenge triggers** · ${eStat.tiltCount} earlier vs ${rStat.tiltCount} recent`,
+      ...(eStat.adh != null && rStat.adh != null
+        ? [`- **Plan adherence** · ${eStat.adh}% earlier → ${rStat.adh}% recent`]
+        : []),
+    ].join("\n");
+  }
+
   // --- Mistakes / leaks / why losing / biggest error ---
   if (/mistake|leak|losing|loss|wrong|blunder|error|costing|hurt|weakness/.test(q) && !/streak/.test(q)) {
+    const setupRows = setupBreakdown(ctx.recentTrades).rows.filter((r) => r.setup !== "(no setup recorded)");
+    const worstSetup = [...setupRows].sort((a, b) => a.netPnl - b.netPnl)[0];
     if (mistakes.length === 0) {
       const losses = ctx.recentTrades.filter((e) => e.pnl < 0);
       if (losses.length === 0) return "You have no losing trades or tagged mistakes recorded yet.";
@@ -307,11 +350,14 @@ export function respond(rawCtx: EdgeBookContext, input: string, opts: RespondOpt
     }
     const top = mistakes[0]!;
     const parts: string[] = [
-      `Your #1 process leak is **${top.label}** — recorded ${top.count} time${top.count === 1 ? "" : "s"} and costing ${money(-top.cost)} in losing trades.`,
+      `Your #1 process leak is **${top.label}** — recorded ${top.count} time${top.count === 1 ? "" : "s"} and costing ${money(-top.cost)} across your losing trades (${Math.round(stats.winRate * 100)}% day win rate, net ${money(stats.totalPnl)}).`,
     ];
-    mistakes.slice(0, 4).forEach((m, i) => {
+    mistakes.slice(0, 3).forEach((m, i) => {
       parts.push(`${i + 1}. **${m.label}** — ${m.count} trade${m.count === 1 ? "" : "s"} · cost ${money(-m.cost)}`);
     });
+    if (worstSetup && worstSetup.netPnl < 0) {
+      parts.push(`${Math.min(mistakes.length, 3) + 1}. **Weakest strategy (${worstSetup.setup})** — ${money(worstSetup.netPnl)} (${worstSetup.winRatePct ?? 0}% win rate across ${worstSetup.trades} trades)`);
+    }
     parts.push(`\n**Next step**: Select **${top.label}** under “Mistakes to watch for today” in **Home → Plan a trade**, or say *"start The Matrix"* and I'll launch a drill for this leak right now.`);
     return parts.join("\n");
   }

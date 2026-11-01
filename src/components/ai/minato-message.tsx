@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { parseMinato, type MinatoBlock } from "@/lib/minato/format";
 import { cn } from "@/lib/utils";
 
@@ -155,11 +155,49 @@ const Chevron = ({ open }: { open: boolean }) => (
 );
 
 /**
+ * Smooth progressive text reveal for newly generated replies.
+ * Reveals complete tokens smoothly at 60fps without splitting markdown markers mid-token.
+ */
+function useProgressiveText(text: string, animate: boolean): string {
+  const animatedRef = useRef<string | null>(animate ? null : text);
+  const [shownLength, setShownLength] = useState<number>(() => (animate ? 0 : text.length));
+
+  useEffect(() => {
+    if (!animate || animatedRef.current === text) {
+      setShownLength(text.length);
+      return;
+    }
+    let idx = 0;
+    const total = text.length;
+    const step = Math.max(4, Math.ceil(total / 26));
+    setShownLength(Math.min(total, step));
+
+    const timer = window.setInterval(() => {
+      idx = Math.min(total, idx + step);
+      // Advance to the next whitespace boundary so **bold** tokens don't flicker half-open
+      while (idx < total && text[idx] !== " " && text[idx] !== "\n") {
+        idx++;
+      }
+      setShownLength(idx);
+      if (idx >= total) {
+        animatedRef.current = text;
+        window.clearInterval(timer);
+      }
+    }, 18);
+
+    return () => window.clearInterval(timer);
+  }, [text, animate]);
+
+  return shownLength >= text.length ? text : text.slice(0, shownLength);
+}
+
+/**
  * A Minato reply as a calm card: one lead sentence, quiet metric rows, an optional
  * note — and all the formulas / assumptions folded behind “Show working”.
  */
 export function MinatoMessageBody({ text, animate = false }: { text: string; animate?: boolean }) {
-  const parsed = useMemo(() => parseMinato(text), [text]);
+  const revealedText = useProgressiveText(text, animate);
+  const parsed = useMemo(() => parseMinato(revealedText), [revealedText]);
   const [open, setOpen] = useState(false);
   const regionId = `mn-work-${useId().replace(/:/g, "")}`;
 

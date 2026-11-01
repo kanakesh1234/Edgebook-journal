@@ -53,6 +53,7 @@ const DATA: RegExp[] = [
   /\bwhy (did|do|am|have) i\b/,
   /\bwhat (did|have|am|do) i\b/,
   /\bam i (improving|overtrading|revenge|tilting|following|breaking|respecting|getting better|consistent)\b/,
+  /\bcompare (my |two )?(periods?|months?|weeks?|sessions?|halves)\b/,
   /\bwhat should i (work on|improve|change|fix|focus on|stop|do (today|next|now))\b/,
   /\b(pre[- ]?session|game ?plan|trading plan|plan for (today|tomorrow|the (day|session|week))|today'?s plan|prep for)\b/,
   /\b(weekly|monthly|daily) (review|recap|summary|report)\b/,
@@ -83,14 +84,17 @@ const SELF_CONTAINED = /\d+(?:\.\d+)?\s*(?:%|percent)\s*(?:win|wr|accuracy)|win 
 /* ---------------------------------- plain chat ---------------------------------- */
 
 const GREETING =
-  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help$)\b/;
+  /^(hi|hii+|hello|hey+|yo|sup|hola|namaste|gm|gn|good (morning|afternoon|evening|night|day)|morning|evening|what'?s up|wassup|howdy|thanks|thank you|thx|ty|cheers|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|sure|yes|yep|no|nope|bye|see you|later|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help$|i (had|have) a (doubt|question)|can i ask|may i ask|arey i('?m| am) saying)\b/;
+
+const META_QUESTION =
+  /\b(i (had|have) a (doubt|question)|can i ask( a (doubt|question)| you( something)?)?|may i ask|arey i('?m| am) saying)\b/;
 
 export function classifyLane(text: string, opts: LaneOptions = {}): LaneResult {
   const t = norm(text);
   if (!t) return { lane: "chat", reason: "empty" };
 
-  // 1. Plain greetings / thanks / acknowledgements — with ANY trailing address ("good morning sensei").
-  if (GREETING.test(t) && words(t) <= 8 && !DATA.some((re) => re.test(t))) {
+  // 1. Plain greetings / thanks / acknowledgements / conversational meta-openings ("I had a doubt can I ask").
+  if ((GREETING.test(t) || META_QUESTION.test(t)) && words(t) <= 12 && !DATA.some((re) => re.test(t))) {
     return { lane: "chat", reason: "greeting" };
   }
 
@@ -118,6 +122,9 @@ export function classifyLane(text: string, opts: LaneOptions = {}): LaneResult {
 export function quickReply(text: string, name: string): string | null {
   const t = norm(text);
   const who = name && name !== "Trader" ? `, ${name}` : "";
+  if (META_QUESTION.test(t) && !DATA.some((re) => re.test(t))) {
+    return `Of course${who} — go ahead and ask. What's on your mind?`;
+  }
   if (/^(good )?morning\b|^gm\b/.test(t)) return `Good morning${who}. What are we working on?`;
   if (/^good afternoon\b/.test(t)) return `Good afternoon${who}. What are we working on?`;
   if (/^good evening\b/.test(t)) return `Good evening${who}. What are we working on?`;

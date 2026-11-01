@@ -604,6 +604,8 @@ export interface UserSemanticParams {
   profitTarget: number | null;
   instruments: string[];
   accountType: string | null;
+  sessionTimes?: string | null;
+  sessionWindow?: string | null;
 }
 
 export function readUserSemanticParams(store?: MemoryStore | null): UserSemanticParams {
@@ -616,6 +618,7 @@ export function readUserSemanticParams(store?: MemoryStore | null): UserSemantic
     profitTarget: null,
     instruments: [],
     accountType: null,
+    sessionTimes: null,
   };
   if (!store) return params;
 

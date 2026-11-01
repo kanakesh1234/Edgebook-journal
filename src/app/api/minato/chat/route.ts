@@ -6,7 +6,7 @@ import { detectPatterns } from "@/lib/minato/patterns";
 import { respond, greet, type MinatoMessage } from "@/lib/minato/respond";
 import { processScore } from "@/lib/competence";
 import { getOpenRouterConfig, type OpenRouterConfig } from "@/lib/services/ai";
-import type { Challenge, JournalEntry, JournalSettings } from "@/lib/types";
+import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, TradePlan } from "@/lib/types";
 import { buildTradeRows, deepFacts, type RawEntry } from "@/lib/minato/facts";
 import { routeIntent, planFor, parseTradeRefs, type Intent } from "@/lib/minato/router";
 import { packFacts, sanitizeMemoryPayload } from "@/lib/minato/context-pack";
@@ -22,13 +22,16 @@ import { enrichActionsFromReplyText, resolveMinatoTasks } from "@/lib/minato/act
 import { classifyLane, quickReply, type Lane } from "@/lib/minato/lane";
 import { marketClock, type MarketClock } from "@/lib/minato/market-clock";
 import { computeIdeal } from "@/lib/minato/ideal-calc";
-import { callChat, failureWording, logModelFailure, summarizeAttempts, type ChatMessage, type FailureKind, type ModelResult } from "@/lib/minato/provider";
+import { callChat, failureWording, logModelFailure, summarizeAttempts, type ChatMessage, type FailureKind } from "@/lib/minato/provider";
 import { sanitizeEntries } from "@/lib/minato/sanitize";
 import { newestFirst, setupToolResult, wantsSetupAnalysis } from "@/lib/minato/setup-analytics";
 import { correctionPrompt, verifyReply, withUnverifiedNote, type Verification } from "@/lib/minato/verify";
 import {
   CALC_PROMPT, CHAT_PROMPT, NEED_JOURNAL, callModel, cleanReply, leanContext, leanHistory, sanitizeGlance, type Glance,
 } from "@/lib/minato/lean";
+import { runMinatoIntelligenceEngine } from "@/lib/minato/engine";
+import { buildContinuousKnowledgeSnapshot } from "@/lib/minato/knowledge";
+import type { TraderDatabaseContext } from "@/lib/minato/db-tools";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -107,6 +110,9 @@ async function handle(request: Request) {
     traderName?: string | null;
     messages?: MinatoMessage[];
     entries?: Record<string, unknown>[];
+    plans?: TradePlan[];
+    dayLogs?: NoTradeLog[];
+    settings?: Partial<JournalSettings> | null;
     journalProvided?: boolean;
     primaryChallenge?: Pick<Challenge, "id" | "name" | "startingBalance" | "targetBalance" | "maxDrawdown" | "drawdownMode" | "trailingBasis" | "drawdownFloor"> | null;
     /** Forced by the client when it re-sends a question after the model asked for the journal. */
@@ -159,6 +165,10 @@ async function handle(request: Request) {
 
   // ---- Load live journal data ----
   let entries: Record<string, unknown>[] = clientEntries;
+  let drivePlans: TradePlan[] = Array.isArray(body.plans) ? body.plans : [];
+  let driveDayLogs: NoTradeLog[] = Array.isArray(body.dayLogs) ? body.dayLogs : [];
+  let driveSettings: Partial<JournalSettings> | null = body.settings ?? null;
+
   if (session && entries.length === 0 && !body.journalProvided) {
     const { getAuthedDrive } = await import("@/lib/server/authed-drive");
     const authed = await getAuthedDrive();
@@ -166,9 +176,12 @@ async function handle(request: Request) {
       try {
         const { readJournalDoc } = await import("@/lib/server/drive");
         const doc = (await readJournalDoc(authed.drive.accessToken, authed.drive.folders)) as
-          | { entries?: Record<string, unknown>[] }
+          | { entries?: Record<string, unknown>[]; plans?: TradePlan[]; dayLogs?: NoTradeLog[]; settings?: Partial<JournalSettings> }
           | null;
         entries = sanitizeEntries(doc?.entries).entries;
+        if (Array.isArray(doc?.plans)) drivePlans = doc.plans;
+        if (Array.isArray(doc?.dayLogs)) driveDayLogs = doc.dayLogs;
+        if (doc?.settings) driveSettings = doc.settings;
       } catch {
         entries = [];
       }
@@ -218,11 +231,12 @@ async function handle(request: Request) {
   }
 
   const effectiveSettings: JournalSettings = {
+    ...(driveSettings ?? {}),
     traderName,
-    startingEquity: selectedChallenge?.startingBalance ?? 10000,
-    targetEquity: selectedChallenge?.targetBalance ?? 20000,
+    startingEquity: selectedChallenge?.startingBalance ?? driveSettings?.startingEquity ?? 10000,
+    targetEquity: selectedChallenge?.targetBalance ?? driveSettings?.targetEquity ?? 20000,
     // Same source of truth as the dashboard: the challenge's own limit and drawdown model.
-    maxDrawdown: (selectedChallenge?.maxDrawdown && selectedChallenge.maxDrawdown > 0 ? selectedChallenge.maxDrawdown : null) ?? semanticParams.drawdownLimit ?? 1000,
+    maxDrawdown: (selectedChallenge?.maxDrawdown && selectedChallenge.maxDrawdown > 0 ? selectedChallenge.maxDrawdown : null) ?? semanticParams.drawdownLimit ?? driveSettings?.maxDrawdown ?? 1000,
     currency: "USD",
     ...(selectedChallenge ? {
       drawdownMode: selectedChallenge.drawdownMode ?? "static",
@@ -235,7 +249,7 @@ async function handle(request: Request) {
   const stats = computeStats(entries as never, effectiveSettings);
   const holds = holdTimeStats(entries as never);
   const patterns = detectPatterns(entries as never);
-  const proc = processScore(entries as never, []);
+  const proc = processScore(entries as never, drivePlans);
 
   // Route intent & run deterministic tools when calculation/stats are requested
   const route = routeIntent(question, { hasFocus: !!body.focusTradeId, prev: body.prevIntent ?? null });
@@ -292,6 +306,32 @@ async function handle(request: Request) {
   const { lessons, traderWords, tradeHistory } = buildTradeRows(entries as RawEntry[]);
 
   const workingMem = summarizeWorkingMemory(messages, 10);
+
+  // ---- Continuous Learning Context (Section 4) ----
+  const continuousKnowledge = buildContinuousKnowledgeSnapshot({
+    traderName,
+    today: todayIso,
+    marketSummary: clock.summary,
+    entries: entries as unknown as JournalEntry[],
+    plans: drivePlans,
+    dayLogs: driveDayLogs,
+    settings: effectiveSettings,
+    primaryChallenge: selectedChallenge,
+    semanticParams,
+  });
+
+  const dbCtx: TraderDatabaseContext = {
+    traderName,
+    today: todayIso,
+    entries: entries as unknown as JournalEntry[],
+    plans: drivePlans,
+    dayLogs: driveDayLogs,
+    settings: effectiveSettings,
+    primaryChallenge: selectedChallenge,
+    semanticParams,
+    companion,
+    focusTradeId: taskRes.resolvedTrade?.id ?? body.focusTradeId ?? null,
+  };
 
   const facts = {
     currentContext: {
@@ -350,6 +390,7 @@ async function handle(request: Request) {
       semanticParams,
       workingMemorySummary: workingMem.summary,
     },
+    continuousKnowledge,
     deterministicTools: Object.keys(deterministicTools).length > 0 ? deterministicTools : undefined,
     deep: deepFacts(entries as RawEntry[]),
     recentTrades: tradeHistory,
@@ -368,8 +409,8 @@ async function handle(request: Request) {
       adherence: {} as never,
       recentTrades: entries as never,
       focus: null,
-      playbook: [],
-      activeRules: [],
+      playbook: effectiveSettings.playbook ?? [],
+      activeRules: (effectiveSettings.rules?.rules ?? []).filter((r) => r.enabled),
       recurringPatterns: patterns.map((p) => ({ pattern: p.label, count: p.count })),
       privacy: { includeNotes: true },
     },
@@ -392,8 +433,8 @@ async function handle(request: Request) {
     adherence: {} as never,
     recentTrades: entries as never,
     focus: null,
-    playbook: [],
-    activeRules: [],
+    playbook: effectiveSettings.playbook ?? [],
+    activeRules: (effectiveSettings.rules?.rules ?? []).filter((r) => r.enabled),
     recurringPatterns: patterns.map((p) => ({ pattern: p.label, count: p.count })),
     privacy: { includeNotes: true },
   });
@@ -417,36 +458,73 @@ async function handle(request: Request) {
       today: facts.currentContext.today,
     });
     packed.facts.trader = traderName;
+    packed.facts.continuousKnowledge = continuousKnowledge;
     if (plan.hold || route.intent === "general") packed.facts.hold = facts.hold;
     if (Object.keys(deterministicTools).length > 0) {
       packed.facts.deterministicTools = deterministicTools;
       packed.facts.precomputedToolAnswer = getDeterministic();
     }
     const system = needsBlueprint(question) ? `${SYSTEM_PROMPT}\n\n${SITE_BLUEPRINT_PROMPT_TEXT}` : SYSTEM_PROMPT;
-    const factsJson = JSON.stringify(packed.facts);
     const t0 = Date.now();
-    const call = await callDataModel(orConfig, system, workingMem.recentMessages, factsJson, maxTokens, [], 38_000);
-    logModelFailure("data", call);
-    let rawText = call.text;
+    const engineRes = await runMinatoIntelligenceEngine({
+      config: orConfig,
+      systemPrompt: system,
+      question,
+      history: workingMem.recentMessages,
+      db: dbCtx,
+      marketSummary: clock.summary,
+      precomputedFacts: packed.facts,
+      maxTokens,
+      budgetMs: 38_000,
+    });
+    logModelFailure("data", {
+      text: engineRes.text,
+      model: engineRes.model,
+      failure: engineRes.failure,
+      attempts: engineRes.attempts,
+    });
+
+    let rawText = engineRes.text;
     let verification: { checked: number; unverified: string[]; retried: boolean } | null = null;
     let finalModelText: string | null = null;
     if (rawText) {
-      // Every $, % and R figure must trace back to the facts, the tool output or the trader's own words.
-      const sources = [packed.facts, deterministicTools, messages.filter((m) => m.role === "user").map((m) => m.text)];
+      // Every $, % and R figure must trace back to the facts, the tool output (including multi-step DB tools) or the trader's own words.
+      const sources = [
+        packed.facts,
+        deterministicTools,
+        engineRes.toolsExecuted,
+        messages.filter((m) => m.role === "user").map((m) => m.text),
+      ];
       let current = cleanReply(rawText);
       let v: Verification = verifyReply(current, sources);
       let retried = false;
       const msLeft = 55_000 - (Date.now() - t0);
       if (v.unverified.length > 0 && msLeft > 8_000) {
         retried = true;
-        const again = await callDataModel(orConfig, system, workingMem.recentMessages, factsJson, maxTokens, [
-          { role: "assistant", content: rawText },
-          { role: "user", content: correctionPrompt(v) },
-        ], Math.min(20_000, msLeft - 3_000));
+        const factsJson = JSON.stringify({
+          ...packed.facts,
+          executedTools: engineRes.toolsExecuted,
+        });
+        const again = await callCorrectionModel(
+          orConfig,
+          system,
+          workingMem.recentMessages,
+          factsJson,
+          maxTokens,
+          [
+            { role: "assistant", content: rawText },
+            { role: "user", content: correctionPrompt(v) },
+          ],
+          Math.min(20_000, msLeft - 3_000),
+        );
         if (again.text) {
           const cleaned = cleanReply(again.text);
           const v2 = verifyReply(cleaned, sources);
-          if (v2.unverified.length <= v.unverified.length) { current = cleaned; v = v2; rawText = again.text; }
+          if (v2.unverified.length <= v.unverified.length) {
+            current = cleaned;
+            v = v2;
+            rawText = again.text;
+          }
         }
       }
       verification = { checked: v.checked, unverified: v.unverified.map((c) => c.raw), retried };
@@ -466,25 +544,34 @@ async function handle(request: Request) {
             .replace(/\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
         : modelText;
 
+      const allToolsCalled = [
+        ...new Set([
+          ...route.toolsToCall,
+          ...Object.keys(deterministicTools).filter((k) => k === "setupPerformance"),
+          ...engineRes.toolsExecuted.map((t) => t.name),
+        ]),
+      ];
+
       return NextResponse.json({
         text: cleanedText,
         actions: finalActions,
         meta: {
           deterministic: false,
           lane: "data",
-          provider: call.model ?? orConfig.model,
+          provider: engineRes.model ?? orConfig.model,
           intent: route.intent,
           category: route.category,
-          toolsCalled: [...route.toolsToCall, ...Object.keys(deterministicTools).filter((k) => k === "setupPerformance")],
+          toolsCalled: allToolsCalled,
+          roundsUsed: engineRes.rounds,
           context: packed.meta,
           verification,
           droppedEntries,
-          diagnostics: summarizeAttempts(call.attempts),
+          diagnostics: summarizeAttempts(engineRes.attempts),
         },
       });
     }
-    degradedReason = failureWording(call.failure);
-    modelFailure = { kind: call.failure, diagnostics: summarizeAttempts(call.attempts) };
+    degradedReason = failureWording(engineRes.failure);
+    modelFailure = { kind: engineRes.failure, diagnostics: summarizeAttempts(engineRes.attempts) };
   } else if (!orConfig) {
     degradedReason = failureWording("no_key");
     modelFailure = { kind: "no_key", diagnostics: "no API key configured" };
@@ -519,8 +606,8 @@ function sanitizeCompanion(value: unknown): Record<string, unknown> | null {
   }
 }
 
-/** The data-lane model call: facts first, then the conversation, optionally followed by a correction turn. */
-async function callDataModel(
+/** Single-step verification correction call when an initial answer contained an unverified number. */
+async function callCorrectionModel(
   config: OpenRouterConfig,
   system: string,
   history: MinatoMessage[],
@@ -528,7 +615,7 @@ async function callDataModel(
   maxTokens: number,
   extra: ChatMessage[],
   budgetMs: number,
-): Promise<ModelResult> {
+) {
   const conversation: ChatMessage[] = history.slice(-HISTORY_TURNS).map((m) => ({
     role: m.role === "user" ? ("user" as const) : ("assistant" as const),
     content: m.text,
@@ -582,7 +669,9 @@ async function leanLane(a: {
         calc: ideal ? { inputs: ideal.inputs, results: ideal.results, missing: ideal.missing, assumptions: ideal.assumptions, fallbackText: ideal.fallbackText } : undefined,
       }),
       conversation: leanHistory(a.messages),
-      maxTokens: ideal ? 650 : 320,
+      // Reasoning models (e.g. nvidia/nemotron-3-super-120b-a12b:free) use part of max_tokens for internal reasoning,
+      // so allocate >= 1000 tokens so visible content is never starved.
+      maxTokens: ideal ? 1200 : 1000,
     });
     if (raw) {
       const text = cleanReply(raw);

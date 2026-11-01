@@ -1,20 +1,17 @@
 /**
  * PROVIDER — the one place MINATO talks to the AI model.
  *
- * Before this file, three copies of "call OpenRouter" existed (chat route, lean lanes, services/ai.ts). All of them
- * treated every non-OK response as "try something else" and then silently fell through to a canned answer, so a
- * rate-limited free model looked exactly like MINATO "only knowing one answer".
- *
- * What this adds:
- *  - every attempt is recorded (model, outcome, HTTP status, milliseconds) — never the key, never the prompt
- *  - failures are classified: auth / credits / rate_limited / timeout / network / server / bad_request / bad_response / empty
- *  - 429 and 5xx get ONE short back-off retry on the same model before moving on (free tiers recover in seconds)
- *  - 401/403 stop immediately (every other model would fail with the same key)
- *  - a 400/422 caused by the optional `reasoning` parameter is retried once without it
- *  - a hard time budget: the caller never waits longer than `budgetMs`
- *  - server-side only: the API key never leaves this process and is never logged
+ * Supports:
+ *  - Standard chat completions and multi-step tool-calling (`tools` / `tool_calls`)
+ *  - Automatic fallback when a free/open model rejects `tools` or `reasoning` (400/422)
+ *  - Automatic retry without `reasoning` if a reasoning model consumes its token budget in `<think>` and returns empty content
+ *  - 429 and 5xx single back-off retry on the same model before moving to the next fallback model
+ *  - 401/403 immediate stop (same key for every model)
+ *  - Hard wall-clock budget (`budgetMs`)
+ *  - Server-side only: the API key never leaves this process and is never logged
  */
 import type { OpenRouterConfig } from "@/lib/services/ai";
+import type { ToolDefinition } from "./db-tools";
 
 export type FailureKind =
   | "no_key" | "auth" | "credits" | "rate_limited" | "timeout" | "network"
@@ -27,13 +24,29 @@ export interface Attempt {
   ms: number;
 }
 
-export interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
+export interface RawToolCall {
+  id: string;
+  type?: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_call_id?: string;
+  name?: string;
+  tool_calls?: RawToolCall[];
+}
 
 export interface ModelResult {
   text: string | null;
+  toolCalls?: RawToolCall[];
   model: string | null;
   attempts: Attempt[];
-  /** Why no text was produced (the last meaningful failure); null on success. */
+  /** Why no text/toolCalls were produced (the last meaningful failure); null on success. */
   failure: FailureKind | null;
 }
 
@@ -42,7 +55,9 @@ export interface CallOptions {
   messages: ChatMessage[];
   maxTokens: number;
   temperature?: number;
-  /** Ask for low reasoning effort on models that support it. Retried without on 400/422. */
+  /** Optional structured tools for native function-calling. Retried without if a model returns 400/422. */
+  tools?: ToolDefinition[];
+  /** Ask for low reasoning effort on models that support it. Retried without on 400/422 or empty content. */
   reasoning?: boolean;
   /** Total wall-clock budget across every attempt. */
   budgetMs?: number;
@@ -96,9 +111,10 @@ export async function callChat(opts: CallOptions): Promise<ModelResult> {
 
   for (const model of models) {
     let useReasoning = !!opts.reasoning;
+    let useTools = !!(opts.tools && opts.tools.length > 0);
     let transientRetried = false;
 
-    // A model gets at most: first try, one retry without `reasoning`, one back-off retry for transient errors.
+    // A model gets at most: first try, one retry without `reasoning`/`tools`, one back-off retry for transient errors.
     for (let tries = 0; tries < 3; tries++) {
       const remaining = deadline - now();
       if (remaining < MIN_REMAINING_MS) return { text: null, model: null, attempts, failure: lastFailure ?? "timeout" };
@@ -118,6 +134,7 @@ export async function callChat(opts: CallOptions): Promise<ModelResult> {
             max_tokens: opts.maxTokens,
             ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
             ...(useReasoning ? { reasoning: { effort: "low" } } : {}),
+            ...(useTools ? { tools: opts.tools, tool_choice: "auto" } : {}),
             messages: opts.messages,
           }),
           signal: AbortSignal.timeout(Math.min(opts.perCallMs ?? 28_000, remaining)),
@@ -126,15 +143,25 @@ export async function callChat(opts: CallOptions): Promise<ModelResult> {
         if (!res.ok) {
           kind = classifyStatus(res.status);
         } else {
-          let json: { choices?: { message?: { content?: string | null } }[]; error?: unknown } | null = null;
+          let json: {
+            choices?: {
+              message?: {
+                content?: string | null;
+                tool_calls?: RawToolCall[];
+              };
+            }[];
+            error?: unknown;
+          } | null = null;
           try { json = await res.json(); } catch { kind = "bad_response"; }
           if (!kind && json) {
             if (json.error) kind = classifyBodyError(json.error);
             else {
-              const text = json.choices?.[0]?.message?.content;
-              if (typeof text === "string" && text.trim()) {
+              const msg = json.choices?.[0]?.message;
+              const toolCalls = Array.isArray(msg?.tool_calls) && msg!.tool_calls.length > 0 ? msg!.tool_calls : undefined;
+              const text = typeof msg?.content === "string" && msg.content.trim() ? msg.content.trim() : null;
+              if (text || toolCalls) {
                 record("ok", res.status);
-                return { text: text.trim(), model, attempts, failure: null };
+                return { text, ...(toolCalls ? { toolCalls } : {}), model, attempts, failure: null };
               }
               kind = "empty";
             }
@@ -149,7 +176,11 @@ export async function callChat(opts: CallOptions): Promise<ModelResult> {
       lastFailure = kind!;
 
       if (kind === "auth") return { text: null, model: null, attempts, failure: "auth" }; // same key for every model
-      if (kind === "bad_request" && useReasoning) { useReasoning = false; continue; }
+      if (kind === "bad_request" && (useReasoning || useTools)) {
+        if (useReasoning) useReasoning = false;
+        else useTools = false;
+        continue;
+      }
       if (isTransient(kind!) && !transientRetried) {
         transientRetried = true;
         if (deadline - now() > RETRY_BACKOFF_MS + MIN_REMAINING_MS) { await sleep(RETRY_BACKOFF_MS); continue; }
@@ -183,6 +214,6 @@ export function failureWording(kind: FailureKind | null): string {
 
 /** Server log line. Never includes keys, prompts or journal data. */
 export function logModelFailure(tag: string, r: ModelResult): void {
-  if (r.text) return;
+  if (r.text || (r.toolCalls && r.toolCalls.length > 0)) return;
   console.warn(`[minato:${tag}] model unavailable (${r.failure ?? "unknown"}): ${summarizeAttempts(r.attempts)}`);
 }

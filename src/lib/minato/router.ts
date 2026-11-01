@@ -29,6 +29,7 @@ const W = (re: RegExp, w: number): [RegExp, number] => [re, w];
 const RULES: Record<Exclude<Intent, "general">, [RegExp, number][]> = {
   chitchat: [
     W(/^\s*(hi|hello|hey|yo|sup|thanks|thank you|thx|ty|ok|okay|cool|great|nice|got it|good (morning|evening|afternoon|night|day)|morning|gm|gn|howdy|hola|namaste|how are you( doing)?|how'?s it going|what are you (doing|up to)|i('?m| am) asking what are you doing|are you there|who are you|what can you do|help(?![\p{L}'\s]*\p{L}))\b(?:\s+[\p{L}']+){0,4}[\s!.?,]*$/iu, 6),
+    W(/\b(i (had|have) a (doubt|question)|can i ask( a (doubt|question)| you( something)?)?|may i ask|arey i('?m| am) saying)\b/iu, 6),
   ],
   calculation: [
     W(/\b(longest losing streak|maximum (?:longest )?losing streak|max losing streak|losing streak possible|probability of (?:a )?losing streak|streak probability|monte carlo)\b/i, 6),
@@ -181,7 +182,7 @@ export interface ContextPlan {
   stats: boolean;
   hold: boolean;
   patterns: boolean;
-  deep: { time: boolean; dow: boolean; setups: boolean; behavior: boolean; concepts: boolean };
+  deep: { time: boolean; dow: boolean; setups: boolean; concepts: boolean; behavior: boolean };
   /** recent = newest N compact rows; resolved = max rows picked by what the question refers to; detail = include prices and setup evidence. */
   trades: { recent: number; resolved: number; detail: boolean };
   analogs: number;
