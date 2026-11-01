@@ -13,6 +13,7 @@ import {
   type MemoryStore, type Observation,
 } from "./memory";
 import { understand, type TF } from "./understanding";
+import { condenseReminderText, parseRememberOrRemindCommand } from "./reminders";
 
 const DAY = 86_400_000;
 const EPISODE_WINDOW_DAYS = 150;
@@ -89,21 +90,23 @@ export function evolveMemory(brain: MinatoBrain, entries: JournalEntry[], plans:
 
 /* ------------------------- what the trader tells Minato ------------------------- */
 
-const REMEMBER = /^\s*(?:please\s+)?remember(?:\s+that)?[:,]?\s+([\s\S]{8,240})$/i;
-const FORGET = /^\s*(?:please\s+)?forget(?:\s+(?:about|that|what i said about))?[:,]?\s+([\s\S]{3,160})$/i;
+const REMEMBER = /^\s*(?:(?:hey|hi)\s+)?(?:(?:minato|sensei)[\s,]+)?(?:please\s+|can\s+you\s+)?(?:remember(?:\s+that|\s+to)?|remind\s+me(?:\s+that|\s+to)?|make\s+me\s+remember(?:\s+that|\s+to)?|don'?t\s+let\s+me\s+forget(?:\s+that|\s+to)?)[:,]?\s+([\s\S]{4,240})$/i;
+const FORGET = /^\s*(?:(?:hey|hi)\s+)?(?:(?:minato|sensei)[\s,]+)?(?:please\s+)?forget(?:\s+(?:about|that|what i said about))?[:,]?\s+([\s\S]{3,160})$/i;
 
 /**
- * "Remember that I only trade the NY open." → a pinned memory that keeps the trader's attribution.
+ * "Remember that I only trade the NY open." / "Remind me to wait for 9:45 close" → a pinned memory + active reminder.
  * "Forget the thing about Mondays." → the closest live memory is retired (restorable from the Mind tab).
  */
 export function applyDirectives(brain: MinatoBrain, text: string, now: number): { brain: MinatoBrain; remembered?: string; forgotten?: string } {
   const store = brain.memory ?? emptyMemory();
+  const parsedRem = parseRememberOrRemindCommand(text, now);
   const rem = text.match(REMEMBER);
-  if (rem) {
-    const said = rem[1].replace(/\s+/g, " ").trim().replace(/[.!]+$/, "");
+  if (parsedRem.matched || rem) {
+    const rawSaid = rem ? rem[1]! : parsedRem.item!.text;
+    const said = condenseReminderText(rawSaid);
     const o: Observation = {
       id: `usr:${slug(said)}`, kind: "semantic", topic: "fact", text: `You told me: ${clip(said, 220)}`, short: clip(said, 48), stance: "fact", polarity: "neutral",
-      level: "supported", confidence: 0.9, n: 1, evidence: [{ date: dayKey(now), note: "said in chat" }], origin: "user", pinned: true, cumulative: true,
+      level: "supported", confidence: 0.95, n: 1, evidence: [{ date: dayKey(now), note: "said in chat" }], origin: "user", pinned: true, cumulative: true,
     };
     return { brain: { ...brain, memory: observe(store, o, now) }, remembered: said };
   }

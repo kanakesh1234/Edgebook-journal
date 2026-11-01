@@ -40,9 +40,10 @@ export function dropEmpty<T>(v: T): T {
 }
 const isEmpty = (x: unknown) => x === null || x === undefined || x === "" || (Array.isArray(x) && !x.length) || (typeof x === "object" && x !== null && !Array.isArray(x) && !Object.keys(x).length);
 
-const PRICE_KEYS = ["entryPrice", "exitPrice", "stopLoss", "takeProfit", "exitTime", "screenshots"];
+const PRICE_KEYS = ["entryPrice", "exitPrice", "stopLoss", "takeProfit", "screenshots"];
 function compactRow(r: Row, detail: boolean) {
-  const { id: _id, ...rest } = r;
+  // Keep `id`, `exitTime`, and `holdMin` so Minato always knows the exact trade ID and hold duration
+  const rest = { ...r };
   if (!detail) for (const k of PRICE_KEYS) delete (rest as Record<string, unknown>)[k];
   return dropEmpty(rest);
 }
@@ -87,12 +88,12 @@ export function analogsOf(rows: Row[], base: Row, exclude: Set<number>, n: numbe
   return rows.map((r, i) => {
     if (exclude.has(i)) return { i, s: -1 };
     let s = 0;
-    if (base.setup && r.setup && String(r.setup).toLowerCase() === String(base.setup).toLowerCase()) s += 2;
+    if (base.setup && r.setup && String(base.setup).toLowerCase() === String(r.setup).toLowerCase()) s += 2;
     if (base.instrument && r.instrument === base.instrument) s += 1;
     if (base.direction && r.direction === base.direction) s += 0.5;
     if (base.date && r.date && dowOf(base.date) === dowOf(r.date)) s += 0.5;
     return { i, s };
-  }).filter((x) => x.s >= 2).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, n).map((x) => x.i);
+  }).filter((x) => x.s >= 2).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, n).slice(0, n).map((x) => x.i);
 }
 
 const clipJson = (v: unknown, chars: number) => { const s = JSON.stringify(v); return s.length > chars ? `${s.slice(0, chars - 1)}…` : v; };

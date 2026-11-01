@@ -65,7 +65,7 @@ export default function JournalPage() {
   useEffect(() => {
     try { const v = localStorage.getItem(VIEW_KEY); if (v === "list" || v === "grid" || v === "folders") setViewState(v); } catch { /* ignore */ }
   }, []);
-  // Deep links from Lessons: /journal?trade=ID opens that trade, /journal?lesson=ID shows the trades linked to a lesson.
+  // Deep links from Lessons or Minato Jarvis actions: /journal?trade=ID opens that trade
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     const trade = q.get("trade"), lesson = q.get("lesson"), review = q.get("review"), mistake = q.get("mistake"), period = q.get("period");
@@ -76,6 +76,14 @@ export default function JournalPage() {
     if (lesson) setLens({ kind: "lesson", id: lesson });
     if (trade) setViewingId(trade);
     window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+  useEffect(() => {
+    const onOpenTrade = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ tradeId?: string }>).detail;
+      if (detail?.tradeId) setViewingId(detail.tradeId);
+    };
+    window.addEventListener("edgebook:open-trade", onOpenTrade);
+    return () => window.removeEventListener("edgebook:open-trade", onOpenTrade);
   }, []);
   const setView = (v: ViewMode) => { haptic.selection(); setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
   const setPath = useCallback((next: string) => {

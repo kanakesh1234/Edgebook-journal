@@ -30,6 +30,8 @@ import { analyzePreTradeThought } from "@/lib/ai-brain";
 import type { InterventionAction, PlanSnapshot } from "@/lib/minato/plan-intervention";
 import { PlanIntervention } from "./plan-intervention";
 import { usePlanIntervention } from "./use-plan-intervention";
+import { useForexFactoryNews } from "./use-forexfactory-news";
+import { useMinatoReminders } from "@/lib/minato/reminders";
 import { ruleStats, statFor } from "@/lib/rule-stats";
 import { MISTAKE_CATEGORIES } from "@/lib/mistakes";
 import { recurringMistakes, thisWeekStart } from "@/lib/weekly";
@@ -434,9 +436,83 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const showReason = emotion !== "" || emotionReason.trim().length > 0;
   const showNews = reasonReveal.settled;
 
+  // Minato ForexFactory Major-Impact News check & autofill
+  const ffNews = useForexFactoryNews(today, open);
+  const [ffAutofilled, setFfAutofilled] = useState(false);
+
+  // Trigger Minato's Apple HIG pre-trade reminder pop-up when the trader opens Plan a Trade
+  useEffect(() => {
+    if (open) {
+      useMinatoReminders.getState().triggerContextReminders("Before You Plan");
+    } else {
+      setFfAutofilled(false);
+    }
+  }, [open]);
+
+  // Autofill News Events from Minato's ForexFactory check ONLY if there are Major-Impact (Red-Folder) events
+  const applyForexFactoryToPlan = (events: typeof ffNews.events) => {
+    if (events.length > 0) {
+      setNewsAnswer(true);
+      setNewsEvents(
+        events.map((e) => ({
+          id: e.id || uid("ev"),
+          name: `${e.currency ? `${e.currency} ` : ""}${e.name}`,
+          time: e.time,
+        })),
+      );
+    } else {
+      setNewsAnswer(false);
+      setNewsEvents([]);
+    }
+    setFfAutofilled(true);
+  };
+
+  useEffect(() => {
+    if (!open || ffNews.loading || ffAutofilled) return;
+    // Autofill when the user hasn't manually typed custom events yet
+    const hasCustomEvents = newsEvents.some((e) => e.name.trim().length > 0);
+    if (newsAnswer === null || (!hasCustomEvents && ffNews.hasMajorNews)) {
+      applyForexFactoryToPlan(ffNews.events);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, ffNews.loading, ffNews.hasMajorNews, ffNews.events, ffAutofilled]);
+
+  // Listen for live "edgebook:forexfactory-news" events dispatched when asking Minato in chat
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    const onFfEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ date?: string; events?: typeof ffNews.events }>).detail;
+      if (detail && Array.isArray(detail.events)) {
+        applyForexFactoryToPlan(detail.events);
+      }
+    };
+    window.addEventListener("edgebook:forexfactory-news", onFfEvent);
+    return () => window.removeEventListener("edgebook:forexfactory-news", onFfEvent);
+  }, [open]);
+
+  const askMinatoForexFactory = async () => {
+    haptic.selection();
+    const res = await ffNews.refresh();
+    if (res) {
+      applyForexFactoryToPlan(res.events);
+    }
+  };
+
   const chooseNews = (v: boolean) => {
     setNewsAnswer(v);
-    if (v && newsEvents.length === 0) setNewsEvents([{ id: uid("ev"), name: "", time: "" }]);
+    if (v && newsEvents.length === 0) {
+      if (ffNews.events.length > 0) {
+        setNewsEvents(
+          ffNews.events.map((e) => ({
+            id: e.id || uid("ev"),
+            name: `${e.currency ? `${e.currency} ` : ""}${e.name}`,
+            time: e.time,
+          })),
+        );
+      } else {
+        setNewsEvents([{ id: uid("ev"), name: "", time: "" }]);
+      }
+    }
   };
   const patchEvent = (id: string, patch: Partial<NewsEvent>) => setNewsEvents((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 
@@ -1115,7 +1191,63 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   {showNews && (
                     <Reveal key="plan-news" delay={0.08}>
                       <div className="space-y-3">
-                        <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                          <button
+                            type="button"
+                            onClick={() => void askMinatoForexFactory()}
+                            disabled={ffNews.loading}
+                            className="inline-flex min-h-[30px] items-center gap-1.5 rounded-full border border-line bg-surface/80 px-3 py-1 text-[12px] font-medium text-ink shadow-2xs backdrop-blur-md transition-all hover:border-gold/50 hover:text-gold active:scale-95 disabled:opacity-50"
+                          >
+                            <span
+                              className={cn(
+                                "h-1.5 w-1.5 rounded-full",
+                                ffNews.loading
+                                  ? "animate-pulse bg-info"
+                                  : ffNews.hasMajorNews
+                                    ? "bg-loss"
+                                    : "bg-profit",
+                              )}
+                              aria-hidden
+                            />
+                            <span>
+                              {ffNews.loading
+                                ? "Asking Minato (ForexFactory)…"
+                                : "Ask Minato · ForexFactory"}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Minato ForexFactory Major-Impact Status Banner */}
+                        {!ffNews.loading && (
+                          <div
+                            className={cn(
+                              "flex items-center justify-between gap-2.5 rounded-2xl border px-3.5 py-2 text-[12.5px]",
+                              ffNews.hasMajorNews
+                                ? "border-loss/30 bg-loss/[0.07] text-ink"
+                                : "border-profit/25 bg-profit/[0.06] text-muted",
+                            )}
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={cn(
+                                  "h-2 w-2 shrink-0 rounded-full",
+                                  ffNews.hasMajorNews ? "bg-loss" : "bg-profit",
+                                )}
+                                aria-hidden
+                              />
+                              <span className="truncate">
+                                {ffNews.hasMajorNews
+                                  ? `Minato autofilled ${ffNews.events.length} major-impact ForexFactory event${ffNews.events.length === 1 ? "" : "s"} (${ffNews.events.map((e) => `${e.name} ${e.time}`).join(", ")} NY)`
+                                  : "Minato checked ForexFactory · No major-impact (red-folder) news today"}
+                              </span>
+                            </span>
+                            <span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-faint">
+                              High Impact Only
+                            </span>
+                          </div>
+                        )}
+
                         <Stagger className="flex flex-wrap gap-2" delay={0.05}>
                           <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>
                             Yes
@@ -1582,6 +1714,34 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               }
                             />
                           </div>
+
+                          {/* Major-Impact News Profile (ForexFactory) on the Log Trade step */}
+                          {!ffNews.loading && ffNews.hasMajorNews && (
+                            <div className="overflow-hidden rounded-2xl border border-line bg-raised/80 px-4 py-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
+                                  <span className="h-2 w-2 rounded-full bg-loss" aria-hidden />
+                                  ForexFactory Major News Today
+                                </span>
+                                <span className="text-[11px] font-medium text-faint">
+                                  {ffNews.events.length} red-folder
+                                </span>
+                              </div>
+                              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {ffNews.events.map((ev) => (
+                                  <span
+                                    key={ev.id}
+                                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] font-medium leading-none text-ink"
+                                  >
+                                    <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
+                                    <span>{ev.name}</span>
+                                    <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           <AnimatePresence initial={false}>
                             {!levelsOpen && (
                               <Collapse key="add-levels">

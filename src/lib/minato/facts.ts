@@ -2,6 +2,8 @@
  * Deterministic journal facts (moved verbatim out of the chat route so they can be tested and routed).
  * Nothing here calls a model.
  */
+import { holdMinutes } from "../holdtime";
+
 /* ------------------------------------------------------------------ */
 /*  Deep analytics facts — computed in-memory from the loaded journal   */
 /* ------------------------------------------------------------------ */
@@ -119,12 +121,6 @@ export function deepFacts(entries: RawEntry[]) {
 }
 
 export function buildTradeRows(entries: RawEntry[]) {
-  // Per-trade rows so specific-trade questions ("how was my last trade",
-  // "the 31 Aug trade") can be answered, AND so the model can genuinely
-  // synthesize patterns across the full history rather than aggregate
-  // stats alone. Sent in full — the user's own journal, no cap — since
-  // per-trade rows are small and this is explicitly meant to be the
-  // model's complete view of the account.
   const recentTrades = entries
     .slice()
     .sort((a, b2) => (b2.date ?? "").localeCompare(a.date ?? ""))
@@ -137,6 +133,7 @@ export function buildTradeRows(entries: RawEntry[]) {
         : psych?.convictionOrUrgency === "conviction" ? "calm"
         : psych?.emotionBefore || null;
       const processVerdict = e.review?.outcome?.processVerdict || null;
+      const holdMin = holdMinutes({ entryTime: e.entryTime, exitTime: e.exitTime });
       return {
         id: e.id ?? null,
         date: e.date ?? null,
@@ -147,6 +144,7 @@ export function buildTradeRows(entries: RawEntry[]) {
         setup: e.setup ?? null,
         entryTime: e.entryTime ?? null,
         exitTime: e.exitTime ?? null,
+        holdMin,
         entryPrice: typeof e.entryPrice === "number" ? e.entryPrice : null,
         exitPrice: typeof e.exitPrice === "number" ? e.exitPrice : null,
         stopLoss: typeof e.stopLoss === "number" ? e.stopLoss : null,
@@ -154,15 +152,11 @@ export function buildTradeRows(entries: RawEntry[]) {
         notes: e.notes || null,
         reviewStatus: e.reviewStatus ?? null,
         screenshots: (e.images ?? []).length,
-        // The 5 Autopsy answers — all five, not just two of them:
         followedPlan: e.review?.outcome?.followedPlan ?? null, // Q1
         emotion, // Q2
         goodProcessTrade: processVerdict === "a-plus" ? true : processVerdict === "process-failure" ? false : null, // Q3
         mistakeOrLesson: e.review?.followUp?.biggestMistake ?? e.reflection?.lesson ?? null, // Q4
         watchNext: e.review?.followUp?.watchNext ?? null, // Q5
-        // Preserve the trader's actual language. This means MINATO can weigh
-        // every written observation against outcomes rather than reducing the
-        // journal to a statistics table.
         traderWords: {
           notes: e.notes || null,
           reflection: {
@@ -210,16 +204,10 @@ export function buildTradeRows(entries: RawEntry[]) {
       };
     });
 
-  // Every written lesson/reflection across the WHOLE journal, oldest to
-  // newest, so the model can teach from the user's own past reviews
-  // ("learn from my last trades where I write reviews") instead of only
-  // ever seeing the aggregated stats.
   const lessons = recentTrades
     .filter((t) => (t.mistakeOrLesson && t.mistakeOrLesson.trim().length > 0) || (t.watchNext && t.watchNext.trim().length > 0))
     .reverse()
     .map((t) => ({ date: t.date, instrument: t.instrument, pnl: t.pnl, mistakeOrLesson: t.mistakeOrLesson, watchNext: t.watchNext }));
-  // Keep numerical/execution history separate from the full written record.
-  // That lets the model inspect both without paying for the same note twice.
   const traderWords = recentTrades.map((trade) => ({ date: trade.date, instrument: trade.instrument, setup: trade.setup, text: trade.traderWords }));
   const tradeHistory = recentTrades.map(({ traderWords: _traderWords, notes: _notes, ...trade }) => trade);
   return { recentTrades, lessons, traderWords, tradeHistory };

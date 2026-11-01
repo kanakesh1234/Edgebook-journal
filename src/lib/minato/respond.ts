@@ -12,9 +12,10 @@ import {
 } from "./tools";
 import type { UserSemanticParams } from "./extract";
 import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName } from "./blueprint";
+import { resolveMinatoTasks, type SimpleChatTurn } from "./actions";
 
 /* ------------------------------------------------------------------ */
-/*  MINATO — English-only, analytical, evidence-based.                 */
+/*  MINATO — English-only, analytical, evidence-based + Jarvis Tasks.  */
 /*  No Telugu. No "bro". No constant nagging.                          */
 /*  Short conclusion → numbered findings → confidence note.            */
 /* ------------------------------------------------------------------ */
@@ -29,6 +30,8 @@ export interface RespondOptions {
   startingEquity?: number;
   targetEquity?: number;
   maxDrawdown?: number;
+  history?: SimpleChatTurn[];
+  focusTradeId?: string | null;
 }
 
 /** Focused starting points for a deeper conversation. Each remains grounded
@@ -42,7 +45,7 @@ export const QUICK_PROMPTS = [
 ] as const;
 
 function money(n: number): string {
-  const abs = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const abs = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 });
   return `${n < 0 ? "−" : "+"}$${abs}`;
 }
 
@@ -56,7 +59,7 @@ export function greet(ctx: EdgeBookContext): string {
   if (unreviewed > 3) {
     return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Completing your ${unreviewed} unreviewed trades in **Journal → Quick Autopsy** will sharpen pattern accuracy further.`;
   }
-  return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, losing streak odds, exact position sizing, or where to practise next.`;
+  return `Hello, ${name}. I've indexed ${ctx.recentTrades.length} trades (${cal.tier} calibration · ${cal.calibrationPct}%). Ask me anything about your setups, losing streak odds, exact position sizing, or tell me to open a trade replay or section.`;
 }
 
 export function respond(ctx: EdgeBookContext, input: string, opts: RespondOptions = {}): string {
@@ -68,7 +71,19 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   const calcParams = parseCalcQuery(input);
   const sem = opts.semanticParams ?? {};
 
-  // --- PRIORITY 0: GREETINGS & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
+  // --- PRIORITY 0A: JARVIS / SIRI / BIXBY DIRECT TASK COMMANDS ---
+  const taskRes = resolveMinatoTasks({
+    query: input,
+    entries: ctx.recentTrades,
+    history: opts.history ?? [],
+    focusTradeId: opts.focusTradeId ?? ctx.focus?.entry.id ?? null,
+    traderName: name,
+  });
+  if (taskRes.isDirectCommand && taskRes.directReply) {
+    return taskRes.directReply;
+  }
+
+  // --- PRIORITY 0B: GREETINGS & SITE NAVIGATION / BLUEPRINT GUIDANCE ---
   if (/^\s*(hi|hello|hey|yo|good (morning|afternoon|evening)|hi sensei|hey sensei|hello sensei|hi minato|hey minato)\b[\s!.?]*$/i.test(q)) {
     const unreviewed = ctx.recentTrades.filter((e) => e.reviewStatus !== "reviewed").length;
     const topLeak = mistakes[0]?.label;
@@ -80,7 +95,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       topLeak
         ? `2. **Practise → The Matrix & ICT Lab**: Run a 5-minute drill targeting **${topLeak}** so it doesn't repeat today.`
         : `2. **Practise → Math Duel & The Matrix**: Sharpen your chart recognition or R-multiple sizing before the session.`,
-      `\nWhat would you like to look at first, ${name} — a trade autopsy, streak/position sizing math, or a practice drill?`,
+      `\nWhat would you like me to do first, ${name} — replay a trade, run streak/sizing math, or take you to a practice drill?`,
     ].join("\n");
   }
 
@@ -109,7 +124,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       `4. **Home (\`/dashboard\`) & Feed (\`/feed\`)**: Lock your daily loss limit, run **Plan a trade** before market open, or swipe through your best chart replays in **Feed**.`,
     );
     parts.push(
-      `\nTell me which area you want to focus on and I'll pull the exact trades or numbers for you.`,
+      `\nJust say *"take me to The Matrix"*, *"open Trading Lab"*, or *"replay my last trade"* and I'll take you there immediately.`,
     );
     return parts.join("\n");
   }
@@ -210,7 +225,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
         );
       } else {
         sections.push(
-          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size, or practice sizing speed in **Practise → Math Duel**?`,
+          `\nWant me to run a sensitivity table across 10pt, 15pt, and 25pt stops for your ${mnq.symbol} size, or launch **Practise → Math Duel** for you?`,
         );
       }
     }
@@ -260,9 +275,33 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
           lines.push(`   - Lesson: “${t.reflection?.lesson ?? t.review?.followUp?.biggestMistake}”`);
         }
       });
-      lines.push(`\nOpen this session in **Journal** (\`/journal?date=${targetDate}\`) to view screenshots or launch **Replay**.`);
+      lines.push(`\nTap **Replay** or **Open in Journal** below — or say *"replay this trade"* and I'll launch it right now.`);
       return lines.join("\n");
     }
+  }
+
+  // --- Hold time (including "what is my largest holding time and which trade it is") ---
+  if (/hold|how long|duration/.test(q)) {
+    const holds = holdTimeStats(ctx.recentTrades);
+    if (holds.sampleSize === 0) return "No entry/exit times recorded yet. Add timestamps to your trades in **Journal** (or use **Settings → Data → Recover Entry Times**) and I'll calculate hold durations.";
+    const parts: string[] = [];
+    if (holds.longestHoldTrade && /\b(largest|longest|max|maximum|which trade)\b/.test(q)) {
+      const lt = holds.longestHoldTrade;
+      parts.push(
+        `Your longest holding time is **${lt.holdFormatted}** (${lt.entryTime} → ${lt.exitTime} NY) on **${lt.date} ${lt.instrument}${lt.direction ? ` ${lt.direction}` : ""}** (${lt.setup}) for **${money(lt.pnl)}**.`,
+      );
+    } else {
+      parts.push(`Hold time analysis (**${holds.sampleSize} trades** with timestamps):`);
+    }
+    parts.push(`1. **Average winning hold**: ${formatHold(holds.avgWinMin)} (median ${formatHold(holds.medianWinMin)})`);
+    parts.push(`2. **Average losing hold**: ${formatHold(holds.avgLossMin)} (median ${formatHold(holds.medianLossMin)})`);
+    parts.push(`3. **Longest win vs shortest loss**: ${formatHold(holds.longestWinMin)} vs ${formatHold(holds.shortestLossMin)}`);
+    if (holds.longestHoldTrade) {
+      parts.push(
+        `\nUse the **Replay** or **Open in Journal** action button below (or just say *"play this trade"*) and I'll open **${holds.longestHoldTrade.date} ${holds.longestHoldTrade.instrument}** right away.`,
+      );
+    }
+    return parts.join("\n");
   }
 
   // --- Mistakes / leaks / why losing / biggest error ---
@@ -280,7 +319,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     mistakes.slice(0, 4).forEach((m, i) => {
       parts.push(`${i + 1}. **${m.label}** — ${m.count} trade${m.count === 1 ? "" : "s"} · cost ${money(-m.cost)}`);
     });
-    parts.push(`\n**Next step**: Select **${top.label}** under “Mistakes to watch for today” in **Home → Plan a trade**, and run a 5-minute drill in **Practise → The Matrix** to cut this leak first. (Sample: ${ctx.recentTrades.length} trades · ${cal.tier} calibration)`);
+    parts.push(`\n**Next step**: Select **${top.label}** under “Mistakes to watch for today” in **Home → Plan a trade**, or say *"start The Matrix"* and I'll launch a drill for this leak right now.`);
     return parts.join("\n");
   }
 
@@ -362,23 +401,6 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       parts.push(`3. **Primary leak**: ${mistakes[0].label} (${mistakes[0].count}× · ${money(-mistakes[0].cost)}) — drill this in **Practise → The Matrix**`);
     }
     parts.push(`4. **AI Brain calibration**: ${cal.calibrationPct}% (${cal.tier} tier · ${cal.reviewedTrades} reviewed trades indexed)`);
-    return parts.join("\n");
-  }
-
-  // --- Hold time ---
-  if (/hold|how long|duration/.test(q)) {
-    const holds = holdTimeStats(ctx.recentTrades);
-    if (holds.sampleSize === 0) return "No entry/exit times recorded yet. Add timestamps to your trades in **Journal** (or use **Settings → Data → Recover Entry Times**) and I'll calculate hold durations.";
-    const parts: string[] = [];
-    parts.push(`Hold time analysis (**${holds.sampleSize} trades** with timestamps):`);
-    parts.push(`1. **Average winning hold**: ${formatHold(holds.avgWinMin)} (median ${formatHold(holds.medianWinMin)})`);
-    parts.push(`2. **Average losing hold**: ${formatHold(holds.avgLossMin)} (median ${formatHold(holds.medianLossMin)})`);
-    parts.push(`3. **Longest win vs shortest loss**: ${formatHold(holds.longestWinMin)} vs ${formatHold(holds.shortestLossMin)}`);
-    if (holds.avgWinMin != null && holds.avgLossMin != null && holds.avgWinMin < holds.avgLossMin) {
-      parts.push(`\nYou're cutting winners shorter than losers — review exit management in **Trading Lab → Playbook** or step through your exits in **Feed**.`);
-    } else if (holds.avgWinMin != null && holds.avgLossMin != null) {
-      parts.push(`\nYou're letting winners run longer than losers — healthy execution asymmetry.`);
-    }
     return parts.join("\n");
   }
 
@@ -483,7 +505,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
     } else {
       mistakes.slice(0, 3).forEach((m, i) => parts.push(`${i + 1}. **${m.label}** — ${m.count} occurrences (${money(-m.cost)})`));
     }
-    parts.push(`\nHead to **Practise → The Matrix** to drill these specific patterns or document a rule in **Lessons**.`);
+    parts.push(`\nSay *"start The Matrix"* to drill these specific patterns or document a rule in **Lessons**.`);
     return parts.join("\n");
   }
 
@@ -520,7 +542,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
       `2. **Mistakes tagged**: ${tags.length > 0 ? tags.map((t) => t.label).join(", ") : "None flagged"}`,
     ];
     if (lesson) parts.push(`3. **Recorded takeaway**: “${lesson}”`);
-    parts.push(`\nYou can open this trade's full **Quick Autopsy** (\`/review/${focus.id}\`) or step through it in **Feed → Replay**.`);
+    parts.push(`\nTap **Replay** or **Quick Autopsy** below — or say *"replay this trade"* and I'll launch it right now.`);
     return parts.join("\n");
   }
 
@@ -544,7 +566,7 @@ export function respond(ctx: EdgeBookContext, input: string, opts: RespondOption
   if (lessonQuote) {
     synthesis.push(`3. **Your own recent lesson (${latestLesson!.date})**: “${lessonQuote}”`);
   }
-  synthesis.push(`\nAsk me about losing streak probabilities, exact MNQ/NQ position sizing, a specific trade date, or what to drill next in **Practise** or **Trading Lab**.`);
+  synthesis.push(`\nAsk me about losing streak probabilities, exact MNQ/NQ position sizing, or tell me to replay a trade or open any section.`);
   return synthesis.join("\n");
 }
 

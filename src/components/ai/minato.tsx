@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { MINATO_MAX_WIDTH, MINATO_MIN_WIDTH, useUi } from "@/lib/ui-store";
@@ -22,6 +22,18 @@ import { sessionNudge } from "@/lib/minato/nudge";
 import { routeIntent, planFor, type Intent } from "@/lib/minato/router";
 import { applyExtractedMemories, extractStructuredMemoriesFromTurn, readUserSemanticParams } from "@/lib/minato/extract";
 import { resolveTraderFirstName } from "@/lib/minato/blueprint";
+import {
+  enrichActionsFromReplyText,
+  resolveMinatoTasks,
+  type MinatoAction,
+} from "@/lib/minato/actions";
+import { useMinatoReminders } from "@/lib/minato/reminders";
+import { fetchMajorForexFactoryNews } from "@/components/journal/use-forexfactory-news";
+import { MinatoReminderPopup } from "./minato-reminder-popup";
+import { planJournalReplay } from "@/lib/backtesting/journal-replay";
+import { useBacktest } from "@/lib/backtesting/store";
+import { defaultRuleSet } from "@/lib/types";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import "./minato.css";
 
@@ -43,6 +55,8 @@ type ChatMsg = MinatoMessage & {
   noted?: Mood[];
   committed?: string[];
   savedFacts?: string[];
+  actions?: MinatoAction[];
+  executedTask?: string;
 };
 const BRAIN_MIRROR = "edgebook:minato:brain:v1";
 const THREAD_MAX = 60;
@@ -103,6 +117,21 @@ const Svg = ({ children, className = "h-[17px] w-[17px]" }: { children: React.Re
 const CloseIcon = () => <Svg><path d="M6 6l12 12M18 6 6 18" /></Svg>;
 const ComposeIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>;
 const SendIcon = () => <Svg className="h-4 w-4"><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
+const PlayIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
+    <path d="M8 5.14v13.72a1 1 0 0 0 1.55.83l10.29-6.86a1 1 0 0 0 0-1.66L9.55 4.31A1 1 0 0 0 8 5.14Z" />
+  </svg>
+);
+const ArrowUpRightIcon = () => (
+  <Svg className="h-3.5 w-3.5">
+    <path d="M7 17 17 7M9 7h8v8" />
+  </Svg>
+);
+const BoltIcon = () => (
+  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
+    <path d="M13 2 3 14h8l-1 8 10-12h-8l1-8Z" />
+  </svg>
+);
 const ExpandIcon = ({ expanded }: { expanded: boolean }) =>
   expanded ? (
     <Svg><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></Svg>
@@ -134,15 +163,9 @@ function Avatar({ className }: { className?: string }) {
 /*  Minato                                                             */
 /* ------------------------------------------------------------------ */
 
-/**
- * MINATO — Apple HIG Redesigned Companion:
- * - Desktop (≥768px): Docked right-side panel that pushes page content (never covers the calendar),
- *   resizable between 400px and 640px with an expand-to-focus mode, ~70ch readable line length,
- *   comfortable line height, spacious list cards, and ONLY ONE close button (launcher hides when open).
- * - Mobile (<768px): Full-height bottom sheet with a drag handle, sticky keyboard-aware composer,
- *   and safe areas respected.
- */
 export function Minato() {
+  const router = useRouter();
+  const pathname = usePathname();
   const allEntries = useApp((s) => s.entries);
   const rawSettings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
@@ -159,7 +182,6 @@ export function Minato() {
 
   const reduce = useReducedMotion();
   const dragControls = useDragControls();
-  const pathname = usePathname();
 
   const { entries, settings, challenge } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
   const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
@@ -247,11 +269,184 @@ export function Minato() {
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
   const [pendingSlot, setPendingSlot] = useState<"stop_points" | "risk_per_trade" | "both" | null>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const focusReviewed = useRef(false);
   const resizingRef = useRef(false);
+
+  /* ------------------------------------------------------------------ */
+  /*  Jarvis / Siri / Bixby Action Executor                              */
+  /* ------------------------------------------------------------------ */
+  const executeMinatoAction = useCallback(
+    async (action: MinatoAction): Promise<string | null> => {
+      const actionKey = `${action.kind}:${action.label}`;
+      setRunningActionId(actionKey);
+      try {
+        // Close mobile bottom-sheet overlay when navigating so the destination page is visible on phones
+        const closeOnMobile = () => {
+          if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+            setOpen(false);
+          }
+        };
+
+        switch (action.kind) {
+          case "replay_trade": {
+            const target =
+              allEntries.find((e) => e.id === action.tradeId) ??
+              entries.find((e) => e.id === action.tradeId) ??
+              allEntries.find((e) => e.date === action.date && e.instrument === action.instrument) ??
+              null;
+            if (!target) {
+              toast.error("Trade not found", "Could not locate that trade in your journal.");
+              return null;
+            }
+            const plan = planJournalReplay(target, {
+              startingBalance: settings.startingEquity > 0 ? settings.startingEquity : 50000,
+              currency: settings.currency,
+            });
+            if (!plan.ok) {
+              // Fallback: open the trade in Journal if replay data isn't available for its symbol
+              closeOnMobile();
+              router.push(`/journal?trade=${target.id}`);
+              window.dispatchEvent(new CustomEvent("edgebook:open-trade", { detail: { tradeId: target.id } }));
+              return `Opened ${target.date} ${target.instrument} in Journal`;
+            }
+            const { purgeReplaySessions } = await import("@/lib/backtesting/persistence");
+            await purgeReplaySessions().catch(() => undefined);
+            const bt = useBacktest.getState();
+            bt.initSession(plan.config);
+            await useBacktest.getState().saveSession();
+            const sid = useBacktest.getState().sessionId;
+            closeOnMobile();
+            router.push(`/backtesting/session?id=${sid}`);
+            setSavedBanner(`Launched Replay · ${target.date} ${target.instrument}`);
+            return `Launched Replay · ${target.date} ${target.instrument}`;
+          }
+
+          case "open_trade_journal": {
+            closeOnMobile();
+            router.push(action.href);
+            window.dispatchEvent(new CustomEvent("edgebook:open-trade", { detail: { tradeId: action.tradeId } }));
+            setSavedBanner(`Opened ${action.date} ${action.instrument} in Journal`);
+            return `Opened ${action.date} ${action.instrument} in Journal`;
+          }
+
+          case "open_trade_autopsy": {
+            closeOnMobile();
+            router.push(action.href);
+            setSavedBanner(`Opened Quick Autopsy · ${action.date} ${action.instrument}`);
+            return `Opened Quick Autopsy · ${action.date} ${action.instrument}`;
+          }
+
+          case "navigate": {
+            closeOnMobile();
+            router.push(action.href);
+            if (action.href.includes("#")) {
+              const hash = action.href.split("#")[1];
+              if (hash && typeof window !== "undefined") {
+                window.setTimeout(() => {
+                  window.location.hash = hash;
+                }, 60);
+              }
+            }
+            setSavedBanner(`Navigated to ${action.section}`);
+            return `Navigated to ${action.section}`;
+          }
+
+          case "open_new_trade": {
+            useUi.getState().openNewEntry();
+            setSavedBanner("Opened New Trade form");
+            return "Opened New Trade form";
+          }
+
+          case "set_daily_loss_limit": {
+            await useApp.getState().setDayLimit(action.date, action.amount);
+            setSavedBanner(`Locked daily loss limit · $${action.amount}`);
+            return `Locked daily loss limit · $${action.amount}`;
+          }
+
+          case "log_no_trade_day": {
+            await useApp.getState().logNoTradeDay(action.date, action.reason);
+            setSavedBanner(`Logged No-Trade Day · ${action.date}`);
+            return `Logged No-Trade Day · ${action.date}`;
+          }
+
+          case "update_rule": {
+            const curRules = rawSettings.rules ?? defaultRuleSet();
+            const nextRules = curRules.rules.map((r) =>
+              r.id === action.ruleId
+                ? { ...r, enabled: action.enabled, params: { ...r.params, [action.paramKey]: action.value } }
+                : r,
+            );
+            await useApp.getState().updateSettings({ rules: { ...curRules, rules: nextRules } });
+            setSavedBanner(`Updated Rule · ${action.label}`);
+            return action.label;
+          }
+
+          case "switch_challenge": {
+            const list = rawSettings.challenges ?? [];
+            const match = list.find((c) => c.name.toLowerCase() === action.challengeName.toLowerCase()) ??
+              list.find((c) => c.name.toLowerCase().includes(action.challengeName.toLowerCase()));
+            if (match) {
+              await useApp.getState().setPrimaryChallenge(match.id);
+              setSavedBanner(`Switched Primary Challenge · ${match.name}`);
+              return `Switched Primary Challenge to ${match.name}`;
+            } else {
+              toast.info("Challenge not found", `No challenge matching "${action.challengeName}" was found.`);
+              return null;
+            }
+          }
+
+          case "set_theme": {
+            if (typeof window !== "undefined") {
+              const root = document.documentElement;
+              const isDark = root.classList.contains("dark");
+              const nextDark = action.theme === "toggle" ? !isDark : action.theme === "dark";
+              root.classList.toggle("dark", nextDark);
+              try {
+                window.localStorage.setItem("edgebook.theme", nextDark ? "dark" : "light");
+              } catch {
+                /* ignore */
+              }
+              setSavedBanner(`Switched to ${nextDark ? "Dark" : "Light"} Mode`);
+              return `Switched to ${nextDark ? "Dark" : "Light"} Mode`;
+            }
+            return null;
+          }
+
+          case "panel_control": {
+            if (action.mode === "close") setOpen(false);
+            else if (action.mode === "expand") setFocused(true);
+            else setFocused(false);
+            return `Panel ${action.mode}`;
+          }
+
+          case "save_reminder": {
+            useMinatoReminders.getState().upsertReminder(action.reminder, true);
+            setSavedBanner(`Reminder saved · ${action.reminder.text}`);
+            return `Reminder saved · ${action.reminder.text}`;
+          }
+
+          case "check_forexfactory_news": {
+            const res = await fetchMajorForexFactoryNews(action.date, true);
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("edgebook:forexfactory-news", { detail: res }));
+            }
+            const summary = res.hasMajorNews
+              ? `${res.events.length} Major ForexFactory event${res.events.length === 1 ? "" : "s"} (${res.events.map((e) => `${e.name} ${e.timeLabel}`).join(" · ")})`
+              : `No major red-folder news on ForexFactory (${action.date})`;
+            setSavedBanner(summary);
+            return summary;
+          }
+        }
+      } finally {
+        setRunningActionId(null);
+      }
+    },
+    [allEntries, entries, settings.startingEquity, settings.currency, rawSettings.rules, rawSettings.challenges, router, setOpen, setFocused],
+  );
 
   // Sync CSS variable `--minato-dock-w` on `document.documentElement` so `.app-main` pushes smoothly on desktop
   useEffect(() => {
@@ -288,10 +483,10 @@ export function Minato() {
     };
   }, [open]);
 
-  // Subtle "Saved to memory" confirmation banner timeout
+  // Subtle "Saved to memory" / task confirmation banner timeout
   useEffect(() => {
     if (!savedBanner) return;
-    const t = window.setTimeout(() => setSavedBanner(null), 3200);
+    const t = window.setTimeout(() => setSavedBanner(null), 3400);
     return () => window.clearTimeout(t);
   }, [savedBanner]);
 
@@ -510,6 +705,7 @@ export function Minato() {
 
       const moods = applied.moods;
       setBrain(applied.brain);
+      const priorMessages = messages.map(({ role, text: t }) => ({ role, text: t }));
       const next: ChatMsg[] = [
         ...messages,
         {
@@ -523,9 +719,42 @@ export function Minato() {
       setMessages(next);
       setInput("");
       if (inputRef.current) inputRef.current.style.height = "";
+
+      // 5. Check Jarvis / Siri / Bixby Task Engine on the client FIRST!
+      //    If the user issued a direct task command ("take me to play of this trade", "navigate me to there",
+      //    "set my daily loss limit to $300", "start The Matrix", etc.), execute it immediately with zero wait!
+      const clientTask = resolveMinatoTasks({
+        query: trimmed,
+        entries: entries.length > 0 ? entries : allEntries,
+        history: priorMessages,
+        focusTradeId: focusEntry?.id ?? null,
+        traderName: firstName,
+        today: todayKey(),
+      });
+
+      if (clientTask.isDirectCommand && clientTask.directReply) {
+        const autoAction = clientTask.actions.find((a) => a.autoExecute);
+        let executedLabel: string | undefined;
+        if (autoAction) {
+          const resLabel = await executeMinatoAction(autoAction);
+          if (resLabel) executedLabel = resLabel;
+        }
+        setMessages([
+          ...next,
+          {
+            role: "buddy",
+            text: clientTask.directReply,
+            actions: clientTask.actions,
+            ...(executedLabel ? { executedTask: executedLabel } : {}),
+          },
+        ]);
+        return;
+      }
+
       setBusy(true);
       try {
         let replyText: string | null = null;
+        let replyActions: MinatoAction[] = clientTask.actions;
         try {
           const controller = new AbortController();
           const timeout = window.setTimeout(() => controller.abort(), 56_000);
@@ -533,7 +762,7 @@ export function Minato() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              messages: next.map(({ role, text }) => ({ role, text })),
+              messages: next.map(({ role, text: t }) => ({ role, text: t })),
               traderName: firstName,
               entries,
               journalProvided: true,
@@ -554,8 +783,15 @@ export function Minato() {
           });
           window.clearTimeout(timeout);
           if (res.ok) {
-            const json = (await res.json()) as { text?: string; fallback?: boolean };
+            const json = (await res.json()) as {
+              text?: string;
+              fallback?: boolean;
+              actions?: MinatoAction[];
+            };
             replyText = json.fallback ? null : json.text ?? null;
+            if (Array.isArray(json.actions) && json.actions.length > 0) {
+              replyActions = json.actions;
+            }
           }
         } catch {
           /* offline → local provider below */
@@ -564,18 +800,56 @@ export function Minato() {
           const reply = await provider.reply({ messages: next, focusEntry }, ctx);
           replyText = reply.text;
         }
+
+        const finalActions = enrichActionsFromReplyText(
+          replyText,
+          replyActions,
+          entries.length > 0 ? entries : allEntries,
+        );
+
+        let executedLabel: string | undefined;
+        const autoAction = finalActions.find((a) => a.autoExecute);
+        if (autoAction) {
+          const resLabel = await executeMinatoAction(autoAction);
+          if (resLabel) executedLabel = resLabel;
+        }
+
         // Detect if Minato asked once for missing stop size or risk % so the next user reply is captured into semantic memory
         if (/isn't saved in memory yet/i.test(replyText)) {
           const needsStop = semanticParams.stopPoints === null;
           const needsRisk = semanticParams.riskDollars === null && semanticParams.riskPct === null;
           setPendingSlot(needsStop && needsRisk ? "both" : needsStop ? "stop_points" : "risk_per_trade");
         }
-        setMessages([...next, { role: "buddy", text: replyText }]);
+        setMessages([
+          ...next,
+          {
+            role: "buddy",
+            text: replyText,
+            ...(finalActions.length ? { actions: finalActions } : {}),
+            ...(executedLabel ? { executedTask: executedLabel } : {}),
+          },
+        ]);
       } finally {
         setBusy(false);
       }
     },
-    [busy, messages, entries, challenge, companion, provider, focusEntry, ctx, brain, recall, readiness, pendingSlot, firstName],
+    [
+      busy,
+      messages,
+      entries,
+      allEntries,
+      challenge,
+      companion,
+      provider,
+      focusEntry,
+      ctx,
+      brain,
+      recall,
+      readiness,
+      pendingSlot,
+      firstName,
+      executeMinatoAction,
+    ],
   );
 
   // Opened from a trade → start its review once.
@@ -589,16 +863,16 @@ export function Minato() {
 
   /* ---------------- suggestions ---------------- */
   const suggestions = useMemo(() => {
-    if (focusEntry) return ["What did I do well?", "What should I change?", "Is this a repeat of something?"];
+    if (focusEntry) return ["Replay this trade", "What did I do well?", "What should I change?"];
     if (entries.length === 0) return [];
     const today = todayKey();
     const todays = entries.filter((e) => e.date === today);
     const lostToday = todays.length > 0 && todays.reduce((s, e) => s + e.pnl, 0) < 0;
     return [
       lostToday ? "Help me reset after today" : "How am I doing lately?",
+      "Replay my last trade",
       "With my win rate, what's the max losing streak & MNQ/NQ size?",
-      "Where should I practise or review today?",
-      "What pattern keeps repeating?",
+      "Start The Matrix drill",
     ];
   }, [focusEntry, entries]);
 
@@ -768,7 +1042,7 @@ export function Minato() {
               </button>
             </div>
 
-            {/* Subtle "Saved to memory" toast bar */}
+            {/* Subtle "Saved to memory" / Task Executed toast bar */}
             <AnimatePresence>
               {savedBanner && (
                 <motion.div
@@ -784,7 +1058,7 @@ export function Minato() {
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-profit" />
                     <span className="truncate">{savedBanner}</span>
                   </span>
-                  <span className="shrink-0 text-[11px] text-muted">Settings → MINATO</span>
+                  <span className="shrink-0 text-[11px] text-muted">Minato</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -809,7 +1083,7 @@ export function Minato() {
                     {nudge ??
                       (entries.length === 0
                         ? "Log your first trade and I’ll start learning how you trade."
-                        : "Ask me about losing streak probabilities, exact MNQ/NQ position sizing, or where to practise and review next.")}
+                        : "Ask me about losing streak probabilities, exact MNQ/NQ position sizing, or tell me to replay a trade or launch a drill.")}
                   </p>
                 </motion.div>
               )}
@@ -838,8 +1112,48 @@ export function Minato() {
                     ) : (
                       <div className="space-y-2">{renderMinatoText(m.text)}</div>
                     )}
+
+                    {/* Jarvis / Siri Interactive Action Pills inside Buddy Message */}
+                    {m.role === "buddy" && m.actions && m.actions.length > 0 && (
+                      <div className="mt-3.5 flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
+                        {m.actions.map((act, actIdx) => {
+                          const actKey = `${act.kind}:${act.label}`;
+                          const isPrimary = actIdx === 0 || act.kind === "replay_trade";
+                          const isRunning = runningActionId === actKey;
+                          return (
+                            <button
+                              key={`${act.kind}-${actIdx}`}
+                              type="button"
+                              disabled={isRunning}
+                              onClick={() => void executeMinatoAction(act)}
+                              className={cn(
+                                "inline-flex min-h-[34px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-all active:scale-[0.97] disabled:opacity-50",
+                                isPrimary
+                                  ? "bg-gold-strong text-on-gold shadow-xs hover:opacity-92"
+                                  : "border border-line bg-surface/85 text-ink hover:border-gold/50 hover:text-gold",
+                              )}
+                            >
+                              {act.kind === "replay_trade" ? (
+                                <PlayIcon />
+                              ) : act.autoExecute ? (
+                                <BoltIcon />
+                              ) : (
+                                <ArrowUpRightIcon />
+                              )}
+                              <span>{isRunning ? "Opening…" : act.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
+                  {m.executedTask && (
+                    <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] font-medium text-profit">
+                      <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
+                      Task executed · {m.executedTask}
+                    </p>
+                  )}
                   {m.savedFacts && m.savedFacts.length > 0 && (
                     <p className="flex items-center gap-1.5 px-1.5 text-[11.5px] font-medium text-profit">
                       <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden />
@@ -928,7 +1242,7 @@ export function Minato() {
                   placeholder={
                     pendingSlot
                       ? "Reply with your stop size (pts) & risk ($ or %)…"
-                      : "Ask Minato about streaks, sizing, or trades…"
+                      : "Ask Minato or tell him to replay a trade, open a section…"
                   }
                   value={input}
                   onChange={(e) => {
@@ -954,6 +1268,9 @@ export function Minato() {
           </motion.aside>
         )}
       </AnimatePresence>
+
+      {/* Apple HIG Reminder Banner Pop-up (mounts globally so reminders surface anywhere) */}
+      <MinatoReminderPopup />
     </>
   );
 }

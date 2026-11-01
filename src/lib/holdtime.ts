@@ -7,6 +7,20 @@ import type { JournalEntry } from "./types";
 /*  wall times on the trade's own date; cross-midnight not assumed).   */
 /* ------------------------------------------------------------------ */
 
+export interface HoldTradeSummary {
+  id: string;
+  date: string;
+  instrument: string;
+  direction: "long" | "short" | null;
+  setup: string;
+  pnl: number;
+  rr: number | null;
+  entryTime: string;
+  exitTime: string;
+  holdMin: number;
+  holdFormatted: string;
+}
+
 export interface HoldStats {
   sampleSize: number;
   avgWinMin: number | null;
@@ -18,6 +32,10 @@ export interface HoldStats {
   longestLossMin: number | null;
   shortestLossMin: number | null;
   avgHoldMin: number | null;
+  longestHoldTrade: HoldTradeSummary | null;
+  shortestHoldTrade: HoldTradeSummary | null;
+  longestWinTrade: HoldTradeSummary | null;
+  longestLossTrade: HoldTradeSummary | null;
 }
 
 function toMinutes(hhmm: string): number | null {
@@ -29,7 +47,7 @@ function toMinutes(hhmm: string): number | null {
   return h * 60 + min;
 }
 
-export function holdMinutes(e: JournalEntry): number | null {
+export function holdMinutes(e: Pick<JournalEntry, "entryTime" | "exitTime">): number | null {
   if (!e.entryTime || !e.exitTime) return null;
   const a = toMinutes(e.entryTime);
   const b = toMinutes(e.exitTime);
@@ -49,13 +67,44 @@ function avg(values: number[]): number | null {
   return Math.round(values.reduce((s, v) => s + v, 0) / values.length);
 }
 
+export function formatHold(min: number | null): string {
+  if (min == null) return "—";
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function toSummary(e: JournalEntry, min: number): HoldTradeSummary {
+  return {
+    id: e.id,
+    date: e.date,
+    instrument: e.instrument,
+    direction: e.direction ?? null,
+    setup: e.setup || "Unnamed setup",
+    pnl: e.pnl,
+    rr: e.rr ?? null,
+    entryTime: e.entryTime ?? "",
+    exitTime: e.exitTime ?? "",
+    holdMin: min,
+    holdFormatted: formatHold(min),
+  };
+}
+
 export function holdTimeStats(entries: JournalEntry[]): HoldStats {
   const withHold = entries
     .map((e) => ({ e, min: holdMinutes(e) }))
     .filter((x): x is { e: JournalEntry; min: number } => x.min != null);
 
-  const winMin = withHold.filter((x) => x.e.pnl > 0).map((x) => x.min);
-  const lossMin = withHold.filter((x) => x.e.pnl < 0).map((x) => x.min);
+  const wins = withHold.filter((x) => x.e.pnl > 0);
+  const losses = withHold.filter((x) => x.e.pnl < 0);
+  const winMin = wins.map((x) => x.min);
+  const lossMin = losses.map((x) => x.min);
+
+  const byDesc = [...withHold].sort((a, b) => b.min - a.min || b.e.date.localeCompare(a.e.date));
+  const byAsc = [...withHold].sort((a, b) => a.min - b.min || b.e.date.localeCompare(a.e.date));
+  const winDesc = [...wins].sort((a, b) => b.min - a.min || b.e.date.localeCompare(a.e.date));
+  const lossDesc = [...losses].sort((a, b) => b.min - a.min || b.e.date.localeCompare(a.e.date));
 
   return {
     sampleSize: withHold.length,
@@ -68,13 +117,9 @@ export function holdTimeStats(entries: JournalEntry[]): HoldStats {
     longestLossMin: lossMin.length ? Math.max(...lossMin) : null,
     shortestLossMin: lossMin.length ? Math.min(...lossMin) : null,
     avgHoldMin: avg(withHold.map((x) => x.min)),
+    longestHoldTrade: byDesc[0] ? toSummary(byDesc[0].e, byDesc[0].min) : null,
+    shortestHoldTrade: byAsc[0] ? toSummary(byAsc[0].e, byAsc[0].min) : null,
+    longestWinTrade: winDesc[0] ? toSummary(winDesc[0].e, winDesc[0].min) : null,
+    longestLossTrade: lossDesc[0] ? toSummary(lossDesc[0].e, lossDesc[0].min) : null,
   };
-}
-
-export function formatHold(min: number | null): string {
-  if (min == null) return "—";
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }

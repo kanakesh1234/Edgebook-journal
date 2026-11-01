@@ -25,6 +25,8 @@ import { LessonPeek, LessonPicker, LessonThumb } from "./lesson-links";
 import { useReplayTrade } from "./replay-trade";
 import { EntryTags } from "./tag-panel";
 import { PlanVsTrade } from "./plan-vs-trade";
+import { useForexFactoryNews } from "./use-forexfactory-news";
+import { findNearbyMajorNews } from "@/lib/minato/forexfactory";
 import { cn } from "@/lib/utils";
 
 const tone = (n: number) => (n > 0 ? "text-profit" : n < 0 ? "text-loss" : "text-muted");
@@ -609,6 +611,9 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
                   </section>
                 )}
 
+                {/* Major-Impact News Profile (ForexFactory) */}
+                <TradeNewsProfile date={entry.date} entryTime={entry.entryTime} />
+
                 <nav aria-label="Details" className="divide-y divide-ink/[0.07] border-y border-ink/[0.07]">
                   {hasReview && <NavRow label="Review" value={verdict ?? undefined} tone={verdict ? (goodProcess ? "good" : "bad") : "plain"} onClick={() => onPage("review")} />}
                   {planReview && <NavRow label="Plan" value={PLAN_WORD[planReview.verdict]} tone={PLAN_TONE[planReview.verdict]} onClick={() => onPage("plan")} />}
@@ -692,5 +697,77 @@ function Story({ entry, page, onPage, scroll, onReflect, canEdit, onPickLesson, 
         </motion.div>
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * Profiles the trade date's Major-Impact (Red-Folder) news events and their exact NY times
+ * checked by Minato from ForexFactory, and highlights if the trade entry was within ±15m of a release.
+ */
+function TradeNewsProfile({ date, entryTime }: { date: string; entryTime?: string }) {
+  const ff = useForexFactoryNews(date, Boolean(date));
+  const nearby = useMemo(
+    () => (entryTime ? findNearbyMajorNews(entryTime, ff.events, 15) : null),
+    [entryTime, ff.events],
+  );
+
+  if (ff.loading) return null;
+
+  return (
+    <section aria-label="Major news profile" className="mb-5">
+      <div className="overflow-hidden rounded-[18px] border border-line-soft bg-ink/[0.03] px-3.5 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
+            <span
+              className={cn(
+                "h-2 w-2 rounded-full",
+                ff.hasMajorNews ? "bg-loss" : "bg-profit",
+              )}
+              aria-hidden
+            />
+            ForexFactory Major News
+          </span>
+          <span className="text-[11px] font-medium text-faint">
+            {ff.hasMajorNews ? `${ff.events.length} red-folder` : "No major news"}
+          </span>
+        </div>
+
+        {ff.hasMajorNews ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {ff.events.map((ev) => {
+              const isNear = nearby?.id === ev.id;
+              return (
+                <span
+                  key={ev.id}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium leading-none",
+                    isNear
+                      ? "border-loss/45 bg-loss/12 text-loss"
+                      : "border-line bg-surface/80 text-ink",
+                  )}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
+                  <span className="truncate max-w-[180px]">{ev.name}</span>
+                  <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-1 text-[12.5px] text-muted">
+            No high-impact news scheduled on ForexFactory for {date}.
+          </p>
+        )}
+
+        {nearby && (
+          <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-loss">
+            <span>⚠</span>
+            <span>
+              Entry ({entryTime}) was within 15 min of {nearby.name} ({nearby.time} NY)
+            </span>
+          </p>
+        )}
+      </div>
+    </section>
   );
 }

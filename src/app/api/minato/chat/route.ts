@@ -18,6 +18,7 @@ import {
 } from "@/lib/minato/tools";
 import { summarizeWorkingMemory, type UserSemanticParams } from "@/lib/minato/extract";
 import { EDGEBOOK_SITE_BLUEPRINT, resolveTraderFirstName, SITE_BLUEPRINT_PROMPT_TEXT } from "@/lib/minato/blueprint";
+import { enrichActionsFromReplyText, resolveMinatoTasks } from "@/lib/minato/actions";
 
 export const dynamic = "force-dynamic";
 // AI calls can exceed the default serverless timeout on Vercel.
@@ -31,10 +32,15 @@ const HISTORY_TURNS = 30;
 const HISTORY_CHARS = 12_000;
 
 const SYSTEM_PROMPT = [
-  "You are MINATO, the EdgeBook trading companion — a warm, perceptive mentor and sharp quantitative analyst who knows this trader well. You understand their psychology, emotions, habits and decisions, and you read their journal, trades, screenshots metadata, plans, practice sessions, statistics, semantic/episodic memory, deterministic tool outputs, and the complete EdgeBook website blueprint.",
+  "You are MINATO, the EdgeBook trading companion and active task assistant (like Jarvis, Siri, or Bixby) — a warm, perceptive mentor and sharp quantitative analyst who knows this trader well and can execute workspace tasks directly.",
   "",
   "TRADER NAME RULE:",
   "- Always address the trader by `facts.trader` (their real first name, e.g. 'Nandigam'). NEVER address them by an email handle, username with digits (like `kanakesh939264`), or raw user ID.",
+  "",
+  "JARVIS / SIRI TASK EXECUTION RULE:",
+  "- You can directly execute tasks in EdgeBook for the trader: launching candle-by-candle Trade Replay (`replay_trade`), opening a trade in Journal (`/journal?trade=<id>`) or Quick Autopsy (`/review/<id>`), navigating to any section or Practise drill (`/practice?mode=matrix`, `/lab#setups`, etc.), setting today's daily loss limit, logging a no-trade day, enabling guardrail rules, logging a new trade, or switching themes/challenges.",
+  "- NEVER output placeholder paths like `/journal/review/[id]` or `/journal/review/[trade-id]`. Every trade in `facts.recentTrades`, `facts.referencedTrades`, and `facts.hold.longestHoldTrade` includes its exact `id`. Furthermore, the UI automatically attaches clickable 1-tap action buttons (`Replay`, `Open in Journal`, `Quick Autopsy`, `Open Section`) below your message.",
+  "- When the trader asks you to navigate somewhere, open a trade, or play/replay a trade, confirm that you are opening/launching it for them right now instead of telling them to manually click around.",
   "",
   SITE_BLUEPRINT_PROMPT_TEXT,
   "",
@@ -42,7 +48,7 @@ const SYSTEM_PROMPT = [
   "1. ANSWER THE EXACT QUESTION ASKED FIRST: Lead directly with the exact answer and numbers requested. NEVER substitute a different analysis (e.g. never return a directional or instrument breakdown when asked about losing streaks or position sizing).",
   "2. NEVER DO TRADING MATH YOURSELF: When `facts.deterministicTools` is present (streak probabilities, Monte Carlo results, position sizing for NQ/MNQ/ES/MES, expectancy, profit factor, average R, drawdown room), you MUST report the exact pre-computed numbers, working formulas, assumptions, and sample-size caveats from `facts.deterministicTools`. Never recalculate or round away the tool's contract count or probabilities.",
   "3. MISSING INPUTS RULE: If `facts.deterministicTools.positionSizing.missingInputs` is non-empty, show the baseline calculation first, then ask ONCE for the missing input (e.g. default stop size in points or risk per trade) so it can be saved to memory.",
-  "4. SHOW WORKING, ASSUMPTIONS & FOLLOW-UP: State the exact numbers, show the formula working (e.g. `contracts = floor(risk_$ / (stop_points × point_value))`), state the statistical assumptions and sample-size caveat, and finish with ONE helpful follow-up pointing to the relevant EdgeBook section when applicable (e.g. Practise → The Matrix / ICT Lab / Math Duel, Journal → Quick Autopsy, or Trading Lab → Playbook / Backtesting).",
+  "4. SHOW WORKING, ASSUMPTIONS & FOLLOW-UP: State the exact numbers, show the formula working (e.g. `contracts = floor(risk_$ / (stop_points × point_value))`), state the statistical assumptions and sample-size caveat, and finish with ONE helpful follow-up.",
   "",
   "VOICE:",
   "- Friendly, calm and human. Speak to the trader like a thoughtful friend who is also a sharp analyst. Be kind about mistakes, honest about patterns, never preachy. No slang like 'bro', no empty hype.",
@@ -92,6 +98,7 @@ export async function POST(request: Request) {
   const memory = sanitizeMemoryPayload((body.companion as { memory?: unknown } | null | undefined)?.memory);
   const semanticParams: Partial<UserSemanticParams> = body.semanticParams ?? (companion?.semanticParams as Partial<UserSemanticParams> | undefined) ?? {};
   const question = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
+  const priorHistory = messages.slice(0, -1);
 
   // Prefer the client-supplied fullName / display name from Settings over the raw session username/email prefix
   const traderName = resolveTraderFirstName({
@@ -121,11 +128,39 @@ export async function POST(request: Request) {
     entries = entries.filter((entry) => entry.challengeId === selectedChallenge.id);
   }
 
+  // ---- Check Jarvis / Siri / Bixby Task Engine First ----
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const taskRes = resolveMinatoTasks({
+    query: question,
+    entries: entries as unknown as JournalEntry[],
+    history: priorHistory,
+    focusTradeId: body.focusTradeId ?? null,
+    traderName,
+    today: todayIso,
+  });
+
+  // If the user gave a direct action command ("navigate me to there", "take me to play of this trade", "set daily loss limit to $300"),
+  // return the confirmation + executable actions immediately!
+  if (taskRes.isDirectCommand && taskRes.directReply) {
+    return NextResponse.json({
+      text: taskRes.directReply,
+      actions: taskRes.actions,
+      meta: {
+        deterministic: true,
+        provider: "jarvis-action-engine",
+        intent: "action",
+        actionsCount: taskRes.actions.length,
+      },
+    });
+  }
+
   if (entries.length === 0) {
     return NextResponse.json({
       text: selectedChallenge
         ? `No trades are recorded for **${selectedChallenge.name}** yet, ${traderName}. Log a trade in **Home** or **Journal** under this challenge, or test your setup in **Trading Lab → Backtesting**.`
         : `Your journal is empty, ${traderName} — log or import a trade in **Journal**, or explore **Practise** and **Trading Lab** to get started.`,
+      actions: taskRes.actions,
     });
   }
 
@@ -193,12 +228,11 @@ export async function POST(request: Request) {
 
   const { lessons, traderWords, tradeHistory } = buildTradeRows(entries as RawEntry[]);
 
-  const now = new Date();
   const workingMem = summarizeWorkingMemory(messages, 10);
 
   const facts = {
     currentContext: {
-      today: now.toISOString().slice(0, 10),
+      today: todayIso,
       weekday: now.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" }),
       nyTime: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" }),
       liveMarketDataAvailable: false,
@@ -226,6 +260,10 @@ export async function POST(request: Request) {
       shortestWin: formatHold(holds.shortestWinMin),
       longestLoss: formatHold(holds.longestLossMin),
       shortestLoss: formatHold(holds.shortestLossMin),
+      longestHoldTrade: holds.longestHoldTrade,
+      shortestHoldTrade: holds.shortestHoldTrade,
+      longestWinTrade: holds.longestWinTrade,
+      longestLossTrade: holds.longestLossTrade,
       sample: holds.sampleSize,
     },
     patterns: patterns.map((p) => ({
@@ -271,6 +309,8 @@ export async function POST(request: Request) {
       startingEquity: effectiveSettings.startingEquity,
       targetEquity: effectiveSettings.targetEquity,
       maxDrawdown: effectiveSettings.maxDrawdown,
+      history: priorHistory,
+      focusTradeId: body.focusTradeId ?? null,
     },
   );
 
@@ -300,20 +340,34 @@ export async function POST(request: Request) {
       route,
       plan,
       refs: parseTradeRefs(question, vocab, facts.currentContext.today),
-      focusId: body.focusTradeId ?? null,
+      focusId: taskRes.resolvedTrade?.id ?? body.focusTradeId ?? null,
       memory,
       today: facts.currentContext.today,
     });
     packed.facts.trader = traderName;
     packed.facts.siteBlueprint = EDGEBOOK_SITE_BLUEPRINT;
+    packed.facts.hold = facts.hold;
     if (Object.keys(deterministicTools).length > 0) {
       packed.facts.deterministicTools = deterministicTools;
       packed.facts.precomputedToolAnswer = deterministic;
     }
-    const text = await callOpenRouterWithFallback(orConfig, workingMem.recentMessages, JSON.stringify(packed.facts), maxTokens);
-    if (text) {
+    const rawText = await callOpenRouterWithFallback(orConfig, workingMem.recentMessages, JSON.stringify(packed.facts), maxTokens);
+    if (rawText) {
+      // Sanitize any accidental [id] or [trade-id] placeholders if a specific trade was resolved
+      const finalActions = enrichActionsFromReplyText(rawText, taskRes.actions, entries as unknown as JournalEntry[]);
+      const primaryTradeId =
+        taskRes.resolvedTrade?.id ??
+        (finalActions.find((a) => "tradeId" in a) as { tradeId?: string } | undefined)?.tradeId ??
+        null;
+      const cleanedText = primaryTradeId
+        ? rawText
+            .replace(/\/journal\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
+            .replace(/\/review\/\[(?:trade-)?id\]/gi, `/review/${primaryTradeId}`)
+        : rawText;
+
       return NextResponse.json({
-        text,
+        text: cleanedText,
+        actions: finalActions,
         meta: {
           deterministic: false,
           provider: orConfig.model,
@@ -327,8 +381,10 @@ export async function POST(request: Request) {
   }
 
   const text = question ? deterministic : greetingText;
+  const finalActions = enrichActionsFromReplyText(text, taskRes.actions, entries as unknown as JournalEntry[]);
   return NextResponse.json({
     text,
+    actions: finalActions,
     meta: {
       deterministic: true,
       provider: "deterministic",

@@ -15,6 +15,9 @@ import { TradeReviewFlow } from "./trade-review-flow";
 import { cn } from "@/lib/utils";
 import { defaultMnqSymbol, resolveInstrument } from "./journal-model";
 import { AlertTriangleIcon, CheckIcon } from "@/components/ui/icons";
+import { useForexFactoryNews } from "./use-forexfactory-news";
+import { findNearbyMajorNews } from "@/lib/minato/forexfactory";
+import { useMinatoReminders } from "@/lib/minato/reminders";
 import {
   BinaryChoice, ChoiceCard, Chip, Collapse, Disclosure, FLOW_EXPAND, GlyphArrowIn, GlyphArrowOut, GlyphTimer, Hint, IconCheck, IconTile, Label, PrimaryButton, Reveal, Segmented,
   SheetFrame, Stagger, Stepper, StepTitle, StepTransition, TextBlock, TextBox,
@@ -167,6 +170,7 @@ export function EntryFormModal({
   // settings update never re-runs this effect and wipes the user's in-progress answers.
   useEffect(() => {
     if (!open) return;
+    useMinatoReminders.getState().triggerContextReminders("Before Logging Trade");
     setStep("trade");
     setDir(1);
     setSaveError(null);
@@ -525,6 +529,7 @@ export function EntryFormModal({
                     <TimeRow id="add-in" label="Entry" value={entryTime} onChange={(v) => { setEntryEdited(true); setEntryTime(v); }} tile="bg-info" icon={<GlyphArrowIn />} />
                     <TimeRow id="add-out" label="Exit" value={exitTime} onChange={setExitTime} tile="bg-gold-strong" icon={<GlyphArrowOut />} />
                   </div>
+                  <ForexFactoryFormProfile date={date} entryTime={entryTime} />
                   <AnimatePresence initial={false}>
                     {showPremature && (
                       <motion.div key="premature" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={FLOW_EXPAND} className="overflow-hidden" role="alert">
@@ -972,6 +977,76 @@ function ImportBody({ imp, challenges, playbook }: { imp: ImportState; challenge
             </Reveal>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Profiles Major-Impact (Red-Folder) ForexFactory news events and their exact NY times
+ * inside the trade form, and alerts if the trader's entry time was within ±15m of a major release.
+ */
+function ForexFactoryFormProfile({ date, entryTime }: { date: string; entryTime?: string }) {
+  const ff = useForexFactoryNews(date, Boolean(date));
+  const nearby = useMemo(
+    () => (entryTime ? findNearbyMajorNews(entryTime, ff.events, 15) : null),
+    [entryTime, ff.events],
+  );
+
+  if (ff.loading) return null;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line bg-raised/80 px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              ff.hasMajorNews ? "bg-loss" : "bg-profit",
+            )}
+            aria-hidden
+          />
+          ForexFactory Major News ({date})
+        </span>
+        <span className="text-[11px] font-medium text-faint">
+          {ff.hasMajorNews ? `${ff.events.length} red-folder` : "No major news"}
+        </span>
+      </div>
+
+      {ff.hasMajorNews ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {ff.events.map((ev) => {
+            const isNear = nearby?.id === ev.id;
+            return (
+              <span
+                key={ev.id}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium leading-none",
+                  isNear
+                    ? "border-loss/45 bg-loss/12 text-loss"
+                    : "border-line bg-surface text-ink",
+                )}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
+                <span>{ev.name}</span>
+                <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-1 text-[12.5px] text-muted">
+          No high-impact news scheduled on ForexFactory for this session.
+        </p>
+      )}
+
+      {nearby && (
+        <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-loss">
+          <span>⚠</span>
+          <span>
+            Entry ({entryTime}) was within 15 min of {nearby.name} ({nearby.time} NY)
+          </span>
+        </p>
       )}
     </div>
   );

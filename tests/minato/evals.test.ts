@@ -1,5 +1,5 @@
 /**
- * MINATO EVALUATION & REGRESSION TEST SUITE (20 Sample Questions & Scenarios)
+ * MINATO EVALUATION & REGRESSION TEST SUITE (23 Sample Questions & Scenarios)
  *
  * Covers:
  *  1. Exact user bug reproduction ("with this win rate, what's the maximum longest losing streak possible,
@@ -13,6 +13,9 @@
  *  7. Episodic memory & journal recall + hybrid retrieval within token budget.
  *  8. Trader name resolution (never calling the user by email handle / digit ID like `kanakesh939264`)
  *     and EdgeBook website blueprint navigation guidance.
+ *  9. Jarvis / Siri / Bixby Task Execution: contextual navigation ("where can I see that navigate me to there"),
+ *     contextual trade replay ("what is my largest holding time and which trade it is" -> "can you take me to play of this trade now from here"),
+ *     and workspace state mutations ("set my daily loss limit to $300", "set consecutive loss stop to 3").
  */
 
 import { strict as assert } from "node:assert";
@@ -32,6 +35,8 @@ import {
 } from "../../src/lib/minato/extract.ts";
 import { respond } from "../../src/lib/minato/respond.ts";
 import { resolveTraderFirstName } from "../../src/lib/minato/blueprint.ts";
+import { resolveMinatoTasks } from "../../src/lib/minato/actions.ts";
+import { filterMajorForexFactoryEvents, findNearbyMajorNews } from "../../src/lib/minato/forexfactory.ts";
 import { buildContext } from "../../src/lib/minato/context.ts";
 import { computeStats } from "../../src/lib/stats.ts";
 import { disciplineSummary } from "../../src/lib/discipline.ts";
@@ -45,9 +50,13 @@ import { defaultSettings, type JournalEntry } from "../../src/lib/types.ts";
 const NOW = Date.UTC(2026, 9, 31, 14, 0, 0);
 const entries: JournalEntry[] = journal({ days: 40, breakAfterLoss: 0.3, breakBase: 0.1, seed: 42 }).map((e, i) => ({
   ...e,
-  instrument: i % 2 === 0 ? "MNQ" : "NQ",
-  direction: i % 3 === 0 ? "short" : "long",
-  pnl: i % 5 === 0 ? -120 : i % 5 === 1 ? -80 : 180, // ~60% win rate
+  date: i === 5 ? "2026-10-15" : e.date,
+  instrument: i === 5 ? "MNQ" : i % 2 === 0 ? "MNQ" : "NQ",
+  direction: i === 5 ? "short" : i % 3 === 0 ? "short" : "long",
+  setup: i === 5 ? "SMT DIVERGENCE" : e.setup,
+  entryTime: i === 5 ? "09:40" : "09:35",
+  exitTime: i === 5 ? "09:51" : "09:40", // 11 minutes on 2026-10-15 (longest hold) vs 5 minutes on others
+  pnl: i === 5 ? 117.5 : i % 5 === 0 ? -120 : i % 5 === 1 ? -80 : 180,
   rr: i % 5 <= 1 ? -1 : 1.8,
   notes: i === 0 ? "Waited for NY open liquidity sweep and entered on FVG retest" : e.notes,
 }));
@@ -134,8 +143,6 @@ const EVAL_CASES: EvalCase[] = [
     id: "Q03_POSITION_SIZING_MNQ_VS_NQ_FORMULA",
     question: "Calculate exact contract size for MNQ and NQ with $250 risk and a 25 point stop",
     run: () => {
-      // MNQ: floor(250 / (25 * 2)) = floor(250 / 50) = 5 contracts
-      // NQ:  floor(250 / (25 * 20)) = floor(250 / 500) = 0 contracts
       const res = computePositionSizingTool({
         entries,
         settings,
@@ -162,7 +169,7 @@ const EVAL_CASES: EvalCase[] = [
     question: "How many MNQ contracts should I trade right now?",
     run: () => {
       const reply = respond(ctx, "How many MNQ contracts should I trade right now?", {
-        semanticParams: {}, // neither stopPoints nor riskDollars in memory
+        semanticParams: {},
         startingEquity: 50000,
         maxDrawdown: 2000,
       });
@@ -185,7 +192,6 @@ const EVAL_CASES: EvalCase[] = [
       });
       const { brain } = applyExtractedMemories(emptyBrain(), extracted, NOW);
       const sem = readUserSemanticParams(brain.memory);
-      // Now ask sizing question again — should use $150 and 15 pts -> floor(150 / (15 * 2)) = 5 MNQ contracts, no missing prompt!
       const reply = respond(ctx, "What is my position size for MNQ micro or mini now?", {
         semanticParams: sem,
         startingEquity: 50000,
@@ -279,10 +285,10 @@ const EVAL_CASES: EvalCase[] = [
     run: () => {
       const res = computePositionSizingTool({
         entries,
-        settings: { ...settings, maxDrawdown: 600 }, // tight $600 drawdown limit
+        settings: { ...settings, maxDrawdown: 600 },
         symbol: "NQ",
         stopPoints: 15,
-        riskDollars: 300, // $300 risk with p95 streak of 6 = $1800 > $600 cushion
+        riskDollars: 300,
         p95LosingStreak: 6,
       });
       const pass = res.safeForDrawdownStreak.warning !== null && res.safeForDrawdownStreak.maxSafeRiskForDrawdownRoom! < 300;
@@ -416,8 +422,6 @@ const EVAL_CASES: EvalCase[] = [
     id: "Q17_ES_MES_POINT_VALUE_SIZING",
     question: "What is my position size for ES mini vs MES micro with $300 risk and a 12 point stop?",
     run: () => {
-      // MES ($5/pt): floor(300 / (12 * 5)) = floor(300 / 60) = 5 contracts
-      // ES ($50/pt): floor(300 / (12 * 50)) = floor(300 / 600) = 0 contracts
       const res = computePositionSizingTool({
         entries,
         settings,
@@ -480,10 +484,194 @@ const EVAL_CASES: EvalCase[] = [
       };
     },
   },
+  {
+    id: "Q21_JARVIS_CONTEXTUAL_NAVIGATION_COMMAND",
+    question: "where can I see that navigate me to there (after Minato mentioned Trading Lab -> Rule Set)",
+    run: () => {
+      const history = [
+        {
+          role: "buddy" as const,
+          text: "You can guard against streaks with a consecutive-loss stop in **Trading Lab → Rule Set**.",
+        },
+      ];
+      const task = resolveMinatoTasks({
+        query: "where can I see that navigate me to there",
+        entries,
+        history,
+        traderName: "NANDIGAM KANAKESWARA RAO",
+      });
+      const navAction = task.actions.find((a) => a.kind === "navigate");
+      const pass =
+        task.isDirectCommand &&
+        !!navAction &&
+        navAction.kind === "navigate" &&
+        navAction.href === "/lab#setups" &&
+        navAction.autoExecute === true &&
+        !!task.directReply?.includes("Nandigam");
+      return {
+        pass,
+        detail: `isDirect=${task.isDirectCommand}, href=${navAction?.kind === "navigate" ? navAction.href : "none"}, autoExecute=${navAction?.autoExecute}`,
+      };
+    },
+  },
+  {
+    id: "Q22_JARVIS_LARGEST_HOLD_AND_REPLAY_THIS_TRADE",
+    question: "what is my largest holding time and which trade it is -> can you take me to play of this trade now from here",
+    run: () => {
+      // Step 1: Ask about largest holding time
+      const holdReply = respond(ctx, "what is my largest holding time and which trade it is");
+      const holdTask = resolveMinatoTasks({
+        query: "what is my largest holding time and which trade it is",
+        entries,
+        traderName: "NANDIGAM KANAKESWARA RAO",
+      });
+      // Step 2: Ask "can you take me to play of this trade now from here"
+      const replayTask = resolveMinatoTasks({
+        query: "can you take me to play of this trade now from here",
+        entries,
+        history: [
+          { role: "user", text: "what is my largest holding time and which trade it is" },
+          { role: "buddy", text: holdReply },
+        ],
+        traderName: "NANDIGAM KANAKESWARA RAO",
+      });
+      const replayAction = replayTask.actions.find((a) => a.kind === "replay_trade");
+      const pass =
+        holdReply.includes("11m") &&
+        holdReply.includes("2026-10-15") &&
+        !holdReply.includes("[id]") &&
+        holdTask.actions.some((a) => a.kind === "replay_trade" && a.date === "2026-10-15") &&
+        replayTask.isDirectCommand &&
+        !!replayAction &&
+        replayAction.kind === "replay_trade" &&
+        replayAction.date === "2026-10-15" &&
+        replayAction.instrument === "MNQ" &&
+        replayAction.autoExecute === true;
+      return {
+        pass,
+        detail: `holdIdentified=2026-10-15 (11m), replayAutoExec=${replayAction?.autoExecute}, tradeId=${replayAction?.kind === "replay_trade" ? replayAction.tradeId : "none"}`,
+      };
+    },
+  },
+  {
+    id: "Q23_JARVIS_WORKSPACE_MUTATION_COMMANDS",
+    question: "set my daily loss limit to $300 & set consecutive loss stop to 3",
+    run: () => {
+      const limitTask = resolveMinatoTasks({
+        query: "set my daily loss limit to $300",
+        entries,
+        traderName: "NANDIGAM",
+        today: "2026-10-31",
+      });
+      const ruleTask = resolveMinatoTasks({
+        query: "set consecutive loss stop to 3",
+        entries,
+        traderName: "NANDIGAM",
+      });
+      const a1 = limitTask.actions[0];
+      const a2 = ruleTask.actions[0];
+      const pass =
+        limitTask.isDirectCommand &&
+        a1?.kind === "set_daily_loss_limit" &&
+        a1.amount === 300 &&
+        a1.autoExecute === true &&
+        ruleTask.isDirectCommand &&
+        a2?.kind === "update_rule" &&
+        a2.ruleId === "risk.max-consecutive-losses" &&
+        a2.value === 3 &&
+        a2.autoExecute === true;
+      return {
+        pass,
+        detail: `dailyLossLimit=$${a1?.kind === "set_daily_loss_limit" ? a1.amount : 0}, consecLossRule=${a2?.kind === "update_rule" ? a2.value : 0}`,
+      };
+    },
+  },
+  {
+    id: "Q24_MINATO_REMEMBER_AND_APPLE_POPUP",
+    question: "remember to wait for the 9:45 candle close before entering MNQ",
+    run: () => {
+      const remTask = resolveMinatoTasks({
+        query: "remember to wait for the 9:45 candle close before entering MNQ",
+        entries,
+        traderName: "NANDIGAM KANAKESWARA RAO",
+        today: "2026-10-31",
+      });
+      const act = remTask.actions[0];
+      const pass =
+        remTask.isDirectCommand &&
+        act?.kind === "save_reminder" &&
+        act.autoExecute === true &&
+        act.reminder.text.length <= 72 &&
+        /wait for the 9:45 candle close/i.test(act.reminder.text) &&
+        act.reminder.trigger === "pre_trade";
+      return {
+        pass,
+        detail: `reminder="${act?.kind === "save_reminder" ? act.reminder.text : ""}", trigger=${act?.kind === "save_reminder" ? act.reminder.trigger : "none"}`,
+      };
+    },
+  },
+  {
+    id: "Q25_FOREXFACTORY_MAJOR_NEWS_FILTER_AND_TRADE_PROFILE",
+    question: "Filter ForexFactory feed strictly to High-impact (Red-Folder) news with NY times and profile nearby trade entries",
+    run: () => {
+      const sampleFeed = [
+        {
+          title: "Core CPI m/m",
+          country: "USD",
+          date: "2026-10-15T08:30:00-04:00",
+          impact: "High",
+          forecast: "0.3%",
+          previous: "0.2%",
+        },
+        {
+          title: "Unemployment Claims",
+          country: "USD",
+          date: "2026-10-15T08:30:00-04:00",
+          impact: "Medium",
+        },
+        {
+          title: "Crude Oil Inventories",
+          country: "USD",
+          date: "2026-10-15T10:30:00-04:00",
+          impact: "Low",
+        },
+        {
+          title: "ISM Services PMI",
+          country: "USD",
+          date: "2026-10-15T10:00:00-04:00",
+          impact: "High",
+          forecast: "52.5",
+        },
+      ];
+      const majorOnly = filterMajorForexFactoryEvents(sampleFeed, "2026-10-15");
+      const nearAt835 = findNearbyMajorNews("08:35", majorOnly, 15);
+      const nearAt915 = findNearbyMajorNews("09:15", majorOnly, 15);
+      const newsTask = resolveMinatoTasks({
+        query: "check forexfactory major news today",
+        entries,
+        traderName: "NANDIGAM",
+        today: "2026-10-15",
+      });
+      const pass =
+        majorOnly.length === 2 &&
+        majorOnly[0]?.name === "Core CPI m/m" &&
+        majorOnly[0]?.time === "08:30" &&
+        majorOnly[1]?.name === "ISM Services PMI" &&
+        majorOnly[1]?.time === "10:00" &&
+        nearAt835?.name === "Core CPI m/m" &&
+        nearAt915 === null &&
+        newsTask.isDirectCommand &&
+        newsTask.actions[0]?.kind === "check_forexfactory_news";
+      return {
+        pass,
+        detail: `majorCount=${majorOnly.length} (${majorOnly.map((e) => `${e.name}@${e.time}`).join(", ")}), near0835=${nearAt835?.name}`,
+      };
+    },
+  },
 ];
 
 let passedCount = 0;
-console.log("\n=== MINATO MEMORY & DETERMINISTIC MATH EVAL SUITE (20 CASES) ===");
+console.log("\n=== MINATO MEMORY, MATH, JARVIS & FOREXFACTORY EVAL SUITE (25 CASES) ===");
 for (const tc of EVAL_CASES) {
   const res = tc.run();
   const badge = res.pass ? "PASS" : "FAIL";
