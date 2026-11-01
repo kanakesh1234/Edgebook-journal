@@ -983,8 +983,8 @@ function ImportBody({ imp, challenges, playbook }: { imp: ImportState; challenge
 }
 
 /**
- * Profiles Major-Impact (Red-Folder) ForexFactory news events and their exact NY times
- * inside the trade form, and alerts if the trader's entry time was within ±15m of a major release.
+ * Minimal Apple HIG pill strip for Major-Impact news on the Timing step.
+ * Hidden completely when there is no high-impact news on that date.
  */
 function ForexFactoryFormProfile({ date, entryTime }: { date: string; entryTime?: string }) {
   const ff = useForexFactoryNews(date, Boolean(date));
@@ -993,61 +993,30 @@ function ForexFactoryFormProfile({ date, entryTime }: { date: string; entryTime?
     [entryTime, ff.events],
   );
 
-  if (ff.loading) return null;
+  if (ff.loading || !ff.hasMajorNews) return null;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-raised/80 px-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
+    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+      {ff.events.map((ev) => {
+        const isNear = nearby?.id === ev.id;
+        return (
           <span
+            key={ev.id}
             className={cn(
-              "h-2 w-2 rounded-full",
-              ff.hasMajorNews ? "bg-loss" : "bg-profit",
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium leading-none transition-colors",
+              isNear
+                ? "bg-loss/14 text-loss ring-1 ring-inset ring-loss/35"
+                : "bg-ink/[0.045] text-ink",
             )}
-            aria-hidden
-          />
-          ForexFactory Major News ({date})
-        </span>
-        <span className="text-[11px] font-medium text-faint">
-          {ff.hasMajorNews ? `${ff.events.length} red-folder` : "No major news"}
-        </span>
-      </div>
-
-      {ff.hasMajorNews ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {ff.events.map((ev) => {
-            const isNear = nearby?.id === ev.id;
-            return (
-              <span
-                key={ev.id}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium leading-none",
-                  isNear
-                    ? "border-loss/45 bg-loss/12 text-loss"
-                    : "border-line bg-surface text-ink",
-                )}
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
-                <span>{ev.name}</span>
-                <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
-              </span>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="mt-1 text-[12.5px] text-muted">
-          No high-impact news scheduled on ForexFactory for this session.
-        </p>
-      )}
-
-      {nearby && (
-        <p className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-loss">
-          <span>⚠</span>
-          <span>
-            Entry ({entryTime}) was within 15 min of {nearby.name} ({nearby.time} NY)
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
+            <span>{ev.name}</span>
+            <span className={cn("font-mono text-[11.5px]", isNear ? "text-loss" : "text-muted")}>
+              {ev.time}
+            </span>
           </span>
-        </p>
-      )}
+        );
+      })}
     </div>
   );
 }

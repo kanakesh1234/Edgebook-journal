@@ -1191,62 +1191,43 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   {showNews && (
                     <Reveal key="plan-news" delay={0.08}>
                       <div className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <Label done={newsAnswer !== null}>Any news or events today?</Label>
+                        <div className="flex items-center justify-between gap-2">
+                          <Label
+                            done={newsAnswer !== null}
+                            hint={
+                              ffNews.loading
+                                ? "checking…"
+                                : ffNews.hasMajorNews
+                                  ? `${ffNews.events.length} major today`
+                                  : undefined
+                            }
+                          >
+                            Any news or events today?
+                          </Label>
                           <button
                             type="button"
                             onClick={() => void askMinatoForexFactory()}
                             disabled={ffNews.loading}
-                            className="inline-flex min-h-[30px] items-center gap-1.5 rounded-full border border-line bg-surface/80 px-3 py-1 text-[12px] font-medium text-ink shadow-2xs backdrop-blur-md transition-all hover:border-gold/50 hover:text-gold active:scale-95 disabled:opacity-50"
+                            title="Refresh major news from ForexFactory"
+                            aria-label="Refresh major news"
+                            className="inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink active:scale-95 disabled:opacity-40"
                           >
-                            <span
-                              className={cn(
-                                "h-1.5 w-1.5 rounded-full",
-                                ffNews.loading
-                                  ? "animate-pulse bg-info"
-                                  : ffNews.hasMajorNews
-                                    ? "bg-loss"
-                                    : "bg-profit",
-                              )}
+                            <svg
+                              viewBox="0 0 24 24"
+                              className={cn("h-3.5 w-3.5", ffNews.loading && "animate-spin")}
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
                               aria-hidden
-                            />
-                            <span>
-                              {ffNews.loading
-                                ? "Asking Minato (ForexFactory)…"
-                                : "Ask Minato · ForexFactory"}
-                            </span>
+                            >
+                              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                              <path d="M21 3v6h-6" />
+                            </svg>
+                            <span>Sync</span>
                           </button>
                         </div>
-
-                        {/* Minato ForexFactory Major-Impact Status Banner */}
-                        {!ffNews.loading && (
-                          <div
-                            className={cn(
-                              "flex items-center justify-between gap-2.5 rounded-2xl border px-3.5 py-2 text-[12.5px]",
-                              ffNews.hasMajorNews
-                                ? "border-loss/30 bg-loss/[0.07] text-ink"
-                                : "border-profit/25 bg-profit/[0.06] text-muted",
-                            )}
-                          >
-                            <span className="flex items-center gap-2 min-w-0">
-                              <span
-                                className={cn(
-                                  "h-2 w-2 shrink-0 rounded-full",
-                                  ffNews.hasMajorNews ? "bg-loss" : "bg-profit",
-                                )}
-                                aria-hidden
-                              />
-                              <span className="truncate">
-                                {ffNews.hasMajorNews
-                                  ? `Minato autofilled ${ffNews.events.length} major-impact ForexFactory event${ffNews.events.length === 1 ? "" : "s"} (${ffNews.events.map((e) => `${e.name} ${e.time}`).join(", ")} NY)`
-                                  : "Minato checked ForexFactory · No major-impact (red-folder) news today"}
-                              </span>
-                            </span>
-                            <span className="shrink-0 font-mono text-[11px] uppercase tracking-wider text-faint">
-                              High Impact Only
-                            </span>
-                          </div>
-                        )}
 
                         <Stagger className="flex flex-wrap gap-2" delay={0.05}>
                           <Chip selected={newsAnswer === true} onClick={() => chooseNews(true)}>
@@ -1715,30 +1696,19 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             />
                           </div>
 
-                          {/* Major-Impact News Profile (ForexFactory) on the Log Trade step */}
+                          {/* Minimal Major-Impact News Pills on the Log Trade step (only when major news exists) */}
                           {!ffNews.loading && ffNews.hasMajorNews && (
-                            <div className="overflow-hidden rounded-2xl border border-line bg-raised/80 px-4 py-2.5">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-muted">
-                                  <span className="h-2 w-2 rounded-full bg-loss" aria-hidden />
-                                  ForexFactory Major News Today
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              {ffNews.events.map((ev) => (
+                                <span
+                                  key={ev.id}
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-loss/[0.08] px-2.5 py-1 text-[12px] font-medium leading-none text-ink"
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
+                                  <span>{ev.name}</span>
+                                  <span className="font-mono text-[11.5px] text-muted">{ev.time}</span>
                                 </span>
-                                <span className="text-[11px] font-medium text-faint">
-                                  {ffNews.events.length} red-folder
-                                </span>
-                              </div>
-                              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {ffNews.events.map((ev) => (
-                                  <span
-                                    key={ev.id}
-                                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] font-medium leading-none text-ink"
-                                  >
-                                    <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
-                                    <span>{ev.name}</span>
-                                    <span className="font-mono text-[11.5px] text-muted">{ev.time} NY</span>
-                                  </span>
-                                ))}
-                              </div>
+                              ))}
                             </div>
                           )}
 
