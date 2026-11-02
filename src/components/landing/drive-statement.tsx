@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { prefersReducedMotion } from "./motion-utils";
+import { bindScrollProgress, clamp, lerp, prefersReducedMotion } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 const SENTENCE =
@@ -26,21 +24,27 @@ export function DriveStatement() {
 
   useEffect(() => {
     if (prefersReducedMotion()) return;
-    gsap.registerPlugin(ScrollTrigger);
-    const ctx = gsap.context(() => {
-      gsap.fromTo(
-        card.current,
-        { scale: 0.9, borderRadius: 72 },
-        { scale: 1, borderRadius: 44, ease: "none", scrollTrigger: { trigger: sec.current, start: "top 95%", end: "top 25%", scrub: true } },
-      );
-      const words = text.current!.querySelectorAll("[data-w]");
-      gsap.fromTo(
-        words,
-        { opacity: 0.22 },
-        { opacity: 1, ease: "none", stagger: 0.12, scrollTrigger: { trigger: text.current, start: "top 78%", end: "bottom 48%", scrub: true } },
-      );
-    }, sec);
-    return () => ctx.revert();
+    const words = Array.from(text.current?.querySelectorAll<HTMLElement>("[data-w]") ?? []);
+    return bindScrollProgress(
+      sec.current,
+      (p) => {
+        const cardProg = clamp(p * 1.35, 0, 1);
+        if (card.current) {
+          const scale = lerp(0.92, 1, cardProg);
+          const radius = Math.round(lerp(64, 44, cardProg));
+          card.current.style.transform = `scale(${scale})`;
+          card.current.style.borderRadius = `${radius}px`;
+        }
+        const wordProg = clamp((p - 0.12) / 0.78, 0, 1);
+        const total = Math.max(1, words.length);
+        words.forEach((w, i) => {
+          const threshold = i / total;
+          const local = clamp((wordProg - threshold) * 5, 0, 1);
+          w.style.opacity = String(lerp(0.24, 1, local));
+        });
+      },
+      { startRatio: 0.92, endRatio: 0.2 },
+    );
   }, []);
 
   return (
@@ -57,7 +61,7 @@ export function DriveStatement() {
               "radial-gradient(720px 360px at 12% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 70%), radial-gradient(560px 320px at 100% 100%, color-mix(in srgb, var(--profit) 8%, transparent), transparent 70%)",
           }}
         />
-        <div className="relative mb-8"><Eyebrow n="04">Your data</Eyebrow></div>
+        <div className="relative mb-8"><Eyebrow n="06">Your data</Eyebrow></div>
         <p
           ref={text}
           className="relative max-w-4xl font-display text-[clamp(1.9rem,4.8vw,4rem)] font-semibold leading-[1.1] tracking-[-0.035em]"

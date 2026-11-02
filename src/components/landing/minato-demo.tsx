@@ -52,7 +52,7 @@ export function MinatoDemo() {
 
         <div className="order-1 lg:order-2">
           <Reveal>
-            <Eyebrow n="03">Minato</Eyebrow>
+            <Eyebrow n="05">Minato</Eyebrow>
             <h2 id="minato-title" className="mt-6 font-display text-[clamp(2.3rem,5.4vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
               Ask the one who has{" "}
               <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">read every entry.</span>

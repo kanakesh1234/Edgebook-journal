@@ -2,10 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ChevronRightIcon } from "@/components/ui/icons";
-import { prefersReducedMotion } from "./motion-utils";
+import { bindScrollProgress, prefersReducedMotion } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 const ROAD =
@@ -23,14 +21,15 @@ export function Road() {
   const svg = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
-    const root = svg.current!;
-    const path = root.querySelector<SVGPathElement>("[data-road]")!;
-    const marker = root.querySelector<SVGGElement>("[data-marker]")!;
+    const root = svg.current;
+    if (!root) return;
+    const path = root.querySelector<SVGPathElement>("[data-road]");
+    const marker = root.querySelector<SVGGElement>("[data-marker]");
     const ms = Array.from(root.querySelectorAll<SVGGElement>("[data-ms]"));
-    const flag = root.querySelector<SVGGElement>("[data-flag]")!;
+    const flag = root.querySelector<SVGGElement>("[data-flag]");
+    if (!path || !marker || !flag) return;
     const L = path.getTotalLength();
 
-    // where along the road each milestone sits
     const at = [...MILESTONES.map((m) => ({ x: m.x, y: m.y })), { x: 845, y: 65 }].map((m) => {
       let best = 0;
       let bd = Infinity;
@@ -50,8 +49,8 @@ export function Road() {
       const pt = path.getPointAtLength(L * f);
       marker.setAttribute("transform", `translate(${pt.x} ${pt.y})`);
       marker.style.opacity = f > 0.005 ? "1" : "0";
-      ms.forEach((m, i) => m.setAttribute("data-on", String(f >= at[i] - 0.004)));
-      flag.setAttribute("data-on", String(f >= at[3] - 0.004));
+      ms.forEach((m, i) => m.setAttribute("data-on", String(f >= (at[i] ?? 0) - 0.004)));
+      flag.setAttribute("data-on", String(f >= (at[3] ?? 1) - 0.004));
     };
 
     path.style.strokeDasharray = String(L);
@@ -60,27 +59,20 @@ export function Road() {
       marker.style.opacity = "0";
       return;
     }
-    gsap.registerPlugin(ScrollTrigger);
     draw(0);
-    const st = ScrollTrigger.create({
-      trigger: root,
-      start: "top 78%",
-      end: "bottom 42%",
-      onUpdate: (self) => draw(self.progress),
-    });
-    return () => st.kill();
+    return bindScrollProgress(root, draw, { startRatio: 0.82, endRatio: 0.35 });
   }, []);
 
   return (
     <section id="road" ref={sec} className="relative overflow-hidden px-5 py-28 sm:px-8 sm:py-40">
       <div className="mx-auto max-w-[1200px] text-center">
-        <div className="mb-6 flex justify-center"><Eyebrow n="06">The road</Eyebrow></div>
+        <div className="mb-6 flex justify-center"><Eyebrow n="08">The road</Eyebrow></div>
         <h2 className="mx-auto max-w-3xl font-display text-[clamp(2rem,5vw,3.8rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-ink">
           Progress you can{" "}
           <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">see.</span>
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-[clamp(1rem,1.5vw,1.2rem)] leading-snug text-muted">
-          Every logged trade and finished review moves you along the road to your target.
+          Every logged decision and finished review moves you along the road to your target.
         </p>
 
         <div className="lp-sq mx-auto mt-14 max-w-4xl rounded-[32px] border border-line bg-surface px-3 pb-3 pt-8 sm:px-10 sm:pt-10">

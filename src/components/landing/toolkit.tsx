@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { computeScrollProgress, prefersReducedMotion } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 /* ---------------------------- mini interfaces ---------------------------- */
@@ -14,7 +13,7 @@ function FeedMini() {
       <div className="absolute inset-x-2.5 top-6 h-28 rounded-2xl border border-line bg-raised/80" />
       <div className="absolute inset-x-0 top-10 rounded-2xl border border-line-strong bg-raised p-3.5 shadow-sm">
         <p className="text-[11.5px] text-faint">Because you saved Opening range reclaim</p>
-        <p className="mt-1 text-[14px] font-medium text-ink">NQ long, replayed</p>
+        <p className="mt-1 text-[14px] font-medium text-ink">Patience on the 5m close</p>
         <div className="mt-3 h-1 rounded-full bg-ink/[0.08]"><div className="h-full w-2/3 rounded-full bg-gold-strong" /></div>
       </div>
       <p className="absolute inset-x-0 bottom-2 text-center text-[13px] text-muted">You&apos;re all caught up.</p>
@@ -59,7 +58,7 @@ function LabMini() {
         </div>
         <div className="mt-2.5 h-1.5 rounded-full bg-ink/[0.08]"><div className="h-full w-[24%] rounded-full bg-gold-strong" /></div>
       </div>
-      <p className="px-1 text-[12.5px] text-muted">Playbook setups link to the trades that prove them.</p>
+      <p className="px-1 text-[12.5px] text-muted">Playbook setups link to the decisions that prove them.</p>
     </div>
   );
 }
@@ -101,10 +100,10 @@ function LessonsMini() {
     <div className="space-y-2">
       <div className="rounded-2xl border border-line bg-raised p-3.5">
         <p className="text-[14px] font-medium text-ink">Opening range reclaim</p>
-        <p className="mt-1 text-[12.5px] leading-snug text-muted">Wait for the first 15 minutes, then trade the reclaim, not the break.</p>
+        <p className="mt-1 text-[12.5px] leading-snug text-muted">Wait for the first 15 minutes, then act on the reclaim, not the impulse.</p>
       </div>
       <div className="flex gap-1.5">
-        {["84% win rate", "+2.1R average"].map((t) => (
+        {["84% clean process", "+2.1R average"].map((t) => (
           <span key={t} className="rounded-full bg-profit/12 px-2.5 py-1 text-[11.5px] font-medium text-profit">{t}</span>
         ))}
       </div>
@@ -113,12 +112,12 @@ function LessonsMini() {
 }
 
 const CARDS = [
-  { title: "A feed that ends.", body: "Charts, replays and lessons from your own journal. Twenty cards, then you're done for the day.", Mini: FeedMini },
-  { title: "Daily reps from your trades.", body: "Five practice modes built from your charts, your numbers and your repeat mistakes.", Mini: PractiseMini },
-  { title: "Test it before you risk it.", body: "Challenges, a playbook and backtests in the Trading Lab, with drawdown room always in view.", Mini: LabMini },
+  { title: "A feed that ends.", body: "Reflections, autopsies and lessons from your own journal. Twenty cards, then you're done for the day.", Mini: FeedMini },
+  { title: "Daily reps from your decisions.", body: "Five practice modes built from your rules, your numbers and your repeat mistakes.", Mini: PractiseMini },
+  { title: "Test it before you risk it.", body: "Challenges, a playbook and scenario tests in the Trading Lab, with drawdown room always in view.", Mini: LabMini },
   { title: "A coach that has read your journal.", body: "MINATO answers from your own history instead of generic advice.", Mini: MinatoMini },
   { title: "Compete on process.", body: "Friends compare how well they followed their plans. Dollar balances never leave your journal.", Mini: FriendsMini },
-  { title: "Your playbook, written down.", body: "Write lessons once. Each one shows the win rate of the trades linked to it.", Mini: LessonsMini },
+  { title: "Your playbook, written down.", body: "Write lessons once. Each one shows the win rate of the decisions linked to it.", Mini: LessonsMini },
 ];
 
 export function Toolkit() {
@@ -128,43 +127,59 @@ export function Toolkit() {
   const bar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    gsap.registerPlugin(ScrollTrigger);
-    const mm = gsap.matchMedia();
-    mm.add("(min-width: 1024px) and (prefers-reduced-motion: no-preference)", () => {
-      const s = sec.current!;
-      const t = track.current!;
-      let dist = 0;
-      const size = () => {
-        t.style.transform = "none";
-        dist = Math.max(0, t.scrollWidth - window.innerWidth + 64);
-        s.style.height = `${window.innerHeight + dist}px`;
-      };
-      size();
-      ScrollTrigger.addEventListener("refreshInit", size);
-      const st = ScrollTrigger.create({
-        trigger: s,
-        start: "top top",
-        end: "bottom bottom",
-        onUpdate: (self) => {
-          t.style.transform = `translate3d(${-self.progress * dist}px, 0, 0)`;
-          if (bar.current) bar.current.style.transform = `scaleX(${self.progress})`;
-        },
-      });
-      return () => {
-        ScrollTrigger.removeEventListener("refreshInit", size);
-        st.kill();
+    if (prefersReducedMotion()) return;
+    const s = sec.current;
+    const t = track.current;
+    if (!s || !t) return;
+
+    let dist = 0;
+    let enabled = false;
+    let rafId = 0;
+
+    const measure = () => {
+      enabled = window.innerWidth >= 1024 && !prefersReducedMotion();
+      if (!enabled) {
         s.style.height = "";
         t.style.transform = "";
-      };
-    });
-    return () => mm.revert();
+        if (bar.current) bar.current.style.transform = "";
+        return;
+      }
+      t.style.transform = "none";
+      dist = Math.max(0, t.scrollWidth - window.innerWidth + 64);
+      s.style.height = `${window.innerHeight + dist}px`;
+      render();
+    };
+
+    const render = () => {
+      if (!enabled) return;
+      const p = computeScrollProgress(s, { pinned: true });
+      t.style.transform = `translate3d(${-p * dist}px, 0, 0)`;
+      if (bar.current) bar.current.style.transform = `scaleX(${p})`;
+    };
+
+    const onScroll = () => {
+      if (!enabled) return;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(render);
+    };
+
+    measure();
+    window.addEventListener("resize", measure, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", onScroll);
+      s.style.height = "";
+      t.style.transform = "";
+    };
   }, []);
 
   return (
     <section id="toolkit" ref={sec} className="relative" aria-label="Everything around the journal">
       <div ref={stage} className="lp-toolkit-stage py-20 sm:py-28 lg:py-0">
         <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-          <div className="mb-5"><Eyebrow n="05">The toolkit</Eyebrow></div>
+          <div className="mb-5"><Eyebrow n="07">The toolkit</Eyebrow></div>
           <h2 className="max-w-3xl font-display text-[clamp(2rem,5vw,3.8rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-ink">
             Everything around the journal.
           </h2>

@@ -7,11 +7,12 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "#how", label: "How it works", cls: "" },
+  { href: "#film", label: "The Inner Film", cls: "" },
+  { href: "#how", label: "Daily Ritual", cls: "" },
+  { href: "#gap", label: "The Gap", cls: "hidden lg:inline" },
   { href: "#minato", label: "Minato", cls: "" },
   { href: "#drive", label: "Your Drive", cls: "" },
   { href: "#toolkit", label: "Toolkit", cls: "hidden xl:inline" },
-  { href: "#road", label: "Roadmap", cls: "hidden xl:inline" },
 ];
 
 /** Frosted bar in the Apple tradition: quiet at the top, hairline once you scroll. */

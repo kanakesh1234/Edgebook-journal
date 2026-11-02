@@ -16,7 +16,7 @@ export function Gap() {
       <div className="mx-auto grid max-w-[1200px] gap-14 lg:grid-cols-[0.95fr_1.05fr] lg:gap-20">
         <div className="lg:sticky lg:top-28 lg:self-start">
           <Reveal>
-            <Eyebrow n="02">The gap</Eyebrow>
+            <Eyebrow n="04">The gap</Eyebrow>
             <h2 id="gap-title" className="mt-6 font-display text-[clamp(2.3rem,5.4vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
               A normal journal logs the result.{" "}
               <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">Yours should log the decision.</span>

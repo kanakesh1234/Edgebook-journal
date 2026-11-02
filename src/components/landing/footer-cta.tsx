@@ -55,7 +55,8 @@ export function SiteFooter() {
         <div className="flex flex-col gap-8 md:items-end">
           <Wordmark />
           <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 text-[14px] text-muted md:justify-end">
-            <a href="#how" className="transition-colors hover:text-ink">How it works</a>
+            <a href="#film" className="transition-colors hover:text-ink">The Inner Film</a>
+            <a href="#how" className="transition-colors hover:text-ink">Daily Ritual</a>
             <a href="#toolkit" className="transition-colors hover:text-ink">Toolkit</a>
             <Link href="/privacy" className="transition-colors hover:text-ink">Privacy</Link>
             <Link href="/login" className="transition-colors hover:text-ink">Log in</Link>

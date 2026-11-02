@@ -1,532 +1,428 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { useState } from "react";
 import { ChevronRightIcon } from "@/components/ui/icons";
-import { clamp, lerp, prefersReducedMotion, smooth } from "./motion-utils";
+import { Reveal } from "./reveal";
+import { Eyebrow } from "./ledger";
 
-/* -------------------------------------------------------------------------- */
-/*  One trade, drawn once. Everything on the stage reads from this data.       */
-/* -------------------------------------------------------------------------- */
+/* ========================================================================== */
+/*  HERO & PRODUCT RITUAL INTRODUCTION (100% Chart & Candlestick Free)        */
+/*  Preserves the warm editorial paper aesthetic, Instrument Serif + Inter    */
+/*  typography, and tactile ledger layout while focusing on trading           */
+/*  psychology, process, and self-mastery.                                    */
+/* ========================================================================== */
 
-const CLOSES = [
-  18410, 18414, 18409, 18412, 18416, 18413, 18418, 18415, 18419, 18417,
-  18421, 18418, 18422, 18419, 18423, 18420, 18424, 18421, 18425, 18422,
-  18426, 18420, 18416, 18411, 18406, 18402, 18399, 18408, 18413, 18416,
-  18420, 18418, 18424, 18429, 18427, 18433, 18436, 18434, 18439, 18443,
-  18441, 18446, 18444, 18449, 18452, 18450, 18455, 18457,
+interface RitualStage {
+  id: string;
+  num: string;
+  tab: string;
+  moment: string;
+  headline: string;
+  italicAccent: string;
+  description: string;
+  entries: { label: string; value: string; tone?: string }[];
+  note: string;
+}
+
+const RITUAL_STAGES: RitualStage[] = [
+  {
+    id: "plan",
+    num: "01",
+    tab: "Plan",
+    moment: "08:45 AM · Before the Open",
+    headline: "Start with a written intention,",
+    italicAccent: "not an impulse.",
+    description:
+      "Before a single order is placed, you write down the one scenario you are waiting for, what would invalidate it, and how your head feels right now.",
+    entries: [
+      { label: "Session Thesis", value: "Wait for the overnight low to sweep and reclaim" },
+      { label: "Invalidation", value: "Acceptance below the pre-market shelf" },
+      { label: "Internal State", value: "Calm, rested, unhurried", tone: "text-profit" },
+    ],
+    note: "Major high-impact economic releases are automatically noted in your plan before the bell.",
+  },
+  {
+    id: "thought",
+    num: "02",
+    tab: "Thought",
+    moment: "09:15 AM · Pre-Commitment",
+    headline: "Decide how you will act",
+    italicAccent: "before the pressure arrives.",
+    description:
+      "Write your if-then commitments in plain language. Edgebook surfaces your own historical process odds and reminds you of the personal rules you asked it to guard.",
+    entries: [
+      { label: "If-Then Rule", value: "If the first 15 minutes chop, I keep my hands off the mouse" },
+      { label: "Guardrail", value: "Stop for the day after 2 consecutive losses", tone: "text-gold" },
+      { label: "Historical Edge", value: "84% clean-process rate when rested", tone: "text-profit" },
+    ],
+    note: "Your personal reminders surface quietly as a translucent banner before you act.",
+  },
+  {
+    id: "restraint",
+    num: "03",
+    tab: "Restraint",
+    moment: "09:38 AM · In the Moment",
+    headline: "Protect your composure",
+    italicAccent: "when the room speeds up.",
+    description:
+      "Whether you take a clean setup or log a disciplined No-Trade Day because your condition never appeared, Edgebook honors the quality of your decision—not just the dollar outcome.",
+    entries: [
+      { label: "Checklist Gate", value: "All 4 playbook conditions verified before entry" },
+      { label: "Risk Envelope", value: "Sized within your drawdown survival ceiling", tone: "text-profit" },
+      { label: "Impulse Check", value: "Zero FOMO or revenge state flagged", tone: "text-gold" },
+    ],
+    note: "A losing trade with clean rules is recorded as a valid loss; a sloppy win is flagged as a process break.",
+  },
+  {
+    id: "autopsy",
+    num: "04",
+    tab: "Autopsy",
+    moment: "10:20 AM · Honest Mirror",
+    headline: "Name the one thing",
+    italicAccent: "that helped or hurt you.",
+    description:
+      "A three-minute post-trade reflection asks what went well, what slipped, and what you will watch next time—turning vague regret into a specific, named lesson.",
+    entries: [
+      { label: "Process Verdict", value: "Followed plan · Waited for confirmation", tone: "text-profit" },
+      { label: "Observation", value: "Felt the urge to tighten the stop early, stayed patient" },
+      { label: "Watch Next Time", value: "Keep the same composure on Friday sessions", tone: "text-gold" },
+    ],
+    note: "Every reflection is indexed locally and in your own Google Drive so Minato remembers it.",
+  },
+  {
+    id: "practise",
+    num: "05",
+    tab: "Practise",
+    moment: "Evening · Spaced Mastery",
+    headline: "Turn repeat mistakes into",
+    italicAccent: "automatic intuition.",
+    description:
+      "Mistakes don't sit forgotten in an old entry. Edgebook brings them back on a spaced-repetition schedule across five deliberate practice modes until the habit is retired.",
+    entries: [
+      { label: "Active Drill", value: "Patience & Early-Exit Recognition" },
+      { label: "Mastery Box", value: "Box 4 of 5 · Due in 7 days", tone: "text-gold" },
+      { label: "Weekly Ritual", value: "3-minute synthesis completed", tone: "text-profit" },
+    ],
+    note: "Twenty cards at most in your daily study feed—built to be finished and put down.",
+  },
 ];
-const ENTRY = 18412;
-const STOP = 18396;
-const TARGET = 18457;
-const ENTRY_IDX = 28;
-const PRICE_MIN = 18392;
-const PRICE_MAX = 18462;
-const W = 640;
-const H = 300;
-
-const X = (i: number) => 22 + i * 13.1;
-const Y = (p: number) => 14 + ((PRICE_MAX - p) / (PRICE_MAX - PRICE_MIN)) * (H - 28);
-const pct = (p: number) => (Y(p) / H) * 100;
-
-function seeded(seed: number) {
-  let a = seed;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const CANDLES = (() => {
-  const r = seeded(11);
-  let prev = 18408;
-  return CLOSES.map((c, i) => {
-    const o = prev;
-    prev = c;
-    const h = Math.max(o, c) + r() * 3;
-    let l = Math.min(o, c) - r() * 3;
-    if (i === 26) l = 18397; // the sweep
-    return { o, c, h, l };
-  });
-})();
 
 /* -------------------------------------------------------------------------- */
-/*  Chapters                                                                   */
+/*  1. Hero Section — Editorial Identity & Tactile Ledger Preview             */
 /* -------------------------------------------------------------------------- */
-
-const STAGES = ["Plan", "Thought", "Setup", "Replay", "Autopsy", "Practise"] as const;
-
-const CHAPTERS = [
-  {
-    title: "Start with a plan, not a position.",
-    body: "Write your thesis, the liquidity you're targeting and how you feel. It takes a minute, and it's the part most journals skip.",
-  },
-  {
-    title: "Say what you'll do before it happens.",
-    body: "Add your if-then thoughts. Edgebook shows win odds from your own history and asks you to pause after back-to-back losses.",
-  },
-  {
-    title: "Size the risk, then take the trade.",
-    body: "Entry, stop and target go on the chart. You see the risk in R before you click.",
-  },
-  {
-    title: "Watch it back, candle by candle.",
-    body: "Every trade with an entry time becomes a replay you can scrub, with your own levels drawn on the chart.",
-  },
-  {
-    title: "Find the one thing that cost you.",
-    body: "Answer a few short questions. Edgebook tags the mistake and writes a two-line summary under the replay.",
-  },
-  {
-    title: "Turn the mistake into a drill.",
-    body: "Mistakes come back as practice questions on a spaced schedule, until you stop making them.",
-  },
-] as const;
-
-/* ------------------------------ panels ----------------------------------- */
-
-function Cell({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-2xl border border-line bg-raised px-3 py-2.5">
-      <p className="text-[11px] text-faint">{label}</p>
-      <p className={`mt-0.5 text-[13px] font-medium leading-snug ${tone ?? "text-ink"}`}>{value}</p>
-    </div>
-  );
-}
-
-function PlanPanel() {
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      <Cell label="Thesis" value="Asia low is swept, then reclaimed" />
-      <Cell label="Liquidity" value="Previous day low" />
-      <Cell label="State" value="Calm and rested" tone="text-profit" />
-    </div>
-  );
-}
-
-function ThoughtPanel() {
-  return (
-    <div className="space-y-2">
-      {[
-        "If price sweeps the Asia low, I wait for a 5m close back inside.",
-        "If it chops at the open, I sit on my hands.",
-      ].map((t) => (
-        <p key={t} className="rounded-2xl border border-line bg-raised px-3 py-2 text-[12.5px] leading-snug text-ink">
-          {t}
-        </p>
-      ))}
-      <p className="px-1 text-[12px] text-muted">
-        Win odds come from your own history, once you have enough trades.
-      </p>
-    </div>
-  );
-}
-
-function SetupPanel() {
-  return (
-    <div className="grid grid-cols-4 gap-2">
-      <Cell label="Entry" value="18,412" />
-      <Cell label="Stop" value="18,396" tone="text-loss" />
-      <Cell label="Target" value="18,457" tone="text-profit" />
-      <Cell label="Reward" value="2.8R" tone="text-gold" />
-    </div>
-  );
-}
-
-function ReplayPanel() {
-  return (
-    <div className="rounded-2xl border border-line bg-raised px-3.5 py-3">
-      <div className="flex items-center justify-between text-[12px]">
-        <span className="font-medium text-ink">Long · 09:41 to 10:12</span>
-        <span data-clock className="font-mono text-faint">00:00</span>
-      </div>
-      <div className="mt-3 h-1 overflow-hidden rounded-full bg-ink/[0.09]">
-        <div data-scrub className="h-full w-0 rounded-full bg-gold-strong" />
-      </div>
-    </div>
-  );
-}
-
-function AutopsyPanel() {
-  return (
-    <div className="space-y-2">
-      <p className="rounded-2xl border border-profit/25 bg-profit/[0.07] px-3 py-2 text-[12.5px] leading-snug text-ink">
-        Waited for the 5m close back above the range before entering.
-      </p>
-      <p className="rounded-2xl border border-loss/25 bg-loss/[0.06] px-3 py-2 text-[12.5px] leading-snug text-ink">
-        Mistake spotted: moved the stop at 09:52.
-      </p>
-    </div>
-  );
-}
-
-function PractisePanel() {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-raised px-3.5 py-3">
-      <div>
-        <p className="text-[13px] font-medium text-ink">Moving the stop early</p>
-        <p className="mt-0.5 text-[12px] text-muted">Time Machine · due tomorrow</p>
-      </div>
-      <span className="shrink-0 rounded-full bg-gold/15 px-2.5 py-1 text-[11.5px] font-medium text-gold">Box 1 of 5</span>
-    </div>
-  );
-}
-
-const PANELS = [PlanPanel, ThoughtPanel, SetupPanel, ReplayPanel, AutopsyPanel, PractisePanel];
-
-/* -------------------------------- chart ----------------------------------- */
-
-function Chart({ full }: { full?: boolean }) {
-  const lv = full ? undefined : { opacity: 0 };
-  return (
-    <div data-chart className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" role="img" aria-label="Candlestick chart of one example trade with entry, stop and target">
-        {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="var(--color-line-soft)" strokeWidth="1" />
-        ))}
-        <g data-levels style={lv}>
-          <line x1={X(ENTRY_IDX)} x2={W} y1={Y(ENTRY)} y2={Y(ENTRY)} stroke="var(--color-gold)" strokeWidth="1.2" strokeDasharray="4 5" />
-          <line x1={X(ENTRY_IDX)} x2={W} y1={Y(STOP)} y2={Y(STOP)} stroke="var(--color-loss)" strokeWidth="1.2" strokeDasharray="4 5" />
-          <line x1={X(ENTRY_IDX)} x2={W} y1={Y(TARGET)} y2={Y(TARGET)} stroke="var(--color-profit)" strokeWidth="1.2" strokeDasharray="4 5" />
-          <circle cx={X(ENTRY_IDX)} cy={Y(ENTRY)} r="4.5" fill="var(--color-gold)" />
-        </g>
-        {CANDLES.map((c, i) => {
-          const up = c.c >= c.o;
-          const col = up ? "var(--color-profit)" : "var(--color-loss)";
-          const top = Y(Math.max(c.o, c.c));
-          const bh = Math.max(2.5, Math.abs(Y(c.o) - Y(c.c)));
-          return (
-            <g key={i} data-candle>
-              <line x1={X(i)} x2={X(i)} y1={Y(c.h)} y2={Y(c.l)} stroke={col} strokeWidth="1.5" strokeLinecap="round" />
-              <rect x={X(i) - 4} y={top} width="8" height={bh} rx="1.8" fill={col} />
-            </g>
-          );
-        })}
-      </svg>
-      <div data-level-labels style={lv} aria-hidden>
-        {[
-          { p: TARGET, t: "Target", c: "text-profit", side: "left-2" },
-          { p: ENTRY, t: "Entry", c: "text-gold", side: "right-2" },
-          { p: STOP, t: "Stop", c: "text-loss", side: "right-2" },
-        ].map((l) => (
-          <span
-            key={l.t}
-            style={{ top: `${pct(l.p)}%` }}
-            className={`absolute ${l.side} -translate-y-1/2 rounded-full border border-line bg-raised/90 px-2 py-0.5 text-[11px] font-medium ${l.c}`}
-          >
-            {l.t} {l.p.toLocaleString("en-US")}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Segmented() {
-  return (
-    <div className="relative grid grid-cols-6 rounded-full bg-ink/[0.07] p-1" role="tablist" aria-label="Trade stages">
-      <span aria-hidden className="lp-pill absolute inset-y-1 left-1 rounded-full border border-line-soft bg-raised shadow-sm" style={{ width: "calc((100% - 0.5rem) / 6)" }} />
-      {STAGES.map((s, i) => (
-        <span
-          key={s}
-          role="tab"
-          aria-selected={i === 0}
-          data-tab
-          data-on={i === 0}
-          className="lp-stage-tab relative truncate px-0 py-1.5 text-center text-[10.5px] font-medium text-faint sm:px-1 sm:text-[12.5px]"
-        >
-          {s}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/* -------------------------------- hero copy -------------------------------- */
-
-function HeroCopy({ rise }: { rise?: boolean }) {
-  const r = (d: string) => (rise ? { className: "lp-rise", style: { "--d": d } as React.CSSProperties } : {});
-  return (
-    <>
-      <p
-        {...r("0s")}
-        className={`${rise ? "lp-rise " : ""}mb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11.5px] uppercase tracking-[0.14em] text-faint sm:text-[12px]`}
-      >
-        <span className="text-gold">№ 01</span>
-        <span aria-hidden className="hidden h-px w-10 bg-line-strong sm:block" />
-        <span>The trading journal that reviews with you</span>
-      </p>
-      <h1
-        style={rise ? ({ "--d": "0.05s" } as React.CSSProperties) : undefined}
-        className={`${rise ? "lp-rise " : ""}font-display text-[clamp(2.5rem,7vw,5.7rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink`}
-      >
-        Most journals record the result.{" "}
-        <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">Edgebook records the decision.</span>
-      </h1>
-      <p
-        {...r("0.18s")}
-        className={`${rise ? "lp-rise " : ""}mt-6 max-w-2xl text-[clamp(1.05rem,1.7vw,1.3rem)] leading-snug text-muted`}
-      >
-        Plan the trade, replay it candle by candle, tag the mistake and practise it away. All of it stays in your own Google Drive.
-      </p>
-      <div
-        {...r("0.3s")}
-        className={`${rise ? "lp-rise " : ""}mt-8 flex flex-wrap items-center justify-center gap-x-7 gap-y-3`}
-      >
-        <Link
-          href="/login?mode=signup"
-          className="inline-flex h-12 items-center rounded-full bg-gold-strong px-7 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
-        >
-          Start your journal
-        </Link>
-        <a href="#how" className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink">
-          See it work
-          <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-        </a>
-      </div>
-      <ul
-        {...r("0.42s")}
-        className={`${rise ? "lp-rise " : ""}mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 font-mono text-[11.5px] uppercase tracking-[0.1em] text-faint`}
-      >
-        {["Your Google Drive", "Local option", "Export as JSON"].map((t) => (
-          <li key={t} className="flex items-center gap-2"><span aria-hidden className="h-1 w-1 rounded-full bg-gold" />{t}</li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*  The stage                                                                  */
-/* -------------------------------------------------------------------------- */
-
-const N = CHAPTERS.length;
-const INTRO = 0.1;
 
 export function JourneyStage() {
-  const trackRef = useRef<HTMLElement>(null);
+  return (
+    <section
+      id="top"
+      className="relative overflow-hidden px-5 pb-16 pt-[clamp(96px,14svh,148px)] sm:px-8 sm:pb-24"
+      aria-label="Edgebook introduction"
+    >
+      {/* Subtle warm editorial paper ambient light */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
+        style={{
+          background:
+            "radial-gradient(820px 380px at 50% 0%, color-mix(in srgb, var(--gold) 11%, transparent), transparent 72%)",
+        }}
+      />
 
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
-    gsap.registerPlugin(ScrollTrigger);
-    const track = trackRef.current;
-    if (!track) return;
+      <div className="relative mx-auto flex max-w-5xl flex-col items-center text-center">
+        <p
+          style={{ "--d": "0s" } as React.CSSProperties}
+          className="lp-rise mb-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 font-mono text-[11.5px] uppercase tracking-[0.14em] text-faint sm:text-[12px]"
+        >
+          <span className="text-gold">№ 01</span>
+          <span aria-hidden className="hidden h-px w-10 bg-line-strong sm:block" />
+          <span>The trading psychology &amp; decision ledger</span>
+        </p>
 
-    const hero = track.querySelector<HTMLElement>("[data-hero]")!;
-    const win = track.querySelector<HTMLElement>("[data-win]")!;
-    const chartEl = track.querySelector<HTMLElement>("[data-chart]")!;
-    const levels = track.querySelector<SVGGElement>("[data-levels]")!;
-    const labels = track.querySelector<HTMLElement>("[data-level-labels]")!;
-    const readout = track.querySelector<HTMLElement>("[data-readout]")!;
-    const scrub = track.querySelector<HTMLElement>("[data-scrub]")!;
-    const clock = track.querySelector<HTMLElement>("[data-clock]")!;
-    const pill = track.querySelector<HTMLElement>(".lp-pill")!;
-    const tabs = Array.from(track.querySelectorAll<HTMLElement>("[data-tab]"));
-    const candles = Array.from(track.querySelectorAll<SVGGElement>("[data-candle]"));
-    const caps = Array.from(track.querySelectorAll<HTMLElement>("[data-cap]"));
-    const panels = Array.from(track.querySelectorAll<HTMLElement>("[data-panel]"));
+        <h1
+          style={{ "--d": "0.06s" } as React.CSSProperties}
+          className="lp-rise font-display text-[clamp(2.5rem,6.8vw,5.6rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink"
+        >
+          Most journals record the result.{" "}
+          <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+            Edgebook records the decision.
+          </span>
+        </h1>
 
-    let dx = 0;
-    let dy = 0;
-    let s0 = 1.1;
-    let lastStage = -1;
-    let lastReadout = "";
+        <p
+          style={{ "--d": "0.16s" } as React.CSSProperties}
+          className="lp-rise mt-6 max-w-2xl text-[clamp(1.05rem,1.65vw,1.28rem)] leading-relaxed text-muted"
+        >
+          Before the market tests your strategy, it tests your mind. Write your intention before the bell, review your discipline honestly, and turn every mistake into quiet mastery—all stored in your own Google Drive.
+        </p>
 
-    const measure = () => {
-      win.style.transform = "none";
-      const r = win.getBoundingClientRect();
-      dx = window.innerWidth / 2 - (r.left + r.width / 2);
-      dy = window.innerHeight * 0.5;
-      s0 = window.innerWidth >= 1024 ? 1.18 : 1.02;
-    };
+        <div
+          style={{ "--d": "0.26s" } as React.CSSProperties}
+          className="lp-rise mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-3.5"
+        >
+          <Link
+            href="/login?mode=signup"
+            className="inline-flex h-12 items-center rounded-full bg-gold-strong px-7 text-[16.5px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+          >
+            Start your journal
+          </Link>
+          <a
+            href="#film"
+            className="group inline-flex items-center gap-1.5 text-[16.5px] text-gold transition-colors hover:text-ink"
+          >
+            Experience The Inner Film
+            <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </a>
+        </div>
 
-    /** Fade/slide for chapter i at chapter-position c. Last chapter holds. */
-    const chapterVis = (i: number, c: number) => {
-      const f = c - i;
-      if (f < 0) return { v: 0, dir: 1 };
-      if (i === N - 1) return { v: smooth(f / 0.14), dir: 1 };
-      if (f > 1) return { v: 0, dir: -1 };
-      return { v: smooth(Math.min(f / 0.14, (1 - f) / 0.14)), dir: f < 0.5 ? 1 : -1 };
-    };
+        <ul
+          style={{ "--d": "0.36s" } as React.CSSProperties}
+          className="lp-rise mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 font-mono text-[11.5px] uppercase tracking-[0.11em] text-faint"
+        >
+          {["Your Google Drive", "Pre-Session Clarity", "Psychological Autopsy", "Export as JSON"].map((t) => (
+            <li key={t} className="flex items-center gap-2">
+              <span aria-hidden className="h-1 w-1 rounded-full bg-gold" />
+              {t}
+            </li>
+          ))}
+        </ul>
+      </div>
 
-    const priceAt = (count: number) => {
-      const pos = clamp(count - 1, 0, CLOSES.length - 1);
-      const i = Math.floor(pos);
-      return lerp(CLOSES[i], CLOSES[Math.min(i + 1, CLOSES.length - 1)], pos - i);
-    };
+      {/* Tactile Editorial Atelier Preview Card (Photographic Light + Archival Ledger — Zero Charts) */}
+      <div className="lp-win-in mx-auto mt-14 max-w-[1140px]">
+        <div className="lp-sq grid overflow-hidden rounded-[32px] border border-line-strong/80 bg-surface shadow-[0_48px_110px_-42px_rgba(0,0,0,0.45)] lg:grid-cols-[1.08fr_0.92fr]">
+          {/* Left: Atmospheric Photographic Study */}
+          <div className="relative min-h-[280px] overflow-hidden bg-[#1a1510] sm:min-h-[360px]">
+            <div
+              className="absolute inset-0 bg-cover bg-center transition-transform duration-1000 hover:scale-[1.03]"
+              style={{ backgroundImage: "url(/landing/act-2-stillness.jpg)" }}
+              aria-hidden
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1600&q=82"
+              alt="Sunlight falling across an open handwritten trading journal and fountain pen"
+              loading="eager"
+              decoding="async"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+              className="absolute inset-0 h-full w-full object-cover opacity-55 mix-blend-soft-light"
+              style={{ filter: "sepia(0.26) contrast(1.05)" }}
+            />
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(18,14,10,0.32) 0%, rgba(18,14,10,0.08) 45%, rgba(18,14,10,0.82) 100%)",
+              }}
+              aria-hidden
+            />
+            <div className="relative z-10 flex h-full flex-col justify-between p-6 text-[#f7f4ee] sm:p-8">
+              <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-[#dfbe82]">
+                <span>Archival Study · Morning Ritual</span>
+                <span>09:05 NY</span>
+              </div>
+              <div className="mt-20">
+                <p className="font-serif text-[clamp(1.45rem,2.5vw,2.1rem)] italic leading-snug text-[#f7f4ee]">
+                  &ldquo;When your rules are written in calm, the market cannot rewrite them in noise.&rdquo;
+                </p>
+                <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[#d6cebd]">
+                  The Edgebook Philosophy · Process Over Outcome
+                </p>
+              </div>
+            </div>
+          </div>
 
-    const render = (p: number) => {
-      /* intro: headline leaves, window takes the stage */
-      const t = clamp(p / INTRO);
-      const e = smooth(t);
-      win.style.transform = `translate3d(${(1 - e) * dx}px, ${(1 - e) * dy}px, 0) rotateX(${(1 - e) * 18}deg) scale(${lerp(s0, 1, e)})`;
-      hero.style.opacity = String(1 - clamp(t / 0.65));
-      hero.style.transform = `translate3d(0, ${-t * 70}px, 0)`;
-      hero.style.pointerEvents = t > 0.4 ? "none" : "auto";
+          {/* Right: Live Archival Ledger Entry Sheet */}
+          <div className="relative flex flex-col justify-between p-6 sm:p-8 lg:p-10">
+            <span aria-hidden className="pointer-events-none absolute inset-y-0 left-7 w-px bg-loss/20 sm:left-9" />
+            <div className="pl-5 sm:pl-6">
+              <div className="flex items-center justify-between border-b border-line pb-3.5">
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-gold">
+                  Session Entry #048
+                </span>
+                <span className="rounded-full border border-profit/30 bg-profit/10 px-2.5 py-0.5 font-mono text-[10.5px] font-medium text-profit">
+                  Process Verified
+                </span>
+              </div>
 
-      const c = clamp((p - INTRO) / (1 - INTRO)) * N;
+              <div className="mt-5 space-y-4">
+                <div>
+                  <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+                    01 · Pre-Session Intention
+                  </p>
+                  <p className="mt-1 font-display text-[15.5px] font-medium leading-snug text-ink">
+                    Wait for the overnight liquidity sweep to reclaim on a 5-minute close. Do not chase the opening drive.
+                  </p>
+                </div>
 
-      /* captions + panels */
-      for (let i = 0; i < N; i++) {
-        const { v, dir } = chapterVis(i, c);
-        const o = v * e;
-        const y = dir * (1 - v) * 26;
-        caps[i].style.opacity = String(o);
-        caps[i].style.transform = `translate3d(0, ${y}px, 0)`;
-        caps[i].style.visibility = o < 0.01 ? "hidden" : "visible";
-        panels[i].style.opacity = String(o);
-        panels[i].style.transform = `translate3d(0, ${y * 0.7}px, 0)`;
-        panels[i].style.visibility = o < 0.01 ? "hidden" : "visible";
-      }
+                <div className="grid grid-cols-2 gap-3 border-y border-line py-3.5">
+                  <div>
+                    <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+                      02 · Headspace
+                    </p>
+                    <p className="mt-0.5 text-[14px] font-medium text-profit">
+                      Calm · Composed
+                    </p>
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+                      03 · Guardrail
+                    </p>
+                    <p className="mt-0.5 text-[14px] font-medium text-ink">
+                      Max 2 trades · Clean stop
+                    </p>
+                  </div>
+                </div>
 
-      /* the chart builds with the story */
-      let count: number;
-      if (c < 1) count = lerp(3, 27, smooth(c / 0.92));
-      else if (c < 2) count = 27;
-      else if (c < 3) count = lerp(27, ENTRY_IDX + 1, smooth(clamp((c - 2) / 0.6)));
-      else if (c < 4) count = lerp(ENTRY_IDX + 1, CLOSES.length, smooth(clamp((c - 3) / 0.92)));
-      else count = CLOSES.length;
-      for (let i = 0; i < candles.length; i++) {
-        const o = clamp(count - i);
-        candles[i].style.opacity = String(o);
-        candles[i].style.transform = `scaleY(${0.35 + 0.65 * o})`;
-      }
-      const lvl = String(smooth(clamp((c - 2.05) / 0.4)));
-      levels.style.opacity = lvl;
-      labels.style.opacity = lvl;
-      chartEl.style.opacity = String(1 - 0.6 * smooth(clamp((c - 5.0) / 0.35)));
+                <div>
+                  <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+                    04 · Post-Session Reflection
+                  </p>
+                  <p className="mt-1 font-serif text-[18px] italic leading-snug text-ink">
+                    &ldquo;Let the first false move pass at 09:34 without clicking. Entered only when my condition appeared.&rdquo;
+                  </p>
+                </div>
+              </div>
+            </div>
 
-      /* readout + replay scrubber */
-      let text: string;
-      let tone = "text-faint";
-      if (c < 2) text = "Planning";
-      else if (c < 3) text = "Risk 1R";
-      else {
-        const r = (priceAt(count) - ENTRY) / (ENTRY - STOP);
-        text = `${r >= 0 ? "+" : ""}${r.toFixed(1)}R`;
-        tone = r >= 0 ? "text-profit" : "text-loss";
-      }
-      if (text !== lastReadout) {
-        readout.textContent = text;
-        readout.className = `num text-[13px] font-semibold ${tone}`;
-        lastReadout = text;
-      }
-      const replay = clamp((c - 3) / 0.92);
-      scrub.style.width = `${replay * 100}%`;
-      const m = 41 + Math.round(replay * 31);
-      clock.textContent = `${String(9 + Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+            <div className="mt-6 flex items-center justify-between border-t border-line pl-5 pt-4 text-[12.5px] text-muted sm:pl-6">
+              <span>Stored privately in your Google Drive</span>
+              <a href="#how" className="font-medium text-gold transition-colors hover:text-ink">
+                Explore the 5-step ritual →
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
-      /* segmented control */
-      const stage = e < 0.5 ? 0 : Math.min(N - 1, Math.floor(c));
-      if (stage !== lastStage) {
-        pill.style.setProperty("--i", String(stage));
-        tabs.forEach((tb, i) => tb.setAttribute("data-on", String(i === stage)));
-        lastStage = stage;
-      }
-    };
+/* -------------------------------------------------------------------------- */
+/*  2. Product Introduction — How the Daily Ritual Works (#how)               */
+/* -------------------------------------------------------------------------- */
 
-    const st = ScrollTrigger.create({
-      trigger: track,
-      start: "top top",
-      end: "bottom bottom",
-      onUpdate: (self) => render(self.progress),
-      onRefresh: (self) => {
-        measure();
-        render(self.progress);
-      },
-    });
-    measure();
-    render(st.progress);
-
-    return () => {
-      st.kill();
-      win.style.transform = "";
-    };
-  }, []);
+export function DecisionRitualStage() {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const stage = RITUAL_STAGES[activeIdx] ?? RITUAL_STAGES[0]!;
 
   return (
-    <>
-      {/* -------------------- pinned, scroll-driven -------------------- */}
-      <section id="story" ref={trackRef} className="lp-pinned relative" aria-label="How Edgebook works">
-        <span id="how" aria-hidden className="absolute left-0 top-[118svh]" />
-        <div className="sticky top-0 h-svh overflow-hidden">
-          <div data-hero className="absolute inset-x-0 top-0 z-10 mx-auto flex max-w-5xl flex-col items-center px-5 pt-[clamp(88px,15svh,150px)] text-center will-change-transform">
-            <HeroCopy rise />
+    <section id="how" className="px-5 py-24 sm:px-8 sm:py-32" aria-labelledby="ritual-title">
+      <div className="mx-auto max-w-[1200px]">
+        <Reveal>
+          <Eyebrow n="03">The daily ritual</Eyebrow>
+          <div className="mt-6 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+            <h2
+              id="ritual-title"
+              className="max-w-3xl font-display text-[clamp(2.1rem,5vw,4rem)] font-semibold leading-[1.03] tracking-[-0.042em] text-ink"
+            >
+              A quiet system for{" "}
+              <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+                every part of a decision.
+              </span>
+            </h2>
+            <p className="max-w-md text-[16px] leading-relaxed text-muted">
+              From the first thought before the bell to the lesson you practise that evening, Edgebook guides you through five deliberate steps.
+            </p>
           </div>
+        </Reveal>
 
-          <div className="relative mx-auto grid h-full max-w-[1200px] grid-rows-[auto_auto] content-center gap-5 px-5 pb-6 pt-16 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:grid-rows-1 lg:items-center lg:gap-14 lg:pb-0 lg:pt-12">
-            {/* captions */}
-            <div className="relative order-2 grid lg:order-1">
-              {CHAPTERS.map((ch, i) => (
-                <div key={ch.title} data-cap className="invisible col-start-1 row-start-1 will-change-transform">
-                  <h2 className="font-display text-[clamp(1.5rem,3.6vw,2.9rem)] font-semibold leading-[1.06] tracking-[-0.035em] text-ink">{ch.title}</h2>
-                  <p className="mt-3 max-w-md text-[15px] leading-relaxed text-muted sm:text-[17.5px]">{ch.body}</p>
-                  <p className="sr-only">Stage {i + 1} of {N}: {STAGES[i]}</p>
-                </div>
-              ))}
+        {/* Apple HIG Segmented Stage Selector */}
+        <Reveal delay={0.08}>
+          <div className="mt-10 flex overflow-x-auto pb-2 [scrollbar-width:none]">
+            <div
+              role="tablist"
+              aria-label="Five stages of the Edgebook ritual"
+              className="inline-grid min-w-full grid-cols-5 rounded-full border border-line bg-surface p-1.5 sm:min-w-[620px]"
+            >
+              {RITUAL_STAGES.map((s, idx) => {
+                const isSelected = idx === activeIdx;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    onClick={() => setActiveIdx(idx)}
+                    className={`rounded-full px-3 py-2 text-center text-[12.5px] font-medium transition duration-200 sm:px-5 sm:text-[13.5px] ${
+                      isSelected
+                        ? "bg-raised text-ink shadow-[var(--shadow-rest)] border border-line-soft"
+                        : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    <span className="mr-1.5 hidden font-mono text-[11px] text-gold sm:inline">
+                      {s.num}
+                    </span>
+                    {s.tab}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+        </Reveal>
 
-            {/* the window */}
-            <div className="order-1 [perspective:1600px] lg:order-2">
-              <div className="lp-win-in">
-                <div
-                  data-win
-                  className="lp-sq mx-auto w-full max-w-[600px] overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface p-3.5 shadow-[0_50px_110px_-40px_rgba(0,0,0,0.55)] will-change-transform sm:p-5 lg:max-w-none"
+        {/* Interactive Stage Card */}
+        <Reveal delay={0.12}>
+          <div className="lp-sq mt-6 grid items-center gap-8 rounded-[32px] border border-line-strong/80 bg-surface p-6 shadow-[var(--shadow-overlay)] sm:p-10 lg:grid-cols-[0.92fr_1.08fr] lg:gap-14 lg:p-12">
+            <div>
+              <p className="font-mono text-[11.5px] uppercase tracking-[0.14em] text-gold">
+                Stage {stage.num} of 05 · {stage.moment}
+              </p>
+              <h3 className="mt-3.5 font-display text-[clamp(1.65rem,3.2vw,2.6rem)] font-semibold leading-[1.06] tracking-[-0.035em] text-ink">
+                {stage.headline}{" "}
+                <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+                  {stage.italicAccent}
+                </span>
+              </h3>
+              <p className="mt-4 text-[16px] leading-relaxed text-muted">
+                {stage.description}
+              </p>
+
+              <div className="mt-7 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveIdx((prev) => (prev - 1 + RITUAL_STAGES.length) % RITUAL_STAGES.length)}
+                  className="inline-flex h-9 items-center rounded-full border border-line-strong bg-raised px-4 text-[13px] font-medium text-ink transition hover:border-gold/60 active:scale-[0.98]"
                 >
-                  <Segmented />
-                  <div className="mt-3 flex items-center justify-between px-1 sm:mt-4">
-                    <p className="text-[13px] font-medium text-ink">
-                      MNQ <span className="font-normal text-faint">· Long · 5m · Sample trade</span>
-                    </p>
-                    <span data-readout className="num text-[13px] font-semibold text-faint">Planning</span>
-                  </div>
-                  <div className="mt-2 rounded-2xl border border-line bg-canvas/70 p-1.5 sm:mt-3 sm:p-2.5">
-                    <Chart />
-                  </div>
-                  <div className="relative mt-3 grid min-h-[118px] sm:mt-4 sm:min-h-[128px]">
-                    {PANELS.map((Panel, i) => (
-                      <div key={i} data-panel className="invisible col-start-1 row-start-1 self-start will-change-transform">
-                        <Panel />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                  ← Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveIdx((prev) => (prev + 1) % RITUAL_STAGES.length)}
+                  className="inline-flex h-9 items-center rounded-full border border-line-strong bg-raised px-4 text-[13px] font-medium text-ink transition hover:border-gold/60 active:scale-[0.98]"
+                >
+                  Next stage →
+                </button>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
 
-      {/* -------------------- reduced motion: plain, stacked -------------------- */}
-      <section className="lp-static px-5 pb-16 pt-28 sm:px-8" aria-label="How Edgebook works">
-        <div className="mx-auto flex max-w-5xl flex-col items-center text-center">
-          <HeroCopy />
-        </div>
-        <div className="mx-auto mt-14 max-w-[1100px] space-y-6">
-          <div className="lp-sq rounded-[28px] border border-line-strong/80 bg-surface p-4 sm:p-6">
-            <Chart full />
-          </div>
-          {CHAPTERS.map((ch, i) => {
-            const Panel = PANELS[i];
-            return (
-              <div key={ch.title} className="grid items-center gap-5 rounded-[24px] border border-line bg-surface p-5 sm:p-7 md:grid-cols-2">
-                <div>
-                  <h2 className="font-display text-2xl font-semibold tracking-[-0.03em] text-ink sm:text-3xl">{ch.title}</h2>
-                  <p className="mt-2 text-base leading-relaxed text-muted">{ch.body}</p>
-                </div>
-                <div>
-                  <Panel />
-                </div>
+            {/* Right: Tactile Ledger Sheet for the Active Stage */}
+            <div className="rounded-[24px] border border-line bg-canvas/80 p-5 sm:p-7">
+              <div className="space-y-3">
+                {stage.entries.map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-2xl border border-line bg-raised px-4 py-3.5 shadow-[var(--shadow-rest)]"
+                  >
+                    <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-faint">
+                      {item.label}
+                    </p>
+                    <p className={`mt-1 text-[15px] font-medium leading-snug ${item.tone ?? "text-ink"}`}>
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
-      </section>
-    </>
+              <p className="mt-4 flex items-center gap-2 px-1 text-[13px] text-muted">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gold" aria-hidden />
+                <span>{stage.note}</span>
+              </p>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
   );
 }

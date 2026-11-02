@@ -1,696 +1,690 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { clamp, lerp, prefersReducedMotion, smooth } from "./motion-utils";
+import { ChevronRightIcon } from "@/components/ui/icons";
+import { bindScrollProgress, clamp, lerp, prefersReducedMotion, smooth } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 /* ========================================================================== */
-/*  THE INNER FILM — Scroll-Scrubbed & Playable 60fps Story Cinema            */
-/*  Zero charts, zero candles. A 5-act visual metaphor of a trader's mind     */
-/*  rendered in EdgeBook's warm editorial paper, ink, sage, crimson & gold.   */
+/*  THE INNER FILM — Five-Act Scroll-Driven Cinematic Experience              */
+/*  Art-directed photographic plates, layered optical depth, natural light    */
+/*  and shadow motion, and editorial storytelling. Zero charts or candles.    */
 /* ========================================================================== */
 
-interface FilmAct {
-  act: string;
-  timecode: string;
-  stamp: string;
+export interface FilmActSpec {
+  id: string;
+  actNumber: string;
+  roman: string;
   title: string;
-  italicAccent: string;
-  subtitle: string;
-  quote: string;
-  pulseBpm: number;
-  stateLabel: string;
+  theme: string;
+  line: string;
+  italicPart: string;
+  reflection: string;
+  marginNote: string;
+  timeStamp: string;
+  atmosphere: string;
+  localPlate: string;
+  unsplashPhoto: string;
+  accentTone: "loss" | "gold" | "profit";
 }
 
-const ACTS: FilmAct[] = [
+const FILM_ACTS: FilmActSpec[] = [
   {
-    act: "ACT I",
-    timecode: "08:28:14 NY",
-    stamp: "THE NOISE",
-    title: "Before a plan, the morning is a",
-    italicAccent: "storm of impulse.",
-    subtitle:
-      "A hundred competing ticks, opinions, and urges pull at your attention. When nothing is written down, every sudden move feels like the one you cannot afford to miss.",
-    quote: "“Unwritten rules bend the moment the tape speeds up.”",
-    pulseBpm: 114,
-    stateLabel: "Scattered · Reactive",
+    id: "act-1-noise",
+    actNumber: "01",
+    roman: "ACT I",
+    title: "THE NOISE",
+    theme: "Before discipline, there is chaos.",
+    line: "Every morning begins with",
+    italicPart: "a thousand possibilities.",
+    reflection:
+      "The room is still dark. Rain traces the glass while the world outside wakes in a blur of opinions, urgency, and unfinished thoughts. Without a written boundary, every flicker of movement feels like an invitation.",
+    marginNote: "08:14 AM · Pre-session tension · Unwritten mind",
+    timeStamp: "00:00:08:14",
+    atmosphere: "Pre-dawn glass & rain reflections",
+    localPlate: "/landing/act-1-noise.jpg",
+    unsplashPhoto:
+      "https://images.unsplash.com/photo-1515694346937-94d85e41e6f0?auto=format&fit=crop&w=1800&q=82",
+    accentTone: "loss",
   },
   {
-    act: "ACT II",
-    timecode: "09:15:00 NY",
-    stamp: "THE STILLNESS",
-    title: "One honest line on paper",
-    italicAccent: "quiets the room.",
-    subtitle:
-      "You write your thesis and your invalidation before the bell. The noise settles into concentric order — you already know what you are waiting for, and what you will ignore.",
-    quote: "“If the sweep doesn't reclaim with a 5m close, I sit on my hands.”",
-    pulseBpm: 68,
-    stateLabel: "Centered · Intentional",
+    id: "act-2-stillness",
+    actNumber: "02",
+    roman: "ACT II",
+    title: "THE STILLNESS",
+    theme: "The decision to become intentional.",
+    line: "Before you enter the market,",
+    italicPart: "enter yourself.",
+    reflection:
+      "Morning light cuts quietly across warm paper. Pen meets page. The moment you write down the single condition you are willing to wait for—and the exact state of your head—the noise outside loses its vote.",
+    marginNote: "09:05 AM · Linen ledger & fountain pen · Intention set",
+    timeStamp: "00:00:24:00",
+    atmosphere: "Morning sun & slow window shadows on paper",
+    localPlate: "/landing/act-2-stillness.jpg",
+    unsplashPhoto:
+      "https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1800&q=82",
+    accentTone: "gold",
   },
   {
-    act: "ACT III",
-    timecode: "09:42:30 NY",
-    stamp: "THE TEMPTATION",
-    title: "The hardest decision is the trade",
-    italicAccent: "you let pass.",
-    subtitle:
-      "Impatience flares in crimson, trying to pull you off your center. Your guardrails hold the line — turning the urge to chase into the quiet discipline of waiting.",
-    quote: "“Protecting your capital and your head IS a winning session.”",
-    pulseBpm: 72,
-    stateLabel: "Guarded · Composed",
+    id: "act-3-temptation",
+    actNumber: "03",
+    roman: "ACT III",
+    title: "THE TEMPTATION",
+    theme: "The emotional battle.",
+    line: "The hardest trade is the one",
+    italicPart: "you choose not to take.",
+    reflection:
+      "The clock approaches the open. Your hand hovers, pulled by the oldest reflex in trading: the fear of being left behind. Then you remember what you wrote ten minutes ago—and let your hand rest.",
+    marginNote: "09:29:58 AM · Chiaroscuro hesitation · Restraint over impulse",
+    timeStamp: "00:00:42:18",
+    atmosphere: "Chiaroscuro timepiece & the pause before action",
+    localPlate: "/landing/act-3-temptation.jpg",
+    unsplashPhoto:
+      "https://images.unsplash.com/photo-1508685096489-7aacd43bd3b1?auto=format&fit=crop&w=1800&q=82",
+    accentTone: "gold",
   },
   {
-    act: "ACT IV",
-    timecode: "10:18:45 NY",
-    stamp: "THE MIRROR",
-    title: "Every decision weaves into",
-    italicAccent: "living memory.",
-    subtitle:
-      "Win or lose, you step in front of the mirror. Each reflection, emotion, and lesson links into a constellation that remembers your patterns better than willpower ever could.",
-    quote: "“A mistake named and practiced is a tuition bill paid only once.”",
-    pulseBpm: 64,
-    stateLabel: "Reflective · Learning",
+    id: "act-4-mirror",
+    actNumber: "04",
+    roman: "ACT IV",
+    title: "THE MIRROR",
+    theme: "Learning from yourself.",
+    line: "Every decision leaves something behind.",
+    italicPart: "Learn from it.",
+    reflection:
+      "Pages accumulate across weeks and seasons. Not a spreadsheet of numbers, but an honest mirror of your own character under pressure—where every named mistake becomes a pattern you no longer have to repeat.",
+    marginNote: "10:45 AM · Layered autopsies & marginalia · Self-knowledge",
+    timeStamp: "00:01:02:09",
+    atmosphere: "Layered archival journal pages & glass reflection",
+    localPlate: "/landing/act-4-mirror.jpg",
+    unsplashPhoto:
+      "https://images.unsplash.com/photo-1517842645767-c639042777db?auto=format&fit=crop&w=1800&q=82",
+    accentTone: "profit",
   },
   {
-    act: "ACT V",
-    timecode: "11:00:00 NY",
-    stamp: "THE QUIET EDGE",
-    title: "Calm is not the absence of risk.",
-    italicAccent: "It is knowing your compass.",
-    subtitle:
-      "When your preparation, guardrails, and reflections compound in one place, you stop trading against yourself. The instrument is just the vehicle — you are the edge.",
-    quote: "“Process over outcome. Every single session.”",
-    pulseBpm: 60,
-    stateLabel: "Aligned · Sovereign",
+    id: "act-5-quiet-edge",
+    actNumber: "05",
+    roman: "ACT V",
+    title: "THE QUIET EDGE",
+    theme: "Mastery through consistency.",
+    line: "Your edge was never in the market.",
+    italicPart: "It was in the person you became.",
+    reflection:
+      " You close the notebook. The session is over, and nothing carries over into your evening. Calm is no longer a mood you hope for—it is the natural result of a process you trust.",
+    marginNote: "SESSION CLOSED · Sovereign process · Edgebook",
+    timeStamp: "00:01:20:00",
+    atmosphere: "Golden-hour stillness & the closed ledger",
+    localPlate: "/landing/act-5-quiet-edge.jpg",
+    unsplashPhoto:
+      "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1800&q=82",
+    accentTone: "profit",
   },
 ];
 
-interface Particle {
-  seedX: number;
-  seedY: number;
-  angle: number;
-  radius: number;
-  speed: number;
-  size: number;
-  orbitLayer: number;
-  hueKind: "ink" | "gold" | "profit" | "loss";
+/* -------------------------------------------------------------------------- */
+/*  Bespoke Layered Visual Compositions for Each Act                          */
+/*  Combines real photographic plates with natural environmental motion,      */
+/*  layered depth planes, window shadows, and tactile archival details.       */
+/* -------------------------------------------------------------------------- */
+
+function ActVisualLayer({
+  act,
+  index,
+  localProgress,
+}: {
+  act: FilmActSpec;
+  index: number;
+  /** 0..1 progress within this act */
+  localProgress: number;
+}) {
+  // Subtle Ken Burns camera movement driven by scroll/play progress
+  const scale = lerp(1.08, 1.0, smooth(localProgress));
+  const panX = lerp(index % 2 === 0 ? -14 : 14, 0, smooth(localProgress));
+  const panY = lerp(10, -8, smooth(localProgress));
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[#14110d] select-none">
+      {/* Plane 1: Local High-Res 35mm Photographic Base Plate (Always instant, zero network latency) */}
+      <div
+        className="absolute inset-0 bg-cover bg-center will-change-transform"
+        style={{
+          backgroundImage: `url(${act.localPlate})`,
+          transform: `translate3d(${panX * 0.6}px, ${panY * 0.6}px, 0) scale(${scale})`,
+        }}
+        aria-hidden
+      />
+
+      {/* Plane 2: Curated Editorial Photographic Layer (blends organically with warm film grading) */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={act.unsplashPhoto}
+        alt=""
+        loading={index <= 1 ? "eager" : "lazy"}
+        decoding="async"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+        }}
+        className="absolute inset-0 h-full w-full object-cover opacity-55 mix-blend-soft-light will-change-transform"
+        style={{
+          transform: `translate3d(${panX}px, ${panY}px, 0) scale(${scale * 1.02})`,
+          filter:
+            index === 0
+              ? "contrast(1.08) saturate(0.78) brightness(0.84)"
+              : index === 1
+                ? "sepia(0.28) contrast(1.04) brightness(0.95)"
+                : index === 2
+                  ? "contrast(1.16) sepia(0.22) brightness(0.82)"
+                  : index === 3
+                    ? "sepia(0.32) contrast(1.05) brightness(0.9)"
+                    : "sepia(0.24) contrast(1.06) brightness(0.96)",
+        }}
+      />
+
+      {/* Plane 3: Act-Specific Environmental Motion & Layered Physical Details */}
+      {index === 0 && (
+        /* ACT I: Rain-on-glass refraction streaks, window mullions & pre-dawn bokeh drift */
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          {/* Ambient twilight bokeh reflection drifting across the glass */}
+          <div
+            className="absolute -inset-12 opacity-65"
+            style={{
+              background:
+                "radial-gradient(280px 240px at 62% 48%, rgba(226, 168, 92, 0.24), transparent 70%), radial-gradient(360px 280px at 38% 58%, rgba(112, 156, 198, 0.2), transparent 72%)",
+              transform: `translate3d(${(0.5 - localProgress) * 36}px, ${(localProgress - 0.5) * 22}px, 0)`,
+            }}
+          />
+          {/* Subtle animated rain rivulets on window glass */}
+          <div className="lp-film-rain absolute inset-0 opacity-40" />
+          {/* Architectural window mullions in foreground parallax */}
+          <div
+            className="absolute inset-0"
+            style={{
+              transform: `translate3d(${(0.5 - localProgress) * -24}px, 0, 0)`,
+            }}
+          >
+            <div className="absolute inset-y-0 left-[31%] w-3 bg-[#0c0a08]/85 shadow-[2px_0_12px_rgba(218,178,118,0.14)]" />
+            <div className="absolute inset-y-0 left-[71%] w-3 bg-[#0c0a08]/85 shadow-[2px_0_12px_rgba(218,178,118,0.12)]" />
+            <div className="absolute inset-x-0 top-[68%] h-3 bg-[#0c0a08]/85" />
+          </div>
+        </div>
+      )}
+
+      {index === 1 && (
+        /* ACT II: Slow-moving Venetian window shadows + tactile handwritten journal card in morning light */
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          {/* Slow-moving diagonal sunlight & window-blind shadow bars */}
+          <div
+            className="lp-film-blinds absolute -inset-24 opacity-55"
+            style={{
+              transform: `translate3d(${(localProgress - 0.5) * 44}px, ${(localProgress - 0.5) * 28}px, 0) rotate(-21deg)`,
+            }}
+          />
+          {/* Layered physical cotton-paper journal sheet in foreground depth */}
+          <div
+            className="absolute bottom-7 right-6 hidden max-w-[330px] rounded-[18px] border border-[#d8ccb6]/40 bg-[#faf5ea]/92 p-5 text-[#26221a] shadow-[0_28px_60px_-18px_rgba(12,9,5,0.65)] backdrop-blur-md sm:block"
+            style={{
+              transform: `translate3d(0, ${(1 - smooth(localProgress * 1.3)) * 22}px, 0) rotate(-1.5deg)`,
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-[#e2d8c5] pb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#8c6d2e]">
+              <span>Entry Plan · 09:05 NY</span>
+              <span>Calm · Rested</span>
+            </div>
+            <p className="mt-3 font-serif text-[19px] italic leading-snug text-[#26221a]">
+              &ldquo;If the Asia low is swept and 5m closes back inside, I act. If the open is noisy, I sit on my hands.&rdquo;
+            </p>
+            <div className="mt-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#6e6657]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#40795b]" />
+              <span>Written before the bell</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {index === 2 && (
+        /* ACT III: Chiaroscuro tension — approaching 09:30 open & the choice of restraint */
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          {/* Shifting chiaroscuro light split: crimson impulse fading as golden restraint takes over */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background: `linear-gradient(105deg, rgba(172, 81, 87, ${0.32 * (1 - localProgress)}) 0%, transparent 48%, rgba(203, 167, 107, ${0.26 * localProgress}) 100%)`,
+            }}
+          />
+          {/* Tactile optical chronograph ring & moment-of-restraint callout */}
+          <div
+            className="absolute bottom-7 right-6 hidden max-w-[320px] rounded-[18px] border border-[#cba76b]/30 bg-[#1c1813]/90 p-4 text-[#f0eae0] shadow-[0_28px_60px_-18px_rgba(0,0,0,0.75)] backdrop-blur-md sm:block"
+            style={{
+              transform: `translate3d(0, ${(0.5 - localProgress) * 18}px, 0)`,
+            }}
+          >
+            <div className="flex items-center justify-between font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#cba76b]">
+              <span>09:29:58 NY · Market Open</span>
+              <span className="text-[#74b08c]">Hand at rest</span>
+            </div>
+            <p className="mt-2.5 font-serif text-[18px] italic leading-snug text-[#f0eae0]">
+              &ldquo;No 5m reclaim yet. Let the first wave pass without you.&rdquo;
+            </p>
+          </div>
+        </div>
+      )}
+
+      {index === 3 && (
+        /* ACT IV: Layered archival journal pages & glass reflection moving in multi-plane parallax */
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          {/* Diagonal glass reflection sweep */}
+          <div
+            className="absolute -inset-20 opacity-45"
+            style={{
+              background:
+                "linear-gradient(125deg, transparent 30%, rgba(255, 236, 198, 0.18) 47%, rgba(255, 236, 198, 0.03) 53%, transparent 70%)",
+              transform: `translate3d(${(localProgress - 0.5) * 90}px, 0, 0)`,
+            }}
+          />
+          {/* Layered archival cards in foreground parallax */}
+          <div className="absolute bottom-7 right-6 hidden sm:flex sm:flex-col sm:gap-2.5">
+            <div
+              className="w-[310px] rounded-[16px] border border-[#d8ccb6]/35 bg-[#f4ede0]/90 px-4 py-3 text-[#26221a] shadow-lg backdrop-blur-md"
+              style={{
+                transform: `translate3d(${(0.5 - localProgress) * 26}px, 0, 0) rotate(-2deg)`,
+              }}
+            >
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#8c6d2e]">
+                14 Sept · Autopsy #12
+              </p>
+              <p className="mt-1 font-serif text-[16px] italic text-[#26221a]">
+                &ldquo;Moved the stop early because I watched P&amp;L instead of structure.&rdquo;
+              </p>
+            </div>
+            <div
+              className="w-[310px] rounded-[16px] border border-[#40795b]/40 bg-[#fcf9f2]/95 px-4 py-3 text-[#26221a] shadow-xl backdrop-blur-md"
+              style={{
+                transform: `translate3d(${(localProgress - 0.5) * 18}px, 0, 0) rotate(1deg)`,
+              }}
+            >
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#40795b]">
+                02 Nov · Autopsy #48 · Pattern Retired
+              </p>
+              <p className="mt-1 font-serif text-[16px] italic text-[#26221a]">
+                &ldquo;Held through the retest with zero interference. Process success.&rdquo;
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {index === 4 && (
+        /* ACT V: Golden-hour morning mist drifting across still water & serene completion */
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <div
+            className="lp-film-mist absolute inset-x-0 top-[36%] h-[32%] opacity-55"
+            style={{
+              transform: `translate3d(${(localProgress - 0.5) * -55}px, 0, 0)`,
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(520px 280px at 54% 52%, rgba(255, 232, 178, 0.24), transparent 72%)",
+            }}
+          />
+        </div>
+      )}
+
+      {/* Plane 4: Unified 35mm Anamorphic Vignette & Scrim for Editorial Readability */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(14,11,8,0.52) 0%, rgba(14,11,8,0.12) 38%, rgba(14,11,8,0.28) 65%, rgba(14,11,8,0.86) 100%)",
+        }}
+        aria-hidden
+      />
+      <div className="lp-film-grain pointer-events-none absolute inset-0 opacity-25" aria-hidden />
+    </div>
+  );
 }
 
-function createParticles(count = 130): Particle[] {
-  const out: Particle[] = [];
-  for (let i = 0; i < count; i++) {
-    const t = i / count;
-    const goldenAngle = i * 2.399963229728653;
-    out.push({
-      seedX: (Math.sin(i * 12.9898) * 43758.5453) % 1,
-      seedY: (Math.cos(i * 78.233) * 23421.631) % 1,
-      angle: goldenAngle,
-      radius: 0.14 + Math.sqrt(t) * 0.78,
-      speed: 0.45 + (i % 7) * 0.14,
-      size: 1.4 + (i % 5) * 0.65,
-      orbitLayer: i % 4,
-      hueKind: i % 11 === 0 ? "loss" : i % 5 === 0 ? "profit" : i % 2 === 0 ? "gold" : "ink",
-    });
-  }
-  return out;
-}
-
-const PARTICLES = createParticles(130);
-const TOTAL_FRAMES = 480;
-
-function readThemePalette(el: HTMLElement) {
-  const cs = getComputedStyle(el);
-  const pick = (v: string, fallback: string) => cs.getPropertyValue(v).trim() || fallback;
-  return {
-    canvas: pick("--color-canvas", "#f6f1e7"),
-    surface: pick("--color-surface", "#efe9dc"),
-    raised: pick("--color-raised", "#faf6ee"),
-    ink: pick("--color-ink", "#1b1916"),
-    muted: pick("--color-muted", "#655e52"),
-    faint: pick("--color-faint", "#948b7b"),
-    gold: pick("--color-gold", "#b88728"),
-    profit: pick("--color-profit", "#2a6f4e"),
-    loss: pick("--color-loss", "#b84438"),
-    line: pick("--color-line", "rgba(27,25,22,0.1)"),
-  };
-}
+/* -------------------------------------------------------------------------- */
+/*  Main StoryFilmScroll Component                                            */
+/* -------------------------------------------------------------------------- */
 
 export function StoryFilmScroll() {
-  const sectionRef = useRef<HTMLElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const trackRef = useRef<HTMLElement>(null);
   const progressRef = useRef(0);
-  const clockPhaseRef = useRef(0);
-  const isPlayingRef = useRef(false);
+  const playingRef = useRef(false);
+  const rafRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
 
-  const [activeAct, setActiveAct] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [actProgress, setActProgress] = useState(0);
+  const [overallProgress, setOverallProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [frameNum, setFrameNum] = useState(1);
-  const [bpm, setBpm] = useState(ACTS[0]!.pulseBpm);
 
-  const syncUiFromProgress = useCallback((p: number) => {
+  const applyProgress = useCallback((p: number) => {
     const clamped = clamp(p, 0, 1);
-    const idx = Math.min(ACTS.length - 1, Math.floor(clamped * ACTS.length));
-    setActiveAct((prev) => (prev === idx ? prev : idx));
-    const f = Math.max(1, Math.min(TOTAL_FRAMES, Math.round(1 + clamped * (TOTAL_FRAMES - 1))));
-    setFrameNum((prev) => (prev === f ? prev : f));
+    progressRef.current = clamped;
+    setOverallProgress(clamped);
 
-    // Smoothly interpolate BPM between acts
-    const exactAct = clamped * (ACTS.length - 1);
-    const i0 = Math.floor(exactAct);
-    const i1 = Math.min(ACTS.length - 1, i0 + 1);
-    const curBpm = Math.round(lerp(ACTS[i0]!.pulseBpm, ACTS[i1]!.pulseBpm, exactAct - i0));
-    setBpm((prev) => (prev === curBpm ? prev : curBpm));
+    const scaled = clamped * FILM_ACTS.length;
+    const idx = Math.min(FILM_ACTS.length - 1, Math.floor(scaled));
+    const local = clamp(scaled - idx, 0, 1);
+    setActiveIndex(idx);
+    setActProgress(local);
   }, []);
 
+  // Native 60fps scroll binding — visitors always retain 100% control of scrolling
   useEffect(() => {
-    const section = sectionRef.current;
-    const canvas = canvasRef.current;
-    if (!section || !canvas) return;
+    if (prefersReducedMotion()) return;
+    const track = trackRef.current;
+    if (!track) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const unbind = bindScrollProgress(
+      track,
+      (progress) => {
+        if (!playingRef.current) {
+          applyProgress(progress);
+        }
+      },
+      { pinned: true },
+    );
 
-    let rafId = 0;
-    let lastTs = performance.now();
-    let palette = readThemePalette( document.documentElement );
-
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.max(320, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(200, Math.floor(rect.height * dpr));
-      palette = readThemePalette(document.documentElement);
+    const stopAutoOnUserScroll = () => {
+      if (playingRef.current) {
+        playingRef.current = false;
+        setIsPlaying(false);
+      }
     };
-
-    resize();
-    window.addEventListener("resize", resize);
-
-    const observer = new MutationObserver(() => {
-      palette = readThemePalette(document.documentElement);
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
-
-    // 5-Act weights from overall progress p in [0, 1]
-    const actWeight = (p: number, actIdx: number) => {
-      const scaled = p * (ACTS.length - 1);
-      const dist = Math.abs(scaled - actIdx);
-      return smooth(clamp(1 - dist, 0, 1));
-    };
-
-    const drawFrame = (now: number) => {
-      const dt = Math.min(0.05, (now - lastTs) / 1000);
-      lastTs = now;
-      clockPhaseRef.current += dt;
-
-      if (isPlayingRef.current) {
-        const nextP = progressRef.current + dt * 0.055; // ~18 second full story film
-        if (nextP >= 1) {
-          progressRef.current = 1;
-          isPlayingRef.current = false;
-          setIsPlaying(false);
-        } else {
-          progressRef.current = nextP;
-        }
-        syncUiFromProgress(progressRef.current);
-      }
-
-      const p = clamp(progressRef.current, 0, 1);
-      const t = clockPhaseRef.current;
-
-      const w1 = actWeight(p, 0); // Noise / Chaos
-      const w2 = actWeight(p, 1); // Stillness / Ink ripple
-      const w3 = actWeight(p, 2); // Temptation / Guardrail shield
-      const w4 = actWeight(p, 3); // Mirror / Constellation memory
-      const w5 = actWeight(p, 4); // Compass / Astrolabe mastery
-
-      const W = canvas.width;
-      const H = canvas.height;
-      const cx = W * 0.5;
-      const cy = H * 0.5;
-      const minDim = Math.min(W, H);
-
-      ctx.clearRect(0, 0, W, H);
-
-      // 1. Subtle archival radial vignette & warm focal glow
-      const bgGrad = ctx.createRadialGradient(cx, cy, minDim * 0.04, cx, cy, Math.max(W, H) * 0.65);
-      bgGrad.addColorStop(0, palette.raised);
-      bgGrad.addColorStop(0.65, palette.surface);
-      bgGrad.addColorStop(1, palette.canvas);
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, W, H);
-
-      // 2. Subtle architectural registration crosshairs & film rule lines
-      ctx.save();
-      ctx.strokeStyle = palette.line;
-      ctx.lineWidth = 1;
-      // Horizontal horizon line that steadies after Act I
-      const horizonTilt = (1 - smooth(clamp(p * 3, 0, 1))) * Math.sin(t * 2.4) * 0.14;
-      ctx.translate(cx, cy);
-      ctx.rotate(horizonTilt);
-      ctx.beginPath();
-      ctx.moveTo(-W * 0.44, 0);
-      ctx.lineTo(W * 0.44, 0);
-      ctx.stroke();
-
-      // Fine vertical meridian
-      ctx.beginPath();
-      ctx.moveTo(0, -H * 0.38);
-      ctx.lineTo(0, H * 0.38);
-      ctx.stroke();
-      ctx.restore();
-
-      // 3. ACT II & III & V: Concentric Zen Ripples / Guardrail Rings / Astrolabe Orbits
-      const orderStrength = clamp(w2 + w3 * 0.9 + w4 * 0.7 + w5, 0, 1);
-      if (orderStrength > 0.01) {
-        const ringCount = 5;
-        for (let rIdx = 1; rIdx <= ringCount; rIdx++) {
-          const baseR = minDim * (0.09 * rIdx);
-          const breathe = Math.sin(t * 1.4 - rIdx * 0.55) * minDim * 0.006 * (w2 + w5 * 0.5);
-          const radius = baseR + breathe;
-
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          ctx.strokeStyle = rIdx === 2 && w3 > 0.15 ? palette.gold : palette.ink;
-          ctx.globalAlpha = orderStrength * (rIdx === 2 ? 0.28 : 0.11);
-          ctx.lineWidth = rIdx === 2 ? 1.8 : 1;
-          if (rIdx % 2 === 1 && (w4 > 0.2 || w5 > 0.2)) {
-            ctx.setLineDash([4, 8]);
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-
-      // 4. ACT II: Calligraphy Ink Wave ("One honest line on paper")
-      if (w2 > 0.02 || w3 > 0.02) {
-        const inkAlpha = clamp(w2 + w3 * 0.45, 0, 1);
-        ctx.save();
-        ctx.beginPath();
-        const spanX = W * 0.38;
-        const steps = 64;
-        for (let i = 0; i <= steps; i++) {
-          const u = i / steps;
-          const x = cx - spanX + u * spanX * 2;
-          // Smooth harmonic standing wave that flattens into calm focus
-          const amp = minDim * 0.065 * (1 - 0.55 * smooth(clamp((p - 0.2) * 2.5, 0, 1)));
-          const y =
-            cy +
-            Math.sin(u * Math.PI * 2 - t * 1.6) * amp * Math.sin(u * Math.PI);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.strokeStyle = palette.gold;
-        ctx.globalAlpha = inkAlpha * 0.75;
-        ctx.lineWidth = 2.2;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // 5. ACT III: The Crimson Temptation Flare vs. The Golden Guardrail Shield
-      if (w3 > 0.02) {
-        const flarePhase = (t * 0.65) % 1;
-        const flareAngle = t * 0.9;
-        const flareDist = minDim * lerp(0.38, 0.21, Math.sin(flarePhase * Math.PI));
-        const fx = cx + Math.cos(flareAngle) * flareDist;
-        const fy = cy + Math.sin(flareAngle) * flareDist * 0.68;
-
-        // Crimson temptation pulse outside the guardrail
-        ctx.save();
-        const flareGrad = ctx.createRadialGradient(fx, fy, 2, fx, fy, minDim * 0.14);
-        flareGrad.addColorStop(0, palette.loss);
-        flareGrad.addColorStop(1, "transparent");
-        ctx.globalAlpha = w3 * 0.42;
-        ctx.fillStyle = flareGrad;
-        ctx.beginPath();
-        ctx.arc(fx, fy, minDim * 0.14, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // Luminous Guardrail Shield Ring holding the center untouched
-        const shieldR = minDim * 0.19;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, shieldR, 0, Math.PI * 2);
-        ctx.strokeStyle = palette.gold;
-        ctx.globalAlpha = w3 * 0.85;
-        ctx.lineWidth = 2.4;
-        ctx.stroke();
-
-        // Bright deflection arc facing the temptation flare
-        ctx.beginPath();
-        ctx.arc(cx, cy, shieldR + 4, flareAngle - 0.55, flareAngle + 0.55);
-        ctx.strokeStyle = palette.profit;
-        ctx.globalAlpha = w3 * 0.9;
-        ctx.lineWidth = 3.2;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // 6. Multi-Act Particle Choreography (130 particles morphing across all 5 acts)
-      const nodePositions: { x: number; y: number }[] = [];
-
-      for (let i = 0; i < PARTICLES.length; i++) {
-        const pt = PARTICLES[i]!;
-
-        // Act I position: turbulent storm swirl
-        const swirlAngle = pt.angle + t * pt.speed * 1.9 + Math.sin(t * 2.3 + i) * 0.9;
-        const swirlR = minDim * (0.08 + pt.radius * 0.44 + Math.sin(t * 3.1 + i * 0.7) * 0.05);
-        const x1 = cx + Math.cos(swirlAngle) * swirlR * 1.25;
-        const y1 = cy + Math.sin(swirlAngle) * swirlR * 0.85;
-
-        // Act II position: concentric breathing Zen rings
-        const ringR = minDim * (0.09 * (pt.orbitLayer + 1));
-        const ringAngle = pt.angle + t * 0.28 * (pt.orbitLayer % 2 === 0 ? 1 : -1);
-        const x2 = cx + Math.cos(ringAngle) * ringR;
-        const y2 = cy + Math.sin(ringAngle) * ringR;
-
-        // Act III position: half inside guardrail core, outer particles deflected outside shield
-        const isOuter = pt.orbitLayer >= 2;
-        const r3 = isOuter ? minDim * (0.25 + (i % 5) * 0.035) : minDim * (0.06 + pt.orbitLayer * 0.05);
-        const a3 = pt.angle + t * (isOuter ? 0.9 : 0.22);
-        const x3 = cx + Math.cos(a3) * r3;
-        const y3 = cy + Math.sin(a3) * r3;
-
-        // Act IV position: 3D Rotating Mirror / Neural Memory Constellation
-        const fibPhi = Math.acos(1 - (2 * (i + 0.5)) / PARTICLES.length);
-        const fibTheta = Math.PI * (1 + Math.sqrt(5)) * i + t * 0.35;
-        const sphereR = minDim * 0.31;
-        const sx = Math.sin(fibPhi) * Math.cos(fibTheta);
-        const sy = Math.cos(fibPhi);
-        const sz = Math.sin(fibPhi) * Math.sin(fibTheta);
-        const persp = 1 / (1.65 - sz * 0.45);
-        const x4 = cx + sx * sphereR * persp;
-        const y4 = cy + sy * sphereR * persp;
-
-        // Act V position: Precision Golden Astrolabe / Compass Rose
-        const spoke = i % 8;
-        const spokeAngle = (spoke * Math.PI) / 4 + t * 0.12;
-        const onRing = i % 3 === 0;
-        const astroR = onRing
-          ? minDim * (0.12 + (pt.orbitLayer * 0.075))
-          : minDim * (0.05 + ((i % 9) / 9) * 0.31);
-        const a5 = onRing ? pt.angle + t * 0.18 * (pt.orbitLayer % 2 === 0 ? 1 : -1) : spokeAngle;
-        const x5 = cx + Math.cos(a5) * astroR;
-        const y5 = cy + Math.sin(a5) * astroR;
-
-        // Blend positions smoothly by continuous progress p
-        const scaled = p * (ACTS.length - 1);
-        const seg = Math.min(ACTS.length - 2, Math.floor(scaled));
-        const frac = smooth(scaled - seg);
-        const xs = [x1, x2, x3, x4, x5];
-        const ys = [y1, y2, y3, y4, y5];
-        const x = lerp(xs[seg]!, xs[seg + 1]!, frac);
-        const y = lerp(ys[seg]!, ys[seg + 1]!, frac);
-
-        if (i < 42) nodePositions.push({ x, y });
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(x, y, pt.size * (w5 > 0.3 && i % 8 === 0 ? 1.35 : 1), 0, Math.PI * 2);
-        if (w1 > 0.4 && pt.hueKind === "loss") {
-          ctx.fillStyle = palette.loss;
-        } else if (pt.hueKind === "gold" || w5 > 0.4) {
-          ctx.fillStyle = palette.gold;
-        } else if (pt.hueKind === "profit" && p > 0.25) {
-          ctx.fillStyle = palette.profit;
-        } else {
-          ctx.fillStyle = palette.ink;
-        }
-        ctx.globalAlpha = 0.28 + 0.52 * (1 - w1 * 0.25);
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // 7. ACT IV & V: Neural Memory Constellation Threads connecting nearby nodes
-      const webAlpha = clamp(w4 * 0.95 + w5 * 0.65, 0, 1);
-      if (webAlpha > 0.02) {
-        const maxDist = minDim * 0.16;
-        const maxDistSq = maxDist * maxDist;
-        ctx.save();
-        ctx.lineWidth = 1;
-        for (let i = 0; i < nodePositions.length; i++) {
-          const a = nodePositions[i]!;
-          for (let j = i + 1; j < nodePositions.length; j++) {
-            const b = nodePositions[j]!;
-            const dx = a.x - b.x;
-            const dy = a.y - b.y;
-            const dSq = dx * dx + dy * dy;
-            if (dSq < maxDistSq) {
-              const proximity = 1 - Math.sqrt(dSq) / maxDist;
-              ctx.strokeStyle = (i + j) % 3 === 0 ? palette.gold : palette.ink;
-              ctx.globalAlpha = webAlpha * proximity * 0.34;
-              ctx.beginPath();
-              ctx.moveTo(a.x, a.y);
-              ctx.lineTo(b.x, b.y);
-              ctx.stroke();
-            }
-          }
-        }
-        ctx.restore();
-      }
-
-      // 8. Central True-North Compass / Focal Core (evolves from jittery needle in Act I to serene Astrolabe in Act V)
-      ctx.save();
-      ctx.translate(cx, cy);
-      // In Act I the needle jitters wildly; from Act II onward it locks smoothly toward True North (-Math.PI / 2)
-      const jitter = w1 * (Math.sin(t * 7.5) * 0.85 + Math.cos(t * 11.2) * 0.55);
-      const compassAngle = jitter + (1 - w1) * Math.sin(t * 0.6) * 0.04;
-      ctx.rotate(compassAngle);
-
-      const needleLen = minDim * lerp(0.11, 0.16, w5);
-      // North pointer (Gold)
-      ctx.beginPath();
-      ctx.moveTo(0, -needleLen);
-      ctx.lineTo(5.5, 0);
-      ctx.lineTo(-5.5, 0);
-      ctx.closePath();
-      ctx.fillStyle = palette.gold;
-      ctx.globalAlpha = 0.92;
-      ctx.fill();
-
-      // South counterweight (Ink)
-      ctx.beginPath();
-      ctx.moveTo(0, needleLen * 0.72);
-      ctx.lineTo(4.5, 0);
-      ctx.lineTo(-4.5, 0);
-      ctx.closePath();
-      ctx.fillStyle = palette.ink;
-      ctx.globalAlpha = 0.35;
-      ctx.fill();
-
-      // Center jewel pivot
-      ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI * 2);
-      ctx.fillStyle = palette.raised;
-      ctx.globalAlpha = 1;
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = palette.gold;
-      ctx.stroke();
-      ctx.restore();
-
-      rafId = window.requestAnimationFrame(drawFrame);
-    };
-
-    rafId = window.requestAnimationFrame(drawFrame);
-
-    let st: ScrollTrigger | null = null;
-    if (!prefersReducedMotion()) {
-      gsap.registerPlugin(ScrollTrigger);
-      st = ScrollTrigger.create({
-        trigger: section,
-        start: "top top",
-        end: "bottom bottom",
-        onUpdate: (self) => {
-          if (!isPlayingRef.current) {
-            progressRef.current = self.progress;
-            syncUiFromProgress(self.progress);
-          }
-        },
-      });
-    }
+    window.addEventListener("wheel", stopAutoOnUserScroll, { passive: true });
+    window.addEventListener("touchmove", stopAutoOnUserScroll, { passive: true });
 
     return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", resize);
-      observer.disconnect();
-      st?.kill();
+      unbind();
+      window.removeEventListener("wheel", stopAutoOnUserScroll);
+      window.removeEventListener("touchmove", stopAutoOnUserScroll);
     };
-  }, [syncUiFromProgress]);
+  }, [applyProgress]);
+
+  // Auto-play loop when the visitor clicks "Play Story Film"
+  useEffect(() => {
+    if (!isPlaying) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      return;
+    }
+
+    lastTimeRef.current = performance.now();
+    const tick = (now: number) => {
+      if (!playingRef.current) return;
+      const dt = Math.min(0.05, (now - lastTimeRef.current) / 1000);
+      lastTimeRef.current = now;
+
+      // 24 seconds for the full 5-act film (~4.8s per act)
+      const next = progressRef.current + dt / 24;
+      if (next >= 1) {
+        applyProgress(1);
+        playingRef.current = false;
+        setIsPlaying(false);
+        return;
+      }
+
+      applyProgress(next);
+
+      // Keep page scroll position gently synchronized if the film section is currently pinned in view
+      const track = trackRef.current;
+      if (track) {
+        const rect = track.getBoundingClientRect();
+        const scrollable = track.offsetHeight - window.innerHeight;
+        if (scrollable > 0 && rect.top <= 4 && rect.bottom >= window.innerHeight - 4) {
+          const targetScrollY = window.scrollY + rect.top + next * scrollable;
+          window.scrollTo({ top: targetScrollY, behavior: "instant" as ScrollBehavior });
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isPlaying, applyProgress]);
 
   const togglePlay = () => {
-    if (isPlayingRef.current) {
-      isPlayingRef.current = false;
+    if (playingRef.current) {
+      playingRef.current = false;
       setIsPlaying(false);
     } else {
       if (progressRef.current >= 0.98) {
-        progressRef.current = 0;
-        syncUiFromProgress(0);
+        applyProgress(0);
       }
-      isPlayingRef.current = true;
+      playingRef.current = true;
       setIsPlaying(true);
     }
   };
 
-  const jumpToAct = (idx: number) => {
-    isPlayingRef.current = false;
+  const selectAct = (idx: number) => {
+    playingRef.current = false;
     setIsPlaying(false);
-    const targetP = idx / (ACTS.length - 1);
-    progressRef.current = targetP;
-    syncUiFromProgress(targetP);
+    const targetP = (idx + 0.15) / FILM_ACTS.length;
+    applyProgress(targetP);
+
+    const track = trackRef.current;
+    if (track && !prefersReducedMotion()) {
+      const top = track.getBoundingClientRect().top + window.scrollY;
+      const scrollable = Math.max(0, track.offsetHeight - window.innerHeight);
+      window.scrollTo({ top: top + targetP * scrollable, behavior: "smooth" });
+    }
   };
 
-  const cur = ACTS[activeAct] ?? ACTS[0]!;
-  const progressPct = Math.round(((frameNum - 1) / (TOTAL_FRAMES - 1)) * 100);
+  const currentAct = FILM_ACTS[activeIndex] ?? FILM_ACTS[0]!;
 
   return (
-    <section
-      id="film"
-      ref={sectionRef}
-      aria-label="The Inner Film — A scroll-driven visual story"
-      className="relative h-[420svh]"
-    >
-      <div className="sticky top-0 flex h-svh flex-col justify-center overflow-hidden px-4 py-6 sm:px-8">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-5">
-          {/* Top Editorial Ledger Header */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <Eyebrow n="02">The inner film · Scroll or press play</Eyebrow>
-            <div className="flex items-center gap-4 font-mono text-[11px] uppercase tracking-[0.14em] text-faint">
-              <span className="hidden sm:inline">35MM PROCEDURAL REEL · NO CHARTS</span>
-              <span className="rounded-full border border-line-strong bg-surface px-3 py-1 text-ink">
-                FRM {String(frameNum).padStart(4, "0")} / {String(TOTAL_FRAMES).padStart(4, "0")}
+    <>
+      {/* ---------------- Editorial Prologue Transition into The Inner Film ---------------- */}
+      <div className="mx-auto max-w-[1200px] px-5 pb-10 pt-16 sm:px-8 sm:pb-14 sm:pt-24">
+        <div className="flex flex-col items-start justify-between gap-6 border-t border-line pt-10 md:flex-row md:items-end">
+          <div>
+            <Eyebrow n="02">The Inner Film · Five Acts</Eyebrow>
+            <h2 className="mt-5 max-w-3xl font-display text-[clamp(2rem,4.6vw,3.75rem)] font-semibold leading-[1.04] tracking-[-0.04em] text-ink">
+              The market is external.{" "}
+              <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+                The battle is inside.
               </span>
-            </div>
+            </h2>
           </div>
+          <p className="max-w-md text-[15.5px] leading-relaxed text-muted">
+            Scroll through the five moments that shape a trader&apos;s mind—or press{" "}
+            <strong className="font-medium text-ink">Play Story Film</strong> to watch the chapters unfold.
+          </p>
+        </div>
+      </div>
 
-          {/* Main Cinema Viewport + Editorial Story Split */}
-          <div className="lp-sq relative grid overflow-hidden rounded-[32px] border border-line-strong/80 bg-surface shadow-[0_50px_110px_-40px_rgba(0,0,0,0.45)] lg:grid-cols-[1.18fr_0.82fr]">
-            {/* Left / Top: 60fps Procedural Cinema Stage */}
-            <div className="relative min-h-[300px] overflow-hidden border-b border-line bg-canvas sm:min-h-[400px] lg:min-h-[500px] lg:border-b-0 lg:border-r">
-              <canvas
-                ref={canvasRef}
-                className="block h-full w-full"
-                aria-label="Procedural visual story showing chaos turning into stillness, resilience, memory, and mastery"
-              />
+      {/* ---------------- Pinned Scroll-Driven Five-Act Cinema Stage ---------------- */}
+      <section
+        id="film"
+        ref={trackRef}
+        aria-label="The Inner Film — Five-act visual story"
+        className="lp-pinned relative h-[460svh]"
+      >
+        <div className="sticky top-0 flex h-svh flex-col justify-center overflow-hidden px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="mx-auto flex h-full max-h-[820px] w-full max-w-[1240px] flex-col justify-between">
+            {/* Widescreen Cinema Frame */}
+            <div className="lp-sq relative flex-1 overflow-hidden rounded-[28px] border border-line-strong/80 bg-[#14110d] shadow-[0_48px_120px_-36px_rgba(0,0,0,0.68)] sm:rounded-[36px]">
+              {/* Cross-Dissolving Photographic Act Plates */}
+              {FILM_ACTS.map((act, idx) => {
+                const isCurrent = idx === activeIndex;
+                return (
+                  <div
+                    key={act.id}
+                    aria-hidden={!isCurrent}
+                    className="absolute inset-0 transition-opacity duration-700 ease-out"
+                    style={{
+                      opacity: isCurrent ? 1 : 0,
+                      pointerEvents: isCurrent ? "auto" : "none",
+                      zIndex: isCurrent ? 2 : 1,
+                    }}
+                  >
+                    <ActVisualLayer
+                      act={act}
+                      index={idx}
+                      localProgress={isCurrent ? actProgress : idx < activeIndex ? 1 : 0}
+                    />
+                  </div>
+                );
+              })}
 
-              {/* Top Film HUD Overlay */}
-              <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-4 py-3.5 sm:px-6">
-                <div className="flex items-center gap-2.5 rounded-full border border-line bg-raised/85 px-3 py-1 backdrop-blur-md">
+              {/* Top Cinema HUD Bar (Apple HIG Translucent Material) */}
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-8 sm:pt-7">
+                <div className="inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/45 px-3.5 py-1.5 backdrop-blur-xl">
                   <span
                     className={`h-2 w-2 rounded-full ${
-                      activeAct === 0
-                        ? "bg-loss animate-pulse"
-                        : activeAct === 2
-                          ? "bg-gold"
-                          : "bg-profit"
+                      currentAct.accentTone === "loss"
+                        ? "bg-[#cd8484]"
+                        : currentAct.accentTone === "gold"
+                          ? "bg-[#cba76b]"
+                          : "bg-[#74b08c]"
                     }`}
                   />
-                  <span className="font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink">
-                    {cur.act} · {cur.stamp}
+                  <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[#f0eae0]">
+                    {currentAct.roman} · {currentAct.title}
+                  </span>
+                  <span className="hidden font-mono text-[11px] text-[#a69d8c] sm:inline">
+                    — {currentAct.theme}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-3 rounded-full border border-line bg-raised/85 px-3 py-1 font-mono text-[11px] tracking-[0.1em] text-muted backdrop-blur-md">
-                  <span>{cur.timecode}</span>
-                  <span aria-hidden className="text-line-strong">·</span>
-                  <span className={activeAct === 0 ? "text-loss" : "text-profit"}>
-                    {bpm} BPM
+                <div className="flex items-center gap-2.5">
+                  <span className="hidden rounded-full border border-white/12 bg-black/40 px-3 py-1.5 font-mono text-[11px] tracking-[0.12em] text-[#a69d8c] backdrop-blur-xl md:inline-block">
+                    {currentAct.timeStamp}
                   </span>
-                </div>
-              </div>
-
-              {/* Bottom Cinema Subtitle & Play/Pause Control Overlay */}
-              <div className=" inset-x-0 bottom-0 absolute flex flex-col gap-3 bg-gradient-to-t from-canvas/95 via-canvas/70 to-transparent px-4 pb-4 pt-10 sm:px-6">
-                <p className="font-serif text-[clamp(1.05rem,1.8vw,1.35rem)] italic tracking-[-0.01em] text-ink">
-                  {cur.quote}
-                </p>
-
-                <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
                     onClick={togglePlay}
-                    className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-raised px-3.5 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink transition hover:border-gold hover:text-gold active:scale-[0.98]"
+                    aria-label={isPlaying ? "Pause story film" : "Play story film"}
+                    className="inline-flex items-center gap-2 rounded-full border border-[#cba76b]/45 bg-[#1c1813]/85 px-4 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#f0eae0] backdrop-blur-xl transition hover:border-[#cba76b] hover:bg-[#272219] active:scale-[0.97]"
                   >
-                    <span className="text-gold">{isPlaying ? "❚❚" : "▶"}</span>
-                    <span>{isPlaying ? "Pause film" : "Play story film"}</span>
+                    <span className="text-[#cba76b]">{isPlaying ? "❚❚" : "▶"}</span>
+                    <span>{isPlaying ? "Pause Film" : "Play Story Film"}</span>
                   </button>
+                </div>
+              </div>
 
-                  <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
-                    {cur.stateLabel}
-                  </span>
+              {/* Lower-Third Narrative Composition & Act V Identity Moment */}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end p-5 sm:p-8 lg:p-12">
+                <div className="max-w-2xl">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#cba76b]">
+                    {currentAct.marginNote}
+                  </p>
+
+                  <h3 className="mt-2.5 font-display text-[clamp(1.65rem,3.8vw,3.35rem)] font-semibold leading-[1.06] tracking-[-0.038em] text-[#f7f4ee]">
+                    {currentAct.line}{" "}
+                    <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.015em] text-[#dfbe82]">
+                      {currentAct.italicPart}
+                    </span>
+                  </h3>
+
+                  <p className="mt-3 max-w-xl text-[14.5px] leading-relaxed text-[#d6cebd] sm:text-[16.5px]">
+                    {currentAct.reflection}
+                  </p>
+
+                  {/* Act V culminates in an Edgebook identity moment & CTA */}
+                  {activeIndex === 4 && (
+                    <div className="pointer-events-auto mt-6 flex flex-wrap items-center gap-4">
+                      <Link
+                        href="/login?mode=signup"
+                        className="inline-flex h-11 items-center rounded-full bg-gold-strong px-6 text-[15px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+                      >
+                        Begin your Edgebook
+                      </Link>
+                      <a
+                        href="#how"
+                        className="group inline-flex items-center gap-1 text-[15px] text-[#dfbe82] transition-colors hover:text-white"
+                      >
+                        See the daily ritual
+                        <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                      </a>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Right: Editorial Narrative Chapter & 5-Act Scrubber */}
-            <div className="flex flex-col justify-between p-6 sm:p-8 lg:p-10">
-              <div>
-                <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-gold">
-                  <span>
-                    {cur.act} OF 05 — {cur.stamp}
-                  </span>
-                  <span>{progressPct}%</span>
-                </div>
-
-                <h2 className="mt-4 font-display text-[clamp(1.75rem,3.2vw,2.75rem)] font-semibold leading-[1.06] tracking-[-0.038em] text-ink">
-                  {cur.title}{" "}
-                  <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
-                    {cur.italicAccent}
-                  </span>
-                </h2>
-
-                <p className="mt-4 text-[15.5px] leading-relaxed text-muted sm:text-[16.5px]">
-                  {cur.subtitle}
-                </p>
+            {/* Bottom 5-Act Chapter Scrubber Bar (Responsive on Mobile, Tablet & Desktop) */}
+            <div className="mt-3.5 rounded-[22px] border border-line bg-surface/90 px-3 py-2.5 backdrop-blur-xl sm:px-5 sm:py-3">
+              <div className="grid grid-cols-5 gap-1.5 sm:gap-3" role="tablist" aria-label="Five acts of The Inner Film">
+                {FILM_ACTS.map((act, idx) => {
+                  const isCurrent = idx === activeIndex;
+                  const isCompleted = idx < activeIndex;
+                  const fillPct = isCurrent ? Math.round(actProgress * 100) : isCompleted ? 100 : 0;
+                  return (
+                    <button
+                      key={act.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isCurrent}
+                      onClick={() => selectAct(idx)}
+                      className={`group flex flex-col items-start rounded-xl px-2.5 py-1.5 text-left transition ${
+                        isCurrent
+                          ? "bg-gold/12 text-ink"
+                          : "text-muted hover:bg-ink/[0.04] hover:text-ink"
+                      }`}
+                    >
+                      <div className="flex w-full items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em]">
+                        <span className={isCurrent ? "text-gold font-semibold" : "text-faint"}>
+                          {act.actNumber}
+                        </span>
+                        <span className="hidden text-[10px] text-faint md:inline">
+                          {act.roman}
+                        </span>
+                      </div>
+                      <span className="mt-0.5 w-full truncate text-[11.5px] font-medium sm:text-[13px]">
+                        {act.title.replace("THE ", "")}
+                      </span>
+                      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-ink/[0.09]">
+                        <div
+                          className="h-full rounded-full bg-gold-strong transition-[width] duration-150 ease-out"
+                          style={{ width: `${fillPct}%` }}
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-
-              {/* 5-Act Interactive Film Strip Timeline */}
-              <div className="mt-8 space-y-3 border-t border-line pt-5">
-                <div className="grid grid-cols-5 gap-1.5" role="tablist" aria-label="Story film acts">
-                  {ACTS.map((item, idx) => {
-                    const isCurrent = idx === activeAct;
-                    const isPassed = idx < activeAct;
-                    return (
-                      <button
-                        key={item.act}
-                        type="button"
-                        role="tab"
-                        aria-selected={isCurrent}
-                        onClick={() => jumpToAct(idx)}
-                        className={`group flex flex-col items-start rounded-xl border px-2.5 py-2 text-left transition ${
-                          isCurrent
-                            ? "border-gold/60 bg-gold/10 text-ink"
-                            : isPassed
-                              ? "border-line bg-raised/60 text-muted hover:border-line-strong"
-                              : "border-line/60 bg-transparent text-faint hover:border-line-strong"
-                        }`}
-                      >
-                        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-gold">
-                          0{idx + 1}
-                        </span>
-                        <span className="mt-0.5 truncate w-full text-[11.5px] font-medium">
-                          {item.stamp.replace("THE ", "")}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Continuous Film Scrub Bar */}
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/[0.08]">
-                  <div
-                    className="h-full rounded-full bg-gold transition-[width] duration-150 ease-out"
-                    style={{ width: `${Math.max(4, progressPct)}%` }}
-                  />
-                </div>
+              <div className="sr-only" aria-live="polite">
+                Act {activeIndex + 1} of 5: {currentAct.title}. {Math.round(overallProgress * 100)}% through film.
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      {/* ---------------- Reduced Motion Fallback: Editorial 5-Act Photographic Essay ---------------- */}
+      <section className="lp-static px-5 py-16 sm:px-8" aria-label="The Inner Film — Five Acts">
+        <div className="mx-auto max-w-[1100px] space-y-8">
+          {FILM_ACTS.map((act, idx) => (
+            <article
+              key={act.id}
+              className="lp-sq grid overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface md:grid-cols-2"
+            >
+              <div className="relative min-h-[260px]">
+                <ActVisualLayer act={act} index={idx} localProgress={0.6} />
+              </div>
+              <div className="flex flex-col justify-center p-6 sm:p-8">
+                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-gold">
+                  {act.roman} · {act.title} — {act.theme}
+                </p>
+                <h3 className="mt-3 font-display text-2xl font-semibold leading-tight tracking-[-0.03em] text-ink sm:text-3xl">
+                  {act.line}{" "}
+                  <span className="font-serif font-normal italic text-gold">{act.italicPart}</span>
+                </h3>
+                <p className="mt-3 text-[15px] leading-relaxed text-muted">{act.reflection}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
