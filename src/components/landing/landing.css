@@ -1,5 +1,5 @@
 /* ============================================================
-   Landing — Apple-style system on top of the Edgebook tokens.
+   Landing — Cinematic 3D Theatre on top of Edgebook tokens.
    Only layout/animation plumbing lives here; colour, type and
    radii come from the shared theme variables in globals.css.
 =========================================================== */
@@ -10,9 +10,28 @@
 
 /* Frosted bar (nav) */
 .lp-glass {
-  background: color-mix(in srgb, var(--canvas) 74%, transparent);
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
+}
+
+/* Dark theatre glass panel (used over the 3D WebGL study/corridor) */
+.lp-theatre-panel {
+  background: rgba(22, 18, 13, 0.76);
+  border: 1px solid rgba(203, 167, 107, 0.24);
+  box-shadow:
+    0 36px 90px -32px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 248, 232, 0.06);
+  -webkit-backdrop-filter: saturate(160%) blur(20px);
+  backdrop-filter: saturate(160%) blur(20px);
+  color: #f0eae0;
+}
+
+/* Depth-of-field edge blur & cinematic vignette over the 3D canvas */
+.lp-theatre-vignette {
+  background:
+    radial-gradient(circle at 50% 44%, transparent 38%, rgba(12, 10, 7, 0.68) 100%),
+    linear-gradient(180deg, rgba(12, 10, 7, 0.55) 0%, transparent 22%, transparent 78%, rgba(12, 10, 7, 0.72) 100%);
 }
 
 /* Continuous (squircle) corners where the browser supports them */
@@ -20,98 +39,134 @@
   corner-shape: squircle;
 }
 
-/* The one orchestrated page-load moment */
+/* Mask / clip-path text reveal & orchestrated page-load moment */
 @keyframes lp-rise {
-  from { opacity: 0; transform: translate3d(0, 26px, 0); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+    clip-path: inset(0% 0% 100% 0%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0% 0% 0% 0%);
+  }
 }
 @keyframes lp-win-in {
-  from { opacity: 0; transform: translate3d(0, 56px, 0) scale(0.975); }
-  to   { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translate3d(0, 44px, 0) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.lp-rise   { animation: lp-rise 1s var(--lp-ease) both; animation-delay: var(--d, 0s); }
-.lp-win-in { animation: lp-win-in 1.25s var(--lp-ease) 0.38s both; }
+.lp-rise {
+  animation: lp-rise 1s var(--lp-ease) both;
+  animation-delay: var(--d, 0s);
+}
+.lp-win-in {
+  animation: lp-win-in 1.2s var(--lp-ease) 0.28s both;
+}
 
 /* ---------------- Pinned scroll sections ---------------- */
-.lp-pinned { --lp-track: 460svh; height: var(--lp-track); }
-@media (max-width: 1023px) { .lp-pinned { --lp-track: 400svh; } }
-.lp-static { display: none; }
-
-/* ---------------- The Inner Film environmental layers ---------------- */
-@keyframes lp-rain-drift {
-  from { background-position: 0 0, 40px 20px; }
-  to   { background-position: 0 280px, 40px 420px; }
+.lp-pinned {
+  --lp-track: 440svh;
+  height: var(--lp-track);
+}
+@media (max-width: 1023px) {
+  .lp-pinned {
+    --lp-track: 360svh;
+  }
+}
+.lp-static {
+  display: none;
 }
 
-.lp-film-rain {
-  background-image:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0px,
-      transparent 38px,
-      rgba(224, 236, 248, 0.06) 39px,
-      transparent 40px
-    ),
-    radial-gradient(1.5px 14px at 22% 30%, rgba(245, 232, 208, 0.35), transparent),
-    radial-gradient(1.5px 18px at 68% 55%, rgba(210, 228, 245, 0.3), transparent),
-    radial-gradient(1.2px 12px at 48% 75%, rgba(245, 220, 180, 0.28), transparent);
-  background-size: 160px 280px, 240px 280px, 310px 420px, 200px 280px;
-  animation: lp-rain-drift 11s linear infinite;
-}
-
-.lp-film-blinds {
-  background-image: repeating-linear-gradient(
-    180deg,
-    rgba(255, 232, 182, 0.14) 0px,
-    rgba(255, 232, 182, 0.14) 38px,
-    rgba(16, 12, 8, 0.34) 44px,
-    rgba(16, 12, 8, 0.34) 86px
-  );
-}
-
-.lp-film-mist {
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    rgba(246, 228, 194, 0.22) 48%,
-    transparent 100%
-  );
-  filter: blur(18px);
-}
-
+/* ---------------- Subtle 35mm Film Grain ---------------- */
 .lp-film-grain {
-  background-image: radial-gradient(rgba(255, 248, 232, 0.12) 0.75px, transparent 0.75px);
-  background-size: 4px 4px;
+  background-image:
+    radial-gradient(rgba(255, 248, 232, 0.13) 0.75px, transparent 0.75px),
+    radial-gradient(rgba(203, 167, 107, 0.09) 0.75px, transparent 0.75px);
+  background-size: 4px 4px, 7px 7px;
+  background-position: 0 0, 2px 3px;
+}
+
+/* ---------------- Calm Cream Section Backdrop ---------------- */
+.lp-cream-backdrop {
+  background: color-mix(in srgb, var(--canvas) 94%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
 
 /* ---------------- Toolkit (horizontal) ---------------- */
 @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
   .lp-toolkit-stage {
-    position: sticky; top: 0; height: 100svh; overflow: hidden;
-    display: flex; flex-direction: column; justify-content: center;
+    position: sticky;
+    top: 0;
+    height: 100svh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
-  .lp-toolkit-track { will-change: transform; }
+  .lp-toolkit-track {
+    will-change: transform;
+  }
 }
 @media (max-width: 1023px), (prefers-reduced-motion: reduce) {
   .lp-toolkit-track {
-    overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
-    padding-inline: 1.25rem; scroll-padding-inline: 1.25rem;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    padding-inline: 1.25rem;
+    scroll-padding-inline: 1.25rem;
   }
-  .lp-toolkit-track::-webkit-scrollbar { display: none; }
-  .lp-toolkit-card { scroll-snap-align: start; }
+  .lp-toolkit-track::-webkit-scrollbar {
+    display: none;
+  }
+  .lp-toolkit-card {
+    scroll-snap-align: start;
+  }
 }
 
 /* Road milestones light up as the line reaches them */
-.lp-ms circle.lp-ms-dot { transition: fill 0.4s ease, stroke 0.4s ease; }
-.lp-ms[data-on="true"] circle.lp-ms-dot { fill: var(--profit); stroke: var(--profit); }
-.lp-ms[data-on="true"] circle.lp-ms-ring { opacity: 1; }
-.lp-ms circle.lp-ms-ring { opacity: 0; transition: opacity 0.5s ease; }
-.lp-ms text { transition: fill 0.4s ease; }
-.lp-ms[data-on="true"] text { fill: var(--profit); }
+.lp-ms circle.lp-ms-dot {
+  transition: fill 0.4s ease, stroke 0.4s ease;
+}
+.lp-ms[data-on="true"] circle.lp-ms-dot {
+  fill: var(--profit);
+  stroke: var(--profit);
+}
+.lp-ms[data-on="true"] circle.lp-ms-ring {
+  opacity: 1;
+}
+.lp-ms circle.lp-ms-ring {
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.lp-ms text {
+  transition: fill 0.4s ease;
+}
+.lp-ms[data-on="true"] text {
+  fill: var(--profit);
+}
 
 /* ---------------- Reduced motion: no pinning, no scrubbing ---------------- */
 @media (prefers-reduced-motion: reduce) {
-  .lp-pinned { display: none; }
-  .lp-static { display: block; }
-  .lp-rise, .lp-win-in, .lp-film-rain { animation: none; }
+  .lp-pinned {
+    display: none;
+  }
+  .lp-static {
+    display: block;
+  }
+  .lp-hero-pinned {
+    height: auto !important;
+  }
+  .lp-rise,
+  .lp-win-in {
+    animation: none;
+    clip-path: none;
+  }
 }

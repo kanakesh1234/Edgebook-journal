@@ -15,7 +15,10 @@ const LINKS = [
   { href: "#toolkit", label: "Toolkit", cls: "hidden xl:inline" },
 ];
 
-/** Frosted bar in the Apple tradition: quiet at the top, hairline once you scroll. */
+/**
+ * Frosted bar in the Apple tradition: legible over both the dark 3D theatre
+ * study and the calm cream sections, with all original anchors and links preserved.
+ */
 export function LandingNav() {
   const [scrolled, setScrolled] = useState(false);
 
@@ -29,9 +32,9 @@ export function LandingNav() {
   return (
     <header
       className={cn(
-        "fixed inset-x-0 top-0 z-50 transition-[background-color,border-color] duration-500",
+        "fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-500",
         "border-b",
-        scrolled ? "lp-glass border-line" : "border-transparent bg-transparent",
+        scrolled ? "lp-glass border-line" : "lp-glass border-line/40",
       )}
     >
       <nav aria-label="Primary" className="mx-auto flex h-14 max-w-[1200px] items-center justify-between px-5 sm:px-8">
@@ -41,7 +44,11 @@ export function LandingNav() {
 
         <div className="hidden items-center gap-7 md:flex">
           {LINKS.map((l) => (
-            <a key={l.href} href={l.href} className={cn("text-[13.5px] text-muted transition-colors duration-200 hover:text-ink", l.cls)}>
+            <a
+              key={l.href}
+              href={l.href}
+              className={cn("text-[13.5px] text-muted transition-colors duration-200 hover:text-ink", l.cls)}
+            >
               {l.label}
             </a>
           ))}
