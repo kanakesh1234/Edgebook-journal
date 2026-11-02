@@ -8,9 +8,8 @@ import { Wordmark } from "./logo";
 import { Eyebrow } from "./ledger";
 
 /**
- * SCENE 06 — THE INVITATION (FinalCta & SiteFooter)
- * Uses 100% original Edgebook tokens (bg-canvas, text-ink, text-gold, bg-gold-strong, text-on-gold).
- * Scroll-scrubbed scale and focal lift bring the closing composition into place.
+ * CHAPTER 06 — THE INVITATION (FinalCta & SiteFooter)
+ * Full-width widescreen closing composition (.lp-wide) with scroll-scrubbed focal lift.
  */
 export function FinalCta() {
   const secRef = useRef<HTMLElement>(null);
@@ -24,7 +23,7 @@ export function FinalCta() {
         if (!innerRef.current) return;
         const s = smooth(p);
         const y = lerp(32, 0, s);
-        const scale = lerp(0.94, 1, s);
+        const scale = lerp(0.95, 1, s);
         innerRef.current.style.opacity = String(lerp(0.25, 1, s));
         innerRef.current.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(4)})`;
       },
@@ -36,39 +35,57 @@ export function FinalCta() {
     <section
       id="finale"
       ref={secRef}
-      className="relative px-5 pb-24 pt-20 text-center sm:px-8 sm:pb-32 sm:pt-28"
+      className="lp-wide relative pb-24 pt-16 text-center sm:pb-32 sm:pt-24"
       aria-label="Get started"
     >
-      <div ref={innerRef} className="mx-auto max-w-4xl will-change-transform">
-        <div className="mb-6 flex justify-center">
-          <Eyebrow n="10">Scene VI · The invitation</Eyebrow>
-        </div>
+      <div
+        ref={innerRef}
+        className="lp-sq relative w-full overflow-hidden rounded-[40px] border border-line-strong/80 bg-surface px-6 py-20 shadow-[var(--shadow-overlay)] will-change-transform sm:px-14 sm:py-28"
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(840px 420px at 50% 0%, color-mix(in srgb, var(--gold) 14%, transparent), transparent 72%)",
+          }}
+        />
 
-        <h2 className="mx-auto max-w-4xl font-display text-[clamp(2.4rem,7vw,5.6rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
-          Your edge deserves{" "}
-          <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
-            a&nbsp;ledger.
-          </span>
-        </h2>
+        <div className="relative z-10 mx-auto max-w-4xl">
+          <div className="mb-6 flex justify-center">
+            <Eyebrow n="10">CH.06 · The Invitation</Eyebrow>
+          </div>
 
-        <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.3rem)] leading-snug text-muted">
-          Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
-        </p>
+          <h2 className="font-display text-[clamp(2.5rem,7vw,5.6rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
+            Your edge deserves{" "}
+            <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+              a&nbsp;ledger.
+            </span>
+          </h2>
 
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
-          <Link
-            href="/login?mode=signup"
-            className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
-          >
-            Create your journal
-          </Link>
-          <Link
-            href="/login"
-            className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink"
-          >
-            Log in
-            <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-          </Link>
+          <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.28rem)] leading-snug text-muted">
+            Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
+          </p>
+
+          <blockquote className="mx-auto mt-6 max-w-lg font-serif text-[19px] italic text-gold">
+            &ldquo;Discipline is choosing between what you want right now and what you want most.&rdquo;
+          </blockquote>
+
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
+            <Link
+              href="/login?mode=signup"
+              className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+            >
+              Create your journal
+            </Link>
+            <Link
+              href="/login"
+              className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink"
+            >
+              Log in
+              <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </Link>
+          </div>
         </div>
       </div>
     </section>
@@ -77,11 +94,11 @@ export function FinalCta() {
 
 const CONTACT_EMAIL = "kanakesh939264@gmail.com";
 
-/** Plain, in-flow footer: contact, links and a one-line disclaimer. No fixed layers, no extra scroll. */
+/** Full-width in-flow footer: contact, links and a one-line disclaimer. */
 export function SiteFooter() {
   return (
-    <footer id="contact" className="border-t border-line bg-canvas px-5 py-14 sm:px-8 sm:py-16">
-      <div className="mx-auto grid w-full max-w-[1200px] gap-12 md:grid-cols-[1.2fr_1fr] md:gap-16">
+    <footer id="contact" className="lp-wide border-t border-line bg-canvas pb-24 pt-14 sm:pb-20 sm:pt-16">
+      <div className="grid w-full gap-12 md:grid-cols-[1.2fr_1fr] md:gap-16">
         <div>
           <h2 className="font-display text-[clamp(1.6rem,3vw,2.2rem)] font-semibold tracking-[-0.035em] text-ink">
             Contact us
@@ -144,7 +161,7 @@ export function SiteFooter() {
         </div>
       </div>
 
-      <div className="mx-auto mt-12 w-full max-w-[1200px] border-t border-line pt-6 text-[12.5px] leading-relaxed text-faint">
+      <div className="mt-12 w-full border-t border-line pt-6 text-[12.5px] leading-relaxed text-faint">
         <p>
           Edgebook is for educational and journaling purposes only. It is not financial advice, and trading involves risk.
         </p>

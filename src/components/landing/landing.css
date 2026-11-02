@@ -1,16 +1,37 @@
 /* ============================================================
-   Landing — Apple-style cinematic scrollytelling system built
-   strictly on top of the original Edgebook tokens in globals.css.
-   Zero colour or font overrides; 100% native Light & Dark theme parity.
+   Landing — Full-Screen Widescreen Game & Interactive Theatre
+   built strictly on top of the original Edgebook tokens in globals.css.
+   Zero wasted left/right desktop margins; 100% Light & Dark parity.
 =========================================================== */
 
 .lp-root {
   --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Full-bleed widescreen container for desktop game layouts */
+.lp-wide {
+  width: 100%;
+  padding-inline: 1.25rem;
+}
+@media (min-width: 640px) {
+  .lp-wide {
+    padding-inline: 2rem;
+  }
+}
+@media (min-width: 1024px) {
+  .lp-wide {
+    padding-inline: 3rem;
+  }
+}
+@media (min-width: 1440px) {
+  .lp-wide {
+    padding-inline: 4rem;
+  }
+}
+
 /* Frosted bar (nav) — uses original --canvas token */
 .lp-glass {
-  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
 }
@@ -49,20 +70,20 @@
   animation: lp-win-in 1.2s var(--lp-ease) 0.28s both;
 }
 
-/* ---------------- Pinned Scroll Scenes ---------------- */
-/* Scene 01: Entrance (Camera push into the Atelier Ledger) */
+/* ---------------- Pinned Scroll Game Stages ---------------- */
+/* Scene 01: Entrance (Full-bleed split-screen Writer's Room) */
 .lp-entrance-pin {
-  height: 195svh;
+  height: 205svh;
 }
 @media (max-width: 1023px) {
   .lp-entrance-pin {
-    height: 155svh;
+    height: auto;
   }
 }
 
-/* Scene 02: The Inner Film (Full-Screen Theatre Sequence) */
+/* Scene 02: The Inner Film (100vw x 100svh Edge-to-Edge Fullscreen Theatre) */
 .lp-pinned {
-  --lp-track: 460svh;
+  --lp-track: 480svh;
   height: var(--lp-track);
 }
 @media (max-width: 1023px) {
@@ -74,19 +95,19 @@
   display: none;
 }
 
-/* Scene 03: The Decision (5-Stage Scroll-Scrubbed Daily Ritual) */
+/* Scene 03: The Decision (5-Gate Widescreen Game Cockpit) */
 .lp-ritual-pin {
-  height: 330svh;
+  height: 350svh;
 }
 @media (max-width: 1023px) {
   .lp-ritual-pin {
-    height: 260svh;
+    height: 270svh;
   }
 }
 
-/* Scene 04A: The Gap (Scroll-Scrubbed Autopsy Unfolding) */
+/* Scene 04A: The Gap (Scroll-Scrubbed Autopsy Scanner) */
 .lp-gap-pin {
-  height: 215svh;
+  height: 225svh;
 }
 @media (max-width: 1023px) {
   .lp-gap-pin {
@@ -95,20 +116,18 @@
 }
 
 /* ---------------- Theatre Mode (Scene 02 Immersion) ---------------- */
-/* Minimises top nav distractions while inside the full-screen film theatre,
-   restoring immediately on hover or keyboard focus. */
 html[data-theatre-mode="true"] .lp-nav-header:not(:hover):not(:focus-within) {
-  opacity: 0.18;
-  transform: translate3d(0, -35%, 0);
+  opacity: 0.14;
+  transform: translate3d(0, -40%, 0);
 }
 
-/* Subtle 35mm film grain used only inside the Theatre viewport */
+/* Subtle 35mm film grain */
 .lp-film-grain {
   background-image: radial-gradient(rgba(255, 248, 232, 0.12) 0.75px, transparent 0.75px);
   background-size: 4px 4px;
 }
 
-/* ---------------- Scene 05B: Toolkit (Horizontal Scroll-Scrub) ---------------- */
+/* ---------------- Scene 05B: Toolkit (Full-bleed Horizontal Scroll) ---------------- */
 @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
   .lp-toolkit-stage {
     position: sticky;

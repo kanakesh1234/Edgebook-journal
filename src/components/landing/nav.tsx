@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Wordmark } from "./logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
-import { subscribeLandingScroll } from "./motion-utils";
+import { SCENE_META, subscribeLandingScroll } from "./motion-utils";
 
 const LINKS = [
   { href: "#film", label: "The Inner Film", cls: "" },
@@ -17,13 +17,14 @@ const LINKS = [
 ];
 
 /**
- * Frosted bar in the Apple tradition: quiet at the top, hairline + restrained
- * scroll-progress indicator once you scroll, and distraction-minimised during
- * the full-screen Theatre Mode sequence (#film).
+ * Full-width edge-to-edge frosted HUD bar in the Apple & narrative-game tradition:
+ * spans the entire desktop width with zero wasted side margins.
  */
 export function LandingNav() {
   const [scrolled, setScrolled] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [activeScene, setActiveScene] = useState(1);
+  const [composure, setComposure] = useState(88);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -31,6 +32,8 @@ export function LandingNav() {
     window.addEventListener("scroll", onScroll, { passive: true });
     const unsub = subscribeLandingScroll((st) => {
       setProgress(st.pageProgress);
+      setActiveScene(st.activeScene);
+      setComposure(st.composureScore);
     });
     return () => {
       window.removeEventListener("scroll", onScroll);
@@ -38,21 +41,33 @@ export function LandingNav() {
     };
   }, []);
 
+  const currentMeta = SCENE_META[activeScene - 1] ?? SCENE_META[0]!;
+
   return (
     <header
       className={cn(
         "lp-nav-header fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,opacity,transform] duration-500",
         "border-b",
-        scrolled ? "lp-glass border-line" : "border-transparent bg-transparent",
+        scrolled ? "lp-glass border-line" : "lp-glass border-line/50",
       )}
     >
       <nav
         aria-label="Primary"
-        className="mx-auto flex h-14 max-w-[1200px] items-center justify-between px-5 sm:px-8"
+        className="lp-wide flex h-14 items-center justify-between"
       >
-        <Link href="/" aria-label="Edgebook home" className="rounded-lg">
-          <Wordmark />
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/" aria-label="Edgebook home" className="rounded-lg">
+            <Wordmark />
+          </Link>
+
+          {/* Diegetic Game Chapter Telemetry Badge */}
+          <div className="hidden items-center gap-2 rounded-full border border-line bg-raised/80 px-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.12em] text-muted xl:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-gold" aria-hidden="true" />
+            <span className="font-semibold text-gold">{currentMeta.code}</span>
+            <span>·</span>
+            <span className="text-ink">{currentMeta.title}</span>
+          </div>
+        </div>
 
         <div className="hidden items-center gap-7 md:flex">
           {LINKS.map((l) => (
@@ -69,7 +84,14 @@ export function LandingNav() {
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="hidden items-center gap-1.5 rounded-full border border-profit/30 bg-profit/10 px-3 py-1 font-mono text-[10.5px] font-medium text-profit lg:inline-flex"
+            title="Live Composure Score"
+          >
+            <span>COMPOSURE</span>
+            <strong>{composure}%</strong>
+          </div>
           <ThemeToggle className="rounded-full" />
           <Link
             href="/login"
