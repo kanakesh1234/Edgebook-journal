@@ -4,8 +4,6 @@ import { create } from "zustand";
 import type { Challenge, JournalEntry, JournalSettings, NoTradeLog, PlaybookSetup, TradePlan, TradeReflection } from "./types";
 import { defaultSettings, reviewStatusOf } from "./types";
 import { dataStore, DriveSyncError, hasPendingDriveSync, loadJournalMirror, saveJournalMirror, type JournalPayload } from "./services/storage";
-import { snapshotToWorkingMemory, markSnapshotFailed } from "./supabase-integration";
-import { clearWorkingMemory } from "./services/supabase-memory";
 import { auth, AuthError, type User } from "./services/auth";
 import { dropImageUrl, primeImageUrl } from "./images";
 import { uid } from "./utils";
@@ -169,19 +167,13 @@ async function persistNow(userId: string, entries: JournalEntry[], settings: Jou
   }
 
   const payload: JournalPayload = { entries, settings: syncedSettings, dayLogs, plans, version: 2 };
-  const snapshotKey = `${Date.now()}`;
-
   // Always save immediately to local mirror so browser cache is up-to-date even before network calls start
   saveJournalMirror(userId, payload);
-
-  const snapshot: Promise<() => void> = snapshotToWorkingMemory(userId, snapshotKey, payload).catch(() => () => undefined);
 
   try {
     await dataStore.saveJournal(userId, payload);
     _persistFailedAt = 0;
-    void snapshot.then((cleanup) => cleanup());
   } catch (err) {
-    void snapshot.then(() => markSnapshotFailed(userId, snapshotKey));
     _persistFailedAt = Date.now();
     const syncError = err instanceof DriveSyncError ? err : null;
     const status = syncError?.status || (err instanceof Error && err.message.includes(":") ? err.message.split(":")[1] : "");
@@ -301,7 +293,6 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       await fetch("/api/auth/google/signout", { method: "POST" });
     } catch { /* offline */ }
-    clearWorkingMemory();
     set({ status: "guest", user: null, entries: [], settings: defaultSettings(), dayLogs: [], plans: [] });
   },
 

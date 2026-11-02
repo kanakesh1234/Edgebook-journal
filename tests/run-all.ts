@@ -27,4 +27,5 @@ import "./minato/format.test.ts";
 import "./minato/lane.test.ts";
 import "./minato/brain2.test.ts";
 import "./minato/agent.test.ts";
+import "./minato/resilience.test.ts";
 import "./minato/intelligence-engine.test.ts";

@@ -1,13 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { updateSession } from "@/utils/supabase/middleware";
 
 /**
  * Production-grade security middleware for Vercel & local environments:
- *  1. Refreshes Supabase auth session cookies.
- *  2. Enforces strict CSRF & Cross-Site Request protection on all mutating `/api/*` requests:
+ *  1. Enforces strict CSRF & Cross-Site Request protection on all mutating `/api/*` requests:
  *     - Blocks `Sec-Fetch-Site: cross-site` mutations immediately.
  *     - Validates `Origin` (or `Referer` fallback when `Origin` is absent) against the request's host.
- *  3. Attaches hardened HTTP security headers (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy,
+ *  2. Attaches hardened HTTP security headers (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy,
  *     Permissions-Policy, COOP, CORP, X-Permitted-Cross-Domain-Policies).
  */
 const isDev = process.env.NODE_ENV !== "production";
@@ -19,7 +17,7 @@ const CSP = [
   "img-src 'self' data: blob: https://*.googleusercontent.com",
   "media-src 'self' blob:",
   "font-src 'self' data:",
-  `connect-src 'self'${isDev ? " ws: wss:" : ""} https://*.supabase.co`,
+  `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
   "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
   "worker-src 'self' blob:",
   "object-src 'none'",
@@ -73,8 +71,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Refresh Supabase auth session — produces a response with updated cookies
-  const { response: res } = updateSession(request);
+  const res = NextResponse.next({ request: { headers: request.headers } });
 
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("X-Frame-Options", "DENY");

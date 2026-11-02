@@ -42,7 +42,7 @@ message ─► /api/minato/chat ─► LLM (system prompt + LIVE brief + convers
 
 ## Persistent trader knowledge (contextual memory, not model training)
 
-* New table `minato_trader_knowledge` (RLS, same identity bridge as migrations 001/003).
+* Stored in the trader's own Google Drive: `EdgeBook/journals/minato-knowledge.json` (no database; Supabase was removed).
 * Written by: the model via `save_trader_insight`; a small post-answer reflection call (goals, rules, decisions, data-verified patterns); a deterministic **daily progress checkpoint**; a per-day **conversation note**.
 * Every note carries `as_of` and a confirmation count. The prompt states: **stored notes are context, live data wins**.
 * The live journal is never copied into memory as a source of truth. Each request recomputes from current records.
@@ -84,7 +84,6 @@ src/lib/minato/agent/brief.ts           src/lib/minato/agent/prompt.ts
 src/lib/minato/agent/loop.ts            src/lib/minato/agent/data-source.ts
 src/lib/minato/agent/guards.ts          src/lib/minato/agent/knowledge-store.ts
 src/lib/minato/agent/memory-update.ts   src/lib/minato/agent/client.ts
-supabase/migrations/004_minato_trader_knowledge.sql
 tests/minato/agent.test.ts
 README-MINATO-AGENT.md
 ```
@@ -97,13 +96,12 @@ Left in place but no longer on the request path (safe to delete later): `lane.ts
 ## Deploy
 
 1. Copy the files above over the project (delete the one listed).
-2. Run `supabase/migrations/004_minato_trader_knowledge.sql` in the Supabase SQL editor (after 001/003).
+2. Nothing to migrate — memory is a JSON file in each trader's Drive and is created on first save.
 3. Environment variables (Vercel → Settings → Environment Variables), then redeploy:
    * `OPENROUTER_API_KEY` — already set.
    * **`MINATO_MODELS`** — set a strong tool-calling model chain, best first. Free models are the main remaining quality limit.
      Example (verify the slugs on openrouter.ai/models, filter "tools"): `~anthropic/claude-sonnet-latest,anthropic/claude-sonnet-4.6`.
    * Optional: `MINATO_MAX_OUTPUT_TOKENS` (default 8000), `MINATO_REASONING_EFFORT` (`low|medium|high`), `MINATO_AGENT_BUDGET_MS` (default 50000).
-   * Supabase variables already used by the identity bridge: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_RLS_JWT_PRIVATE_KEY`, `SUPABASE_RLS_JWT_KEY_ID`.
 4. `git add -A && git commit && git push`.
 5. Smoke test: ask "with my win rate what is the max losing streak", then "ok nice so how much can I risk per trade and position sizing in mnq". The second must continue the first (using your real stops/drawdown room), not reply "Got it."
 
@@ -118,7 +116,7 @@ Left in place but no longer on the request path (safe to delete later): `lane.ts
 * Vercel Hobby limits functions to 60 s (`maxDuration = 60`). Very deep multi-round questions are cut to a forced answer at ~50 s. On a plan allowing longer functions, raise `maxDuration` in `route.ts` and `MINATO_AGENT_BUDGET_MS`.
 * Server snapshot cache is per serverless instance (20 min); a cold instance simply re-requests the journal once.
 * The numeric verifier checks $, % and R figures only, and adds a note rather than rewriting text that has already streamed.
-* Reflection/checkpoint memory writes are best-effort and invisible; if Supabase is down MINATO still answers and does not claim to have remembered anything.
+* Reflection/checkpoint memory writes are best-effort and invisible; if Drive is slow or down MINATO still answers and does not claim to have remembered anything.
 * Screenshot (chart) analysis is out of scope here and unchanged.
 
 ## Troubleshooting: "My reasoning engine …" messages

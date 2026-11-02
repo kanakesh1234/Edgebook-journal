@@ -23,7 +23,7 @@ const { calculate } = await import("../../src/lib/minato/agent/safe-math.ts");
 const { validateArgs } = await import("../../src/lib/minato/agent/schema.ts");
 const { createStreamCleaner } = await import("../../src/lib/minato/agent/stream-clean.ts");
 const tools = await import("../../src/lib/minato/agent/tools.ts");
-const { MemoryKnowledgeStore, SupabaseKnowledgeStore, fingerprintOf } = await import("../../src/lib/minato/agent/knowledge-store.ts");
+const { MemoryKnowledgeStore, DriveKnowledgeStore, fingerprintOf } = await import("../../src/lib/minato/agent/knowledge-store.ts");
 const { dailySummaries, riskProfile, dataCoverage } = await import("../../src/lib/minato/agent/extra-tools.ts");
 const { parseReflection } = await import("../../src/lib/minato/agent/memory-update.ts");
 const { buildSystemPrompt } = await import("../../src/lib/minato/agent/prompt.ts");
@@ -358,16 +358,17 @@ const toolMsgs = (r: Req) => r.messages.filter((m) => m.role === "tool").map((m)
 /*  9 — Memory (database) failures never break an answer                */
 /* ================================================================== */
 {
-  const calls: { url: string; headers: Record<string, string> }[] = [];
-  const store = new SupabaseKnowledgeStore({
-    url: "https://x.supabase.co", anonKey: "anon", token: "jwt-abc", userId: "g_123",
-    fetchImpl: (async (url: string, init: RequestInit) => { calls.push({ url, headers: init.headers as Record<string, string> }); return new Response("boom", { status: 500 }); }) as typeof fetch,
+  const calls: string[] = [];
+  const store = new DriveKnowledgeStore({
+    folderId: "folder-1",
+    run: <T,>(op: (t: string) => Promise<T>) => op("tok"),
+    fetchImpl: (async (url: string) => { calls.push(String(url)); return new Response("boom", { status: 500 }); }) as typeof fetch,
   });
-  eq(await store.list(), [], "list degrades to empty on database failure");
+  eq(await store.list(), [], "list degrades to empty on Drive failure");
   const sv = await store.save({ kind: "goal", content: "Reach $26,000 by end of November.", source: "trader_stated" });
   ok(!sv.ok, "save reports failure honestly (never claims success)");
-  ok(calls.every((c) => c.headers.Authorization === "Bearer jwt-abc" && c.headers.apikey === "anon"), "every call carries the RLS identity token");
-  ok(calls.every((c) => !c.url.includes("user_id=eq.g_999")), "never addresses another trader");
+  eq(await store.flush(), true, "nothing pending → flush is a no-op");
+  ok(calls.every((u) => u.startsWith("https://www.googleapis.com/drive/v3/")), "only ever talks to the trader's own Drive");
   ok(calls.length <= 3, `circuit-breaks after repeated failure (${calls.length} calls)`);
 
   const mem = new MemoryKnowledgeStore();

@@ -6,17 +6,19 @@
  * strategy intentions, decisions the trader made in chat, conclusions drawn from their records (with the date
  * they were true), conversation summaries and a once-a-day progress checkpoint.
  *
- * Ownership & security
- *  - Rows are keyed by the verified Edgebook identity (`g_<google subject>`), minted server-side only.
- *  - Access goes through Supabase PostgREST with the short-lived RLS JWT from supabase-identity.ts, so the
- *    existing row-level-security policy (`user_id = auth.jwt()->>'edgebook_user_id'`) is what enforces isolation —
- *    not application code alone. A caller can never pick another trader's id.
+ * Storage — Google Drive is the server
+ *  - The notebook is ONE JSON file (`minato-knowledge.json`) in the trader's own EdgeBook folder on THEIR Drive,
+ *    next to journal.json. There is no other database: isolation is simply "whose Drive token is this".
+ *  - The file is read lazily (only when memory is actually consulted), mutated in memory, and written once per
+ *    request by `flush()` — which re-reads the file first and merges, so two requests can't erase each other.
+ *  - Memory is best-effort: if Drive is slow or unavailable the chat still answers, it just remembers nothing new.
  *
  * Freshness rule (the point of the `asOf` field)
  *  - Stored observations are context, never evidence. Live journal data always wins; the prompt says so and
  *    every stored insight carries the date it was last confirmed.
  */
 import type { AppSession } from "@/lib/server/session";
+import { getFile, putFile } from "@/lib/server/drive";
 
 export const INSIGHT_KINDS = [
   "strategy", "strength", "weakness", "mistake", "risk", "emotion", "habit", "goal", "decision", "preference", "progress", "fact", "conversation",
@@ -57,11 +59,13 @@ export interface InsightInput {
 export type SaveResult = { ok: true; id: string; created: boolean } | { ok: false; error: string };
 
 export interface KnowledgeStore {
-  readonly backend: "supabase" | "memory" | "none";
+  readonly backend: "drive" | "memory" | "none";
   list(o?: { kinds?: readonly InsightKind[]; query?: string; limit?: number; includeInactive?: boolean }): Promise<Insight[]>;
   save(input: InsightInput): Promise<SaveResult>;
   /** The most recent progress checkpoint dated before `beforeDate` (or any, when omitted). */
   latestCheckpoint(beforeDate?: string): Promise<Insight | null>;
+  /** Persist pending changes. Stores that write through (or hold nothing) may omit it. */
+  flush?(): Promise<boolean>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,15 +122,21 @@ export function rankInsights(items: Insight[], query?: string, limit = 12): Insi
 }
 
 /* ------------------------------------------------------------------ */
-/*  In-memory store (tests, local development without Supabase)         */
+/*  In-memory store (tests, local development without a session)         */
 /* ------------------------------------------------------------------ */
 
+export type StoredInsight = Insight & { fingerprint: string };
+
 export class MemoryKnowledgeStore implements KnowledgeStore {
-  readonly backend = "memory" as const;
-  readonly rows = new Map<string, Insight & { fingerprint: string }>();
+  readonly backend: KnowledgeStore["backend"] = "memory";
+  readonly rows = new Map<string, StoredInsight>();
   private seq = 0;
-  private readonly clock: () => Date;
+  protected readonly clock: () => Date;
   constructor(clock: () => Date = () => new Date()) { this.clock = clock; }
+
+  /** Hook for stores that persist: called with the id of every row that was created or changed. */
+  protected markDirty(_id: string): void { /* in-memory only */ }
+  protected newId(now: string): string { return `ins_${++this.seq}_${now.slice(11, 19).replace(/:/g, "")}`; }
 
   async list(o: { kinds?: readonly InsightKind[]; query?: string; limit?: number; includeInactive?: boolean } = {}): Promise<Insight[]> {
     const all = [...this.rows.values()].filter((r) => (o.includeInactive || r.status === "active") && (!o.kinds || o.kinds.includes(r.kind)));
@@ -142,7 +152,7 @@ export class MemoryKnowledgeStore implements KnowledgeStore {
     const existing = [...this.rows.values()].find((r) => r.fingerprint === fp && r.status === "active");
     if (v.supersedesId) {
       const old = this.rows.get(v.supersedesId);
-      if (old) old.status = "superseded";
+      if (old) { old.status = "superseded"; this.markDirty(old.id); }
     }
     if (existing) {
       existing.timesSeen += 1;
@@ -152,13 +162,15 @@ export class MemoryKnowledgeStore implements KnowledgeStore {
       existing.asOf = v.asOf ?? existing.asOf;
       existing.data = v.data ?? existing.data;
       existing.evidence = [...new Set([...(v.evidence ?? []), ...existing.evidence])].slice(0, 6);
+      this.markDirty(existing.id);
       return { ok: true, id: existing.id, created: false };
     }
-    const id = `ins_${++this.seq}_${now.slice(11, 19).replace(/:/g, "")}`;
+    const id = this.newId(now);
     this.rows.set(id, {
       id, kind: v.kind, content: v.content, evidence: v.evidence ?? [], source: v.source, confidence: v.confidence ?? 0.7,
       status: "active", timesSeen: 1, firstSeen: now, lastSeen: now, asOf: v.asOf ?? null, data: v.data ?? {}, fingerprint: fp,
     });
+    this.markDirty(id);
     return { ok: true, id, created: true };
   }
 
@@ -170,98 +182,157 @@ export class MemoryKnowledgeStore implements KnowledgeStore {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Supabase store (RLS enforced by the minted identity token)          */
+/*  Drive store — one JSON file in the trader's own EdgeBook folder     */
 /* ------------------------------------------------------------------ */
 
-interface Row {
-  id: string; user_id: string; kind: InsightKind; content: string; evidence: string[] | null; source: InsightSource; confidence: number;
-  status: "active" | "superseded" | "deleted"; times_seen: number; first_seen: string; last_seen: string; as_of: string | null;
-  data: Record<string, unknown> | null; fingerprint: string;
-}
-const toInsight = (r: Row): Insight => ({
-  id: r.id, kind: r.kind, content: r.content, evidence: r.evidence ?? [], source: r.source, confidence: r.confidence, status: r.status,
-  timesSeen: r.times_seen, firstSeen: r.first_seen, lastSeen: r.last_seen, asOf: r.as_of, data: r.data ?? {},
+export const KNOWLEDGE_FILE = "minato-knowledge.json";
+const MAX_ROWS = 400;
+
+interface KnowledgeDoc { v: 1; rows: StoredInsight[] }
+
+const isRow = (r: unknown): r is StoredInsight => {
+  const x = r as Partial<StoredInsight> | null;
+  return !!x && typeof x.id === "string" && typeof x.content === "string" && typeof x.kind === "string" && INSIGHT_KINDS.includes(x.kind as InsightKind);
+};
+const normRow = (r: StoredInsight): StoredInsight => ({
+  ...r,
+  evidence: Array.isArray(r.evidence) ? r.evidence.slice(0, 6) : [],
+  confidence: typeof r.confidence === "number" ? r.confidence : 0.7,
+  status: r.status === "superseded" || r.status === "deleted" ? r.status : "active",
+  timesSeen: typeof r.timesSeen === "number" && r.timesSeen > 0 ? r.timesSeen : 1,
+  firstSeen: r.firstSeen || new Date(0).toISOString(),
+  lastSeen: r.lastSeen || r.firstSeen || new Date(0).toISOString(),
+  asOf: r.asOf ?? null,
+  data: r.data && typeof r.data === "object" ? r.data : {},
+  fingerprint: r.fingerprint || fingerprintOf(r.kind, r.content),
 });
 
-export class SupabaseKnowledgeStore implements KnowledgeStore {
-  readonly backend = "supabase" as const;
-  private failures = 0;
-  private readonly cfg: { url: string; anonKey: string; token: string; userId: string; fetchImpl?: typeof fetch; timeoutMs?: number };
-  constructor(cfg: { url: string; anonKey: string; token: string; userId: string; fetchImpl?: typeof fetch; timeoutMs?: number }) { this.cfg = cfg; }
+/** Merge this request's changed rows over the freshest copy of the file, collapsing duplicate facts. */
+export function mergeRows(remote: StoredInsight[], changed: StoredInsight[], maxRows = MAX_ROWS): StoredInsight[] {
+  const byId = new Map<string, StoredInsight>();
+  for (const r of remote) byId.set(r.id, r);
+  for (const r of changed) byId.set(r.id, r);
 
-  private get table() { return `${this.cfg.url.replace(/\/$/, "")}/rest/v1/minato_trader_knowledge`; }
-  private headers(extra: Record<string, string> = {}) {
-    return { apikey: this.cfg.anonKey, Authorization: `Bearer ${this.cfg.token}`, "Content-Type": "application/json", ...extra };
+  // The same active fact written by two requests (or two server instances) becomes one row.
+  const byFp = new Map<string, StoredInsight>();
+  for (const r of [...byId.values()].sort((a, b) => a.firstSeen.localeCompare(b.firstSeen))) {
+    if (r.status !== "active") continue;
+    const keep = byFp.get(r.fingerprint);
+    if (!keep) { byFp.set(r.fingerprint, r); continue; }
+    const newer = r.lastSeen > keep.lastSeen ? r : keep;
+    keep.content = newer.content;
+    keep.lastSeen = newer.lastSeen > keep.lastSeen ? newer.lastSeen : keep.lastSeen;
+    keep.timesSeen = Math.max(keep.timesSeen, r.timesSeen);
+    keep.confidence = Math.max(keep.confidence, r.confidence);
+    keep.evidence = [...new Set([...keep.evidence, ...r.evidence])].slice(0, 6);
+    keep.asOf = newer.asOf ?? keep.asOf;
+    byId.delete(r.id);
   }
-  private async call(url: string, init: RequestInit): Promise<Response | null> {
-    if (this.failures >= 2) return null; // stop hammering a database that is down for this request
-    try {
-      const res = await (this.cfg.fetchImpl ?? fetch)(url, { ...init, signal: AbortSignal.timeout(this.cfg.timeoutMs ?? 6_000) });
-      if (!res.ok) { this.failures++; return res; }
-      return res;
-    } catch {
-      this.failures++;
-      return null;
-    }
+
+  let rows = [...byId.values()];
+  if (rows.length > maxRows) {
+    // Retire what matters least first: inactive rows, then low-confidence machine notes. Trader-stated notes stay.
+    const rank = (r: StoredInsight) => (r.status !== "active" ? 0 : r.source === "trader_stated" ? 3 : r.source === "checkpoint" ? 1 : 2);
+    rows = rows
+      .sort((a, b) => rank(b) - rank(a) || b.confidence - a.confidence || b.lastSeen.localeCompare(a.lastSeen))
+      .slice(0, maxRows);
+  }
+  return rows;
+}
+
+export interface DriveKnowledgeConfig {
+  /** Folder that holds the file (the trader's EdgeBook `journals` folder). */
+  folderId: string;
+  /** Runs a Drive operation with a valid access token (refreshing once on 401). */
+  run: <T>(op: (accessToken: string) => Promise<T>) => Promise<T>;
+  fetchImpl?: typeof fetch;
+  fileName?: string;
+  clock?: () => Date;
+  maxRows?: number;
+}
+
+export class DriveKnowledgeStore extends MemoryKnowledgeStore {
+  readonly backend: KnowledgeStore["backend"] = "drive";
+  private readonly cfg: DriveKnowledgeConfig;
+  private loaded = false;
+  private loading: Promise<boolean> | null = null;
+  private readonly dirty = new Set<string>();
+  private failures = 0;
+  /** The stored file exists but could not be parsed: never overwrite it. */
+  private unreadable = false;
+
+  constructor(cfg: DriveKnowledgeConfig) {
+    super(cfg.clock);
+    this.cfg = cfg;
+  }
+
+  protected markDirty(id: string): void { this.dirty.add(id); }
+  protected newId(): string { return `ins_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`; }
+
+  private get file() { return this.cfg.fileName ?? KNOWLEDGE_FILE; }
+
+  private async readRemote(token: string): Promise<StoredInsight[]> {
+    const blob = await getFile(token, this.cfg.folderId, this.file, this.cfg.fetchImpl);
+    if (!blob) return [];
+    let doc: unknown;
+    try { doc = JSON.parse(await blob.text()); } catch { this.unreadable = true; throw new Error("minato-knowledge.json is not valid JSON"); }
+    const rows = Array.isArray(doc) ? doc : (doc as Partial<KnowledgeDoc> | null)?.rows;
+    return Array.isArray(rows) ? rows.filter(isRow).map(normRow) : [];
+  }
+
+  private ensureLoaded(): Promise<boolean> {
+    if (this.loaded) return Promise.resolve(true);
+    if (this.failures >= 2 || this.unreadable) return Promise.resolve(false);
+    this.loading ??= (async () => {
+      try {
+        const rows = await this.cfg.run((t) => this.readRemote(t));
+        for (const r of rows) if (!this.rows.has(r.id)) this.rows.set(r.id, r);
+        this.loaded = true;
+        return true;
+      } catch {
+        this.failures++;
+        return false;
+      } finally {
+        this.loading = null;
+      }
+    })();
+    return this.loading;
   }
 
   async list(o: { kinds?: readonly InsightKind[]; query?: string; limit?: number; includeInactive?: boolean } = {}): Promise<Insight[]> {
-    const q = new URLSearchParams({ select: "*", user_id: `eq.${this.cfg.userId}`, order: "last_seen.desc", limit: "300" });
-    if (!o.includeInactive) q.set("status", "eq.active");
-    if (o.kinds?.length) q.set("kind", `in.(${o.kinds.join(",")})`);
-    const res = await this.call(`${this.table}?${q}`, { headers: this.headers() });
-    if (!res?.ok) return [];
-    const rows = (await res.json().catch(() => [])) as Row[];
-    return rankInsights(Array.isArray(rows) ? rows.map(toInsight) : [], o.query, o.limit ?? 12);
+    if (!(await this.ensureLoaded())) return [];
+    return super.list(o);
   }
 
   async save(input: InsightInput): Promise<SaveResult> {
-    const n = normalizeInput(input);
-    if (!n.ok) return n;
-    const v = n.value;
-    const fp = v.fingerprint ?? fingerprintOf(v.kind, v.content);
-    const now = new Date().toISOString();
-
-    const find = await this.call(`${this.table}?${new URLSearchParams({ select: "*", user_id: `eq.${this.cfg.userId}`, fingerprint: `eq.${fp}`, status: "eq.active", limit: "1" })}`, { headers: this.headers() });
-    if (!find?.ok) return { ok: false, error: "memory store unavailable" };
-    const found = (await find.json().catch(() => [])) as Row[];
-
-    let id: string;
-    let created = false;
-    if (found[0]) {
-      const cur = found[0];
-      const patch = {
-        content: v.content, last_seen: now, times_seen: (cur.times_seen ?? 1) + 1, confidence: Math.max(cur.confidence ?? 0, v.confidence ?? 0),
-        as_of: v.asOf ?? cur.as_of, data: v.data ?? cur.data ?? {}, evidence: [...new Set([...(v.evidence ?? []), ...(cur.evidence ?? [])])].slice(0, 6),
-      };
-      const r = await this.call(`${this.table}?${new URLSearchParams({ id: `eq.${cur.id}`, user_id: `eq.${this.cfg.userId}` })}`, { method: "PATCH", headers: this.headers({ Prefer: "return=minimal" }), body: JSON.stringify(patch) });
-      if (!r?.ok) return { ok: false, error: "memory store unavailable" };
-      id = cur.id;
-    } else {
-      id = `ins_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      const row = {
-        id, user_id: this.cfg.userId, kind: v.kind, content: v.content, evidence: v.evidence ?? [], source: v.source, confidence: v.confidence ?? 0.7,
-        status: "active", times_seen: 1, first_seen: now, last_seen: now, as_of: v.asOf ?? null, data: v.data ?? {}, fingerprint: fp,
-      };
-      const r = await this.call(this.table, { method: "POST", headers: this.headers({ Prefer: "return=minimal" }), body: JSON.stringify(row) });
-      if (!r?.ok) return { ok: false, error: "memory store unavailable" };
-      created = true;
-    }
-    if (v.supersedesId && v.supersedesId !== id) {
-      await this.call(`${this.table}?${new URLSearchParams({ id: `eq.${v.supersedesId}`, user_id: `eq.${this.cfg.userId}` })}`, {
-        method: "PATCH", headers: this.headers({ Prefer: "return=minimal" }), body: JSON.stringify({ status: "superseded" }),
-      });
-    }
-    return { ok: true, id, created };
+    if (!(await this.ensureLoaded())) return { ok: false, error: "memory store unavailable" };
+    return super.save(input);
   }
 
   async latestCheckpoint(beforeDate?: string): Promise<Insight | null> {
-    const q = new URLSearchParams({ select: "*", user_id: `eq.${this.cfg.userId}`, source: "eq.checkpoint", status: "eq.active", order: "as_of.desc", limit: "1" });
-    if (beforeDate) q.set("as_of", `lt.${beforeDate}`);
-    const res = await this.call(`${this.table}?${q}`, { headers: this.headers() });
-    if (!res?.ok) return null;
-    const rows = (await res.json().catch(() => [])) as Row[];
-    return rows[0] ? toInsight(rows[0]) : null;
+    if (!(await this.ensureLoaded())) return null;
+    return super.latestCheckpoint(beforeDate);
+  }
+
+  /** Write pending changes. Re-reads the file first so concurrent requests merge instead of overwriting. */
+  async flush(): Promise<boolean> {
+    if (this.dirty.size === 0) return true;
+    if (this.unreadable || this.failures >= 2) return false;
+    const ids = [...this.dirty];
+    try {
+      await this.cfg.run(async (token) => {
+        const remote = await this.readRemote(token);
+        const changed = ids.map((id) => this.rows.get(id)).filter((r): r is StoredInsight => !!r);
+        const merged = mergeRows(remote, changed, this.cfg.maxRows ?? MAX_ROWS);
+        const doc: KnowledgeDoc = { v: 1, rows: merged };
+        await putFile(token, this.cfg.folderId, this.file, Buffer.from(JSON.stringify(doc)), "application/json", this.cfg.fetchImpl);
+      });
+      for (const id of ids) this.dirty.delete(id);
+      return true;
+    } catch {
+      this.failures++;
+      return false;
+    }
   }
 }
 
@@ -274,15 +345,24 @@ export const NullKnowledgeStore: KnowledgeStore = {
 };
 
 /**
- * Build the store for a request. Supabase when the identity bridge is configured; otherwise a clear, honest
- * "none" (production) — never a silent process-local fake that would pretend to persist across requests.
+ * Build the store for a request: the trader's own Google Drive when a verified session exists, otherwise an honest
+ * "none" — never a silent process-local fake that would pretend to persist across requests. Never throws and never
+ * waits long: memory is a bonus, answering is the job.
  */
-export async function openKnowledgeStore(session: AppSession | null, env: NodeJS.ProcessEnv = process.env): Promise<KnowledgeStore> {
-  const url = env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!session?.sub || !url || !anonKey) return NullKnowledgeStore;
-  const { issueSupabaseWorkingMemoryToken } = await import("@/lib/server/supabase-identity");
-  const issued = issueSupabaseWorkingMemoryToken(session);
-  if (!issued) return NullKnowledgeStore;
-  return new SupabaseKnowledgeStore({ url, anonKey, token: issued.token, userId: `g_${session.sub}` });
+export async function openKnowledgeStore(session: AppSession | null, opts: { timeoutMs?: number } = {}): Promise<KnowledgeStore> {
+  if (!session?.sub) return NullKnowledgeStore;
+  try {
+    const { getAuthedDrive, withDrive, newRequestId } = await import("@/lib/server/authed-drive");
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), opts.timeoutMs ?? 8_000));
+    const authed = await Promise.race([getAuthedDrive(), timeout]);
+    if (!authed || !authed.ok) return NullKnowledgeStore;
+    const drive = authed.drive;
+    const requestId = newRequestId();
+    return new DriveKnowledgeStore({
+      folderId: drive.folders.journals,
+      run: (op) => withDrive(drive, "minato-knowledge", requestId, op),
+    });
+  } catch {
+    return NullKnowledgeStore;
+  }
 }

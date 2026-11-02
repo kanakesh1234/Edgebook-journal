@@ -149,7 +149,12 @@ async function handle(request: Request) {
           if (!result.ok) {
             const diag = `${summarizeAttempts(result.attempts)}${result.detail ? ` | ${result.detail}` : ""}`;
             console.warn(`[minato:agent] failed (${result.failure}) rounds=${result.rounds} tools=${result.toolRuns.map((t) => t.name).join(",") || "-"} ${diag}`);
-            send({ t: "error", code: result.failure ?? "empty", message: failureMessage(result.failure ?? "empty"), diag });
+            // Tell the trader *why* when the provider rejected the request — "the configured model may be unavailable"
+            // is useless without the model name and the provider's own words (never contains the key or journal data).
+            const why = result.failure === "bad_request" && result.detail ? ` (${result.detail.slice(0, 180)})` : "";
+            send({ t: "error", code: result.failure ?? "empty", message: `${failureMessage(result.failure ?? "empty")}${why}`, diag });
+            // Anything the model managed to save before failing must still reach Drive.
+            background = async () => { await knowledge.flush?.(); };
             return;
           }
 
@@ -175,10 +180,12 @@ async function handle(request: Request) {
             await saveCheckpoint(knowledge, db).catch(() => false);
             await saveConversationNote(knowledge, today, userTexts).catch(() => false);
             await reflectOnTurn({ config, knowledge, question, answer: finalText, today, usedTools: result.toolRuns.length > 0 }).catch(() => 0);
+            await knowledge.flush?.().catch(() => false); // one Drive write for everything this turn learned
           };
         } catch (e) {
           console.error("[minato:agent] error:", e instanceof Error ? `${e.name}: ${e.message}` : "unknown");
           send({ t: "error", code: "internal", message: "Something went wrong while I was thinking. Please try again." });
+          background = async () => { await knowledge.flush?.().catch(() => false); };
         } finally {
           try { controller.close(); } catch { /* client already gone */ }
           closed = true;

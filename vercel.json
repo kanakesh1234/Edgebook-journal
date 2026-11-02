@@ -1,3 +1,1 @@
-{
-  "crons": [{ "path": "/api/cron/supabase-keepalive", "schedule": "0 6 */3 * *" }]
-}
+{}

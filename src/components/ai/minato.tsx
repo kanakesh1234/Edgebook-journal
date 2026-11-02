@@ -14,6 +14,7 @@ import { buildContext } from "@/lib/minato/context";
 import type { MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
 import { streamMinato } from "@/lib/minato/agent/client";
+import { isFailedReply } from "@/lib/minato/agent/failed-reply";
 import { computeDataRev, slimEntry } from "@/lib/minato/agent/data-source";
 import { loadMind, MOOD_LABEL, mindForModel, type Mood } from "@/lib/minato/mind";
 import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type MinatoBrain } from "@/lib/minato/brain-ml";
@@ -61,6 +62,8 @@ type ChatMsg = MinatoMessage & {
   savedFacts?: string[];
   actions?: MinatoAction[];
   executedTask?: string;
+  /** The reply is an error notice ("model unreachable"…), not something Minato said. */
+  isError?: boolean;
 };
 const BRAIN_MIRROR = "edgebook:minato:brain:v1";
 const THREAD_MAX = 60;
@@ -713,7 +716,7 @@ export function Minato() {
 
       const moods = applied.moods;
       setBrain(applied.brain);
-      const priorMessages = messages.map(({ role, text: t }) => ({ role, text: t }));
+      const priorMessages = messages.filter((m) => !isFailedReply(m)).map(({ role, text: t }) => ({ role, text: t }));
       const next: ChatMsg[] = [
         ...messages,
         {
@@ -765,7 +768,7 @@ export function Minato() {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 115_000);
       try {
-        const thread = next.map(({ role, text: t }) => ({ role, text: t }));
+        const thread = next.filter((m) => !isFailedReply(m)).map(({ role, text: t }) => ({ role, text: t }));
         const outcome = await streamMinato({
           signal: controller.signal,
           body: {
@@ -813,6 +816,7 @@ export function Minato() {
           {
             role: "buddy",
             text: replyText,
+            ...(!outcome.ok ? { isError: true } : {}),
             ...(finalActions.length ? { actions: finalActions } : {}),
             ...(executedLabel ? { executedTask: executedLabel } : {}),
           },

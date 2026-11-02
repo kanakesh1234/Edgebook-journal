@@ -7,8 +7,12 @@
  *  - Native tool calling (`tools`, `tool_choice`) with streamed assembly of tool-call fragments
  *  - Real token streaming (SSE) with first-byte and idle watchdogs, so a stalled upstream cannot hang a request
  *  - Model fallback chain, sticky within a turn; one back-off retry for 429/5xx/network on each model
- *  - 400/404 handling: retry without `reasoning`, then report `toolsRejected` so the loop can switch to its
- *    text-tool protocol rather than failing the trader's question
+ *  - 400/404 handling: a model that no longer exists (404 / "no endpoints") is skipped; otherwise retry without
+ *    `reasoning`, lower `max_tokens` if the provider says it is too large, then report `toolsRejected` so the loop
+ *    can switch to its text-tool protocol rather than failing the trader's question
+ *  - Self-healing model list: free-tier slugs rotate and die without notice. The chain always ends with OpenRouter's
+ *    own `openrouter/free` router, and if every model is rejected the live catalogue is asked for free models that
+ *    support tools (cached) and those are tried before giving up
  *  - A hard wall-clock deadline across every attempt; the caller's AbortSignal cancels in-flight calls
  */
 import { getOpenRouterConfig } from "@/lib/services/ai";
@@ -23,6 +27,10 @@ export interface LlmConfig {
   maxOutputTokens: number;
   temperature: number;
   reasoningEffort: "low" | "medium" | "high" | null;
+  /** Ask the provider's live catalogue for working free tool-capable models when every configured one is rejected. */
+  discover?: boolean;
+  /** Catalogue URL (defaults to OpenRouter's public models endpoint). */
+  modelsEndpoint?: string;
 }
 
 export interface WireToolCall { id: string; type: "function"; function: { name: string; arguments: string } }
@@ -72,25 +80,84 @@ const MIN_REMAINING_MS = 1_500;
 /*  Config                                                             */
 /* ------------------------------------------------------------------ */
 
+/** Slugs that are known to be retired. Using one only wastes a round trip and (before this fix) broke tool calling. */
+const DEAD_MODELS = new Set(["z-ai/glm-5.2:free"]);
+/** OpenRouter's own router over the currently-live free models; it picks one that supports what the request needs. */
+export const FREE_ROUTER = "openrouter/free";
+
+export function cleanModelList(models: (string | undefined | null)[]): string[] {
+  const out: string[] = [];
+  for (const raw of models) {
+    const m = (raw ?? "").trim();
+    if (m && !DEAD_MODELS.has(m) && !out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
+const isFreeTier = (m: string) => m === FREE_ROUTER || m.endsWith(":free");
+
 export function getAgentLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfig | null {
   const base = getOpenRouterConfig();
   if (!base) return null;
-  const override = (env.MINATO_MODELS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const override = cleanModelList((env.MINATO_MODELS ?? "").split(","));
   // An explicitly chosen model is never silently diluted with the free-tier fallbacks of the old chain:
   // with MINATO_MODEL set, only it (and MINATO_FALLBACK_MODEL, if given) is used.
-  const chosen = [env.MINATO_MODEL?.trim(), env.MINATO_FALLBACK_MODEL?.trim()].filter((m): m is string => !!m);
-  const models = override.length ? override : chosen.length ? [...new Set(chosen)] : base.models;
+  const chosen = cleanModelList([env.MINATO_MODEL, env.MINATO_FALLBACK_MODEL]);
+  const picked = override.length ? override : chosen.length ? chosen : cleanModelList(base.models);
+  // …except that a chain made ONLY of free-tier models gets OpenRouter's own free router as a last resort and live
+  // discovery: free slugs get retired without notice, and one dead slug must never silence Minato. A paid chain is
+  // left exactly as configured — it never quietly degrades to a free model.
+  const freeOnly = picked.every(isFreeTier);
+  const models = (freeOnly ? cleanModelList([...picked, FREE_ROUTER]) : picked).slice(0, 5);
   const tokens = Number(env.MINATO_MAX_OUTPUT_TOKENS);
   const effort = (env.MINATO_REASONING_EFFORT ?? "").toLowerCase();
+  const endpoint = env.MINATO_LLM_ENDPOINT?.trim() || "https://openrouter.ai/api/v1/chat/completions";
   return {
     apiKey: base.apiKey,
     models,
-    endpoint: env.MINATO_LLM_ENDPOINT?.trim() || "https://openrouter.ai/api/v1/chat/completions",
+    endpoint,
     maxOutputTokens: Number.isFinite(tokens) && tokens >= 512 ? Math.min(64_000, Math.round(tokens)) : 8_000,
     temperature: 0.3,
     reasoningEffort: effort === "low" || effort === "medium" || effort === "high" ? effort : null,
+    discover: freeOnly && (env.MINATO_DISCOVER_MODELS ?? "").toLowerCase() !== "off" && /openrouter\.ai/.test(endpoint),
+    modelsEndpoint: endpoint.replace(/\/chat\/completions\/?$/, "/models"),
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Live catalogue — which free models exist right now                  */
+/* ------------------------------------------------------------------ */
+
+interface CatalogueModel { id?: string; context_length?: number; pricing?: { prompt?: string | number; completion?: string | number }; supported_parameters?: string[]; expiration_date?: string | null }
+let catalogueCache: { at: number; ids: string[] } | null = null;
+const CATALOGUE_TTL_MS = 30 * 60_000;
+
+/** Pure: pick free models that support tool calling, biggest context first. */
+export function pickFreeToolModels(list: CatalogueModel[], exclude: string[] = [], limit = 3, today = new Date()): string[] {
+  const isFree = (m: CatalogueModel) => Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0;
+  const live = (m: CatalogueModel) => !m.expiration_date || new Date(m.expiration_date).getTime() > today.getTime() + 86_400_000;
+  return list
+    .filter((m): m is CatalogueModel & { id: string } => typeof m.id === "string" && m.id !== FREE_ROUTER && !exclude.includes(m.id))
+    .filter((m) => isFree(m) && live(m) && (m.supported_parameters ?? []).includes("tools"))
+    .filter((m) => (m.context_length ?? 0) >= 16_000)
+    .sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))
+    .slice(0, limit)
+    .map((m) => m.id);
+}
+
+async function discoverFreeToolModels(o: CompletionOptions, exclude: string[]): Promise<string[]> {
+  const now = (o.now ?? Date.now)();
+  if (catalogueCache && now - catalogueCache.at < CATALOGUE_TTL_MS) return catalogueCache.ids.filter((id) => !exclude.includes(id));
+  try {
+    const res = await (o.fetchImpl ?? fetch)(o.config.modelsEndpoint ?? "https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(6_000) });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: CatalogueModel[] };
+    const ids = pickFreeToolModels(Array.isArray(json.data) ? json.data : [], [], 6);
+    catalogueCache = { at: now, ids };
+    return ids.filter((id) => !exclude.includes(id));
+  } catch { return []; }
+}
+export function _resetCatalogue(): void { catalogueCache = null; }
 
 /* ------------------------------------------------------------------ */
 /*  One HTTP attempt                                                   */
@@ -260,55 +327,89 @@ async function oneAttempt(o: CompletionOptions, model: string, useReasoning: boo
 /*  Completion with fallbacks                                          */
 /* ------------------------------------------------------------------ */
 
+/** The provider says this model id does not exist / has no live endpoint — skip it, it is not a tools problem. */
+export function looksLikeDeadModel(status: number | undefined, detail: string | undefined): boolean {
+  if (status === 404) return true;
+  return /no endpoints found|not a valid model|model.{0,40}(not found|does not exist|is not available|unavailable|deprecated|retired|no longer)|no allowed providers/i.test(detail ?? "");
+}
+/** The provider says the requested output budget is larger than the model allows. */
+export function looksLikeTokenLimit(detail: string | undefined): boolean {
+  return /max[_ ]?tokens|maximum context|context length|too many tokens|exceeds? the (model|context)|output (token )?limit/i.test(detail ?? "");
+}
+
 export async function complete(o: CompletionOptions): Promise<CompletionResult> {
   const now = o.now ?? Date.now;
   const sleep = o.sleep ?? defaultSleep;
   const attempts: Attempt[] = [];
   const preferred = o.preferModel && o.config.models.includes(o.preferModel) ? o.preferModel : null;
-  const models = [...new Set([...(preferred ? [preferred] : []), ...o.config.models])].slice(0, 5);
+  const configured = [...new Set([...(preferred ? [preferred] : []), ...o.config.models])].slice(0, 5);
   let lastFailure: CompletionFailure = "empty";
   let toolsRejected = false;
   let lastDetail: string | undefined;
+  let outputCap = o.maxTokens ?? o.config.maxOutputTokens;
   // Tools stay declared even with tool_choice "none": providers require them while the history contains tool calls.
   const wantTools = !!(o.tools && o.tools.length > 0);
 
-  for (const model of models) {
-    let useReasoning = !!o.config.reasoningEffort;
-    let useTools = wantTools;
-    let transientRetries = 0;
+  const tryModels = async (models: string[]): Promise<CompletionResult | null> => {
+    for (const model of models) {
+      let useReasoning = !!o.config.reasoningEffort;
+      let useTools = wantTools;
+      let transientRetries = 0;
+      let cappedOnce = false;
 
-    for (let tries = 0; tries < 4; tries++) {
-      const remaining = o.deadline - now();
-      if (remaining < MIN_REMAINING_MS) return { ok: false, failure: lastFailure === "empty" ? "timeout" : lastFailure, attempts, detail: lastDetail, ...(toolsRejected ? { toolsRejected } : {}) };
-      if (o.signal?.aborted) return { ok: false, failure: "aborted", attempts };
+      for (let tries = 0; tries < 5; tries++) {
+        const remaining = o.deadline - now();
+        if (remaining < MIN_REMAINING_MS) return { ok: false, failure: lastFailure === "empty" ? "timeout" : lastFailure, attempts, detail: lastDetail, ...(toolsRejected ? { toolsRejected } : {}) };
+        if (o.signal?.aborted) return { ok: false, failure: "aborted", attempts };
 
-      const started = now();
-      const r = await oneAttempt(o, model, useReasoning, useTools, remaining);
-      const ms = Math.max(0, now() - started);
+        const started = now();
+        const r = await oneAttempt({ ...o, maxTokens: outputCap }, model, useReasoning, useTools, remaining);
+        const ms = Math.max(0, now() - started);
 
-      if (!r.kind) {
-        attempts.push({ model, outcome: "ok", status: r.status, ms });
-        return { ok: true, content: r.content, toolCalls: r.toolCalls, finish: r.finish, model, attempts };
+        if (!r.kind) {
+          attempts.push({ model, outcome: "ok", status: r.status, ms });
+          return { ok: true, content: r.content, toolCalls: r.toolCalls, finish: r.finish, model, attempts };
+        }
+        attempts.push({ model, outcome: r.kind === "aborted" ? "network" : r.kind, status: r.status, ms });
+        lastFailure = r.kind;
+        if (r.detail) lastDetail = `${model}: ${r.status ?? ""} ${r.detail}`.trim();
+        if (r.emitted > 0) o.onReset?.();
+
+        if (r.kind === "aborted") return { ok: false, failure: "aborted", attempts };
+        if (r.kind === "auth") return { ok: false, failure: "auth", attempts };
+        if (r.kind === "bad_request") {
+          // 1. The model itself is gone: move on. This says nothing about whether tools work.
+          if (looksLikeDeadModel(r.status, r.detail)) break;
+          // 2. Asked for more output than this model can give: lower the cap once and retry the same model.
+          if (!cappedOnce && looksLikeTokenLimit(r.detail) && outputCap > 2_048) { cappedOnce = true; outputCap = Math.max(1_024, Math.min(2_048, Math.floor(outputCap / 4))); continue; }
+          // 3. Some models dislike `reasoning`; then some dislike `tools`.
+          if (useReasoning) { useReasoning = false; continue; }
+          if (useTools) { useTools = false; toolsRejected = true; break; } // let other models try native tools first
+          break;
+        }
+        const transient = r.kind === "rate_limited" || r.kind === "server" || r.kind === "network" || r.kind === "timeout" || r.kind === "empty";
+        if (transient && transientRetries < 1 && o.deadline - now() > 2_500 + 700) {
+          transientRetries++;
+          await sleep(r.kind === "rate_limited" ? 1_200 : 700);
+          continue;
+        }
+        break; // next model
       }
-      attempts.push({ model, outcome: r.kind === "aborted" ? "network" : r.kind, status: r.status, ms });
-      lastFailure = r.kind;
-      if (r.detail) lastDetail = `${model}: ${r.status ?? ""} ${r.detail}`.trim();
-      if (r.emitted > 0) o.onReset?.();
+    }
+    return null;
+  };
 
-      if (r.kind === "aborted") return { ok: false, failure: "aborted", attempts };
-      if (r.kind === "auth") return { ok: false, failure: "auth", attempts };
-      if (r.kind === "bad_request") {
-        if (useReasoning) { useReasoning = false; continue; }
-        if (useTools) { useTools = false; toolsRejected = true; break; } // let other models try native tools first
-        break;
-      }
-      const transient = r.kind === "rate_limited" || r.kind === "server" || r.kind === "network" || r.kind === "timeout" || r.kind === "empty";
-      if (transient && transientRetries < 1 && o.deadline - now() > 2_500 + 700) {
-        transientRetries++;
-        await sleep(r.kind === "rate_limited" ? 1_200 : 700);
-        continue;
-      }
-      break; // next model
+  const first = await tryModels(configured);
+  if (first) return first;
+
+  // Every configured model was rejected as unavailable/unsupported (not rate-limited or down): ask the provider what
+  // is live right now and try a few of those, so a retired slug in the environment never silences Minato.
+  const rejectedAll = attempts.length > 0 && attempts.every((a) => a.outcome === "bad_request" || a.outcome === "empty");
+  if (o.config.discover && rejectedAll && o.deadline - now() > 8_000) {
+    const extra = await discoverFreeToolModels(o, configured);
+    if (extra.length) {
+      const second = await tryModels(extra);
+      if (second) return second;
     }
   }
   return { ok: false, failure: lastFailure, attempts, detail: lastDetail, ...(toolsRejected ? { toolsRejected } : {}) };
