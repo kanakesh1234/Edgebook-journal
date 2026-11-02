@@ -11,21 +11,22 @@ import {
   rangeProgress,
   scrollToPinnedProgress,
   smooth,
+  updateComposureScore,
 } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 /* ========================================================================== */
-/*  SCENE 02 — THE INNER FILM (Full-Screen Theatre Mode Sequence)             */
+/*  SCENE 02 — THE INNER FILM (Interactive Game-Theatre Mode & 600-Frame      */
+/*  Scroll-Scrubbed Cinema Engine)                                            */
 /*                                                                            */
-/*  - Scroll-controlled Theatre Mode: scrolling forward advances across       */
-/*    600 frames (5 Acts × 120 frames); scrolling backward reverses it.       */
-/*  - Zero candlesticks, zero trading charts, zero external video dependencies*/
-/*  - Uses preloaded local 35mm photographic plates (/landing/act-*.jpg)      */
-/*    combined with scroll-scrubbed optical canvas choreography:              */
-/*    Act I (Rain & twilight glass), Act II (Live fountain pen writing on     */
-/*    linen ledger), Act III (Chiaroscuro chronograph at 09:29:58),           */
-/*    Act IV (Layered archival autopsy pages), Act V (Golden sunrise lake).   */
+/*  - Scroll-controlled 600-frame timeline (forward advances, reverse rewinds)*/
+/*  - Optional Play/Pause Director's Cut + Keyboard [Space] / [←] [→]         */
+/*  - Playable Game Decision Nodes in every Act: test Impulse vs. Discipline  */
+/*    to shift the scene's optical atmosphere and live Composure Score.       */
+/*  - 100% Candlestick & Chart Free. Pure Edgebook tokens.                    */
 /* ========================================================================== */
+
+export type DecisionBranch = "discipline" | "impulse";
 
 export interface FilmActSpec {
   id: string;
@@ -40,6 +41,17 @@ export interface FilmActSpec {
   timeStamp: string;
   localPlate: string;
   accentTone: "loss" | "gold" | "profit";
+  promptQuestion: string;
+  disciplineChoice: {
+    label: string;
+    outcome: string;
+    delta: string;
+  };
+  impulseChoice: {
+    label: string;
+    outcome: string;
+    delta: string;
+  };
 }
 
 const TOTAL_FRAMES = 600;
@@ -59,6 +71,17 @@ const FILM_ACTS: FilmActSpec[] = [
     timeStamp: "00:00:08:14",
     localPlate: "/landing/act-1-noise.jpg",
     accentTone: "loss",
+    promptQuestion: "08:14 AM — Pre-market noise is spiking. What is your first move?",
+    disciplineChoice: {
+      label: "Close external feeds & open blank plan",
+      outcome: "External noise muted. Mind anchored to a single session thesis.",
+      delta: "+12% Composure",
+    },
+    impulseChoice: {
+      label: "Scan 10 tickers for early breakouts",
+      outcome: "Attention fragmented across random moves before the bell.",
+      delta: "−18% Composure",
+    },
   },
   {
     id: "act-2-stillness",
@@ -74,6 +97,17 @@ const FILM_ACTS: FilmActSpec[] = [
     timeStamp: "00:00:24:00",
     localPlate: "/landing/act-2-stillness.jpg",
     accentTone: "gold",
+    promptQuestion: "09:05 AM — You sit before the open page. How do you define today?",
+    disciplineChoice: {
+      label: "Write exact invalidation & 2-loss guardrail",
+      outcome: "Rule locked in ink: wait for overnight sweep & 5m close.",
+      delta: "+15% Composure",
+    },
+    impulseChoice: {
+      label: "Keep the plan loosely in your head",
+      outcome: "Unwritten boundaries bend the moment volatility expands.",
+      delta: "−15% Composure",
+    },
   },
   {
     id: "act-3-temptation",
@@ -89,6 +123,17 @@ const FILM_ACTS: FilmActSpec[] = [
     timeStamp: "00:00:42:18",
     localPlate: "/landing/act-3-temptation.jpg",
     accentTone: "gold",
+    promptQuestion: "09:29:58 AM — Price surges two seconds before your confirmation.",
+    disciplineChoice: {
+      label: "Hands off mouse · Wait for 5m close",
+      outcome: "False opening drive rejected. Capital and composure preserved.",
+      delta: "+20% Composure",
+    },
+    impulseChoice: {
+      label: "Click market buy so you don't miss it",
+      outcome: "Trapped at the top of an unconfirmed opening wick.",
+      delta: "−24% Composure",
+    },
   },
   {
     id: "act-4-mirror",
@@ -104,6 +149,17 @@ const FILM_ACTS: FilmActSpec[] = [
     timeStamp: "00:01:02:09",
     localPlate: "/landing/act-4-mirror.jpg",
     accentTone: "profit",
+    promptQuestion: "10:45 AM — The trade is closed. How do you record it?",
+    disciplineChoice: {
+      label: "Complete 5-question psychological autopsy",
+      outcome: "Early-stop urge named and queued for evening Time Machine drill.",
+      delta: "+16% Composure",
+    },
+    impulseChoice: {
+      label: "Log only the dollar P&L and walk away",
+      outcome: "The hidden behavioural flaw remains unnamed for tomorrow.",
+      delta: "−14% Composure",
+    },
   },
   {
     id: "act-5-quiet-edge",
@@ -119,6 +175,17 @@ const FILM_ACTS: FilmActSpec[] = [
     timeStamp: "00:01:20:00",
     localPlate: "/landing/act-5-quiet-edge.jpg",
     accentTone: "profit",
+    promptQuestion: "SESSION CLOSED — Your daily 20-card review feed is complete.",
+    disciplineChoice: {
+      label: "Close the ledger & step away in calm",
+      outcome: "Zero carryover stress. Process sovereignty achieved.",
+      delta: "Sovereign State",
+    },
+    impulseChoice: {
+      label: "Keep staring at after-hours ticks",
+      outcome: "Mental fatigue bleeds into tomorrow's preparation.",
+      delta: "Fatigue Risk",
+    },
   },
 ];
 
@@ -131,7 +198,7 @@ function formatTimecode(progress: number): string {
 }
 
 /* ========================================================================== */
-/*  60fps Scroll-Scrubbed Cinema Renderer (100% Candlestick & Chart Free)     */
+/*  60fps 2.5D/3D Spatial Theatre Renderer (Zero Candlesticks / Zero Charts)  */
 /* ========================================================================== */
 
 function drawTheatreFrame(opts: {
@@ -142,9 +209,11 @@ function drawTheatreFrame(opts: {
   velocity: number;
   pointerX: number;
   pointerY: number;
+  time: number;
   plates: (HTMLImageElement | null)[];
+  branches: Record<number, DecisionBranch>;
 }) {
-  const { ctx, W, H, p, velocity, pointerX, pointerY, plates } = opts;
+  const { ctx, W, H, p, velocity, pointerX, pointerY, time, plates, branches } = opts;
   const scaled = clamp(p, 0, 0.9999) * FILM_ACTS.length;
   const actIdx = Math.min(FILM_ACTS.length - 1, Math.floor(scaled));
   const localP = clamp(scaled - actIdx, 0, 1);
@@ -156,13 +225,16 @@ function drawTheatreFrame(opts: {
 
   const renderActScene = (idx: number, prog: number, alpha: number) => {
     if (alpha <= 0.005) return;
+    const branch = branches[idx] ?? "discipline";
+    const isImpulse = branch === "impulse";
+
     ctx.save();
     ctx.globalAlpha = alpha;
 
-    // 1. Scroll-scrubbed camera dolly & subtle pointer parallax on the 35mm photographic plate
-    const camScale = lerp(1.02, 1.15, smooth(prog)) + absVel * 0.012;
-    const camPanX = lerp(idx % 2 === 0 ? -24 : 24, 0, smooth(prog)) + pointerX * -16;
-    const camPanY = lerp(14, -14, smooth(prog)) + pointerY * -10;
+    // 1. 3D Camera Dolly & Pointer Parallax on Base Photographic Plate
+    const camScale = lerp(1.02, 1.18, smooth(prog)) + absVel * 0.015;
+    const camPanX = lerp(idx % 2 === 0 ? -28 : 28, 0, smooth(prog)) + pointerX * -20;
+    const camPanY = lerp(16, -16, smooth(prog)) + pointerY * -12;
 
     const img = plates[idx];
     if (img && img.complete && img.naturalWidth > 0) {
@@ -176,34 +248,49 @@ function drawTheatreFrame(opts: {
       ctx.restore();
     }
 
-    // 2. Act-Specific Scroll-Scrubbed Physical Choreography (100% deterministic from scroll progress)
-    if (idx === 0) {
-      // ACT I: THE NOISE — Camera pushes through architectural window mullions & rain rivulets
-      const dollyZoom = lerp(1.0, 1.24, smooth(prog));
+    // Subtle spatial perspective grid floor in the lower theatre plane (game environment depth cue)
+    ctx.save();
+    const horizonY = H * 0.56 + pointerY * -8;
+    ctx.strokeStyle = isImpulse
+      ? "rgba(205, 132, 132, 0.08)"
+      : "rgba(203, 167, 107, 0.075)";
+    ctx.lineWidth = 1;
+    for (let ray = -6; ray <= 6; ray++) {
+      const topX = W * 0.5 + ray * 42 + pointerX * -12;
+      const botX = W * 0.5 + ray * 220 + pointerX * -36;
+      ctx.beginPath();
+      ctx.moveTo(topX, horizonY);
+      ctx.lineTo(botX, H);
+      ctx.stroke();
+    }
+    ctx.restore();
 
-      for (let i = 0; i < 36; i++) {
+    // 2. Act-Specific Scroll-Scrubbed & Choice-Reactive Choreography
+    if (idx === 0) {
+      // ACT I: THE NOISE — Camera pushes through rain-streaked window glass & bokeh
+      const dollyZoom = lerp(1.0, 1.28, smooth(prog));
+      const bokehCount = isImpulse ? 52 : 34;
+
+      for (let i = 0; i < bokehCount; i++) {
         const seed1 = Math.sin(i * 19.7) * 0.5 + 0.5;
         const seed2 = Math.cos(i * 31.3) * 0.5 + 0.5;
         const depth = 0.4 + (i % 4) * 0.25;
         const bx =
-          W * (0.28 + seed1 * 0.58) +
-          Math.sin(prog * 5 + i) * 28 * depth +
-          pointerX * -22 * depth;
+          W * (0.24 + seed1 * 0.62) +
+          Math.sin(prog * 5 + time * (isImpulse ? 1.1 : 0.35) + i) * 30 * depth +
+          pointerX * -24 * depth;
         const by =
-          H * (0.16 + seed2 * 0.58) +
-          (prog - 0.5) * -85 * depth +
-          pointerY * -14 * depth;
-        const rad = (14 + (i % 6) * 12) * dollyZoom;
+          H * (0.14 + seed2 * 0.6) +
+          (prog - 0.5) * -90 * depth +
+          pointerY * -16 * depth;
+        const rad = (14 + (i % 6) * 13) * dollyZoom;
 
-        const colors = [
-          "238, 178, 96",
-          "118, 168, 212",
-          "218, 108, 88",
-          "246, 222, 178",
-        ];
+        const colors = isImpulse
+          ? ["218, 98, 88", "238, 158, 86", "205, 132, 132", "246, 200, 160"]
+          : ["238, 178, 96", "118, 168, 212", "218, 108, 88", "246, 222, 178"];
         const c = colors[i % 4]!;
         const g = ctx.createRadialGradient(bx, by, 0, bx, by, rad);
-        g.addColorStop(0, `rgba(${c}, 0.22)`);
+        g.addColorStop(0, `rgba(${c}, ${isImpulse ? 0.3 : 0.22})`);
         g.addColorStop(0.65, `rgba(${c}, 0.08)`);
         g.addColorStop(1, `rgba(${c}, 0)`);
         ctx.fillStyle = g;
@@ -212,18 +299,19 @@ function drawTheatreFrame(opts: {
         ctx.fill();
       }
 
-      // Rain rivulets scrubbed directly by scroll progress
+      // Rain rivulets scrubbed by scroll + subtle ambient drift
       ctx.save();
-      for (let i = 0; i < 80; i++) {
-        const rx = ((i * 79.3) % W) + pointerX * -8;
+      for (let i = 0; i < 85; i++) {
+        const rx = ((i * 79.3) % W) + pointerX * -10;
         const scrollFall = prog * H * (0.95 + (i % 5) * 0.35);
-        const ry = ((i * 113.7 + scrollFall) % (H + 140)) - 70;
-        const streakLen = (30 + (i % 6) * 20) * (1 + absVel * 0.6);
+        const ambientFall = time * (isImpulse ? 64 : 28);
+        const ry = ((i * 113.7 + scrollFall + ambientFall) % (H + 150)) - 75;
+        const streakLen = (30 + (i % 6) * 22) * (1 + absVel * 0.7);
 
         const sg = ctx.createLinearGradient(rx, ry, rx - 2.5, ry + streakLen);
         sg.addColorStop(0, "rgba(225, 238, 250, 0)");
         sg.addColorStop(0.5, "rgba(228, 240, 255, 0.26)");
-        sg.addColorStop(1, "rgba(255, 244, 218, 0.42)");
+        sg.addColorStop(1, "rgba(255, 244, 218, 0.44)");
         ctx.strokeStyle = sg;
         ctx.lineWidth = 1.2 + (i % 3) * 0.4;
         ctx.beginPath();
@@ -233,45 +321,44 @@ function drawTheatreFrame(opts: {
       }
       ctx.restore();
 
-      // Window mullions separating as the camera pushes forward
+      // Foreground window mullions separating as camera pushes through
       ctx.save();
-      ctx.translate(W * 0.5 + pointerX * -28, H * 0.5 + pointerY * -16);
+      ctx.translate(W * 0.5 + pointerX * -30, H * 0.5 + pointerY * -18);
       ctx.scale(dollyZoom, dollyZoom);
-      const mullionW = 13;
-      ctx.fillStyle = "rgba(11, 9, 7, 0.88)";
+      const mullionW = 14;
+      ctx.fillStyle = "rgba(11, 9, 7, 0.9)";
       ctx.fillRect(-W * 0.19, -H * 0.6, mullionW, H * 1.2);
       ctx.fillRect(W * 0.21, -H * 0.6, mullionW, H * 1.2);
-      ctx.fillRect(-W * 0.6, H * 0.18, W * 1.2, 11);
-      ctx.fillStyle = "rgba(228, 184, 114, 0.22)";
+      ctx.fillRect(-W * 0.6, H * 0.18, W * 1.2, 12);
+      ctx.fillStyle = "rgba(228, 184, 114, 0.24)";
       ctx.fillRect(-W * 0.19 + mullionW, -H * 0.6, 2, H * 1.2);
       ctx.fillRect(W * 0.21 + mullionW, -H * 0.6, 2, H * 1.2);
       ctx.restore();
     } else if (idx === 1) {
       // ACT II: THE STILLNESS — Open linen ledger & fountain pen writing live with scroll
       ctx.save();
-      const sheetX = W * 0.58 + pointerX * -14;
-      const sheetY = H * 0.48 + lerp(26, -10, smooth(prog)) + pointerY * -10;
+      const sheetX = W * 0.58 + pointerX * -16;
+      const sheetY = H * 0.46 + lerp(26, -12, smooth(prog)) + pointerY * -10;
       const sheetRot = lerp(-0.075, -0.02, smooth(prog));
-      const sheetScale = lerp(0.94, 1.04, smooth(prog));
+      const sheetScale = lerp(0.93, 1.05, smooth(prog));
 
       ctx.translate(sheetX, sheetY);
       ctx.rotate(sheetRot);
       ctx.scale(sheetScale, sheetScale);
 
-      ctx.shadowColor = "rgba(10, 7, 4, 0.65)";
-      ctx.shadowBlur = 52;
+      ctx.shadowColor = "rgba(10, 7, 4, 0.68)";
+      ctx.shadowBlur = 54;
       ctx.shadowOffsetX = -14;
-      ctx.shadowOffsetY = 24;
+      ctx.shadowOffsetY = 26;
 
       const jw = Math.min(540, W * 0.46);
-      const jh = Math.min(350, H * 0.53);
+      const jh = Math.min(350, H * 0.52);
       ctx.fillStyle = "#f7f4ee";
       ctx.beginPath();
       ctx.roundRect(-jw * 0.5, -jh * 0.5, jw, jh, 16);
       ctx.fill();
       ctx.shadowColor = "transparent";
 
-      // Red archival margin rule
       ctx.strokeStyle = "rgba(172, 81, 87, 0.32)";
       ctx.lineWidth = 1.3;
       ctx.beginPath();
@@ -279,7 +366,6 @@ function drawTheatreFrame(opts: {
       ctx.lineTo(-jw * 0.5 + 52, jh * 0.5);
       ctx.stroke();
 
-      // Horizontal ruled lines
       ctx.strokeStyle = "rgba(110, 102, 87, 0.18)";
       ctx.lineWidth = 1;
       for (let y = -jh * 0.5 + 64; y < jh * 0.5 - 24; y += 32) {
@@ -289,21 +375,33 @@ function drawTheatreFrame(opts: {
         ctx.stroke();
       }
 
-      ctx.fillStyle = "#8c6d2e";
+      ctx.fillStyle = isImpulse ? "#ac5157" : "#8c6d2e";
       ctx.font = "600 11px monospace";
-      ctx.fillText("SESSION PLAN · 09:05 AM NY · WRITTEN IN CALM", -jw * 0.5 + 68, -jh * 0.5 + 42);
+      ctx.fillText(
+        isImpulse
+          ? "UNWRITTEN SESSION · NO GUARDRAILS SET"
+          : "SESSION PLAN · 09:05 AM NY · WRITTEN IN CALM",
+        -jw * 0.5 + 68,
+        -jh * 0.5 + 42,
+      );
 
-      const lines = [
-        "If the overnight low sweeps and 5m closes inside,",
-        "I take the single planned entry with defined risk.",
-        "If the open is loud and choppy, I sit on my hands.",
-      ];
+      const lines = isImpulse
+        ? [
+            "No written thesis — reacting to price ticks...",
+            "Stop level undecided — watching P&L fluctuate...",
+            "Impulse risk elevated before the opening bell.",
+          ]
+        : [
+            "If the overnight low sweeps and 5m closes inside,",
+            "I take the single planned entry with defined risk.",
+            "If the open is loud and choppy, I sit on my hands.",
+          ];
       let penTipX = -jw * 0.5 + 68;
       let penTipY = -jh * 0.5 + 88;
       const writeProg = clamp(prog * 1.25, 0, 1);
 
       ctx.font = "italic 19.5px Georgia, serif";
-      ctx.fillStyle = "#26221a";
+      ctx.fillStyle = isImpulse ? "#8f4149" : "#26221a";
 
       lines.forEach((lineText, row) => {
         const rowStart = row / lines.length;
@@ -320,10 +418,9 @@ function drawTheatreFrame(opts: {
         }
       });
 
-      // Fountain pen nib & barrel tracking the live ink tip
       ctx.save();
       ctx.translate(penTipX + 8, penTipY - 4);
-      ctx.rotate(-0.52 + Math.sin(prog * 32) * 0.02);
+      ctx.rotate(-0.52 + Math.sin(prog * 32) * 0.025);
       ctx.shadowColor = "rgba(15, 11, 6, 0.42)";
       ctx.shadowBlur = 16;
       ctx.shadowOffsetY = 8;
@@ -343,27 +440,25 @@ function drawTheatreFrame(opts: {
       ctx.restore();
       ctx.restore();
 
-      // Diagonal Venetian blind light bands sweeping with scroll
+      // Sunlit dust motes floating through diagonal Venetian blind shafts
       ctx.save();
-      ctx.translate(W * 0.5 + (prog - 0.5) * 100, H * 0.5);
-      ctx.rotate(-0.38);
-      for (let s = -800; s <= 800; s += 115) {
-        const sg = ctx.createLinearGradient(0, s, 0, s + 52);
-        sg.addColorStop(0, "rgba(14, 10, 6, 0)");
-        sg.addColorStop(0.5, "rgba(14, 10, 6, 0.32)");
-        sg.addColorStop(1, "rgba(14, 10, 6, 0)");
-        ctx.fillStyle = sg;
-        ctx.fillRect(-1200, s, 2400, 52);
+      for (let m = 0; m < 28; m++) {
+        const mx = ((m * 97.1 + prog * 120 + time * 12) % W);
+        const my = ((m * 61.3 - prog * 60) % H + H) % H;
+        ctx.fillStyle = "rgba(246, 224, 176, 0.38)";
+        ctx.beginPath();
+        ctx.arc(mx, my, 1.5 + (m % 3) * 0.8, 0, Math.PI * 2);
+        ctx.fill();
       }
       ctx.restore();
     } else if (idx === 2) {
-      // ACT III: THE TEMPTATION — Mechanical chronograph approaching 09:30:00 NY
+      // ACT III: THE TEMPTATION — Chiaroscuro Chronograph & Pressure Tunnel Ring
       const cx = W * 0.56 + pointerX * -16;
-      const cy = H * 0.47 + pointerY * -12;
-      const dialR = Math.min(W, H) * 0.26 * lerp(0.93, 1.07, smooth(prog));
+      const cy = H * 0.46 + pointerY * -12;
+      const dialR = Math.min(W, H) * 0.25 * lerp(0.92, 1.08, smooth(prog));
 
-      const impulseAlpha = 0.32 * (1 - smooth(prog));
-      const restraintAlpha = 0.12 + 0.3 * smooth(prog);
+      const impulseAlpha = isImpulse ? 0.48 : 0.32 * (1 - smooth(prog));
+      const restraintAlpha = isImpulse ? 0.08 : 0.14 + 0.34 * smooth(prog);
 
       const leftGlow = ctx.createRadialGradient(cx - dialR * 1.1, cy, 10, cx - dialR * 0.8, cy, dialR * 1.8);
       leftGlow.addColorStop(0, `rgba(172, 81, 87, ${impulseAlpha})`);
@@ -380,11 +475,17 @@ function drawTheatreFrame(opts: {
       ctx.save();
       ctx.translate(cx, cy);
 
-      ctx.strokeStyle = `rgba(203, 167, 107, ${0.28 + 0.62 * smooth(prog)})`;
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.arc(0, 0, dialR + 16, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * smooth(prog * 1.15));
-      ctx.stroke();
+      // Concentric Game-Style Focus / Composure Rings
+      for (let ring = 1; ring <= 2; ring++) {
+        const rr = dialR + ring * 18 + Math.sin(time * 2.5 + ring) * 3;
+        ctx.strokeStyle = isImpulse
+          ? `rgba(205, 132, 132, ${0.42 / ring})`
+          : `rgba(203, 167, 107, ${(0.3 + 0.55 * smooth(prog)) / ring})`;
+        ctx.lineWidth = ring === 1 ? 2.4 : 1.2;
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * smooth(prog * 1.15));
+        ctx.stroke();
+      }
 
       ctx.shadowColor = "rgba(0,0,0,0.75)";
       ctx.shadowBlur = 56;
@@ -421,8 +522,20 @@ function drawTheatreFrame(opts: {
       ctx.fillText(timeStr, 0, -dialR * 0.36);
 
       ctx.font = "italic 17.5px Georgia, serif";
-      ctx.fillStyle = prog > 0.55 ? "rgba(116, 176, 140, 0.92)" : "rgba(240, 234, 224, 0.68)";
-      ctx.fillText(prog > 0.55 ? "Impulse passed · Stillness held" : "Approaching the bell…", 0, dialR * 0.44);
+      ctx.fillStyle = isImpulse
+        ? "rgba(205, 132, 132, 0.92)"
+        : prog > 0.55
+          ? "rgba(116, 176, 140, 0.92)"
+          : "rgba(240, 234, 224, 0.68)";
+      ctx.fillText(
+        isImpulse
+          ? "Impulse clicked · Unconfirmed entry"
+          : prog > 0.55
+            ? "Impulse passed · Stillness held"
+            : "Approaching the bell…",
+        0,
+        dialR * 0.44,
+      );
 
       const hourAng = ((9 + 29.9 / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
       ctx.save();
@@ -451,7 +564,7 @@ function drawTheatreFrame(opts: {
       const secAng = (secs / 60) * Math.PI * 2 - Math.PI * 0.5;
       ctx.save();
       ctx.rotate(secAng);
-      ctx.strokeStyle = prog > 0.55 ? "#74b08c" : "#cd8484";
+      ctx.strokeStyle = isImpulse ? "#cd8484" : prog > 0.55 ? "#74b08c" : "#cd8484";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(-26, 0);
@@ -465,7 +578,7 @@ function drawTheatreFrame(opts: {
       ctx.fill();
       ctx.restore();
     } else if (idx === 3) {
-      // ACT IV: THE MIRROR — Layered archival autopsy pages fanning in 3D depth with scroll
+      // ACT IV: THE MIRROR — 3D Corridor of Floating Archival Autopsy Pages
       const cards = [
         {
           date: "14 SEPT · AUTOPSY #12",
@@ -473,7 +586,7 @@ function drawTheatreFrame(opts: {
           badge: "Mistake Named",
           tone: "#ac5157",
           baseX: -185,
-          baseY: 26,
+          baseY: 24,
           baseRot: -0.12,
         },
         {
@@ -482,16 +595,16 @@ function drawTheatreFrame(opts: {
           badge: "Habit Shifting",
           tone: "#8c6d2e",
           baseX: 0,
-          baseY: 0,
+          baseY: -4,
           baseRot: -0.025,
         },
         {
           date: "02 NOV · AUTOPSY #48",
           quote: "“Waited 40 minutes for the clean 5m close. Zero interference.”",
-          badge: "Pattern Retired · A+",
-          tone: "#40795b",
+          badge: isImpulse ? "Autopsy Skipped" : "Pattern Retired · A+",
+          tone: isImpulse ? "#ac5157" : "#40795b",
           baseX: 185,
-          baseY: -22,
+          baseY: -26,
           baseRot: 0.065,
         },
       ];
@@ -504,7 +617,7 @@ function drawTheatreFrame(opts: {
           c.baseX * lerp(0.55, 1.05, smooth(prog)) +
           pointerX * -18 * depthFactor;
         const cy =
-          H * 0.46 +
+          H * 0.44 +
           c.baseY +
           (1 - reveal) * 50 +
           pointerY * -12 * depthFactor;
@@ -516,7 +629,7 @@ function drawTheatreFrame(opts: {
         ctx.rotate(rot);
 
         const cw = Math.min(335, W * 0.34);
-        const ch = Math.min(225, H * 0.38);
+        const ch = Math.min(220, H * 0.36);
 
         ctx.shadowColor = "rgba(8, 6, 4, 0.60)";
         ctx.shadowBlur = 40;
@@ -556,23 +669,23 @@ function drawTheatreFrame(opts: {
     } else if (idx === 4) {
       // ACT V: THE QUIET EDGE — Sunrise rises with scroll & golden lake reflections
       const sunX = W * 0.54 + pointerX * -12;
-      const sunY = H * lerp(0.6, 0.44, smooth(prog)) + pointerY * -8;
-      const bloomR = Math.max(W, H) * lerp(0.32, 0.56, smooth(prog));
+      const sunY = H * lerp(0.6, 0.42, smooth(prog)) + pointerY * -8;
+      const bloomR = Math.max(W, H) * lerp(0.32, 0.58, smooth(prog));
 
       const sunGrad = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, bloomR);
-      sunGrad.addColorStop(0, `rgba(255, 248, 224, ${0.4 + 0.34 * smooth(prog)})`);
-      sunGrad.addColorStop(0.35, `rgba(203, 167, 107, ${0.22 + 0.16 * smooth(prog)})`);
+      sunGrad.addColorStop(0, `rgba(255, 248, 224, ${0.42 + 0.35 * smooth(prog)})`);
+      sunGrad.addColorStop(0.35, `rgba(203, 167, 107, ${0.22 + 0.18 * smooth(prog)})`);
       sunGrad.addColorStop(1, "rgba(20, 16, 12, 0)");
       ctx.fillStyle = sunGrad;
       ctx.fillRect(0, 0, W, H);
 
       ctx.save();
-      for (let i = 0; i < 42; i++) {
-        const tRow = i / 42;
-        const wy = H * 0.62 + Math.pow(tRow, 1.3) * (H * 0.24);
-        const waveOffset = Math.sin(prog * 14 + i * 0.9) * (16 + tRow * 32);
-        const wLen = (34 + (1 - tRow) * 120) * (0.7 + 0.3 * smooth(prog));
-        ctx.strokeStyle = `rgba(255, 232, 182, ${(1 - tRow) * 0.32})`;
+      for (let i = 0; i < 44; i++) {
+        const tRow = i / 44;
+        const wy = H * 0.6 + Math.pow(tRow, 1.3) * (H * 0.24);
+        const waveOffset = Math.sin(prog * 14 + time * 1.4 + i * 0.9) * (16 + tRow * 32);
+        const wLen = (34 + (1 - tRow) * 125) * (0.7 + 0.3 * smooth(prog));
+        ctx.strokeStyle = `rgba(255, 232, 182, ${(1 - tRow) * 0.34})`;
         ctx.lineWidth = 1.1 + (1 - tRow) * 1.3;
         ctx.beginPath();
         ctx.moveTo(sunX + waveOffset - wLen * 0.5, wy);
@@ -585,7 +698,6 @@ function drawTheatreFrame(opts: {
     ctx.restore();
   };
 
-  // Smooth optical cross-dissolve between acts during the transition window
   const transitionWindow = 0.22;
   if (actIdx < FILM_ACTS.length - 1 && localP > 1 - transitionWindow) {
     const tBlend = smooth((localP - (1 - transitionWindow)) / transitionWindow);
@@ -597,10 +709,10 @@ function drawTheatreFrame(opts: {
 
   // Editorial readability gradient scrim
   const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  scrim.addColorStop(0, "rgba(12, 10, 8, 0.56)");
-  scrim.addColorStop(0.28, "rgba(12, 10, 8, 0.10)");
-  scrim.addColorStop(0.58, "rgba(12, 10, 8, 0.24)");
-  scrim.addColorStop(1, "rgba(12, 10, 8, 0.88)");
+  scrim.addColorStop(0, "rgba(12, 10, 8, 0.62)");
+  scrim.addColorStop(0.26, "rgba(12, 10, 8, 0.12)");
+  scrim.addColorStop(0.55, "rgba(12, 10, 8, 0.28)");
+  scrim.addColorStop(1, "rgba(12, 10, 8, 0.92)");
   ctx.fillStyle = scrim;
   ctx.fillRect(0, 0, W, H);
 }
@@ -619,14 +731,40 @@ export function StoryFilmScroll() {
   const smoothProgressRef = useRef(0);
   const velocityRef = useRef(0);
   const pointerRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
+  const playingRef = useRef(false);
   const draggingTimelineRef = useRef(false);
 
   const platesRef = useRef<(HTMLImageElement | null)[]>([null, null, null, null, null]);
+  const branchesRef = useRef<Record<number, DecisionBranch>>({
+    0: "discipline",
+    1: "discipline",
+    2: "discipline",
+    3: "discipline",
+    4: "discipline",
+  });
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [actProgress, setActProgress] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [decisions, setDecisions] = useState<Record<number, DecisionBranch>>({
+    0: "discipline",
+    1: "discipline",
+    2: "discipline",
+    3: "discipline",
+    4: "discipline",
+  });
+
+  const chooseBranch = (actIdx: number, branch: DecisionBranch) => {
+    const next = { ...branchesRef.current, [actIdx]: branch };
+    branchesRef.current = next;
+    setDecisions(next);
+
+    // Compute updated Composure Score (each discipline choice = 20 pts)
+    const countDiscipline = Object.values(next).filter((b) => b === "discipline").length;
+    updateComposureScore(35 + countDiscipline * 13);
+  };
 
   const syncUiState = useCallback((p: number) => {
     const clamped = clamp(p, 0, 1);
@@ -641,7 +779,6 @@ export function StoryFilmScroll() {
     setCurrentFrame((prev) => (prev === frame ? prev : frame));
   }, []);
 
-  // Preload local 35mm photographic plates (poster first)
   useEffect(() => {
     if (typeof window === "undefined") return;
     FILM_ACTS.forEach((act, idx) => {
@@ -652,7 +789,6 @@ export function StoryFilmScroll() {
     });
   }, []);
 
-  // 60fps Scroll-Scrubbed Canvas Loop (pauses when off-screen or tab hidden)
   useEffect(() => {
     const canvas = canvasRef.current;
     const track = trackRef.current;
@@ -696,7 +832,17 @@ export function StoryFilmScroll() {
       const dt = Math.min(0.05, (now - lastTime) / 1000);
       lastTime = now;
 
-      // Damped spring interpolation tied strictly to actual scroll position
+      if (playingRef.current && !draggingTimelineRef.current) {
+        const nextTarget = targetProgressRef.current + dt / 24;
+        if (nextTarget >= 1) {
+          targetProgressRef.current = 1;
+          playingRef.current = false;
+          setIsPlaying(false);
+        } else {
+          targetProgressRef.current = nextTarget;
+        }
+      }
+
       const prevSmooth = smoothProgressRef.current;
       const diff = targetProgressRef.current - prevSmooth;
       const springStep = Math.abs(diff) < 0.0002 ? diff : diff * Math.min(1, dt * 15);
@@ -708,7 +854,6 @@ export function StoryFilmScroll() {
       ptr.x += (ptr.targetX - ptr.x) * Math.min(1, dt * 10);
       ptr.y += (ptr.targetY - ptr.y) * Math.min(1, dt * 10);
 
-      // Theatre frame scale & radius choreography at entrance and exit of #film
       if (frameWrapRef.current) {
         const enterBell = smooth(rangeProgress(curSmooth, 0, 0.08));
         const exitBell = 1 - smooth(rangeProgress(curSmooth, 0.93, 1.0)) * 0.035;
@@ -726,7 +871,9 @@ export function StoryFilmScroll() {
         velocity: velocityRef.current,
         pointerX: ptr.x,
         pointerY: ptr.y,
+        time: now / 1000,
         plates: platesRef.current,
+        branches: branchesRef.current,
       });
     };
 
@@ -738,24 +885,54 @@ export function StoryFilmScroll() {
     };
   }, [syncUiState]);
 
-  // Bind page scroll to targetProgressRef (works identically forward and backward)
   useEffect(() => {
     if (prefersReducedMotion()) return;
     const track = trackRef.current;
     if (!track) return;
 
-    return bindScrollProgress(
+    const unbind = bindScrollProgress(
       track,
       (progress) => {
-        if (!draggingTimelineRef.current) {
+        if (!playingRef.current && !draggingTimelineRef.current) {
           targetProgressRef.current = progress;
         }
       },
       { pinned: true },
     );
+
+    const stopAutoOnUserScroll = () => {
+      if (playingRef.current) {
+        playingRef.current = false;
+        setIsPlaying(false);
+      }
+    };
+    window.addEventListener("wheel", stopAutoOnUserScroll, { passive: true });
+    window.addEventListener("touchmove", stopAutoOnUserScroll, { passive: true });
+
+    return () => {
+      unbind();
+      window.removeEventListener("wheel", stopAutoOnUserScroll);
+      window.removeEventListener("touchmove", stopAutoOnUserScroll);
+    };
   }, []);
 
+  const togglePlay = () => {
+    if (playingRef.current) {
+      playingRef.current = false;
+      setIsPlaying(false);
+    } else {
+      if (targetProgressRef.current >= 0.98) {
+        targetProgressRef.current = 0;
+        smoothProgressRef.current = 0;
+      }
+      playingRef.current = true;
+      setIsPlaying(true);
+    }
+  };
+
   const selectAct = (idx: number) => {
+    playingRef.current = false;
+    setIsPlaying(false);
     const targetP = (idx + 0.08) / FILM_ACTS.length;
     targetProgressRef.current = targetP;
     scrollToPinnedProgress(trackRef.current, targetP, true);
@@ -766,6 +943,8 @@ export function StoryFilmScroll() {
     if (!bar) return;
     const r = bar.getBoundingClientRect();
     const nextP = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
+    playingRef.current = false;
+    setIsPlaying(false);
     targetProgressRef.current = nextP;
     scrollToPinnedProgress(trackRef.current, nextP, false);
   }, []);
@@ -788,6 +967,9 @@ export function StoryFilmScroll() {
   };
 
   const currentAct = FILM_ACTS[activeIndex] ?? FILM_ACTS[0]!;
+  const currentBranch = decisions[activeIndex] ?? "discipline";
+  const branchInfo =
+    currentBranch === "discipline" ? currentAct.disciplineChoice : currentAct.impulseChoice;
 
   return (
     <>
@@ -798,7 +980,7 @@ export function StoryFilmScroll() {
           className="flex flex-col items-start justify-between gap-6 border-t border-line pt-10 md:flex-row md:items-end"
         >
           <div>
-            <Eyebrow n="02">Scene II · The Inner Film (Theatre Mode)</Eyebrow>
+            <Eyebrow n="02">Scene II · The Inner Film (Interactive Theatre)</Eyebrow>
             <h2 className="mt-5 max-w-3xl font-display text-[clamp(2rem,4.6vw,3.75rem)] font-semibold leading-[1.04] tracking-[-0.04em] text-ink">
               The market is external.{" "}
               <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
@@ -807,17 +989,17 @@ export function StoryFilmScroll() {
             </h2>
           </div>
           <p className="max-w-md text-[15.5px] leading-relaxed text-muted">
-            Scroll forward or backward to direct the five-act film across 600 frames, or drag the timeline reel below to inspect any moment.
+            Scroll to scrub the 600-frame film, press <strong className="font-medium text-ink">Play Film</strong>, or test <strong className="font-medium text-ink">Impulse vs. Discipline</strong> inside each scene.
           </p>
         </div>
       </div>
 
-      {/* ---------------- Full-Screen Pinned Theatre Sequence ---------------- */}
+      {/* ---------------- Full-Screen Pinned Interactive Theatre Sequence ---------------- */}
       <section
         id="film"
         ref={trackRef}
         aria-label="The Inner Film — Interactive scroll-scrubbed theatre sequence"
-        className="lp-pinned relative h-[460svh]"
+        className="lp-pinned relative h-[480svh]"
       >
         <div className="sticky top-0 flex h-svh flex-col justify-center overflow-hidden px-3 py-3 sm:px-6 sm:py-5 lg:px-8">
           <div
@@ -847,13 +1029,13 @@ export function StoryFilmScroll() {
               {/* Subtle 35mm Film Grain Overlay */}
               <div className="lp-film-grain pointer-events-none absolute inset-0 opacity-25" aria-hidden="true" />
 
-              {/* Top Theatre Aperture Bar */}
-              <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-8 sm:pt-7">
-                <div className="inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/45 px-3.5 py-1.5 backdrop-blur-xl">
+              {/* Top Theatre HUD Bar */}
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-8 sm:pt-6">
+                <div className="inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/50 px-3.5 py-1.5 backdrop-blur-xl">
                   <span
                     className={`h-2 w-2 rounded-full ${
-                      currentAct.accentTone === "loss"
-                        ? "bg-[#cd8484]"
+                      currentBranch === "impulse"
+                        ? "bg-[#cd8484] animate-pulse"
                         : currentAct.accentTone === "gold"
                           ? "bg-[#cba76b]"
                           : "bg-[#74b08c]"
@@ -868,14 +1050,23 @@ export function StoryFilmScroll() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="rounded-full border border-white/12 bg-black/45 px-3.5 py-1.5 font-mono text-[11px] tabular-nums tracking-[0.1em] text-[#d6cebd] backdrop-blur-xl">
+                  <span className="hidden rounded-full border border-white/12 bg-black/50 px-3 py-1.5 font-mono text-[11px] tabular-nums tracking-[0.1em] text-[#d6cebd] backdrop-blur-xl sm:inline-block">
                     {formatTimecode(overallProgress)} · FRM {String(currentFrame).padStart(3, "0")}/{TOTAL_FRAMES}
                   </span>
+                  <button
+                    type="button"
+                    onClick={togglePlay}
+                    aria-label={isPlaying ? "Pause story film" : "Play story film"}
+                    className="inline-flex items-center gap-2 rounded-full border border-[#cba76b]/50 bg-[#1c1813]/85 px-4 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#f0eae0] backdrop-blur-xl transition hover:border-[#cba76b] hover:bg-[#272219] active:scale-[0.97]"
+                  >
+                    <span className="text-[#cba76b]">{isPlaying ? "❚❚" : "▶"}</span>
+                    <span>{isPlaying ? "Pause" : "Play Film"}</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Lower-Third Narrative Composition & Scroll-Synced Reveal */}
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col justify-end p-5 sm:p-8 lg:p-12">
+              {/* Lower-Third Narrative + Playable Game Decision Node */}
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 grid items-end gap-5 p-5 sm:p-8 lg:grid-cols-[1.15fr_0.85fr] lg:p-10">
                 <div
                   className="max-w-2xl transition-transform duration-150 ease-out"
                   style={{
@@ -886,28 +1077,28 @@ export function StoryFilmScroll() {
                     {currentAct.marginNote}
                   </p>
 
-                  <h3 className="mt-2.5 font-display text-[clamp(1.65rem,3.8vw,3.35rem)] font-semibold leading-[1.06] tracking-[-0.038em] text-[#f7f4ee]">
+                  <h3 className="mt-2 font-display text-[clamp(1.55rem,3.5vw,3.15rem)] font-semibold leading-[1.06] tracking-[-0.038em] text-[#f7f4ee]">
                     {currentAct.line}{" "}
                     <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.015em] text-[#dfbe82]">
                       {currentAct.italicPart}
                     </span>
                   </h3>
 
-                  <p className="mt-3 max-w-xl text-[14.5px] leading-relaxed text-[#d6cebd] sm:text-[16.5px]">
+                  <p className="mt-2.5 max-w-xl text-[14px] leading-relaxed text-[#d6cebd] sm:text-[15.5px]">
                     {currentAct.reflection}
                   </p>
 
                   {activeIndex === 4 && (
-                    <div className="pointer-events-auto mt-6 flex flex-wrap items-center gap-4">
+                    <div className="pointer-events-auto mt-5 flex flex-wrap items-center gap-4">
                       <Link
                         href="/login?mode=signup"
-                        className="inline-flex h-11 items-center rounded-full bg-gold-strong px-6 text-[15px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+                        className="inline-flex h-10 items-center rounded-full bg-gold-strong px-5 text-[14.5px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
                       >
                         Begin your Edgebook
                       </Link>
                       <a
                         href="#how"
-                        className="group inline-flex items-center gap-1 text-[15px] text-[#dfbe82] transition-colors hover:text-white"
+                        className="group inline-flex items-center gap-1 text-[14.5px] text-[#dfbe82] transition-colors hover:text-white"
                       >
                         Continue to The Decision
                         <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
@@ -915,11 +1106,71 @@ export function StoryFilmScroll() {
                     </div>
                   )}
                 </div>
+
+                {/* Playable Game Decision Node Card (Interactive Choice Inside the Scene) */}
+                <div className="pointer-events-auto rounded-[22px] border border-white/15 bg-[#15120d]/85 p-4 backdrop-blur-xl sm:p-5">
+                  <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-[#cba76b]">
+                    <span>Decision Node · {currentAct.roman}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 font-semibold ${
+                        currentBranch === "discipline"
+                          ? "bg-[#74b08c]/20 text-[#74b08c]"
+                          : "bg-[#cd8484]/20 text-[#cd8484]"
+                      }`}
+                    >
+                      {branchInfo.delta}
+                    </span>
+                  </div>
+
+                  <p className="mt-2 text-[13px] font-medium leading-snug text-[#f7f4ee]">
+                    {currentAct.promptQuestion}
+                  </p>
+
+                  <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => chooseBranch(activeIndex, "discipline")}
+                      className={`rounded-xl border px-3 py-2 text-left text-[12px] font-medium transition ${
+                        currentBranch === "discipline"
+                          ? "border-[#74b08c]/70 bg-[#74b08c]/18 text-[#f7f4ee]"
+                          : "border-white/10 bg-white/[0.04] text-[#a69d8c] hover:border-white/25 hover:text-white"
+                      }`}
+                    >
+                      <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-[#74b08c]">
+                        [A] Discipline
+                      </span>
+                      <span className="mt-0.5 block leading-tight">
+                        {currentAct.disciplineChoice.label}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => chooseBranch(activeIndex, "impulse")}
+                      className={`rounded-xl border px-3 py-2 text-left text-[12px] font-medium transition ${
+                        currentBranch === "impulse"
+                          ? "border-[#cd8484]/70 bg-[#cd8484]/18 text-[#f7f4ee]"
+                          : "border-white/10 bg-white/[0.04] text-[#a69d8c] hover:border-white/25 hover:text-white"
+                      }`}
+                    >
+                      <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-[#cd8484]">
+                        [B] Impulse
+                      </span>
+                      <span className="mt-0.5 block leading-tight">
+                        {currentAct.impulseChoice.label}
+                      </span>
+                    </button>
+                  </div>
+
+                  <p className="mt-2.5 border-t border-white/10 pt-2 text-[12px] leading-snug text-[#d6cebd]">
+                    <strong className="font-medium text-[#f0eae0]">Outcome:</strong> {branchInfo.outcome}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Interactive Draggable Scrubber + 5-Act Chapter Bar (Uses original surface/line/gold tokens) */}
-            <div className="mt-3.5 rounded-[22px] border border-line bg-surface/92 px-3.5 py-3 shadow-[var(--shadow-rest)] backdrop-blur-xl sm:px-5 sm:py-3.5">
+            {/* Interactive Scrubber + 5-Act Chapter Bar */}
+            <div className="mt-3 rounded-[22px] border border-line bg-surface/92 px-3.5 py-2.5 shadow-[var(--shadow-rest)] backdrop-blur-xl sm:px-5 sm:py-3">
               <div
                 ref={timelineRef}
                 role="slider"
@@ -967,12 +1218,13 @@ export function StoryFilmScroll() {
               </div>
 
               <div
-                className="mt-1.5 grid grid-cols-5 gap-1.5 sm:gap-2.5"
+                className="mt-1 grid grid-cols-5 gap-1.5 sm:gap-2.5"
                 role="tablist"
                 aria-label="Five acts of The Inner Film"
               >
                 {FILM_ACTS.map((act, idx) => {
                   const isCurrent = idx === activeIndex;
+                  const actBranch = decisions[idx] ?? "discipline";
                   return (
                     <button
                       key={act.id}
@@ -990,6 +1242,12 @@ export function StoryFilmScroll() {
                         <span className="mr-1.5 font-mono text-[10px] text-gold">{act.actNumber}</span>
                         {act.title.replace("THE ", "")}
                       </span>
+                      <span
+                        aria-hidden="true"
+                        className={`hidden h-1.5 w-1.5 shrink-0 rounded-full sm:inline-block ${
+                          actBranch === "discipline" ? "bg-profit" : "bg-loss"
+                        }`}
+                      />
                     </button>
                   );
                 })}

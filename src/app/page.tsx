@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "@/components/landing/landing.css";
 import { LandingNav } from "@/components/landing/nav";
 import { SmoothScroll } from "@/components/landing/smooth-scroll";
+import { DirectorHud } from "@/components/landing/director-hud";
 import { JourneyStage, DecisionRitualStage } from "@/components/landing/journey-stage";
 import { StoryFilmScroll } from "@/components/landing/story-film-scroll";
 import { DriveStatement } from "@/components/landing/drive-statement";
@@ -29,6 +30,7 @@ export default function LandingPage() {
     <div className="lp-root relative">
       <SmoothScroll />
       <LandingNav />
+      <DirectorHud />
       <main>
         <JourneyStage />
         <StoryFilmScroll />

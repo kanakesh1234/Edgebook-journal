@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import {
+  SCENE_META,
   clamp,
   computeScrollProgress,
   landingScrollState,
@@ -12,8 +13,8 @@ import {
 
 /**
  * Coordinates bidirectional scroll-scrubbed typography/scene transitions,
- * Theatre Mode immersion detection for #film, and global scroll progress
- * while preserving 100% native browser scrolling (no scroll-jacking).
+ * active chapter detection (CH.01 – CH.06), Theatre Mode immersion for #film,
+ * and global scroll progress while preserving 100% native browser scrolling.
  */
 export function SmoothScroll() {
   useEffect(() => {
@@ -29,23 +30,41 @@ export function SmoothScroll() {
       const maxScroll = Math.max(1, doc.scrollHeight - window.innerHeight);
       const scrollY = window.scrollY || window.pageYOffset || 0;
       const pageProg = clamp(scrollY / maxScroll, 0, 1);
+      const vh = window.innerHeight || 1;
 
       // Detect whether visitor is immersed inside the full-screen Theatre sequence (#film)
       const filmEl = document.getElementById("film");
       let inTheatre = false;
       if (filmEl && !reduced) {
         const rect = filmEl.getBoundingClientRect();
-        const vh = window.innerHeight || 1;
-        // Active while #film is pinned in the viewport
-        inTheatre = rect.top <= 24 && rect.bottom >= vh - 24;
+        inTheatre = rect.top <= 36 && rect.bottom >= vh - 36;
       }
+
+      // Detect active chapter (1..6)
+      let detectedScene = 1;
+      for (let i = SCENE_META.length - 1; i >= 0; i--) {
+        const meta = SCENE_META[i]!;
+        const el = document.querySelector<HTMLElement>(meta.anchor);
+        if (el) {
+          const r = el.getBoundingClientRect();
+          if (r.top <= vh * 0.48) {
+            detectedScene = meta.id;
+            break;
+          }
+        }
+      }
+
+      const sceneMeta = SCENE_META[detectedScene - 1] ?? SCENE_META[0]!;
 
       if (
         Math.abs(landingScrollState.pageProgress - pageProg) > 0.001 ||
-        landingScrollState.theatreMode !== inTheatre
+        landingScrollState.theatreMode !== inTheatre ||
+        landingScrollState.activeScene !== detectedScene
       ) {
         landingScrollState.pageProgress = pageProg;
         landingScrollState.theatreMode = inTheatre;
+        landingScrollState.activeScene = detectedScene;
+        landingScrollState.sceneTitle = sceneMeta.title;
         if (inTheatre) {
           doc.dataset.theatreMode = "true";
         } else {

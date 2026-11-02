@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   bindScrollProgress,
   lerp,
@@ -25,6 +25,52 @@ const POINTS = [
     d: "No signals, no predictions, no financial advice.",
   },
 ] as const;
+
+interface DialogueBranch {
+  id: string;
+  chip: string;
+  userPrompt: string;
+  minatoReply: string;
+  findingBadge: string;
+  followUpPrompt: string;
+  followUpReply: string;
+}
+
+const DIALOGUE_BRANCHES: DialogueBranch[] = [
+  {
+    id: "fridays",
+    chip: "Friday givebacks",
+    userPrompt: "Why do I keep giving back my Friday gains?",
+    minatoReply:
+      "You tend to take a second trade right after a green one, and your notes in those trades mention feeling “ahead”. A simple rule may help: on Fridays, stop after the first winner.",
+    findingBadge: "4 of 5 Friday losses followed a green opener",
+    followUpPrompt: "Okay. What should I practise?",
+    followUpReply:
+      "Your last two mistakes were moving the stop early. A short Time Machine drill on that is a good next step.",
+  },
+  {
+    id: "early-stop",
+    chip: "Early stop moves",
+    userPrompt: "Why did I choke my stop to breakeven at 09:42?",
+    minatoReply:
+      "In 6 of your last 9 entries, you moved your stop within 4 minutes whenever you kept dollar P&L visible. When you switch to R-multiples, your premature exits drop by 70%.",
+    findingBadge: "Trigger identified: Watching live dollar P&L",
+    followUpPrompt: "How do I lock that habit out tomorrow?",
+    followUpReply:
+      "I've added a pre-session guardrail reminder for 09:25 AM: hide dollar P&L and wait for the 5-minute candle close.",
+  },
+  {
+    id: "size-up",
+    chip: "Readiness to size up",
+    userPrompt: "Am I disciplined enough to increase my risk per trade?",
+    minatoReply:
+      "Your clean-process rate over the last 20 sessions is 88%, and you logged two disciplined No-Trade Days during chop. Your process supports a 1.25× step-up with a hard two-loss circuit breaker.",
+    findingBadge: "88% clean process across 20 sessions",
+    followUpPrompt: "What would invalidate the size increase?",
+    followUpReply:
+      "Any single unscheduled revenge entry immediately resets sizing back to baseline until three clean reviews are logged.",
+  },
+];
 
 function Bubble({
   me,
@@ -57,15 +103,17 @@ function Bubble({
 
 /**
  * SCENE 04B — MINATO (#minato)
- * Uses 100% original Edgebook tokens (bg-surface, bg-ink, text-canvas, text-ink).
- * As you scroll forward/backward, the 4 conversation bubbles and 3 editorial points
- * progressively reveal in lockstep with scroll position.
+ * Interactive Game Dialogue Tree + Scroll-Scrubbed Conversation Reveal
+ * using 100% original Edgebook tokens.
  */
 export function MinatoDemo() {
   const secRef = useRef<HTMLElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const bubbleRefs = useRef<(HTMLDivElement | null)[]>([]);
   const pointRefs = useRef<(HTMLLIElement | null)[]>([]);
+
+  const [branchIdx, setBranchIdx] = useState(0);
+  const branch = DIALOGUE_BRANCHES[branchIdx] ?? DIALOGUE_BRANCHES[0]!;
 
   useEffect(() => {
     if (prefersReducedMotion()) return;
@@ -82,7 +130,7 @@ export function MinatoDemo() {
 
         bubbleRefs.current.forEach((b, idx) => {
           if (!b) return;
-          const start = 0.08 + idx * 0.16;
+          const start = 0.08 + idx * 0.14;
           const bProg = smooth(rangeProgress(p, start, start + 0.24));
           b.style.opacity = String(lerp(0.18, 1, bProg));
           b.style.transform = `translate3d(0, ${lerp(14, 0, bProg).toFixed(1)}px, 0)`;
@@ -111,9 +159,9 @@ export function MinatoDemo() {
         <div className="order-2 lg:order-1">
           <div
             ref={panelRef}
-            className="lp-sq mx-auto w-full max-w-[460px] overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface shadow-[0_50px_110px_-50px_rgba(0,0,0,0.55)] will-change-transform"
-            role="img"
-            aria-label="Sample conversation with Minato about a trading habit"
+            className="lp-sq mx-auto w-full max-w-[470px] overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface shadow-[0_50px_110px_-50px_rgba(0,0,0,0.55)] will-change-transform"
+            role="region"
+            aria-label="Interactive conversation with Minato about a trading habit"
           >
             <div className="flex items-center gap-3 border-b border-line px-4 py-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -134,8 +182,29 @@ export function MinatoDemo() {
                 </p>
               </div>
               <span className="rounded-full bg-ink/[0.06] px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-faint">
-                Sample
+                Interactive
               </span>
+            </div>
+
+            {/* Interactive Dialogue Branch Selector */}
+            <div className="flex flex-wrap gap-1.5 border-b border-line bg-canvas/55 px-4 py-2.5">
+              {DIALOGUE_BRANCHES.map((b, idx) => {
+                const active = idx === branchIdx;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setBranchIdx(idx)}
+                    className={`rounded-full px-2.5 py-1 font-mono text-[10.5px] transition ${
+                      active
+                        ? "bg-gold-strong font-medium text-on-gold"
+                        : "border border-line bg-raised text-muted hover:text-ink"
+                    }`}
+                  >
+                    {b.chip}
+                  </button>
+                );
+              })}
             </div>
 
             <div className="space-y-2.5 px-4 py-5">
@@ -145,35 +214,51 @@ export function MinatoDemo() {
                   bubbleRefs.current[0] = el;
                 }}
               >
-                Why do I keep giving back my Friday gains?
+                {branch.userPrompt}
               </Bubble>
               <Bubble
                 bubbleRef={(el) => {
                   bubbleRefs.current[1] = el;
                 }}
               >
-                You tend to take a second trade right after a green one, and your notes in those trades mention feeling &ldquo;ahead&rdquo;. A simple rule may help: on Fridays, stop after the first winner.
+                {branch.minatoReply}
               </Bubble>
-              <Bubble
-                me
-                bubbleRef={(el) => {
+
+              {/* Native Minato analytical finding card from globals.css */}
+              <div
+                ref={(el) => {
                   bubbleRefs.current[2] = el;
                 }}
+                className="minato-finding transition-transform duration-150"
               >
-                Okay. What should I practise?
-              </Bubble>
+                <span className="minato-finding-number">!</span>
+                <span className="font-mono text-[11.5px] font-medium text-ink">
+                  {branch.findingBadge}
+                </span>
+              </div>
+
               <Bubble
+                me
                 bubbleRef={(el) => {
                   bubbleRefs.current[3] = el;
                 }}
               >
-                Your last two mistakes were moving the stop early. A short Time Machine drill on that is a good next step.
+                {branch.followUpPrompt}
+              </Bubble>
+              <Bubble
+                bubbleRef={(el) => {
+                  bubbleRefs.current[4] = el;
+                }}
+              >
+                {branch.followUpReply}
               </Bubble>
             </div>
 
             <div className="px-3 pb-3">
               <div className="flex items-center gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
-                <span className="flex-1 text-[15px] text-faint">Ask Minato…</span>
+                <span className="flex-1 text-[14.5px] text-faint">
+                  Select a prompt above or ask Minato…
+                </span>
                 <span
                   className="grid h-8 w-8 place-items-center rounded-full bg-gold-strong text-on-gold"
                   aria-hidden="true"
@@ -197,7 +282,7 @@ export function MinatoDemo() {
 
         <div className="order-1 lg:order-2">
           <div data-scrub-reveal>
-            <Eyebrow n="05">Minato · Contextual Reflection</Eyebrow>
+            <Eyebrow n="05">Minato · Contextual Companion</Eyebrow>
             <h2
               id="minato-title"
               className="mt-6 font-display text-[clamp(2.3rem,5.4vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink"

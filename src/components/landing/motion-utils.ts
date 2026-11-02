@@ -28,12 +28,27 @@ export interface LandingScrollState {
   theatreMode: boolean;
   /** Current major scene number [1..6] */
   activeScene: number;
+  /** Current scene label for the diegetic HUD */
+  sceneTitle: string;
+  /** Player's interactive Composure / Discipline score [0..100] from choices & scroll */
+  composureScore: number;
 }
+
+export const SCENE_META: { id: number; anchor: string; code: string; title: string }[] = [
+  { id: 1, anchor: "#top", code: "CH.01", title: "THE ENTRANCE" },
+  { id: 2, anchor: "#film", code: "CH.02", title: "THE INNER FILM" },
+  { id: 3, anchor: "#how", code: "CH.03", title: "THE DECISION" },
+  { id: 4, anchor: "#gap", code: "CH.04", title: "THE REFLECTION" },
+  { id: 5, anchor: "#drive", code: "CH.05", title: "THE EXPERIENCE" },
+  { id: 6, anchor: "#finale", code: "CH.06", title: "THE INVITATION" },
+];
 
 export const landingScrollState: LandingScrollState = {
   pageProgress: 0,
   theatreMode: false,
   activeScene: 1,
+  sceneTitle: "THE ENTRANCE",
+  composureScore: 88,
 };
 
 type ScrollStateListener = (state: LandingScrollState) => void;
@@ -48,6 +63,11 @@ export function subscribeLandingScroll(fn: ScrollStateListener): () => void {
 
 export function notifyLandingScroll(): void {
   listeners.forEach((fn) => fn(landingScrollState));
+}
+
+export function updateComposureScore(nextScore: number): void {
+  landingScrollState.composureScore = Math.round(clamp(nextScore, 0, 100));
+  notifyLandingScroll();
 }
 
 /**
