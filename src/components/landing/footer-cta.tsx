@@ -1,49 +1,70 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { ChevronRightIcon } from "@/components/ui/icons";
+import { bindScrollProgress, lerp, prefersReducedMotion, smooth } from "./motion-utils";
 import { Wordmark } from "./logo";
 import { Eyebrow } from "./ledger";
 
 /**
- * ACT 08: FINAL CTA — Full-screen closing keynote statement over the 3D golden dusk study.
+ * SCENE 06 — THE INVITATION (FinalCta & SiteFooter)
+ * Uses 100% original Edgebook tokens (bg-canvas, text-ink, text-gold, bg-gold-strong, text-on-gold).
+ * Scroll-scrubbed scale and focal lift bring the closing composition into place.
  */
 export function FinalCta() {
+  const secRef = useRef<HTMLElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) return;
+    return bindScrollProgress(
+      secRef.current,
+      (p) => {
+        if (!innerRef.current) return;
+        const s = smooth(p);
+        const y = lerp(32, 0, s);
+        const scale = lerp(0.94, 1, s);
+        innerRef.current.style.opacity = String(lerp(0.25, 1, s));
+        innerRef.current.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(4)})`;
+      },
+      { startRatio: 0.9, endRatio: 0.35 },
+    );
+  }, []);
+
   return (
     <section
       id="finale"
-      className="relative z-10 flex min-h-[92svh] flex-col items-center justify-center px-5 py-24 text-center sm:px-8 sm:py-32"
+      ref={secRef}
+      className="relative px-5 pb-24 pt-20 text-center sm:px-8 sm:pb-32 sm:pt-28"
       aria-label="Get started"
     >
-      <div className="lp-theatre-panel lp-sq mx-auto w-full max-w-[1120px] rounded-[40px] px-6 py-20 sm:px-14 sm:py-28">
+      <div ref={innerRef} className="mx-auto max-w-4xl will-change-transform">
         <div className="mb-6 flex justify-center">
-          <Eyebrow n="10">Final Curtain · Begin Today</Eyebrow>
+          <Eyebrow n="10">Scene VI · The invitation</Eyebrow>
         </div>
 
-        <h2
-          data-theatre-reveal
-          className="mx-auto max-w-4xl font-display text-[clamp(2.5rem,7.2vw,5.8rem)] font-semibold leading-[1.01] tracking-[-0.045em] text-[#f7f4ee]"
-        >
+        <h2 className="mx-auto max-w-4xl font-display text-[clamp(2.4rem,7vw,5.6rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
           Your edge deserves{" "}
-          <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-[#cba76b]">
+          <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
             a&nbsp;ledger.
           </span>
         </h2>
 
-        <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.28rem)] leading-relaxed text-[#d6cebd]">
-          Start with today&apos;s session. Sign in with Google so your journal lives in your own Drive, or keep it on this device. Export everything whenever you like.
+        <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.3rem)] leading-snug text-muted">
+          Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
         </p>
 
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3.5">
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
           <Link
             href="/login?mode=signup"
-            className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold shadow-[0_16px_40px_-10px_rgba(183,142,62,0.55)] transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+            className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
           >
             Create your journal
           </Link>
           <Link
             href="/login"
-            className="group inline-flex items-center gap-1 text-[17px] text-[#cba76b] transition-colors hover:text-white"
+            className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink"
           >
             Log in
             <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
@@ -56,10 +77,10 @@ export function FinalCta() {
 
 const CONTACT_EMAIL = "kanakesh939264@gmail.com";
 
-/** Plain, in-flow footer: contact, links and a one-line disclaimer. */
+/** Plain, in-flow footer: contact, links and a one-line disclaimer. No fixed layers, no extra scroll. */
 export function SiteFooter() {
   return (
-    <footer id="contact" className="relative z-10 border-t border-line bg-canvas px-5 py-14 sm:px-8 sm:py-16">
+    <footer id="contact" className="border-t border-line bg-canvas px-5 py-14 sm:px-8 sm:py-16">
       <div className="mx-auto grid w-full max-w-[1200px] gap-12 md:grid-cols-[1.2fr_1fr] md:gap-16">
         <div>
           <h2 className="font-display text-[clamp(1.6rem,3vw,2.2rem)] font-semibold tracking-[-0.035em] text-ink">
@@ -91,21 +112,42 @@ export function SiteFooter() {
 
         <div className="flex flex-col gap-8 md:items-end">
           <Wordmark />
-          <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 text-[14px] text-muted md:justify-end">
-            <a href="#film" className="transition-colors hover:text-ink">The Inner Film</a>
-            <a href="#how" className="transition-colors hover:text-ink">Daily Ritual</a>
-            <a href="#gap" className="transition-colors hover:text-ink">The Gap</a>
-            <a href="#minato" className="transition-colors hover:text-ink">Minato</a>
-            <a href="#drive" className="transition-colors hover:text-ink">Your Drive</a>
-            <a href="#toolkit" className="transition-colors hover:text-ink">Toolkit</a>
-            <Link href="/privacy" className="transition-colors hover:text-ink">Privacy</Link>
-            <Link href="/login" className="transition-colors hover:text-ink">Log in</Link>
+          <nav
+            aria-label="Footer"
+            className="flex flex-wrap gap-x-7 gap-y-3 text-[14px] text-muted md:justify-end"
+          >
+            <a href="#film" className="transition-colors hover:text-ink">
+              The Inner Film
+            </a>
+            <a href="#how" className="transition-colors hover:text-ink">
+              Daily Ritual
+            </a>
+            <a href="#gap" className="transition-colors hover:text-ink">
+              The Gap
+            </a>
+            <a href="#minato" className="transition-colors hover:text-ink">
+              Minato
+            </a>
+            <a href="#drive" className="transition-colors hover:text-ink">
+              Your Drive
+            </a>
+            <a href="#toolkit" className="transition-colors hover:text-ink">
+              Toolkit
+            </a>
+            <Link href="/privacy" className="transition-colors hover:text-ink">
+              Privacy
+            </Link>
+            <Link href="/login" className="transition-colors hover:text-ink">
+              Log in
+            </Link>
           </nav>
         </div>
       </div>
 
       <div className="mx-auto mt-12 w-full max-w-[1200px] border-t border-line pt-6 text-[12.5px] leading-relaxed text-faint">
-        <p>Edgebook is for educational and journaling purposes only. It is not financial advice, and trading involves risk.</p>
+        <p>
+          Edgebook is for educational and journaling purposes only. It is not financial advice, and trading involves risk.
+        </p>
         <p className="mt-1">&copy; {new Date().getFullYear()} Edgebook</p>
       </div>
     </footer>

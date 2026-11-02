@@ -5,17 +5,18 @@ import { bindScrollProgress, clamp, lerp, prefersReducedMotion } from "./motion-
 import { Eyebrow } from "./ledger";
 
 const SENTENCE =
-  "Your data stays in your Drive. One plain JSON ledger in a folder only you control—open it, export it, or walk away with it whenever you like.";
+  "Your journal is one file in your own Google Drive. Open it, export it, or walk away with it whenever you like.";
 
 const FACTS = [
-  { t: "Sign in with Google", d: "Your journal syncs directly to a private folder in your own Google Drive." },
-  { t: "Prefer to stay local?", d: "Use a local session and keep every plan and reflection on this device." },
-  { t: "Export in one click", d: "Download your entire decision ledger as clean, portable JSON any time." },
+  { t: "Sign in with Google", d: "Your journal syncs to a folder only you control." },
+  { t: "Prefer to stay local?", d: "Use an email session and keep everything on this device." },
+  { t: "Export in one click", d: "Your whole journal as JSON, any time." },
 ];
 
 /**
- * ACT 06: YOUR DRIVE — Data particles stream into a single 3D vault in the WebGL canvas,
- * paired with the word-by-word illuminated sovereignty statement.
+ * SCENE 05A — YOUR DRIVE (#drive)
+ * A quiet pause in the page: the card grows into place on the theme's own
+ * surface (bg-surface), then the sentence lights up word by word with the scroll.
  */
 export function DriveStatement() {
   const sec = useRef<HTMLElement>(null);
@@ -30,17 +31,17 @@ export function DriveStatement() {
       (p) => {
         const cardProg = clamp(p * 1.35, 0, 1);
         if (card.current) {
-          const scale = lerp(0.93, 1, cardProg);
-          const radius = Math.round(lerp(56, 40, cardProg));
+          const scale = lerp(0.92, 1, cardProg);
+          const radius = Math.round(lerp(64, 44, cardProg));
           card.current.style.transform = `scale(${scale})`;
           card.current.style.borderRadius = `${radius}px`;
         }
-        const wordProg = clamp((p - 0.1) / 0.72, 0, 1);
+        const wordProg = clamp((p - 0.12) / 0.78, 0, 1);
         const total = Math.max(1, words.length);
         words.forEach((w, i) => {
           const threshold = i / total;
           const local = clamp((wordProg - threshold) * 5, 0, 1);
-          w.style.opacity = String(lerp(0.26, 1, local));
+          w.style.opacity = String(lerp(0.24, 1, local));
         });
       },
       { startRatio: 0.92, endRatio: 0.2 },
@@ -48,48 +49,38 @@ export function DriveStatement() {
   }, []);
 
   return (
-    <section id="drive" ref={sec} className="relative z-10 px-3 py-14 sm:px-6 sm:py-24">
+    <section id="drive" ref={sec} className="relative px-3 py-10 sm:px-6 sm:py-16">
       <div
         ref={card}
-        className="lp-theatre-panel lp-sq relative mx-auto max-w-[1200px] overflow-hidden rounded-[40px] px-6 py-20 will-change-transform sm:px-12 sm:py-28 lg:px-20 lg:py-32"
+        className="lp-sq relative mx-auto max-w-[1200px] overflow-hidden rounded-[44px] border border-line-strong/70 bg-surface px-6 py-20 text-ink shadow-[var(--shadow-overlay)] will-change-transform sm:px-12 sm:py-28 lg:px-20 lg:py-36"
       >
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "radial-gradient(720px 360px at 18% 0%, rgba(203, 167, 107, 0.18), transparent 70%), radial-gradient(560px 320px at 92% 100%, rgba(116, 176, 140, 0.14), transparent 70%)",
+              "radial-gradient(720px 360px at 12% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 70%), radial-gradient(560px 320px at 100% 100%, color-mix(in srgb, var(--profit) 8%, transparent), transparent 70%)",
           }}
         />
         <div className="relative mb-8">
-          <Eyebrow n="06">Your Drive · Sovereign Vault</Eyebrow>
+          <Eyebrow n="06">Scene V · Your data</Eyebrow>
         </div>
-
-        <h2 className="sr-only">Your data stays in your Drive</h2>
-
         <p
           ref={text}
-          className="relative max-w-4xl font-display text-[clamp(1.9rem,4.7vw,3.9rem)] font-semibold leading-[1.1] tracking-[-0.035em] text-[#f7f4ee]"
+          className="relative max-w-4xl font-display text-[clamp(1.9rem,4.8vw,4rem)] font-semibold leading-[1.1] tracking-[-0.035em]"
         >
           {SENTENCE.split(" ").map((w, i) => (
-            <span
-              key={i}
-              data-w
-              className={`inline-block pr-[0.28em] ${
-                i < 6 ? "text-[#cba76b]" : "text-[#f7f4ee]"
-              }`}
-            >
+            <span key={i} data-w className="inline-block pr-[0.28em]">
               {w}
             </span>
           ))}
         </p>
 
-        {/* Vault File Telemetry Badge */}
-        <div className="relative mt-12 inline-flex max-w-full flex-wrap items-center gap-3 overflow-x-auto rounded-2xl border border-[#cba76b]/35 bg-[#15120d]/90 px-4 py-3 sm:mt-16">
-          <span className="h-2 w-2 rounded-full bg-[#74b08c] animate-pulse" aria-hidden="true" />
+        {/* The file */}
+        <div className="relative mt-14 inline-flex max-w-full items-center gap-3 overflow-x-auto rounded-2xl border border-line bg-raised px-4 py-3 sm:mt-20">
           <svg
             viewBox="0 0 24 24"
-            className="h-5 w-5 shrink-0 text-[#cba76b]"
+            className="h-5 w-5 shrink-0 text-gold"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -99,19 +90,16 @@ export function DriveStatement() {
           >
             <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
           </svg>
-          <code className="break-all font-mono text-[12px] text-[#f0eae0] sm:whitespace-nowrap sm:text-sm">
+          <code className="break-all font-mono text-[12px] text-muted sm:whitespace-nowrap sm:text-sm">
             EdgeBook / journals / journal.json
           </code>
-          <span className="rounded-full bg-[#74b08c]/15 px-2.5 py-0.5 font-mono text-[10.5px] text-[#74b08c]">
-            Vault Stream Active
-          </span>
         </div>
 
         <ul className="relative mt-12 grid gap-8 sm:mt-16 md:grid-cols-3 md:gap-10">
           {FACTS.map((f) => (
-            <li key={f.t} className="border-t border-white/15 pt-5">
-              <p className="text-[17px] font-medium text-[#f7f4ee]">{f.t}</p>
-              <p className="mt-1.5 text-[15px] leading-relaxed text-[#d6cebd]">{f.d}</p>
+            <li key={f.t} className="border-t border-line-strong pt-5">
+              <p className="text-[17px] font-medium">{f.t}</p>
+              <p className="mt-1.5 text-[15px] leading-relaxed text-muted">{f.d}</p>
             </li>
           ))}
         </ul>

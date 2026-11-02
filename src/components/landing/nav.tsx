@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Wordmark } from "./logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { cn } from "@/lib/utils";
+import { subscribeLandingScroll } from "./motion-utils";
 
 const LINKS = [
   { href: "#film", label: "The Inner Film", cls: "" },
@@ -16,28 +17,39 @@ const LINKS = [
 ];
 
 /**
- * Frosted bar in the Apple tradition: legible over both the dark 3D theatre
- * study and the calm cream sections, with all original anchors and links preserved.
+ * Frosted bar in the Apple tradition: quiet at the top, hairline + restrained
+ * scroll-progress indicator once you scroll, and distraction-minimised during
+ * the full-screen Theatre Mode sequence (#film).
  */
 export function LandingNav() {
   const [scrolled, setScrolled] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    const unsub = subscribeLandingScroll((st) => {
+      setProgress(st.pageProgress);
+    });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      unsub();
+    };
   }, []);
 
   return (
     <header
       className={cn(
-        "fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-500",
+        "lp-nav-header fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,opacity,transform] duration-500",
         "border-b",
-        scrolled ? "lp-glass border-line" : "lp-glass border-line/40",
+        scrolled ? "lp-glass border-line" : "border-transparent bg-transparent",
       )}
     >
-      <nav aria-label="Primary" className="mx-auto flex h-14 max-w-[1200px] items-center justify-between px-5 sm:px-8">
+      <nav
+        aria-label="Primary"
+        className="mx-auto flex h-14 max-w-[1200px] items-center justify-between px-5 sm:px-8"
+      >
         <Link href="/" aria-label="Edgebook home" className="rounded-lg">
           <Wordmark />
         </Link>
@@ -47,7 +59,10 @@ export function LandingNav() {
             <a
               key={l.href}
               href={l.href}
-              className={cn("text-[13.5px] text-muted transition-colors duration-200 hover:text-ink", l.cls)}
+              className={cn(
+                "text-[13.5px] text-muted transition-colors duration-200 hover:text-ink",
+                l.cls,
+              )}
             >
               {l.label}
             </a>
@@ -70,6 +85,19 @@ export function LandingNav() {
           </Link>
         </div>
       </nav>
+
+      {/* Restrained scroll-progress hairline */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none h-[1.5px] w-full overflow-hidden bg-transparent"
+      >
+        <div
+          className="h-full origin-left bg-gold transition-transform duration-75 ease-out"
+          style={{
+            transform: `scaleX(${scrolled ? progress : 0})`,
+          }}
+        />
+      </div>
     </header>
   );
 }

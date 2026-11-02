@@ -1,8 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
-import { bindScrollProgress, clamp, prefersReducedMotion } from "./motion-utils";
+import { useEffect, useRef } from "react";
+import {
+  bindScrollProgress,
+  lerp,
+  prefersReducedMotion,
+  rangeProgress,
+  smooth,
+} from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 const POINTS = [
@@ -20,42 +26,27 @@ const POINTS = [
   },
 ] as const;
 
-interface DialogueThread {
-  id: string;
-  label: string;
-  q1: string;
-  a1: string;
-  q2: string;
-  a2: string;
-}
-
-const THREADS: DialogueThread[] = [
-  {
-    id: "fridays",
-    label: "Friday givebacks",
-    q1: "Why do I keep giving back my Friday gains?",
-    a1: "You tend to take a second trade right after a green one, and your notes in those trades mention feeling “ahead”. A simple rule may help: on Fridays, stop after the first winner.",
-    q2: "Okay. What should I practise?",
-    a2: "Your last two mistakes were moving the stop early. A short Time Machine drill on that is a good next step.",
-  },
-  {
-    id: "stops",
-    label: "Early stop moves",
-    q1: "When do I usually choke a winning trade?",
-    a1: "Across your last 18 entries, 5 early exits happened between 09:45 and 10:05 NY when you watched unrealized P&L instead of the 5-minute candle close.",
-    q2: "How do I lock that habit out?",
-    a2: "Enable your pre-session guardrail banner for the first 30 minutes and hide dollar P&L during active execution.",
-  },
-];
-
-function Bubble({ me, children }: { me?: boolean; children: React.ReactNode }) {
+function Bubble({
+  me,
+  children,
+  bubbleRef,
+}: {
+  me?: boolean;
+  children: React.ReactNode;
+  bubbleRef?: (el: HTMLDivElement | null) => void;
+}) {
   return (
-    <div className={me ? "flex justify-end" : "flex justify-start"}>
+    <div
+      ref={bubbleRef}
+      className={`transition-transform duration-150 will-change-transform ${
+        me ? "flex justify-end" : "flex justify-start"
+      }`}
+    >
       <p
-        className={`max-w-[86%] rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.48] ${
+        className={`max-w-[86%] rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.45] ${
           me
-            ? "rounded-br-[6px] bg-[#cba76b] font-medium text-[#231a09]"
-            : "rounded-bl-[6px] border border-white/12 bg-white/[0.07] text-[#f7f4ee]"
+            ? "rounded-br-[6px] bg-ink text-canvas"
+            : "rounded-bl-[6px] bg-ink/[0.06] text-ink"
         }`}
       >
         {children}
@@ -65,117 +56,124 @@ function Bubble({ me, children }: { me?: boolean; children: React.ReactNode }) {
 }
 
 /**
- * ACT 05: MINATO — Camera arrives at a 3D glass panel where a Minato conversation types in live.
+ * SCENE 04B — MINATO (#minato)
+ * Uses 100% original Edgebook tokens (bg-surface, bg-ink, text-canvas, text-ink).
+ * As you scroll forward/backward, the 4 conversation bubbles and 3 editorial points
+ * progressively reveal in lockstep with scroll position.
  */
 export function MinatoDemo() {
   const secRef = useRef<HTMLElement>(null);
-  const [threadIdx, setThreadIdx] = useState(0);
-  const [typeProg, setTypeProg] = useState(1);
-
-  const activeThread = THREADS[threadIdx] ?? THREADS[0]!;
+  const panelRef = useRef<HTMLDivElement>(null);
+  const bubbleRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const pointRefs = useRef<(HTMLLIElement | null)[]>([]);
 
   useEffect(() => {
-    if (prefersReducedMotion()) {
-      setTypeProg(1);
-      return;
-    }
+    if (prefersReducedMotion()) return;
 
     return bindScrollProgress(
       secRef.current,
       (p) => {
-        // As the camera arrives at the glass panel, type the conversation in from 0 -> 1
-        const t = clamp((p - 0.08) / 0.58, 0.15, 1);
-        setTypeProg((prev) => (Math.abs(prev - t) < 0.01 ? prev : t));
+        if (panelRef.current) {
+          const panelProg = smooth(rangeProgress(p, 0.0, 0.45));
+          const y = lerp(28, 0, panelProg);
+          const scale = lerp(0.95, 1, panelProg);
+          panelRef.current.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(4)})`;
+        }
+
+        bubbleRefs.current.forEach((b, idx) => {
+          if (!b) return;
+          const start = 0.08 + idx * 0.16;
+          const bProg = smooth(rangeProgress(p, start, start + 0.24));
+          b.style.opacity = String(lerp(0.18, 1, bProg));
+          b.style.transform = `translate3d(0, ${lerp(14, 0, bProg).toFixed(1)}px, 0)`;
+        });
+
+        pointRefs.current.forEach((pt, idx) => {
+          if (!pt) return;
+          const start = 0.12 + idx * 0.18;
+          const ptProg = smooth(rangeProgress(p, start, start + 0.26));
+          pt.style.opacity = String(lerp(0.25, 1, ptProg));
+          pt.style.transform = `translate3d(${lerp(16, 0, ptProg).toFixed(1)}px, 0, 0)`;
+        });
       },
       { startRatio: 0.88, endRatio: 0.2 },
     );
   }, []);
 
-  const switchThread = (idx: number) => {
-    setThreadIdx(idx);
-    setTypeProg(1);
-  };
-
-  // Slice replies progressively based on typeProg
-  const a1Len = Math.ceil(activeThread.a1.length * clamp((typeProg - 0.12) / 0.42, 0, 1));
-  const showQ2 = typeProg > 0.56;
-  const a2Len = Math.ceil(activeThread.a2.length * clamp((typeProg - 0.62) / 0.36, 0, 1));
-
   return (
     <section
       id="minato"
       ref={secRef}
-      className="relative z-10 px-5 py-24 sm:px-8 sm:py-36"
+      className="px-5 py-24 sm:px-8 sm:py-36"
       aria-labelledby="minato-title"
     >
       <div className="mx-auto grid max-w-[1200px] items-center gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:gap-24">
-        {/* Left: Translucent 3D Glass Monolith Conversation Panel */}
         <div className="order-2 lg:order-1">
           <div
-            className="lp-theatre-panel lp-sq mx-auto w-full max-w-[480px] overflow-hidden rounded-[28px]"
-            role="region"
-            aria-label="Live conversation with Minato about a trading habit"
+            ref={panelRef}
+            className="lp-sq mx-auto w-full max-w-[460px] overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface shadow-[0_50px_110px_-50px_rgba(0,0,0,0.55)] will-change-transform"
+            role="img"
+            aria-label="Sample conversation with Minato about a trading habit"
           >
-            <div className="flex items-center gap-3 border-b border-white/12 px-4 py-3.5">
+            <div className="flex items-center gap-3 border-b border-line px-4 py-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/minato-avatar.jpg"
                 alt=""
                 width={36}
                 height={36}
-                className="h-9 w-9 rounded-full border border-[#cba76b]/40 object-cover"
+                className="h-9 w-9 rounded-full object-cover"
               />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-[#f7f4ee]">
+                <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">
                   Minato
                 </p>
-                <p className="flex items-center gap-1.5 text-[12px] text-[#d6cebd]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#74b08c]" />
-                  <span>Your trading companion · Live on Glass</span>
+                <p className="flex items-center gap-1.5 text-[12px] text-muted">
+                  <span className="h-1.5 w-1.5 rounded-full bg-profit" />
+                  Your trading companion
                 </p>
               </div>
-              <div className="flex gap-1">
-                {THREADS.map((th, idx) => (
-                  <button
-                    key={th.id}
-                    type="button"
-                    onClick={() => switchThread(idx)}
-                    className={`rounded-full px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] transition ${
-                      threadIdx === idx
-                        ? "bg-[#cba76b] text-[#231a09] font-semibold"
-                        : "bg-white/[0.06] text-[#a69d8c] hover:text-white"
-                    }`}
-                  >
-                    {th.label}
-                  </button>
-                ))}
-              </div>
+              <span className="rounded-full bg-ink/[0.06] px-2.5 py-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-faint">
+                Sample
+              </span>
             </div>
 
-            <div className="min-h-[268px] space-y-3 px-4 py-5">
-              <Bubble me>{activeThread.q1}</Bubble>
-              <Bubble>
-                {activeThread.a1.slice(0, Math.max(18, a1Len))}
-                {a1Len < activeThread.a1.length && (
-                  <span className="ml-1 inline-block h-3.5 w-1.5 animate-pulse bg-[#cba76b] align-middle" />
-                )}
+            <div className="space-y-2.5 px-4 py-5">
+              <Bubble
+                me
+                bubbleRef={(el) => {
+                  bubbleRefs.current[0] = el;
+                }}
+              >
+                Why do I keep giving back my Friday gains?
               </Bubble>
-              {showQ2 && <Bubble me>{activeThread.q2}</Bubble>}
-              {showQ2 && (
-                <Bubble>
-                  {activeThread.a2.slice(0, Math.max(12, a2Len))}
-                  {a2Len < activeThread.a2.length && (
-                    <span className="ml-1 inline-block h-3.5 w-1.5 animate-pulse bg-[#cba76b] align-middle" />
-                  )}
-                </Bubble>
-              )}
+              <Bubble
+                bubbleRef={(el) => {
+                  bubbleRefs.current[1] = el;
+                }}
+              >
+                You tend to take a second trade right after a green one, and your notes in those trades mention feeling &ldquo;ahead&rdquo;. A simple rule may help: on Fridays, stop after the first winner.
+              </Bubble>
+              <Bubble
+                me
+                bubbleRef={(el) => {
+                  bubbleRefs.current[2] = el;
+                }}
+              >
+                Okay. What should I practise?
+              </Bubble>
+              <Bubble
+                bubbleRef={(el) => {
+                  bubbleRefs.current[3] = el;
+                }}
+              >
+                Your last two mistakes were moving the stop early. A short Time Machine drill on that is a good next step.
+              </Bubble>
             </div>
 
             <div className="px-3 pb-3">
-              <div className="flex items-center gap-2 rounded-[22px] border border-white/10 bg-black/35 py-1.5 pl-4 pr-1.5">
-                <span className="flex-1 text-[14.5px] text-[#a69d8c]">
-                  Ask Minato about your journal…
-                </span>
+              <div className="flex items-center gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
+                <span className="flex-1 text-[15px] text-faint">Ask Minato…</span>
                 <span
                   className="grid h-8 w-8 place-items-center rounded-full bg-gold-strong text-on-gold"
                   aria-hidden="true"
@@ -197,28 +195,33 @@ export function MinatoDemo() {
           </div>
         </div>
 
-        {/* Right: Editorial Copy */}
         <div className="order-1 lg:order-2">
-          <div data-theatre-reveal>
-            <Eyebrow n="05">Minato · Contextual Companion</Eyebrow>
+          <div data-scrub-reveal>
+            <Eyebrow n="05">Minato · Contextual Reflection</Eyebrow>
             <h2
               id="minato-title"
-              className="mt-6 font-display text-[clamp(2.3rem,5.4vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-[#f7f4ee]"
+              className="mt-6 font-display text-[clamp(2.3rem,5.4vw,4.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink"
             >
               Ask the one who has{" "}
-              <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-[#cba76b]">
+              <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
                 read every entry.
               </span>
             </h2>
           </div>
 
-          <ul className="mt-10 divide-y divide-white/12 border-y border-white/12">
-            {POINTS.map((p) => (
-              <li key={p.t} className="py-5">
-                <p className="font-display text-[clamp(1.2rem,2vw,1.5rem)] font-semibold tracking-[-0.025em] text-[#f7f4ee]">
+          <ul className="mt-10 divide-y divide-line border-y border-line">
+            {POINTS.map((p, i) => (
+              <li
+                key={p.t}
+                ref={(el) => {
+                  pointRefs.current[i] = el;
+                }}
+                className="py-5 transition-opacity duration-150 will-change-transform"
+              >
+                <p className="font-display text-[clamp(1.2rem,2vw,1.5rem)] font-semibold tracking-[-0.025em] text-ink">
                   {p.t}
                 </p>
-                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-[#d6cebd]">
+                <p className="mt-1.5 max-w-md text-[15.5px] leading-relaxed text-muted">
                   {p.d}
                 </p>
               </li>
@@ -227,7 +230,7 @@ export function MinatoDemo() {
 
           <Link
             href="/login?mode=signup"
-            className="group mt-8 inline-flex items-center gap-1.5 text-[17px] text-[#cba76b] transition-colors hover:text-white"
+            className="group mt-8 inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink"
           >
             Meet Minato
             <svg

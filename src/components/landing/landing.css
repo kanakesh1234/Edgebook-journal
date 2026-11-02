@@ -1,37 +1,18 @@
 /* ============================================================
-   Landing — Cinematic 3D Theatre on top of Edgebook tokens.
-   Only layout/animation plumbing lives here; colour, type and
-   radii come from the shared theme variables in globals.css.
+   Landing — Apple-style cinematic scrollytelling system built
+   strictly on top of the original Edgebook tokens in globals.css.
+   Zero colour or font overrides; 100% native Light & Dark theme parity.
 =========================================================== */
 
 .lp-root {
   --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Frosted bar (nav) */
+/* Frosted bar (nav) — uses original --canvas token */
 .lp-glass {
   background: color-mix(in srgb, var(--canvas) 78%, transparent);
   -webkit-backdrop-filter: saturate(180%) blur(24px);
   backdrop-filter: saturate(180%) blur(24px);
-}
-
-/* Dark theatre glass panel (used over the 3D WebGL study/corridor) */
-.lp-theatre-panel {
-  background: rgba(22, 18, 13, 0.76);
-  border: 1px solid rgba(203, 167, 107, 0.24);
-  box-shadow:
-    0 36px 90px -32px rgba(0, 0, 0, 0.72),
-    inset 0 1px 0 rgba(255, 248, 232, 0.06);
-  -webkit-backdrop-filter: saturate(160%) blur(20px);
-  backdrop-filter: saturate(160%) blur(20px);
-  color: #f0eae0;
-}
-
-/* Depth-of-field edge blur & cinematic vignette over the 3D canvas */
-.lp-theatre-vignette {
-  background:
-    radial-gradient(circle at 50% 44%, transparent 38%, rgba(12, 10, 7, 0.68) 100%),
-    linear-gradient(180deg, rgba(12, 10, 7, 0.55) 0%, transparent 22%, transparent 78%, rgba(12, 10, 7, 0.72) 100%);
 }
 
 /* Continuous (squircle) corners where the browser supports them */
@@ -39,23 +20,21 @@
   corner-shape: squircle;
 }
 
-/* Mask / clip-path text reveal & orchestrated page-load moment */
+/* Initial entrance choreography */
 @keyframes lp-rise {
   from {
     opacity: 0;
     transform: translate3d(0, 24px, 0);
-    clip-path: inset(0% 0% 100% 0%);
   }
   to {
     opacity: 1;
     transform: none;
-    clip-path: inset(0% 0% 0% 0%);
   }
 }
 @keyframes lp-win-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 44px, 0) scale(0.975);
+    transform: translate3d(0, 48px, 0) scale(0.975);
   }
   to {
     opacity: 1;
@@ -63,44 +42,73 @@
   }
 }
 .lp-rise {
-  animation: lp-rise 1s var(--lp-ease) both;
+  animation: lp-rise 0.95s var(--lp-ease) both;
   animation-delay: var(--d, 0s);
 }
 .lp-win-in {
   animation: lp-win-in 1.2s var(--lp-ease) 0.28s both;
 }
 
-/* ---------------- Pinned scroll sections ---------------- */
+/* ---------------- Pinned Scroll Scenes ---------------- */
+/* Scene 01: Entrance (Camera push into the Atelier Ledger) */
+.lp-entrance-pin {
+  height: 195svh;
+}
+@media (max-width: 1023px) {
+  .lp-entrance-pin {
+    height: 155svh;
+  }
+}
+
+/* Scene 02: The Inner Film (Full-Screen Theatre Sequence) */
 .lp-pinned {
-  --lp-track: 440svh;
+  --lp-track: 460svh;
   height: var(--lp-track);
 }
 @media (max-width: 1023px) {
   .lp-pinned {
-    --lp-track: 360svh;
+    --lp-track: 380svh;
   }
 }
 .lp-static {
   display: none;
 }
 
-/* ---------------- Subtle 35mm Film Grain ---------------- */
+/* Scene 03: The Decision (5-Stage Scroll-Scrubbed Daily Ritual) */
+.lp-ritual-pin {
+  height: 330svh;
+}
+@media (max-width: 1023px) {
+  .lp-ritual-pin {
+    height: 260svh;
+  }
+}
+
+/* Scene 04A: The Gap (Scroll-Scrubbed Autopsy Unfolding) */
+.lp-gap-pin {
+  height: 215svh;
+}
+@media (max-width: 1023px) {
+  .lp-gap-pin {
+    height: auto;
+  }
+}
+
+/* ---------------- Theatre Mode (Scene 02 Immersion) ---------------- */
+/* Minimises top nav distractions while inside the full-screen film theatre,
+   restoring immediately on hover or keyboard focus. */
+html[data-theatre-mode="true"] .lp-nav-header:not(:hover):not(:focus-within) {
+  opacity: 0.18;
+  transform: translate3d(0, -35%, 0);
+}
+
+/* Subtle 35mm film grain used only inside the Theatre viewport */
 .lp-film-grain {
-  background-image:
-    radial-gradient(rgba(255, 248, 232, 0.13) 0.75px, transparent 0.75px),
-    radial-gradient(rgba(203, 167, 107, 0.09) 0.75px, transparent 0.75px);
-  background-size: 4px 4px, 7px 7px;
-  background-position: 0 0, 2px 3px;
+  background-image: radial-gradient(rgba(255, 248, 232, 0.12) 0.75px, transparent 0.75px);
+  background-size: 4px 4px;
 }
 
-/* ---------------- Calm Cream Section Backdrop ---------------- */
-.lp-cream-backdrop {
-  background: color-mix(in srgb, var(--canvas) 94%, transparent);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-}
-
-/* ---------------- Toolkit (horizontal) ---------------- */
+/* ---------------- Scene 05B: Toolkit (Horizontal Scroll-Scrub) ---------------- */
 @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
   .lp-toolkit-stage {
     position: sticky;
@@ -161,12 +169,17 @@
   .lp-static {
     display: block;
   }
-  .lp-hero-pinned {
+  .lp-entrance-pin,
+  .lp-ritual-pin,
+  .lp-gap-pin {
     height: auto !important;
   }
   .lp-rise,
   .lp-win-in {
     animation: none;
-    clip-path: none;
+  }
+  html[data-theatre-mode="true"] .lp-nav-header {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
