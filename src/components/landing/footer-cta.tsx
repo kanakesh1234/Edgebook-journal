@@ -6,77 +6,25 @@ import { Wordmark } from "./logo";
 
 export function FinalCta() {
   return (
-    <section className="relative px-4 pb-20 pt-12 sm:px-8 sm:pb-28 sm:pt-20" aria-label="Get started">
-      <div className="lp-sq relative mx-auto max-w-[1280px] overflow-hidden rounded-[36px] border border-line-strong/80 bg-[#14110d] px-6 py-24 text-center text-[#f7f4ee] shadow-[0_54px_120px_-38px_rgba(0,0,0,0.68)] sm:px-12 sm:py-32">
-        {/* Golden-Hour Cinema Video & 4K Landscape Backdrop */}
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-70"
-          style={{ backgroundImage: "url(/landing/act-5-quiet-edge.jpg)" }}
-          aria-hidden
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2200&q=85"
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={(e) => {
-            e.currentTarget.style.display = "none";
-          }}
-          className="absolute inset-0 h-full w-full object-cover opacity-55"
-          style={{ filter: "sepia(0.24) contrast(1.06) brightness(0.82)" }}
-        />
-        <video
-          src="https://assets.mixkit.co/videos/preview/mixkit-sunrise-over-a-calm-lake-and-mountains-41572-large.mp4"
-          poster="/landing/act-5-quiet-edge.jpg"
-          muted
-          loop
-          autoPlay
-          playsInline
-          preload="metadata"
-          className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-45 mix-blend-screen"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(640px 380px at 50% 35%, rgba(18,14,10,0.45), rgba(14,11,8,0.88) 80%)",
-          }}
-        />
-
-        <div className="relative z-10 mx-auto max-w-4xl">
-          <p className="font-mono text-[11.5px] uppercase tracking-[0.16em] text-[#dfbe82]">
-            Begin Your Ledger · 100% Owned in Your Google Drive
-          </p>
-          <h2 className="mt-5 font-display text-[clamp(2.4rem,6.8vw,5.4rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-[#f7f4ee]">
-            Your edge deserves{" "}
-            <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-[#dfbe82]">
-              a&nbsp;ledger.
-            </span>
-          </h2>
-          <p className="mx-auto mt-5 max-w-xl font-serif text-[clamp(1.2rem,2vw,1.6rem)] italic text-[#e8dec9]">
-            &ldquo;Your edge was never in the market. It was in the person you became.&rdquo;
-          </p>
-          <p className="mx-auto mt-4 max-w-xl text-[clamp(1rem,1.45vw,1.18rem)] leading-relaxed text-[#d6cebd]">
-            Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
-          </p>
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
-            <Link
-              href="/login?mode=signup"
-              className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
-            >
-              Create your journal
-            </Link>
-            <Link
-              href="/login"
-              className="group inline-flex items-center gap-1 text-[17px] text-[#dfbe82] transition-colors hover:text-white"
-            >
-              Log in
-              <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-            </Link>
-          </div>
-        </div>
+    <section className="relative px-5 pb-20 pt-20 text-center sm:px-8 sm:pb-28 sm:pt-28" aria-label="Get started">
+      <h2 className="mx-auto max-w-4xl font-display text-[clamp(2.4rem,7vw,5.6rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink">
+        Your edge deserves{" "}
+        <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">a&nbsp;ledger.</span>
+      </h2>
+      <p className="mx-auto mt-6 max-w-xl text-[clamp(1.05rem,1.6vw,1.3rem)] leading-snug text-muted">
+        Start with today&apos;s session. Sign in with Google, or keep it on this device. Export everything whenever you like.
+      </p>
+      <div className="mt-10 flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
+        <Link
+          href="/login?mode=signup"
+          className="inline-flex h-12 items-center rounded-full bg-gold-strong px-8 text-[17px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
+        >
+          Create your journal
+        </Link>
+        <Link href="/login" className="group inline-flex items-center gap-1 text-[17px] text-gold transition-colors hover:text-ink">
+          Log in
+          <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </Link>
       </div>
     </section>
   );
@@ -84,7 +32,7 @@ export function FinalCta() {
 
 const CONTACT_EMAIL = "kanakesh939264@gmail.com";
 
-/** Plain, in-flow footer: contact, links and a one-line disclaimer. */
+/** Plain, in-flow footer: contact, links and a one-line disclaimer. No fixed layers, no extra scroll. */
 export function SiteFooter() {
   return (
     <footer id="contact" className="border-t border-line bg-canvas px-5 py-14 sm:px-8 sm:py-16">
