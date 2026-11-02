@@ -15,7 +15,7 @@ delete process.env.VERCEL;
 delete process.env.MINATO_MODEL;
 delete process.env.MINATO_FALLBACK_MODEL;
 
-const { POST } = await import("../../src/app/api/minato/chat/route.ts");
+const { POST, GET } = await import("../../src/app/api/minato/chat/route.ts");
 const { computeDataRev, slimEntry, _clearSnapshotCache } = await import("../../src/lib/minato/agent/data-source.ts");
 const { _resetGuards } = await import("../../src/lib/minato/agent/guards.ts");
 const { streamMinato } = await import("../../src/lib/minato/agent/client.ts");
@@ -582,6 +582,45 @@ const toolMsgs = (r: Req) => r.messages.filter((m) => m.role === "tool").map((m)
   const prompt = buildSystemPrompt({ trader: "N" });
   ok(/Never reveal tools/.test(prompt) && /ONLY with `calculate`/.test(prompt) && /live data wins/.test(prompt), "prompt carries the grounding, secrecy and freshness rules");
   ok(!/\bgood morning\b.*->/i.test(prompt), "no canned replies in the prompt");
+}
+
+/* ================================================================== */
+/* 17 — Diagnosable failures + probe endpoint                           */
+/* ================================================================== */
+{
+  // Every model returns 404 "no such model": the trader gets a specific message and the log gets the provider's reason.
+  const warns: string[] = [];
+  const w = console.warn; console.warn = (...a: unknown[]) => { warns.push(a.join(" ")); };
+  globalThis.fetch = (async (_u: unknown, init: RequestInit) => {
+    const req = JSON.parse(String(init.body));
+    if (req.messages[0]?.content?.startsWith("You maintain")) return new Response("{}", { status: 500 });
+    return new Response(JSON.stringify({ error: { message: "No endpoints found for test/m1", code: 404 } }), { status: 404 });
+  }) as typeof fetch;
+  const r = await ask("hello", J(base()));
+  console.warn = w;
+  const err = r.events.find((e) => e.t === "error")!;
+  eq(err.code, "bad_request", "404 from every model is reported as a rejected request");
+  ok(/rejected the request/.test(err.message!) && /model may be unavailable/.test(err.message!), "message points at the model, not a vague failure");
+  ok(String((err as any).diag).includes("No endpoints found"), "diagnostic carries the provider's own reason");
+  ok(warns.some((x) => x.includes("No endpoints found")), "the server log carries the same reason");
+  ok(!JSON.stringify(r.events).includes("sk-or-test"), "no secret in diagnostics");
+
+  // A model that streams only empty content is reported as empty, not as success.
+  mockModel(() => ({ text: [""] }));
+  const e2 = await ask("hello", J(base()));
+  eq(e2.events.find((e) => e.t === "error")!.code, "empty", "empty replies are surfaced");
+
+  // Probe endpoint reports per-model status without exposing the key.
+  globalThis.fetch = (async (_u: unknown, init: RequestInit) => {
+    const m = JSON.parse(String(init.body)).model;
+    return m === "test/m1" ? new Response(JSON.stringify({ error: { message: "model retired" } }), { status: 404 }) : new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+  }) as typeof fetch;
+  const pr = await GET(new Request("http://localhost/api/minato/chat?probe=1", { headers: { "x-forwarded-for": "10.2.2.2" } }));
+  const body = await pr.text();
+  ok(!body.includes("sk-or-test-SECRET-999"), "probe never returns the key");
+  const pj = JSON.parse(body);
+  eq(pj.probe.map((p: any) => [p.model, p.ok]), [["test/m1", false], ["test/m2", true]], "probe shows which configured model actually works");
+  ok(pj.probe[0].error.includes("model retired"), "probe shows the provider's error text");
 }
 
 globalThis.fetch = realFetch;

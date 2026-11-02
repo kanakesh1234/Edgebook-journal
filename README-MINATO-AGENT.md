@@ -120,3 +120,9 @@ Left in place but no longer on the request path (safe to delete later): `lane.ts
 * The numeric verifier checks $, % and R figures only, and adds a note rather than rewriting text that has already streamed.
 * Reflection/checkpoint memory writes are best-effort and invisible; if Supabase is down MINATO still answers and does not claim to have remembered anything.
 * Screenshot (chart) analysis is out of scope here and unchanged.
+
+## Troubleshooting: "My reasoning engine …" messages
+MINATO now shows a specific message and logs the provider's own reason (Vercel → Logs, search `[minato:agent]`; also in the browser console as `[minato] engine error`).
+* Signed in, open `/api/minato/chat?probe=1` in the browser: it lists each configured model with its HTTP status and error text (the key is never shown).
+* `rejected the request` / 404 → the model slug is retired or unavailable. Set `MINATO_MODELS` to a live tool-calling model.
+* `rate-limited` → free models; use a paid model. `out of credits` → top up OpenRouter. `rejected the server's credentials` → check `OPENROUTER_API_KEY`.

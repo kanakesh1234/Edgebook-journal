@@ -147,8 +147,9 @@ async function handle(request: Request) {
           });
 
           if (!result.ok) {
-            console.warn(`[minato:agent] failed (${result.failure}) rounds=${result.rounds} tools=${result.toolRuns.map((t) => t.name).join(",") || "-"} ${summarizeAttempts(result.attempts)}`);
-            send({ t: "error", code: result.failure ?? "empty", message: failureMessage(result.failure ?? "empty") });
+            const diag = `${summarizeAttempts(result.attempts)}${result.detail ? ` | ${result.detail}` : ""}`;
+            console.warn(`[minato:agent] failed (${result.failure}) rounds=${result.rounds} tools=${result.toolRuns.map((t) => t.name).join(",") || "-"} ${diag}`);
+            send({ t: "error", code: result.failure ?? "empty", message: failureMessage(result.failure ?? "empty"), diag });
             return;
           }
 
@@ -193,6 +194,46 @@ async function handle(request: Request) {
     slot.release();
     throw e;
   }
+}
+
+/**
+ * GET /api/minato/chat?probe=1 — signed-in health check. Reports which models are configured and whether each
+ * one actually answers (a 1-token call), with the provider's own error text. Never returns the key.
+ */
+export async function GET(request: Request) {
+  const session = sessionOf(request);
+  if (requiresAuth() && !session) return json({ error: "not_logged_in" }, 401);
+  const config = getAgentLlmConfig();
+  if (!config) return json({ keyConfigured: false, hint: "Set OPENROUTER_API_KEY on the server." }, 200);
+  const url = new URL(request.url);
+  const out: Record<string, unknown> = { keyConfigured: true, models: config.models, endpoint: config.endpoint };
+  if (url.searchParams.get("probe")) {
+    out.probe = await Promise.all(
+      config.models.slice(0, 5).map(async (model) => {
+        const t0 = Date.now();
+        try {
+          const res = await fetch(config.endpoint, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ model, max_tokens: 16, messages: [{ role: "user", content: "Reply with the word ok." }] }),
+            signal: AbortSignal.timeout(20_000),
+          });
+          const text = await res.text();
+          let reply = "";
+          let err = "";
+          try {
+            const j = JSON.parse(text) as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
+            reply = j.choices?.[0]?.message?.content ?? "";
+            err = j.error?.message ?? "";
+          } catch { err = text.slice(0, 160); }
+          return { model, status: res.status, ok: res.ok && !err, ms: Date.now() - t0, replied: !!reply.trim(), error: err.slice(0, 200) || undefined };
+        } catch (e) {
+          return { model, ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.name : "failed" };
+        }
+      }),
+    );
+  }
+  return json(out, 200);
 }
 
 function ndjsonHeaders(): HeadersInit {

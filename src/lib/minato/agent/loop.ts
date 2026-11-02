@@ -53,6 +53,7 @@ export interface AgentResult {
   attempts: Attempt[];
   textMode: boolean;
   forced: boolean;
+  detail?: string;
 }
 
 const canon = (name: string, args: unknown) => `${name}:${JSON.stringify(args, Object.keys((args as object) ?? {}).sort())}`;
@@ -157,7 +158,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
         rounds--;
         continue;
       }
-      return { ok: false, text: "", failure: res.failure, model, rounds, toolRuns, attempts, textMode, forced };
+      return { ok: false, text: "", failure: res.failure, model, rounds, toolRuns, attempts, textMode, forced, detail: res.detail };
     }
     model = res.model;
     const tail = cleaner.flush();

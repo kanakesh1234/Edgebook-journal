@@ -56,20 +56,21 @@ async function once(args: StreamArgs, body: Record<string, unknown>): Promise<St
   let pending = "";
   let text = "";
   let done: StreamDone | null = null;
-  let err: { code: string; message: string } | null = null;
+  let err: { code: string; message: string; diag?: string } | null = null;
   let need = false;
 
   const handle = (line: string) => {
     if (!line) return;
-    let e: { t?: string; x?: string; text?: string; actions?: unknown[]; meta?: Record<string, unknown>; code?: string; message?: string };
+    let e: { t?: string; x?: string; text?: string; actions?: unknown[]; meta?: Record<string, unknown>; code?: string; message?: string; diag?: string };
     try { e = JSON.parse(line); } catch { return; }
     switch (e.t) {
       case "delta": if (typeof e.x === "string") { text += e.x; args.onText(text); } break;
       case "reset": text = ""; args.onText(""); break;
       case "need_data": need = true; break;
       case "done": done = { text: String(e.text ?? text), actions: Array.isArray(e.actions) ? e.actions : [], meta: e.meta ?? {} }; break;
-      case "error": err = { code: e.code ?? "error", message: e.message ?? "Something went wrong. Please try again." }; break;
+      case "error": err = { code: e.code ?? "error", message: e.message ?? "Something went wrong. Please try again.", diag: e.diag }; break;
     }
+    if (e.t === "error" && e.diag && typeof console !== "undefined") console.warn("[minato] engine error:", e.code, e.diag);
   };
 
   try {
@@ -86,7 +87,7 @@ async function once(args: StreamArgs, body: Record<string, unknown>): Promise<St
   }
   if (need) return { needData: true };
   if (done) { const d = done as StreamDone; if (d.text !== text) args.onText(d.text); return { ok: true, ...d }; }
-  const e = err as { code: string; message: string } | null;
+  const e = err as { code: string; message: string; diag?: string } | null;
   return { ok: false, code: e?.code ?? "incomplete", message: e?.message ?? "The answer was cut off. Please ask again.", partial: text };
 }
 

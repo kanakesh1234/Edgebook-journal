@@ -63,7 +63,7 @@ export interface CompletionOptions {
 
 export type CompletionResult =
   | { ok: true; content: string; toolCalls: ToolCallOut[]; finish: string | null; model: string; attempts: Attempt[] }
-  | { ok: false; failure: CompletionFailure; attempts: Attempt[]; toolsRejected?: boolean };
+  | { ok: false; failure: CompletionFailure; attempts: Attempt[]; toolsRejected?: boolean; detail?: string };
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const MIN_REMAINING_MS = 1_500;
@@ -103,6 +103,22 @@ interface AttemptOutcome {
   toolCalls: ToolCallOut[];
   finish: string | null;
   emitted: number;
+  /** Short, non-secret description of what the provider said (error body snippet). */
+  detail?: string;
+}
+
+function snippetOf(v: unknown): string {
+  try {
+    const o = v as { message?: unknown; code?: unknown; error?: { message?: unknown } };
+    const m = typeof o?.message === "string" ? o.message : typeof o?.error?.message === "string" ? o.error.message : JSON.stringify(v);
+    return String(m).replace(/\s+/g, " ").replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-…").slice(0, 200);
+  } catch { return ""; }
+}
+async function errorSnippet(res: Response): Promise<string> {
+  try {
+    const t = await res.text();
+    try { return snippetOf((JSON.parse(t) as { error?: unknown }).error ?? JSON.parse(t)); } catch { return t.replace(/\s+/g, " ").slice(0, 200); }
+  } catch { return ""; }
 }
 
 function bodyErrorKind(err: unknown): FailureKind {
@@ -141,19 +157,23 @@ async function oneAttempt(o: CompletionOptions, model: string, useReasoning: boo
         stream: streaming,
         ...(useReasoning && o.config.reasoningEffort ? { reasoning: { effort: o.config.reasoningEffort } } : {}),
         ...(useTools && o.tools?.length
-          ? { tools: o.tools, tool_choice: o.toolChoice ?? "auto", provider: { require_parameters: true } }
+          ? { tools: o.tools, tool_choice: o.toolChoice ?? "auto" }
           : {}),
         messages: o.messages,
       }),
       signal: ctl.signal,
     });
     out.status = res.status;
-    if (!res.ok) { out.kind = classifyStatus(res.status); return out; }
+    if (!res.ok) {
+      out.kind = classifyStatus(res.status);
+      out.detail = await errorSnippet(res);
+      return out;
+    }
 
     if (!streaming || !res.body) {
       let json: { choices?: { message?: { content?: unknown; tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[] }; finish_reason?: string }[]; error?: unknown } | null = null;
       try { json = await res.json(); } catch { out.kind = "bad_response"; return out; }
-      if (json?.error) { out.kind = bodyErrorKind(json.error); return out; }
+      if (json?.error) { out.kind = bodyErrorKind(json.error); out.detail = snippetOf(json.error); return out; }
       const choice = json?.choices?.[0];
       const msg = choice?.message;
       out.content = typeof msg?.content === "string" ? msg.content : "";
@@ -181,7 +201,7 @@ async function oneAttempt(o: CompletionOptions, model: string, useReasoning: boo
         choices?: { delta?: { content?: unknown; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }; finish_reason?: string | null }[];
       };
       try { evt = JSON.parse(payload); } catch { return; }
-      if (evt.error) { out.kind = bodyErrorKind(evt.error); done = true; return; }
+      if (evt.error) { out.kind = bodyErrorKind(evt.error); out.detail = snippetOf(evt.error); done = true; return; }
       const ch = evt.choices?.[0];
       if (!ch) return;
       const d = ch.delta;
@@ -248,6 +268,7 @@ export async function complete(o: CompletionOptions): Promise<CompletionResult> 
   const models = [...new Set([...(preferred ? [preferred] : []), ...o.config.models])].slice(0, 5);
   let lastFailure: CompletionFailure = "empty";
   let toolsRejected = false;
+  let lastDetail: string | undefined;
   // Tools stay declared even with tool_choice "none": providers require them while the history contains tool calls.
   const wantTools = !!(o.tools && o.tools.length > 0);
 
@@ -258,7 +279,7 @@ export async function complete(o: CompletionOptions): Promise<CompletionResult> 
 
     for (let tries = 0; tries < 4; tries++) {
       const remaining = o.deadline - now();
-      if (remaining < MIN_REMAINING_MS) return { ok: false, failure: lastFailure === "empty" ? "timeout" : lastFailure, attempts, ...(toolsRejected ? { toolsRejected } : {}) };
+      if (remaining < MIN_REMAINING_MS) return { ok: false, failure: lastFailure === "empty" ? "timeout" : lastFailure, attempts, detail: lastDetail, ...(toolsRejected ? { toolsRejected } : {}) };
       if (o.signal?.aborted) return { ok: false, failure: "aborted", attempts };
 
       const started = now();
@@ -271,6 +292,7 @@ export async function complete(o: CompletionOptions): Promise<CompletionResult> 
       }
       attempts.push({ model, outcome: r.kind === "aborted" ? "network" : r.kind, status: r.status, ms });
       lastFailure = r.kind;
+      if (r.detail) lastDetail = `${model}: ${r.status ?? ""} ${r.detail}`.trim();
       if (r.emitted > 0) o.onReset?.();
 
       if (r.kind === "aborted") return { ok: false, failure: "aborted", attempts };
@@ -289,7 +311,7 @@ export async function complete(o: CompletionOptions): Promise<CompletionResult> 
       break; // next model
     }
   }
-  return { ok: false, failure: lastFailure, attempts, ...(toolsRejected ? { toolsRejected } : {}) };
+  return { ok: false, failure: lastFailure, attempts, detail: lastDetail, ...(toolsRejected ? { toolsRejected } : {}) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -310,6 +332,7 @@ export function failureMessage(f: CompletionFailure): string {
     case "network": return "I couldn't reach my reasoning engine.";
     case "server": return "My reasoning engine hit a server error.";
     case "aborted": return "The request was cancelled.";
-    default: return "My reasoning engine didn't return a usable answer.";
+    case "bad_request": return "My reasoning engine rejected the request — the configured model may be unavailable or not support this kind of request.";
+    default: return "My reasoning engine returned an empty answer.";
   }
 }
