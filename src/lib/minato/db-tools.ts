@@ -139,6 +139,7 @@ export const MINATO_TOOL_DEFINITIONS: ToolDefinition[] = [
             description: "Sort order for returned trades (default: newest).",
           },
           limit: { type: "number", description: "Max trade rows to return (1 to 50, default 20)." },
+          offset: { type: "number", description: "Skip this many matching trades (for paging through long histories)." },
         },
       },
     },
@@ -313,7 +314,7 @@ export function isValidToolName(name: unknown): name is MinatoToolName {
 /*  Helper: Filter entries safely                                      */
 /* ------------------------------------------------------------------ */
 
-function filterEntries(
+export function filterEntries(
   entries: readonly JournalEntry[],
   args: {
     dateFrom?: string;
@@ -562,20 +563,23 @@ export function executeMinatoTool(
       }
 
       const limit = Math.min(50, Math.max(1, Number(args.limit) || 20));
+      const offset = Math.max(0, Math.min(filtered.length, Math.trunc(Number(args.offset) || 0)));
       const wins = filtered.filter((e) => e.pnl > 0).length;
       const losses = filtered.filter((e) => e.pnl < 0).length;
       const netPnl = Math.round(filtered.reduce((s, e) => s + e.pnl, 0) * 100) / 100;
 
       return {
         totalMatchingTrades: filtered.length,
-        returnedCount: Math.min(limit, ordered.length),
+        returnedCount: Math.min(limit, Math.max(0, ordered.length - offset)),
+        offset,
+        hasMore: offset + limit < ordered.length,
         summaryOfMatching: {
           wins,
           losses,
           winRatePct: wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : null,
           netPnl,
         },
-        trades: ordered.slice(0, limit).map((e) => {
+        trades: ordered.slice(offset, offset + limit).map((e) => {
           const m = mistakeOf(e);
           const holdMin = entryHoldMinutes(e);
           return {
@@ -790,7 +794,13 @@ export function executeMinatoTool(
       const adherence = adherenceSummary(pool, settings);
       const discipline = disciplineSummary(pool, db.dayLogs ?? []);
 
-      const prematureEntries = pool
+      // The 9:33 AM rule is the trader's own configurable R1 checklist item. Only report "premature entries"
+      // when that rule is actually in play (a trade carries the R1 flag, or a playbook rule mentions it) —
+      // otherwise this would flag trades against a rule the trader never set.
+      const r1InPlay =
+        pool.some((e) => e.checklist && Object.prototype.hasOwnProperty.call(e.checklist, "r1Time")) ||
+        (settings.playbook ?? []).some((p: PlaybookSetup) => setupRules(p).some((r) => /9[:.]?33/.test(r.text)));
+      const prematureEntries = (!r1InPlay ? [] : pool)
         .filter((e) => e.entryTime && e.entryTime < "09:33" && e.entryTime >= "09:15")
         .map((e) => ({ id: e.id, date: e.date, instrument: e.instrument, entryTime: e.entryTime, pnl: e.pnl }));
 

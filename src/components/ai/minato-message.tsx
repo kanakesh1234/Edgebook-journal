@@ -155,38 +155,53 @@ const Chevron = ({ open }: { open: boolean }) => (
 );
 
 /**
- * Smooth progressive text reveal for newly generated replies.
- * Reveals complete tokens smoothly at 60fps without splitting markdown markers mid-token.
+ * Smooth progressive text reveal.
+ *
+ * Works both for a finished reply and for one that is still being written: `text` may keep growing while it is
+ * revealed. The reveal never restarts — it keeps its position and chases the end of the text, speeding up only
+ * when it falls behind. It advances to the next whitespace so **bold** markers never flicker half-open.
  */
 function useProgressiveText(text: string, animate: boolean): string {
-  const animatedRef = useRef<string | null>(animate ? null : text);
+  const textRef = useRef(text);
+  textRef.current = text;
+  const shownRef = useRef<number>(animate ? 0 : text.length);
+  const timerRef = useRef<number | null>(null);
   const [shownLength, setShownLength] = useState<number>(() => (animate ? 0 : text.length));
 
   useEffect(() => {
-    if (!animate || animatedRef.current === text) {
+    if (!animate) {
+      shownRef.current = text.length;
       setShownLength(text.length);
       return;
     }
-    let idx = 0;
-    const total = text.length;
-    const step = Math.max(4, Math.ceil(total / 26));
-    setShownLength(Math.min(total, step));
-
-    const timer = window.setInterval(() => {
-      idx = Math.min(total, idx + step);
-      // Advance to the next whitespace boundary so **bold** tokens don't flicker half-open
-      while (idx < total && text[idx] !== " " && text[idx] !== "\n") {
-        idx++;
+    if (shownRef.current > text.length) {
+      shownRef.current = text.length; // the text was replaced by a shorter one
+      setShownLength(text.length);
+    }
+    if (timerRef.current != null || shownRef.current >= text.length) return;
+    timerRef.current = window.setInterval(() => {
+      const full = textRef.current;
+      const remaining = full.length - shownRef.current;
+      if (remaining <= 0) {
+        if (timerRef.current != null) window.clearInterval(timerRef.current);
+        timerRef.current = null;
+        return;
       }
+      let idx = Math.min(full.length, shownRef.current + Math.max(4, Math.ceil(remaining / 18)));
+      // Advance to the next whitespace so markdown tokens don't flicker half-open
+      while (idx < full.length && full[idx] !== " " && full[idx] !== "\n") idx++;
+      shownRef.current = idx;
       setShownLength(idx);
-      if (idx >= total) {
-        animatedRef.current = text;
-        window.clearInterval(timer);
-      }
     }, 18);
-
-    return () => window.clearInterval(timer);
   }, [text, animate]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current != null) window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    },
+    [],
+  );
 
   return shownLength >= text.length ? text : text.slice(0, shownLength);
 }

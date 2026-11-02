@@ -11,9 +11,10 @@ import { disciplineSummary } from "@/lib/discipline";
 import { evaluateRules, adherenceSummary } from "@/lib/rules";
 import { computeInsights, topState, type MinatoState } from "@/lib/minato/insights";
 import { buildContext } from "@/lib/minato/context";
-import { resolveCoachProvider, type MinatoMessage } from "@/lib/services/ai";
+import type { MinatoMessage } from "@/lib/services/ai";
 import { todayKey } from "@/lib/format";
-import { classifyLane, type Lane } from "@/lib/minato/lane";
+import { streamMinato } from "@/lib/minato/agent/client";
+import { computeDataRev, slimEntry } from "@/lib/minato/agent/data-source";
 import { loadMind, MOOD_LABEL, mindForModel, type Mood } from "@/lib/minato/mind";
 import { applyChat, brainForModel, buildRecall, collectWords, emptyBrain, readinessNow, reconcileBrain, trainNet, type MinatoBrain } from "@/lib/minato/brain-ml";
 import { evolveMemory, applyDirectives } from "@/lib/minato/evolve";
@@ -162,7 +163,6 @@ export function Minato() {
   const dragControls = useDragControls();
 
   const { entries, settings, challenge } = useMemo(() => scopeToPrimary(rawSettings, allEntries), [rawSettings, allEntries]);
-  const provider = useMemo(() => resolveCoachProvider(settings), [settings]);
   const focusEntry = useMemo(() => entries.find((e) => e.id === focusId) ?? null, [entries, focusId]);
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
@@ -233,21 +233,27 @@ export function Minato() {
     };
   }, [rawSettings, plans, dayLogs, challenge, firstName]);
 
-  /* A handful of numbers for the model's awareness on chat lanes — never the journal. */
-  const glance = useMemo(() => {
-    const today = todayKey();
-    const todays = entries.filter((e) => e.date === today);
-    return {
-      trades: entries.length,
-      totalPnl: Math.round(stats.totalPnl),
-      winRatePct: Math.round(stats.winRate * 100),
-      todayTrades: todays.length,
-      todayPnl: Math.round(todays.reduce((sum, e) => sum + e.pnl, 0)),
-      drawdownRoom: stats.drawdownCushion != null ? Math.round(stats.drawdownCushion) : null,
-      drawdownUsedPct: Math.round((stats.drawdownBudgetUsed ?? 0) * 100),
-      challenge: challenge?.name ?? null,
-    };
-  }, [entries, stats, challenge]);
+  /* What the server needs to answer from the trader's CURRENT records. Screenshots are never uploaded; the
+     revision lets the server reuse its copy when nothing changed and ask again the moment anything does. */
+  const wireSettings = useMemo(
+    () => ({
+      startingEquity: rawSettings.startingEquity,
+      targetEquity: rawSettings.targetEquity,
+      maxDrawdown: rawSettings.maxDrawdown,
+      currency: rawSettings.currency,
+      playbook: rawSettings.playbook ?? [],
+      rules: rawSettings.rules,
+      dayLimits: rawSettings.dayLimits ?? {},
+      fullName: rawSettings.fullName,
+      primaryChallengeId: rawSettings.primaryChallengeId ?? null,
+    }),
+    [rawSettings],
+  );
+  const wireEntries = useMemo(() => allEntries.map((e) => slimEntry(e as unknown as Record<string, unknown>)), [allEntries]);
+  const dataRev = useMemo(
+    () => computeDataRev({ entries: wireEntries, plans: plans ?? [], dayLogs, settings: wireSettings }),
+    [wireEntries, plans, dayLogs, wireSettings],
+  );
 
   /* ---------------- conversation & memory ---------------- */
   const threadKey = `${THREAD_KEY}:${user?.id ?? "guest"}`;
@@ -259,6 +265,7 @@ export function Minato() {
   const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [streamed, setStreamed] = useState(false);
   const [slow, setSlow] = useState(false);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
   const [pendingSlot, setPendingSlot] = useState<"stop_points" | "risk_per_trade" | "both" | null>(null);
@@ -592,7 +599,6 @@ export function Minato() {
     return () => useMindView.getState().register(null);
   }, []);
   const lastIntent = useRef<Intent | null>(null);
-  const lastLane = useRef<Lane | null>(null);
 
   const state: MinatoState = busy ? "thinking" : topState(insights);
 
@@ -676,10 +682,6 @@ export function Minato() {
       lastIntent.current = route.intent;
       const plan = planFor(route);
 
-      // 4b. Lane: normal chat and ideal calculations never upload the journal.
-      const prevLane = lastLane.current;
-      const laneRes = classifyLane(trimmed, { hasFocus: !!focusEntry, prevLane });
-      lastLane.current = laneRes.lane;
       const memory = memoryForModel(applied.brain.memory, trimmed, plan, nowMs);
       const semanticParams = readUserSemanticParams(applied.brain.memory);
 
@@ -758,95 +760,44 @@ export function Minato() {
       }
 
       setBusy(true);
+      setStreamed(false);
+      const requestId = `req_${nowMs}_${Math.random().toString(36).slice(2, 8)}`;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 115_000);
       try {
-        let replyText: string | null = null;
-        let replyActions: MinatoAction[] = clientTask.actions;
-        try {
-          const thread = next.map(({ role, text: t }) => ({ role, text: t }));
-          const post = async (lane: Lane) => {
-            const controller = new AbortController();
-            const timeout = window.setTimeout(() => controller.abort(), 56_000);
-            try {
-              // Slim for chat / calc: a few turns, a tiny glance, no entries, no memory.
-              const slim = lane !== "data";
-              const res = await fetch("/api/minato/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(
-                  slim
-                    ? {
-                        lane,
-                        prevLane,
-                        messages: thread.slice(-8),
-                        traderName: firstName,
-                        entries: [],
-                        journalProvided: true,
-                        focusTradeId: focusEntry?.id ?? null,
-                        semanticParams,
-                        glance,
-                      }
-                    : {
-                        lane: "data",
-                        messages: thread,
-                        traderName: firstName,
-                        entries,
-                        plans: (plans ?? []).filter((p) => !challenge || !p.challengeId || p.challengeId === challenge.id),
-                        dayLogs,
-                        settings: {
-                          startingEquity: settings.startingEquity,
-                          targetEquity: settings.targetEquity,
-                          maxDrawdown: settings.maxDrawdown,
-                          currency: settings.currency,
-                          playbook: settings.playbook ?? [],
-                          rules: settings.rules,
-                          dayLimits: rawSettings.dayLimits ?? {},
-                          fullName: rawSettings.fullName,
-                        },
-                        journalProvided: true,
-                        primaryChallenge: challenge ?? undefined,
-                        focusTradeId: focusEntry?.id ?? null,
-                        prevIntent,
-                        semanticParams,
-                        companion: {
-                          ...companion,
-                          traderName: firstName,
-                          semanticParams,
-                          mind: mindForModel(applied.brain.mind, moods, nowMs),
-                          brain: brainForModel(applied.brain, recall, trimmed, readiness, todayKey()),
-                          memory,
-                        },
-                      },
-                ),
-                signal: controller.signal,
-              });
-              return res.ok
-                ? ((await res.json()) as { text?: string; fallback?: boolean; needs?: string; actions?: MinatoAction[] })
-                : null;
-            } finally {
-              window.clearTimeout(timeout);
-            }
-          };
+        const thread = next.map(({ role, text: t }) => ({ role, text: t }));
+        const outcome = await streamMinato({
+          signal: controller.signal,
+          body: {
+            requestId,
+            messages: thread.slice(-40),
+            traderName: firstName,
+            dataRev,
+            primaryChallenge: challenge ?? undefined,
+            focusTradeId: focusEntry?.id ?? null,
+            semanticParams,
+            memory,
+          },
+          getSnapshot: () => ({ entries: wireEntries, plans: plans ?? [], dayLogs, settings: wireSettings }),
+          // The answer grows as the model writes it; the reveal animation in MinatoMessageBody follows it.
+          onText: (t) => {
+            setStreamed(t.length > 0);
+            setMessages(t.length > 0 ? [...next, { role: "buddy", text: t }] : next);
+          },
+        });
 
-          let json = await post(laneRes.lane);
-          // The model decided this one needs the trader's real data → send it once, now.
-          if (json?.needs === "journal") json = await post("data");
-          if (json) {
-            replyText = json.fallback ? null : json.text ?? null;
-            if (Array.isArray(json.actions) && json.actions.length > 0) {
-              replyActions = json.actions;
-            }
-          }
-        } catch {
-          /* offline → local provider below */
-        }
-        if (!replyText) {
-          const reply = await provider.reply({ messages: next, focusEntry }, ctx);
-          replyText = reply.text;
-        }
+        if (!outcome.ok && outcome.code === "duplicate") return;
+
+        const replyText = outcome.ok
+          ? outcome.text
+          : outcome.partial
+            ? `${outcome.partial}\n\n> The answer was interrupted. Ask again and I'll pick it up.`
+            : outcome.message;
+        const replyActions = outcome.ok ? ((outcome.actions as MinatoAction[]) ?? []) : [];
 
         const finalActions = enrichActionsFromReplyText(
           replyText,
-          replyActions,
+          replyActions.length > 0 ? replyActions : clientTask.actions,
           entries.length > 0 ? entries : allEntries,
         );
 
@@ -857,12 +808,6 @@ export function Minato() {
           if (resLabel) executedLabel = resLabel;
         }
 
-        // Detect if Minato asked once for missing stop size or risk % so the next user reply is captured into semantic memory
-        if (/isn't saved in memory yet/i.test(replyText)) {
-          const needsStop = semanticParams.stopPoints === null;
-          const needsRisk = semanticParams.riskDollars === null && semanticParams.riskPct === null;
-          setPendingSlot(needsStop && needsRisk ? "both" : needsStop ? "stop_points" : "risk_per_trade");
-        }
         setMessages([
           ...next,
           {
@@ -873,7 +818,9 @@ export function Minato() {
           },
         ]);
       } finally {
+        window.clearTimeout(timeout);
         setBusy(false);
+        setStreamed(false);
       }
     },
     [
@@ -883,7 +830,6 @@ export function Minato() {
       allEntries,
       challenge,
       companion,
-      provider,
       focusEntry,
       ctx,
       brain,
@@ -892,7 +838,11 @@ export function Minato() {
       pendingSlot,
       firstName,
       executeMinatoAction,
-      glance,
+      dataRev,
+      wireEntries,
+      wireSettings,
+      plans,
+      dayLogs,
     ],
   );
 
@@ -1252,7 +1202,7 @@ export function Minato() {
                 );
               })}
 
-              {busy && (
+              {busy && !streamed && (
                 <div className="mx-auto flex w-full max-w-[62ch] items-center gap-2.5 py-1">
                   <span className="mn-typing" aria-label="Minato is thinking">
                     <i />
