@@ -12,6 +12,7 @@ import { DATE_SPEC, toJsonSchema, validateArgs, type ObjectSchema } from "./sche
 import { calculate, MathError } from "./safe-math";
 import { dailySummaries, dataCoverage, riskProfile } from "./extra-tools";
 import { executeMinatoTool, type MinatoToolName, type TraderDatabaseContext } from "../db-tools";
+import { fetchMajorForexFactoryEventsServer } from "../forexfactory";
 import { dropEmpty } from "../context-pack";
 import { INSIGHT_KINDS, queryWords, type Insight, type InsightKind, type KnowledgeStore } from "./knowledge-store";
 import type { ToolSpec } from "./llm";
@@ -58,6 +59,22 @@ export const AGENT_TOOLS: AgentTool[] = [
     description: "Who the trader is and how they have configured things: active challenge, account limits, playbook setups with their rules, enabled guardrail rules, and saved risk/stop/instrument preferences. Use for questions about their rules, strategy definitions, limits or setup. Not for performance numbers.",
     schema: { properties: {} },
     run: dbTool("get_trader_profile"),
+  },
+  {
+    name: "get_economic_news",
+    description: "Fetch High-Impact (Red Folder) economic calendar news events from ForexFactory (and US macro schedule) for today, a specific date, and the upcoming week in New York time (America/New_York). Use whenever the trader asks about news events, red-folder releases, CPI, NFP, FOMC, PMI, Unemployment Claims, or economic calendar events.",
+    schema: {
+      properties: {
+        date: D("Target date YYYY-MM-DD (defaults to today)."),
+        currency: STR("Currency filter, e.g. USD, EUR, GBP, ALL (defaults to USD).", 20),
+      },
+    },
+    run: async (a, c) => {
+      const date = typeof a.date === "string" && a.date ? a.date : c.today;
+      const curRaw = typeof a.currency === "string" && a.currency.trim() ? a.currency.trim().toUpperCase() : "USD";
+      const currencies = curRaw.split(/[,\s]+/).filter(Boolean);
+      return await fetchMajorForexFactoryEventsServer(date, currencies.length ? currencies : ["USD"], true);
+    },
   },
   {
     name: "get_trading_history",

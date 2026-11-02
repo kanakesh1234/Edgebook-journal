@@ -408,24 +408,32 @@ export function resolveMinatoTasks(params: {
   // 0B. FOREXFACTORY MAJOR NEWS CHECK COMMAND ("check forexfactory", "what major news events are today?", "autofill today's news")
   // ------------------------------------------------------------------
   if (
-    /\b(forexfactory|forex\s+factory|red\s+folder|major\s+(?:impact\s+)?news|high\s+impact\s+news|news\s+events?\s+today|what\s+news\s+(?:is|are)\s+today|autofill.*news)\b/i.test(
+    /\b(forexfactory|forex\s+factory|red\s+folder|major\s+(?:impact\s+)?news|high\s+impact\s+news|news\s+events?|any\s+news|what\s+news|economic\s+calendar|autofill.*news|sync.*news)\b/i.test(
       low,
     )
   ) {
     const dateMatch = low.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
     const targetDate = dateMatch ? dateMatch[1]! : today;
+    const isPureSyncImperative = /\b(autofill|sync|fill\s+in)\b.*\bnews\b/i.test(low);
+    const newsAction: MinatoAction = {
+      kind: "check_forexfactory_news",
+      label: `Sync ForexFactory News (${targetDate})`,
+      date: targetDate,
+      autoExecute: true,
+    };
+    if (isPureSyncImperative) {
+      return {
+        isDirectCommand: true,
+        resolvedTrade: null,
+        actions: [newsAction],
+        directReply: `Checking **ForexFactory** for Major-Impact (Red Folder) news events on **${targetDate}** and syncing them to your **Plan a trade** news profile, ${name}…`,
+      };
+    }
     return {
-      isDirectCommand: true,
+      isDirectCommand: false,
       resolvedTrade: null,
-      actions: [
-        {
-          kind: "check_forexfactory_news",
-          label: `Check ForexFactory (${targetDate})`,
-          date: targetDate,
-          autoExecute: true,
-        },
-      ],
-      directReply: `Checking **ForexFactory** for Major-Impact (Red Folder) news events on **${targetDate}** and syncing them to your **Plan a trade** news profile, ${name}…`,
+      actions: [newsAction],
+      directReply: null,
     };
   }
 

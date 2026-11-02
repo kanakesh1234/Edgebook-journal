@@ -37,6 +37,35 @@ export interface RawForexFactoryItem {
   previous?: string;
 }
 
+export interface ForexFactoryLookupResult {
+  date: string;
+  live: boolean;
+  source: "forexfactory-live" | "us-macro-schedule";
+  hasMajorNews: boolean;
+  events: MajorNewsEvent[];
+  upcomingWeekEvents?: MajorNewsEvent[];
+}
+
+// In-memory cache of the ForexFactory weekly feed (15 minutes TTL)
+let cachedRawFeed: { items: RawForexFactoryItem[]; fetchedAt: number } | null = null;
+const CACHE_TTL_MS = 15 * 60 * 1000;
+
+const FF_URLS = [
+  "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+  "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+];
+
+export function todayNyIso(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TRADING_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "01";
+  return `${g("year")}-${g("month")}-${g("day")}`;
+}
+
 /** Convert an ISO timestamp (e.g. "2026-11-01T08:30:00-05:00") to NY YYYY-MM-DD and HH:MM. */
 export function toNyDateAndTime(isoString: string): { date: string; time: string; timeLabel: string } | null {
   const parsed = new Date(isoString);
@@ -185,6 +214,107 @@ export function getDeterministicMajorUsEvents(dateKey: string): MajorNewsEvent[]
   }
 
   return events.sort((a, b) => a.time.localeCompare(b.time));
+}
+
+export async function fetchLiveForexFactoryFeed(): Promise<{ items: RawForexFactoryItem[]; live: boolean }> {
+  const now = Date.now();
+  if (cachedRawFeed && now - cachedRawFeed.fetchedAt < CACHE_TTL_MS) {
+    return { items: cachedRawFeed.items, live: true };
+  }
+
+  const collected: RawForexFactoryItem[] = [];
+  let anySuccess = false;
+
+  for (const url of FF_URLS) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as unknown;
+        if (Array.isArray(data)) {
+          collected.push(...(data as RawForexFactoryItem[]));
+          anySuccess = true;
+        }
+      }
+    } catch {
+      /* ignore individual endpoint timeout/offline */
+    }
+  }
+
+  if (anySuccess) {
+    cachedRawFeed = { items: collected, fetchedAt: now };
+    return { items: collected, live: true };
+  }
+
+  return { items: cachedRawFeed?.items ?? [], live: false };
+}
+
+function addDaysIso(dateKey: string, delta: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return dateKey;
+  const dt = new Date(Date.UTC(y, m - 1, d + delta, 12, 0, 0));
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Server-side lookup for Major-Impact (Red Folder) ForexFactory events on `dateKey`,
+ * plus upcoming high-impact events over the next 5 days so Minato can answer both
+ * "any news today?" and "what's coming up this week?".
+ */
+export async function fetchMajorForexFactoryEventsServer(
+  dateKey?: string,
+  currencies: string[] = ["USD"],
+  includeWeek = true,
+): Promise<ForexFactoryLookupResult> {
+  const date = dateKey && /^\d{4}-\d{2}-\d{2}$/.test(dateKey.trim()) ? dateKey.trim() : todayNyIso();
+  const { items, live } = await fetchLiveForexFactoryFeed();
+  let majorEvents: MajorNewsEvent[] = [];
+  let source: "forexfactory-live" | "us-macro-schedule" = "forexfactory-live";
+
+  const feedDates = new Set(
+    items
+      .map((i) => (typeof i.date === "string" ? toNyDateAndTime(i.date)?.date ?? i.date.slice(0, 10) : ""))
+      .filter(Boolean),
+  );
+
+  if (items.length > 0) {
+    majorEvents = filterMajorForexFactoryEvents(items, date, currencies);
+    if (majorEvents.length === 0 && !feedDates.has(date)) {
+      majorEvents = getDeterministicMajorUsEvents(date);
+      source = "us-macro-schedule";
+    }
+  } else {
+    majorEvents = getDeterministicMajorUsEvents(date);
+    source = "us-macro-schedule";
+  }
+
+  let upcomingWeekEvents: MajorNewsEvent[] | undefined;
+  if (includeWeek) {
+    const weekOut: MajorNewsEvent[] = [];
+    for (let offset = 0; offset <= 5; offset++) {
+      const dayIso = addDaysIso(date, offset);
+      let dayEvs = items.length > 0 ? filterMajorForexFactoryEvents(items, dayIso, currencies) : [];
+      if (dayEvs.length === 0 && (!items.length || !feedDates.has(dayIso))) {
+        dayEvs = getDeterministicMajorUsEvents(dayIso);
+      }
+      weekOut.push(...dayEvs);
+    }
+    upcomingWeekEvents = weekOut;
+  }
+
+  return {
+    date,
+    live,
+    source,
+    hasMajorNews: majorEvents.length > 0,
+    events: majorEvents,
+    ...(upcomingWeekEvents ? { upcomingWeekEvents } : {}),
+  };
 }
 
 /**

@@ -335,9 +335,10 @@ export function extractStructuredMemoriesFromTurn(opts: {
     });
   }
 
-  // 7. Instruments traded
+  // 7. Instruments traded (including casual chat mentions like "mnq", "I focus on mnq", "looking at nq today")
   const instrStmt =
-    raw.match(/\b(?:i\s+(?:only\s+|mainly\s+|primarily\s+|now\s+)?trade|switched\s+to(?:\s+trading)?|my\s+(?:main\s+|primary\s+)?instrument(?:s)?\s+(?:is|are))\s+([^.!?\n]{2,50})/i);
+    raw.match(/\b(?:i\s+(?:only\s+|mainly\s+|primarily\s+|now\s+|usually\s+)?(?:trade|watch|focus\s+on|scalp|like)|switched\s+to(?:\s+trading)?|my\s+(?:main\s+|primary\s+|favorite\s+)?instrument(?:s)?\s+(?:is|are)|looking\s+at|focusing\s+on)\s+([^.!?\n]{2,50})/i) ??
+    raw.match(/^\s*(mnq|nq|mes|es|ym|mym|rty|m2k|gc|mgc|cl|mcl)(?:\s+today|\s+only)?\s*[.!]*$/i);
   if (instrStmt) {
     const foundInstrs = entities.filter((e) => ["MNQ", "NQ", "MES", "ES", "YM", "MYM", "RTY", "M2K", "GC", "MGC", "CL", "MCL"].includes(e));
     if (foundInstrs.length > 0) {
@@ -347,8 +348,8 @@ export function extractStructuredMemoriesFromTurn(opts: {
         type: "semantic",
         category: "instruments_traded",
         fact_key: "user:instruments_traded",
-        content: `Trades ${joined}`,
-        short: `Instruments: ${joined}`,
+        content: `Focuses on trading ${joined}`,
+        short: `Instrument: ${joined}`,
         structured_value: { instruments: foundInstrs },
         entities: foundInstrs,
         confidence: 0.95,

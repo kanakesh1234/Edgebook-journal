@@ -27,17 +27,24 @@ import { marketClock } from "@/lib/minato/market-clock";
 import { resolveTraderFirstName } from "@/lib/minato/blueprint";
 import { newestFirst } from "@/lib/minato/setup-analytics";
 import { sanitizeMemoryPayload } from "@/lib/minato/pack-memory";
-import { enrichActionsFromReplyText } from "@/lib/minato/actions";
+import { enrichActionsFromReplyText, type MinatoAction } from "@/lib/minato/actions";
 import { verifyReply, withUnverifiedNote } from "@/lib/minato/verify";
 import type { TraderDatabaseContext } from "@/lib/minato/db-tools";
 import type { UserSemanticParams } from "@/lib/minato/extract";
+import type { ForexFactoryLookupResult } from "@/lib/minato/forexfactory";
 import { buildSnapshot, cachedSnapshot, scopeSnapshot, storeSnapshot, type TraderSnapshot } from "@/lib/minato/agent/data-source";
 import { admit, BadRequest, dedupeKey, parseChatBody, readBody } from "@/lib/minato/agent/guards";
 import { failureMessage, getAgentLlmConfig, summarizeAttempts } from "@/lib/minato/agent/llm";
 import { runAgent } from "@/lib/minato/agent/loop";
-import { buildBrief, GREETING_QUERY_RE, getTimeOfDayGreetingContext } from "@/lib/minato/agent/brief";
+import {
+  buildBrief,
+  explicitlyAsksForStatsOrNumbers,
+  GREETING_QUERY_RE,
+  getTimeOfDayGreetingContext,
+  NEWS_QUERY_RE,
+} from "@/lib/minato/agent/brief";
 import { riskProfile } from "@/lib/minato/agent/extra-tools";
-import { openKnowledgeStore } from "@/lib/minato/agent/knowledge-store";
+import { openKnowledgeStore, type KnowledgeStore } from "@/lib/minato/agent/knowledge-store";
 import { reflectOnTurn, saveCheckpoint, saveConversationNote } from "@/lib/minato/agent/memory-update";
 import type { AgentToolContext } from "@/lib/minato/agent/tools";
 
@@ -122,6 +129,10 @@ async function handle(request: Request) {
     const { brief } = await buildBrief({ db, clock, knowledge, clientBeliefs, question });
     const ctx: AgentToolContext = { db, knowledge, clientBeliefs, today };
 
+    const isNewsQuery = NEWS_QUERY_RE.test(question);
+    const isPureGreeting = GREETING_QUERY_RE.test(question);
+    const asksForStats = explicitlyAsksForStatsOrNumbers(question);
+
     // ---- stream ----
     const enc = new TextEncoder();
     const abort = new AbortController();
@@ -148,8 +159,7 @@ async function handle(request: Request) {
           });
 
           if (!result.ok) {
-            // If the LLM timed out on a safe-risk / position-sizing / loss-limit question, answer deterministically
-            // from the exact riskProfile calculation so the trader never gets a timeout error on risk math.
+            // 1. Safe-risk / position-sizing / loss-limit timeout fallback
             if (result.failure === "timeout" && isSafeRiskOrSizingQuestion(question)) {
               const fallbackText = buildDeterministicRiskReply(question, db);
               send({ t: "reset" });
@@ -175,8 +185,37 @@ async function handle(request: Request) {
               return;
             }
 
-            // If the LLM timed out on a simple greeting ("hi", "good morning", etc.), reply with a warm time-of-day greeting.
-            if (result.failure === "timeout" && GREETING_QUERY_RE.test(question)) {
+            // 2. Economic news timeout fallback
+            if (result.failure === "timeout" && isNewsQuery) {
+              const newsData = brief.economicNews as ForexFactoryLookupResult | undefined;
+              const fallbackNews = buildDeterministicNewsReply(newsData, today, traderName);
+              const newsActions: MinatoAction[] = [
+                { kind: "check_forexfactory_news", label: `Sync ForexFactory News (${today})`, date: today, autoExecute: true },
+              ];
+              send({ t: "reset" });
+              send({ t: "delta", x: fallbackNews });
+              send({
+                t: "done",
+                text: fallbackNews,
+                actions: newsActions,
+                meta: {
+                  rounds: result.rounds,
+                  tools: ["get_economic_news"],
+                  model: "forexfactory-news-fallback",
+                  ms: Date.now() - t0,
+                  textMode: result.textMode,
+                  forcedAnswer: true,
+                  verification: { checked: 0, unverified: [] },
+                  droppedEntries: snap.dropped,
+                  memory: knowledge.backend,
+                },
+              });
+              background = async () => { await knowledge.flush?.(); };
+              return;
+            }
+
+            // 3. Greeting timeout fallback
+            if (result.failure === "timeout" && isPureGreeting) {
               const fallbackGreeting = buildWarmGreetingReply(now, traderName);
               send({ t: "reset" });
               send({ t: "delta", x: fallbackGreeting });
@@ -202,22 +241,42 @@ async function handle(request: Request) {
 
             const diag = `${summarizeAttempts(result.attempts)}${result.detail ? ` | ${result.detail}` : ""}`;
             console.warn(`[minato:agent] failed (${result.failure}) rounds=${result.rounds} tools=${result.toolRuns.map((t) => t.name).join(",") || "-"} ${diag}`);
-            // Tell the trader *why* when the provider rejected the request — "the configured model may be unavailable"
-            // is useless without the model name and the provider's own words (never contains the key or journal data).
             const why = result.failure === "bad_request" && result.detail ? ` (${result.detail.slice(0, 180)})` : "";
             send({ t: "error", code: result.failure ?? "empty", message: `${failureMessage(result.failure ?? "empty")}${why}`, diag });
-            // Anything the model managed to save before failing must still reach Drive.
             background = async () => { await knowledge.flush?.(); };
             return;
           }
 
-          // If the user sent a pure greeting ("hi", "good morning", etc.) and the model ignored instructions
-          // by dumping dollar figures or unverified stats, replace with a warm time-of-day motivational greeting.
-          const isPureGreeting = GREETING_QUERY_RE.test(question);
-          const rawReplyText =
-            isPureGreeting && /\$\d/.test(result.text)
-              ? buildWarmGreetingReply(now, traderName)
-              : result.text;
+          let rawReplyText = result.text;
+
+          // Guard A: Pure greeting should never dump dollar figures
+          if (isPureGreeting && /\$\d/.test(rawReplyText)) {
+            rawReplyText = buildWarmGreetingReply(now, traderName);
+          }
+
+          // Guard B: Economic news query — if the model falsely claims it has no economic calendar / live news feed,
+          // replace with the real ForexFactory schedule from brief.economicNews.
+          if (
+            isNewsQuery &&
+            /\b(don'?t\s+have\s+access\s+to\s+an?\s+economic\s+calendar|no\s+live\s+news\s+feed|can'?t\s+tell\s+you\s+what'?s\s+scheduled|cannot\s+check\s+news)\b/i.test(
+              rawReplyText,
+            )
+          ) {
+            const newsData = brief.economicNews as ForexFactoryLookupResult | undefined;
+            rawReplyText = buildDeterministicNewsReply(newsData, today, traderName);
+          }
+
+          // Guard C: Casual non-stats message (e.g. user just typed "mnq" or shared a thought without asking for stats) —
+          // if the model still dumped trade counts / median stops / dollar figures, replace with a natural conversational mentor reply.
+          if (
+            !isPureGreeting &&
+            !isNewsQuery &&
+            !asksForStats &&
+            hasUnpromptedStatsDump(question, rawReplyText)
+          ) {
+            rawReplyText = buildConversationalLearnedReply(question, traderName);
+          }
+
           if (rawReplyText !== result.text) {
             send({ t: "reset" });
             send({ t: "delta", x: rawReplyText });
@@ -226,7 +285,12 @@ async function handle(request: Request) {
           // Every $, % and R figure must trace to the brief, a tool result, the calculator or the trader's own words.
           const v = verifyReply(rawReplyText, [brief, result.toolRuns.map((r) => r.value), userTexts, priorAnswers]);
           const finalText = withUnverifiedNote(rawReplyText, v);
-          const actions = enrichActionsFromReplyText(finalText, [], entries);
+
+          const baseActions: MinatoAction[] = isNewsQuery
+            ? [{ kind: "check_forexfactory_news", label: `Sync ForexFactory News (${today})`, date: today, autoExecute: true }]
+            : [];
+          const actions = enrichActionsFromReplyText(finalText, baseActions, entries);
+
           const meta = {
             rounds: result.rounds,
             tools: result.toolRuns.map((r) => r.name),
@@ -242,6 +306,7 @@ async function handle(request: Request) {
           send({ t: "done", text: finalText, actions, meta });
 
           background = async () => {
+            await learnFromConversationalTurn(knowledge, question, today).catch(() => false);
             await saveCheckpoint(knowledge, db).catch(() => false);
             await saveConversationNote(knowledge, today, userTexts).catch(() => false);
             await reflectOnTurn({ config, knowledge, question, answer: finalText, today, usedTools: result.toolRuns.length > 0 }).catch(() => 0);
@@ -284,6 +349,80 @@ function buildWarmGreetingReply(now: Date, traderName?: string | null): string {
     return `${ctx.salutation}! Great to see you — evenings are the best time to step back with a calm mind and sharpen your game for tomorrow. Want to review today's session or plan ahead?`;
   }
   return `${ctx.salutation}! Good to see you here — remember that rest and a clear head are just as much a part of your edge as chart time. What's on your mind tonight?`;
+}
+
+function buildDeterministicNewsReply(
+  newsData: ForexFactoryLookupResult | undefined,
+  today: string,
+  traderName?: string | null,
+): string {
+  const name = traderName && traderName !== "Trader" ? traderName : null;
+  const todayEvents = newsData?.events ?? [];
+  const weekEvents = (newsData?.upcomingWeekEvents ?? []).filter((e) => e.date > today);
+
+  if (todayEvents.length > 0) {
+    const list = todayEvents
+      .map(
+        (e) =>
+          `- **${e.name}** · **${e.timeLabel}** (${e.currency} · High Impact${e.forecast ? ` · Forecast ${e.forecast}` : ""})`,
+      )
+      .join("\n");
+    return [
+      `Yes${name ? `, ${name}` : ""} — there ${todayEvents.length === 1 ? "is **1 Major-Impact (Red Folder)** event" : `are **${todayEvents.length} Major-Impact (Red Folder)** events`} on **ForexFactory** for today (**${today}**), and I've synced ${todayEvents.length === 1 ? "it" : "them"} to your **Plan a trade** sheet:`,
+      list,
+      `Flatten or tighten stops 10–15 minutes before the release and let the initial spread/whipsaw settle before looking for your setup.`,
+    ].join("\n");
+  }
+
+  if (weekEvents.length > 0) {
+    const nextFew = weekEvents
+      .slice(0, 4)
+      .map((e) => `- **${e.date} · ${e.timeLabel}** · ${e.name} (${e.currency})`)
+      .join("\n");
+    return [
+      `No major Red-Folder USD releases are scheduled for today (**${today}**)${name ? `, ${name}` : ""} — the tape is clear of high-impact macro catalysts today. Here are the next Major-Impact events coming up this week on **ForexFactory**:`,
+      nextFew,
+    ].join("\n");
+  }
+
+  return `There are **no Major-Impact (Red Folder) USD news events** scheduled on ForexFactory for today (**${today}**)${name ? `, ${name}` : ""}, so you have a clean macro slate to focus purely on price action and your setup.`;
+}
+
+function hasUnpromptedStatsDump(question: string, reply: string): boolean {
+  const q = question.trim();
+  // If the user just typed a bare symbol or short casual remark, any reply reciting "traded it X times", "Median stop", "realized loss", "binding ceiling", or 2+ dollar/percent figures is an unprompted stat dump.
+  if (/traded it \d+ times|median stop is|average realized loss|binding ceiling|in scope with \$/i.test(reply)) {
+    return true;
+  }
+  const isBareSymbol = /^\s*(mnq|nq|mes|es|ym|mym|rty|m2k|gc|mgc|cl|mcl)(?:\s+today)?\s*[.!?]*$/i.test(q);
+  if (isBareSymbol && (/\$\d/.test(reply) || /\d+%/.test(reply))) {
+    return true;
+  }
+  return false;
+}
+
+function buildConversationalLearnedReply(question: string, traderName?: string | null): string {
+  const name = traderName && traderName !== "Trader" ? `, ${traderName}` : "";
+  const symMatch = question.trim().match(/^\s*(?:i\s+(?:trade|like|watch|focus\s+on)\s+)?(mnq|nq|mes|es|ym|mym|rty|m2k|gc|mgc|cl|mcl)(?:\s+today)?\s*[.!?]*$/i);
+  if (symMatch) {
+    const sym = symMatch[1]!.toUpperCase();
+    return `Got it${name} — I've noted that you're focusing on **${sym}**. Are you watching a specific session window or setup on ${sym} today, or would you like me to check your safe risk sizing or past trades on it?`;
+  }
+  return `Got it${name} — I've noted that down. Tell me a bit more about what you're seeing or how you want to approach today's session.`;
+}
+
+async function learnFromConversationalTurn(knowledge: KnowledgeStore, question: string, today: string): Promise<void> {
+  const q = question.trim();
+  const symMatch = q.match(/^\s*(?:i\s+(?:trade|like|watch|focus\s+on)\s+)?(mnq|nq|mes|es|ym|mym|rty|m2k|gc|mgc|cl|mcl)(?:\s+today)?\s*[.!?]*$/i);
+  if (symMatch) {
+    const sym = symMatch[1]!.toUpperCase();
+    await knowledge.save({
+      kind: "preference",
+      content: `Trader focuses on trading ${sym}.`,
+      source: "trader_stated",
+      asOf: today,
+    });
+  }
 }
 
 function buildDeterministicRiskReply(question: string, db: TraderDatabaseContext): string {

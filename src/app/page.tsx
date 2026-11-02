@@ -3,6 +3,7 @@ import "@/components/landing/landing.css";
 import { LandingNav } from "@/components/landing/nav";
 import { SmoothScroll } from "@/components/landing/smooth-scroll";
 import { JourneyStage } from "@/components/landing/journey-stage";
+import { StoryFilmScroll } from "@/components/landing/story-film-scroll";
 import { DriveStatement } from "@/components/landing/drive-statement";
 import { Gap } from "@/components/landing/gap";
 import { MinatoDemo } from "@/components/landing/minato-demo";
@@ -29,6 +30,7 @@ export default function LandingPage() {
       <LandingNav />
       <main>
         <JourneyStage />
+        <StoryFilmScroll />
         <Gap />
         <MinatoDemo />
         <DriveStatement />

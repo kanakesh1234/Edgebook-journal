@@ -8,6 +8,7 @@
  */
 import { buildContinuousKnowledgeSnapshot } from "../knowledge";
 import { dropEmpty } from "../context-pack";
+import { fetchMajorForexFactoryEventsServer } from "../forexfactory";
 import { riskProfile, todaySnapshot } from "./extra-tools";
 import type { TraderDatabaseContext } from "../db-tools";
 import type { Insight, KnowledgeStore } from "./knowledge-store";
@@ -39,11 +40,37 @@ export function checkpointFrom(db: TraderDatabaseContext, today: string): Checkp
   };
 }
 
-const RISK_QUERY_RE =
-  /\b(how much (?:can i|to|should i) risk|risk safely|safe risk|position siz\w*|contracts?|mnq|nq|mes|es|loss limit|drawdown|losing streak|max(?:imum)? (?:longest )?losing|stop loss|stop size)\b/i;
+/**
+ * Only pre-compute riskProfile when the trader explicitly asks about risk, sizing, contracts, loss limits,
+ * drawdown, or losing streaks — NEVER when they merely type an instrument symbol like "mnq" or "nq".
+ */
+export const RISK_QUERY_RE =
+  /\b(how much (?:can i|to|should i) risk|risk safely|safe risk|position siz\w*|how many contracts?|lot size|loss limit|drawdown|losing streak|max(?:imum)? (?:longest )?losing|stop loss|stop size|not hit (?:my )?(?:daily |max )?loss)\b/i;
+
+export const NEWS_QUERY_RE =
+  /\b(news|forexfactory|forex\s+factory|economic\s+calendar|red\s+folder|high[-\s]?impact|major\s+events?|macro\s+events?|cpi|fomc|nfp|ppi|unemployment\s+claims|pmi|fed\s+speaker)\b/i;
 
 export const GREETING_QUERY_RE =
   /^\s*(?:hi|hello|hey|hola|yo|sup|gm|good\s*(?:morning|afternoon|evening|night)|morning|afternoon|evening|hey\s+there|hi\s+there|what'?s\s+up|howdy)(?:\s+minato)?[!.?\s]*$/i;
+
+/**
+ * True ONLY when the trader explicitly asks for numbers, stats, performance metrics, risk math,
+ * account balances/drawdown, or specific trade reviews/analyses.
+ * Casual messages (e.g. "mnq", "I trade london session", "feeling a bit rushed", "any news events?")
+ * return false so Minato converses naturally and learns about the trader without dumping unprompted stats.
+ */
+export function explicitlyAsksForStatsOrNumbers(q?: string | null): boolean {
+  if (!q) return false;
+  const s = q.trim();
+  if (!s || GREETING_QUERY_RE.test(s) || NEWS_QUERY_RE.test(s)) return false;
+  // Bare instrument name or short casual statement about an instrument ("mnq", "nq today", "I trade mnq")
+  if (/^\s*(?:i\s+(?:trade|like|watch|focus\s+on)\s+)?(mnq|nq|mes|es|ym|mym|rty|m2k|gc|mgc|cl|mcl)(?:\s+today)?\s*[.!?]*$/i.test(s)) {
+    return false;
+  }
+  return /\b(how much|how many|stats?|statistics|numbers?|win\s*rate|winrate|pnl|p&l|profit|loss(?:es)?|losing|winning|drawdown|balance|equity|target|expectancy|risk|siz(?:e|ing)|contracts?|streak|performance|metrics?|average|avg|median|best|worst|compare|comparison|history|trades?|review|autopsy|violat\w*|rules?|why am i|how am i doing|how did i|analy[sz]e|breakdown|report|summary|calculate|math|r-multiple|payoff|hold\s*time|largest|longest|shortest|biggest)\b/i.test(
+    s,
+  );
+}
 
 export function getTimeOfDayGreetingContext(now = new Date(), traderName?: string | null) {
   const h = now.getHours();
@@ -96,9 +123,14 @@ export async function buildBrief(opts: {
     settings: db.settings, primaryChallenge: db.primaryChallenge, semanticParams: db.semanticParams,
   });
 
-  const [stored, last] = await Promise.all([
+  const isNewsQuery = !!(opts.question && NEWS_QUERY_RE.test(opts.question));
+
+  const [stored, last, economicNews] = await Promise.all([
     opts.knowledge.list({ limit: 10 }).catch(() => [] as Insight[]),
     opts.knowledge.latestCheckpoint(db.today).catch(() => null),
+    isNewsQuery
+      ? fetchMajorForexFactoryEventsServer(db.today, ["USD"], true).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const insights = stored.filter((s) => s.source !== "checkpoint" && s.kind !== "conversation").slice(0, 8);
 
@@ -115,11 +147,10 @@ export async function buildBrief(opts: {
   }
 
   const isGreeting = !!(opts.question && GREETING_QUERY_RE.test(opts.question));
+  const asksForStats = explicitlyAsksForStatsOrNumbers(opts.question);
   const greetingContext = getTimeOfDayGreetingContext(new Date(), db.traderName);
 
-  // Pre-compute riskProfile when the question asks about safe risk, position sizing, loss limits, or streaks
-  // so the model has all exact risk ceilings ($67.14, $58.75, daily loss limit, MNQ/NQ contract sizing) in Round 1
-  // without burning multiple slow tool-call round-trips.
+  // Pre-compute riskProfile ONLY when the question explicitly asks about safe risk, position sizing, loss limits, or streaks.
   const precomputedRisk = opts.question && RISK_QUERY_RE.test(opts.question)
     ? riskProfile(db, {})
     : null;
@@ -127,6 +158,13 @@ export async function buildBrief(opts: {
   const brief = dropEmpty({
     now: { date: db.today, weekday: clock.weekday, newYorkTime: clock.time, market: clock.summary },
     timeOfDay: greetingContext,
+    responseMode: isGreeting
+      ? "GREETING_NO_STATS: Reply with a warm, friendly, time-of-day motivational greeting using the trader's first name. Do NOT cite account balances, drawdown, targets, or trade stats."
+      : isNewsQuery
+        ? "ECONOMIC_NEWS_CHECK: Answer using `brief.economicNews` (or call `get_economic_news` for another date/currency). State clearly whether there are High-Impact (Red Folder) ForexFactory events today (with exact NY times) and upcoming this week, and confirm they are synced to the trader's Plan a Trade news section. Do NOT dump unprompted account stats."
+        : asksForStats
+          ? "EXPLICIT_ANALYTICS_OR_RISK: The trader explicitly asked for stats, numbers, risk math, or trade analysis. Provide exact, verified figures."
+          : "CONVERSATIONAL_MENTOR_NO_STATS: The trader did NOT ask for stats or numbers. Do NOT output trade counts, win rates, median stops, P&L, drawdown numbers, or contract ceilings! Converse naturally like a thoughtful mentor, acknowledge what they shared, ask one natural follow-up question to learn more about their plan/style, and call `save_trader_insight` if they shared a preference or habit.",
     ...(isGreeting
       ? {
           greetingTurn: {
@@ -137,6 +175,7 @@ export async function buildBrief(opts: {
           },
         }
       : {}),
+    ...(economicNews ? { economicNews } : {}),
     trader: db.traderName,
     scope: db.primaryChallenge ? { challenge: db.primaryChallenge.name } : { challenge: "all trades" },
     account: k.accountOverview,
