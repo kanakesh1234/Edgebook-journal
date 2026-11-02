@@ -208,9 +208,9 @@ async function oneAttempt(o: CompletionOptions, model: string, useReasoning: boo
     if (o.signal.aborted) return { ...out, kind: "aborted" };
     o.signal.addEventListener("abort", onAbort, { once: true });
   }
-  const overall = Math.min(o.perCallMs ?? 120_000, remainingMs);
+  const overall = Math.min(o.perCallMs ?? 28_000, remainingMs);
   const overallTimer = setTimeout(() => { timedOut = true; ctl.abort(); }, overall);
-  arm(Math.min(o.firstByteMs ?? 30_000, overall));
+  arm(Math.min(o.firstByteMs ?? 18_000, overall));
 
   const streaming = o.stream !== false;
   try {

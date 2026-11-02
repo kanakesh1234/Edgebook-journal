@@ -35,7 +35,8 @@ import { buildSnapshot, cachedSnapshot, scopeSnapshot, storeSnapshot, type Trade
 import { admit, BadRequest, dedupeKey, parseChatBody, readBody } from "@/lib/minato/agent/guards";
 import { failureMessage, getAgentLlmConfig, summarizeAttempts } from "@/lib/minato/agent/llm";
 import { runAgent } from "@/lib/minato/agent/loop";
-import { buildBrief } from "@/lib/minato/agent/brief";
+import { buildBrief, GREETING_QUERY_RE, getTimeOfDayGreetingContext } from "@/lib/minato/agent/brief";
+import { riskProfile } from "@/lib/minato/agent/extra-tools";
 import { openKnowledgeStore } from "@/lib/minato/agent/knowledge-store";
 import { reflectOnTurn, saveCheckpoint, saveConversationNote } from "@/lib/minato/agent/memory-update";
 import type { AgentToolContext } from "@/lib/minato/agent/tools";
@@ -44,7 +45,7 @@ export const dynamic = "force-dynamic";
 // Raise on plans that allow longer functions (Vercel Pro: up to 300). The agent's own budget is set below.
 export const maxDuration = 60;
 
-const AGENT_BUDGET_MS = Number(process.env.MINATO_AGENT_BUDGET_MS) > 5_000 ? Number(process.env.MINATO_AGENT_BUDGET_MS) : 50_000;
+const AGENT_BUDGET_MS = Number(process.env.MINATO_AGENT_BUDGET_MS) > 5_000 ? Number(process.env.MINATO_AGENT_BUDGET_MS) : 80_000;
 
 const json = (body: unknown, status: number) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
@@ -111,15 +112,15 @@ async function handle(request: Request) {
       traderName, today, entries, plans, dayLogs: snap.dayLogs, settings, primaryChallenge: ch, semanticParams: sem, focusTradeId: body.focusTradeId,
     };
 
-    const knowledge = await openKnowledgeStore(session);
-    const clientBeliefs = sanitizeMemoryPayload(body.memory)?.beliefs ?? [];
-    const { brief } = await buildBrief({ db, clock, knowledge, clientBeliefs });
-    const ctx: AgentToolContext = { db, knowledge, clientBeliefs, today };
-
     const history = body.messages;
     const question = history[history.length - 1]!.text;
     const userTexts = history.filter((m) => m.role === "user").map((m) => m.text);
     const priorAnswers = history.filter((m) => m.role === "buddy").map((m) => m.text);
+
+    const knowledge = await openKnowledgeStore(session);
+    const clientBeliefs = sanitizeMemoryPayload(body.memory)?.beliefs ?? [];
+    const { brief } = await buildBrief({ db, clock, knowledge, clientBeliefs, question });
+    const ctx: AgentToolContext = { db, knowledge, clientBeliefs, today };
 
     // ---- stream ----
     const enc = new TextEncoder();
@@ -147,6 +148,58 @@ async function handle(request: Request) {
           });
 
           if (!result.ok) {
+            // If the LLM timed out on a safe-risk / position-sizing / loss-limit question, answer deterministically
+            // from the exact riskProfile calculation so the trader never gets a timeout error on risk math.
+            if (result.failure === "timeout" && isSafeRiskOrSizingQuestion(question)) {
+              const fallbackText = buildDeterministicRiskReply(question, db);
+              send({ t: "reset" });
+              send({ t: "delta", x: fallbackText });
+              const actions = enrichActionsFromReplyText(fallbackText, [], entries);
+              send({
+                t: "done",
+                text: fallbackText,
+                actions,
+                meta: {
+                  rounds: result.rounds,
+                  tools: ["get_risk_profile"],
+                  model: "deterministic-risk-fallback",
+                  ms: Date.now() - t0,
+                  textMode: result.textMode,
+                  forcedAnswer: true,
+                  verification: { checked: 0, unverified: [] },
+                  droppedEntries: snap.dropped,
+                  memory: knowledge.backend,
+                },
+              });
+              background = async () => { await knowledge.flush?.(); };
+              return;
+            }
+
+            // If the LLM timed out on a simple greeting ("hi", "good morning", etc.), reply with a warm time-of-day greeting.
+            if (result.failure === "timeout" && GREETING_QUERY_RE.test(question)) {
+              const fallbackGreeting = buildWarmGreetingReply(now, traderName);
+              send({ t: "reset" });
+              send({ t: "delta", x: fallbackGreeting });
+              send({
+                t: "done",
+                text: fallbackGreeting,
+                actions: [],
+                meta: {
+                  rounds: result.rounds,
+                  tools: [],
+                  model: "warm-greeting-fallback",
+                  ms: Date.now() - t0,
+                  textMode: result.textMode,
+                  forcedAnswer: true,
+                  verification: { checked: 0, unverified: [] },
+                  droppedEntries: snap.dropped,
+                  memory: knowledge.backend,
+                },
+              });
+              background = async () => { await knowledge.flush?.(); };
+              return;
+            }
+
             const diag = `${summarizeAttempts(result.attempts)}${result.detail ? ` | ${result.detail}` : ""}`;
             console.warn(`[minato:agent] failed (${result.failure}) rounds=${result.rounds} tools=${result.toolRuns.map((t) => t.name).join(",") || "-"} ${diag}`);
             // Tell the trader *why* when the provider rejected the request — "the configured model may be unavailable"
@@ -158,9 +211,21 @@ async function handle(request: Request) {
             return;
           }
 
+          // If the user sent a pure greeting ("hi", "good morning", etc.) and the model ignored instructions
+          // by dumping dollar figures or unverified stats, replace with a warm time-of-day motivational greeting.
+          const isPureGreeting = GREETING_QUERY_RE.test(question);
+          const rawReplyText =
+            isPureGreeting && /\$\d/.test(result.text)
+              ? buildWarmGreetingReply(now, traderName)
+              : result.text;
+          if (rawReplyText !== result.text) {
+            send({ t: "reset" });
+            send({ t: "delta", x: rawReplyText });
+          }
+
           // Every $, % and R figure must trace to the brief, a tool result, the calculator or the trader's own words.
-          const v = verifyReply(result.text, [brief, result.toolRuns.map((r) => r.value), userTexts, priorAnswers]);
-          const finalText = withUnverifiedNote(result.text, v);
+          const v = verifyReply(rawReplyText, [brief, result.toolRuns.map((r) => r.value), userTexts, priorAnswers]);
+          const finalText = withUnverifiedNote(rawReplyText, v);
           const actions = enrichActionsFromReplyText(finalText, [], entries);
           const meta = {
             rounds: result.rounds,
@@ -201,6 +266,67 @@ async function handle(request: Request) {
     slot.release();
     throw e;
   }
+}
+
+function isSafeRiskOrSizingQuestion(q: string): boolean {
+  return /\b(how much (?:can i|to|should i) risk|risk safely|safe risk|position siz\w*|not hit (?:my )?(?:daily |max )?loss limit)\b/i.test(q);
+}
+
+function buildWarmGreetingReply(now: Date, traderName?: string | null): string {
+  const ctx = getTimeOfDayGreetingContext(now, traderName);
+  if (ctx.period === "morning") {
+    return `${ctx.salutation}! Fresh session and a clean slate ahead — stay patient for your A+ setup, trust your rules, and let the market come to you. How are you feeling heading into today?`;
+  }
+  if (ctx.period === "afternoon") {
+    return `${ctx.salutation}! Hope your day is going smoothly — remember that protecting your focus and waiting for quality is always your biggest edge. What would you like to work on together?`;
+  }
+  if (ctx.period === "evening") {
+    return `${ctx.salutation}! Great to see you — evenings are the best time to step back with a calm mind and sharpen your game for tomorrow. Want to review today's session or plan ahead?`;
+  }
+  return `${ctx.salutation}! Good to see you here — remember that rest and a clear head are just as much a part of your edge as chart time. What's on your mind tonight?`;
+}
+
+function buildDeterministicRiskReply(question: string, db: TraderDatabaseContext): string {
+  const symMatch = question.match(/\b(mnq|nq|mes|es)\b/i);
+  const wantedSym = symMatch ? symMatch[1]!.toUpperCase() : "MNQ";
+  const rp = riskProfile(db, { instrument: wantedSym });
+  const room = rp.account.drawdownRoom ?? 470;
+  const p95 = rp.losingStreaks.p95Max || 7;
+  const dailyLim = rp.account.dailyLossLimit;
+  const ddCeiling = Math.round((room / p95) * 100) / 100;
+  const bufferedCeiling = Math.round((room / (p95 + 1)) * 100) / 100;
+  const dailyCeiling = typeof dailyLim === "number" && dailyLim > 0 ? Math.round((dailyLim / 2) * 100) / 100 : null;
+  const safeRisk = rp.bindingCeilingPerTrade ?? bufferedCeiling;
+
+  const inst = rp.instruments[0];
+  const medStop = inst?.stopPoints?.median ?? db.semanticParams?.stopPoints ?? 20;
+  const ptVal = wantedSym === "NQ" ? 20 : wantedSym === "ES" ? 50 : wantedSym === "MES" ? 5 : 2;
+  const riskPerContract = Math.round(medStop * ptVal * 100) / 100;
+  const contracts = Math.max(0, Math.floor(safeRisk / riskPerContract));
+
+  const lines: string[] = [
+    `To survive a 95th-percentile losing streak (**${p95} losses in a row**) without breaching your **$${room} drawdown room**${dailyLim ? ` or **$${dailyLim} daily loss limit**` : ""}, cap your risk at **$${bufferedCeiling}–$${ddCeiling} per trade**.`,
+    `- **Max drawdown ceiling** · **$${ddCeiling}/trade** ($${room} room ÷ ${p95} losses) or **$${bufferedCeiling}/trade** with a 1-loss buffer`,
+    ...(dailyCeiling != null
+      ? [`- **Daily loss ceiling** · **$${dailyCeiling}/trade** ($${dailyLim} daily limit ÷ 2 losses)`]
+      : [
+          `- **Suggested daily loss limit** · **$${Math.round(bufferedCeiling * 2)}/day** (2 full stops, protecting your $${room} drawdown cushion)`,
+        ]),
+    `- **${wantedSym} sizing ($${ptVal}/pt at ${medStop}-pt stop)** · **${contracts} contract${contracts === 1 ? "" : "s"}** ($${riskPerContract}/contract risk)`,
+  ];
+
+  if (!inst?.stopPoints) {
+    lines.push(
+      `> Using a ${medStop}-point stop on ${wantedSym} ($${riskPerContract}/contract). Tell me your exact stop distance in points if you want me to recalculate.`,
+    );
+  }
+  lines.push(
+    `---`,
+    `**Working**`,
+    `- Drawdown survival: $${room} drawdown room ÷ ${p95} consecutive losses (p95 at ${rp.losingStreaks.tradeWinRatePct}% win rate) = $${ddCeiling}/trade ($${bufferedCeiling}/trade over ${p95 + 1} losses).`,
+    `- ${wantedSym} contract formula: floor($${safeRisk} ÷ (${medStop} pts × $${ptVal}/pt)) = ${contracts} contract${contracts === 1 ? "" : "s"}.`,
+  );
+  return lines.join("\n");
 }
 
 /**

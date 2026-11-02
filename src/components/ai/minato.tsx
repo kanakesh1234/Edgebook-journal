@@ -882,10 +882,37 @@ export function Minato() {
     ];
   }, [focusEntry, entries]);
 
-  const greeting = useMemo(() => {
+  const { greeting, motivationalLine } = useMemo(() => {
     const h = new Date().getHours();
-    const part = h < 5 ? "Hi" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
-    return firstName && firstName !== "Trader" ? `${part}, ${firstName}.` : `${part}.`;
+    const hasName = Boolean(firstName && firstName !== "Trader");
+    if (h < 5) {
+      return {
+        greeting: hasName ? `Hey, ${firstName}.` : "Hey there.",
+        motivationalLine: "Quiet hours build sharp edges. Take your time, protect your headspace, and let's prepare with a calm mind.",
+      };
+    }
+    if (h < 12) {
+      return {
+        greeting: hasName ? `Good morning, ${firstName}.` : "Good morning.",
+        motivationalLine: "Fresh session, clean slate. Wait patiently for your A+ setup, trust your rules, and let the market come to you.",
+      };
+    }
+    if (h < 17) {
+      return {
+        greeting: hasName ? `Good afternoon, ${firstName}.` : "Good afternoon.",
+        motivationalLine: "Stay composed and protect your focus. One disciplined, well-planned decision beats forcing five trades.",
+      };
+    }
+    if (h < 21) {
+      return {
+        greeting: hasName ? `Good evening, ${firstName}.` : "Good evening.",
+        motivationalLine: "Great time to unwind and review with a clear head. Every honest note makes tomorrow's execution sharper.",
+      };
+    }
+    return {
+      greeting: hasName ? `Good evening, ${firstName}.` : "Good evening.",
+      motivationalLine: "Rest is part of your edge too. Let's wrap up cleanly so you show up sharp and focused tomorrow.",
+    };
   }, [firstName, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const learned = useMemo(
@@ -1091,11 +1118,8 @@ export function Minato() {
                   <p className="font-display text-[28px] font-semibold leading-[1.12] tracking-[-0.03em] text-ink">
                     {greeting}
                   </p>
-                  <p className="mt-2.5 line-clamp-2 max-w-[46ch] text-[15px] leading-[1.5] text-muted">
-                    {nudge ??
-                      (entries.length === 0
-                        ? "Log your first trade and I’ll start learning how you trade."
-                        : "What are we working on?")}
+                  <p className="mt-2.5 max-w-[46ch] text-[15px] leading-[1.55] text-muted">
+                    {motivationalLine}
                   </p>
                 </motion.div>
               )}

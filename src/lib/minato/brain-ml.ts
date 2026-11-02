@@ -83,12 +83,15 @@ function topics(texts: string[], n = 5): string[] {
 /* ============================ 1. commitments ============================ */
 
 const INTENT = /\b(i (?:will|'ll|am going to|'m going to|won'?t|will not|promise|must|need to|plan to|commit to|have to)|from now on|no more|never again|my rule is|today i (?:will|won'?t))\b/i;
+// Prevent questions without a '?' (e.g. "for mnq how much I can risk safely so that I will not hit my loss limit") from being misclassified as commitments.
+const QUESTION_OR_SUBORDINATE_CLAUSE =
+  /\b(how much|how many|what|why|when|where|which|who|can i|should i|could i|would i|do i|am i|so that i|in order to|if i)\b/i;
 
 export function extractCommitments(text: string): { text: string; rule?: CommitmentRule }[] {
   const out: { text: string; rule?: CommitmentRule }[] = [];
   for (const raw of text.split(/(?<=[.!?\n])\s+/)) {
     const s = raw.trim();
-    if (s.length < 10 || s.length > 160 || s.endsWith("?") || !INTENT.test(s)) continue;
+    if (s.length < 10 || s.length > 160 || s.endsWith("?") || QUESTION_OR_SUBORDINATE_CLAUSE.test(s) || !INTENT.test(s)) continue;
     let rule: CommitmentRule | undefined;
     const max = s.match(/\b(?:max(?:imum)?|only|no more than|more than|limit(?:ed)?(?: to)?|stop after|at most)\D{0,14}(\d)\s*(?:trades?|setups?|positions?)\b/i);
     if (max) rule = { kind: "maxTrades", n: Number(max[1]) };

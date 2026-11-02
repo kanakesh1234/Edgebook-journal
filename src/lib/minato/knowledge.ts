@@ -16,7 +16,7 @@ import { defaultSettings } from "@/lib/types";
 import { computeStats } from "@/lib/stats";
 import { evaluateRules, adherenceSummary } from "@/lib/rules";
 import { mistakeIndex } from "@/lib/mistakes";
-import { newestFirst, setupBreakdown, aPlusSummary, verdictOf } from "./setup-analytics";
+import { newestFirst, setupBreakdown, aPlusSummary } from "./setup-analytics";
 import type { UserSemanticParams } from "./extract";
 import type { MemoryStore } from "./memory";
 
@@ -37,6 +37,8 @@ export interface TraderKnowledgeSnapshot {
     startingEquity: number;
     currentEquity: number;
     targetEquity: number;
+    remainingToTarget: number;
+    targetProgressPct: number;
     totalPnl: number;
     tradingDays: number;
     winRateDayPct: number;
@@ -216,6 +218,8 @@ export function buildContinuousKnowledgeSnapshot(opts: {
       startingEquity: settings.startingEquity,
       currentEquity: Math.round(stats.currentEquity),
       targetEquity: settings.targetEquity,
+      remainingToTarget: Math.round(stats.remainingToTarget),
+      targetProgressPct: Math.round(stats.targetProgress * 100),
       totalPnl: Math.round(stats.totalPnl),
       tradingDays: stats.tradingDays,
       winRateDayPct: Math.round(stats.winRate * 100),
