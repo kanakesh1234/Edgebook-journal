@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { computeScrollProgress, prefersReducedMotion } from "./motion-utils";
+import { computeScrollProgress, lerp, prefersReducedMotion } from "./motion-utils";
 import { Eyebrow } from "./ledger";
 
 /* ---------------------------- mini interfaces ---------------------------- */
@@ -125,6 +125,7 @@ export function Toolkit() {
   const stage = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLElement | null)[]>([]);
 
   useEffect(() => {
     if (prefersReducedMotion()) return;
@@ -135,6 +136,7 @@ export function Toolkit() {
     let dist = 0;
     let enabled = false;
     let rafId = 0;
+    let lastP = 0;
 
     const measure = () => {
       enabled = window.innerWidth >= 1024 && !prefersReducedMotion();
@@ -142,6 +144,9 @@ export function Toolkit() {
         s.style.height = "";
         t.style.transform = "";
         if (bar.current) bar.current.style.transform = "";
+        cardRefs.current.forEach((c) => {
+          if (c) c.style.transform = "";
+        });
         return;
       }
       t.style.transform = "none";
@@ -153,8 +158,20 @@ export function Toolkit() {
     const render = () => {
       if (!enabled) return;
       const p = computeScrollProgress(s, { pinned: true });
+      const vel = p - lastP;
+      lastP = p;
       t.style.transform = `translate3d(${-p * dist}px, 0, 0)`;
       if (bar.current) bar.current.style.transform = `scaleX(${p})`;
+
+      // Subtle 3D perspective tilt on each card as it glides through the center of the viewport
+      const tiltY = Math.max(-7, Math.min(7, vel * -220));
+      cardRefs.current.forEach((c, idx) => {
+        if (!c) return;
+        const cardCenter = idx / Math.max(1, CARDS.length - 1);
+        const distFromFocus = Math.abs(p - cardCenter);
+        const lift = lerp(1.02, 0.96, Math.min(1, distFromFocus * 2.2));
+        c.style.transform = `perspective(1400px) rotateY(${tiltY.toFixed(2)}deg) scale(${lift.toFixed(3)})`;
+      });
     };
 
     const onScroll = () => {
@@ -179,7 +196,7 @@ export function Toolkit() {
     <section id="toolkit" ref={sec} className="relative" aria-label="Everything around the journal">
       <div ref={stage} className="lp-toolkit-stage py-20 sm:py-28 lg:py-0">
         <div className="mx-auto w-full max-w-[1200px] px-5 sm:px-8">
-          <div className="mb-5"><Eyebrow n="07">The toolkit</Eyebrow></div>
+          <div className="mb-5"><Eyebrow n="07">The toolkit · 3D Horizontal Reel</Eyebrow></div>
           <h2 className="max-w-3xl font-display text-[clamp(2rem,5vw,3.8rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-ink">
             Everything around the journal.
           </h2>
@@ -189,14 +206,20 @@ export function Toolkit() {
         </div>
 
         <div className="mt-10 lg:mt-12 lg:pl-[max(2rem,calc((100vw-1200px)/2+2rem))]">
-          <div ref={track} className="lp-toolkit-track flex gap-4 sm:gap-5">
-            {CARDS.map(({ title, body, Mini }) => (
+          <div ref={track} className="lp-toolkit-track flex gap-5 sm:gap-6">
+            {CARDS.map(({ title, body, Mini }, idx) => (
               <article
                 key={title}
-                className="lp-toolkit-card lp-sq flex h-[430px] w-[300px] shrink-0 flex-col justify-between rounded-[30px] border border-line bg-surface p-6 sm:w-[340px] lg:h-[460px] lg:w-[370px]"
+                ref={(el) => {
+                  cardRefs.current[idx] = el;
+                }}
+                className="lp-toolkit-card lp-sq flex h-[430px] w-[300px] shrink-0 flex-col justify-between rounded-[30px] border border-line-strong/80 bg-surface p-6 shadow-[0_32px_70px_-30px_rgba(0,0,0,0.35)] transition-transform duration-200 ease-out will-change-transform sm:w-[340px] lg:h-[460px] lg:w-[370px]"
               >
                 <div>
-                  <h3 className="font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">{title}</h3>
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-gold">
+                    0{idx + 1} / 06
+                  </span>
+                  <h3 className="mt-1.5 font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">{title}</h3>
                   <p className="mt-2 text-[14.5px] leading-relaxed text-muted">{body}</p>
                 </div>
                 <div className="relative min-h-[190px]">
