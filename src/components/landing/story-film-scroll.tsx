@@ -1,1276 +1,909 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRightIcon } from "@/components/ui/icons";
+import { useState } from "react";
 import {
-  bindScrollProgress,
-  clamp,
-  lerp,
-  prefersReducedMotion,
-  scrollToPinnedProgress,
-  smooth,
-  updateComposureScore,
-} from "./motion-utils";
+  AwardIcon,
+  CandlestickIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  FlameIcon,
+  ShieldIcon,
+  SparklesIcon,
+} from "@/components/ui/icons";
 import { Eyebrow } from "./ledger";
+import { awardGameAction, useLandingGame } from "./game-state";
 
 /* ========================================================================== */
-/*  CHAPTER 02 — THE INNER FILM (True 100vw × 100svh Edge-to-Edge Fullscreen  */
-/*  Game Cinema + Animated Graphic-Novel Characters + Playable Decisions)     */
+/*  QUEST 02 — 09:30 NY LIVE TAPE & IMPULSE DEFENSE SIMULATOR (#film)         */
+/*  100% Edgebook Theme Tokens & Fonts (Inter Variable, Instrument Serif,     */
+/*  JetBrains Mono). Works identically in Light and Dark modes.               */
 /* ========================================================================== */
 
 export type DecisionBranch = "discipline" | "impulse";
 
-export interface FilmActSpec {
+interface CandleBar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  note?: string;
+}
+
+interface TapeRound {
   id: string;
-  actNumber: string;
-  roman: string;
+  stepNum: string;
+  timeStamp: string;
   title: string;
-  theme: string;
-  line: string;
-  italicPart: string;
-  reflection: string;
+  innerVoiceType: string;
+  innerWhisper: string;
+  marketContext: string;
   quote: string;
   quoteAuthor: string;
-  marginNote: string;
-  timeStamp: string;
-  localPlate: string;
-  accentTone: "loss" | "gold" | "profit";
-  promptQuestion: string;
+  visibleCandles: number;
+  priceLabel: string;
   disciplineChoice: {
     label: string;
+    sublabel: string;
     outcome: string;
-    delta: string;
+    rDelta: number;
+    dollarDelta: number;
+    composureDelta: number;
   };
   impulseChoice: {
     label: string;
+    sublabel: string;
     outcome: string;
-    delta: string;
+    rDelta: number;
+    dollarDelta: number;
+    composureDelta: number;
   };
 }
 
-const TOTAL_FRAMES = 600;
+const SESSION_CANDLES: CandleBar[] = [
+  { time: "09:15", open: 432, high: 438, low: 426, close: 429 },
+  { time: "09:20", open: 429, high: 434, low: 421, close: 423 },
+  { time: "09:25", open: 423, high: 428, low: 416, close: 418 },
+  // Round 1: 09:29 Fakeout green spike before sweep
+  { time: "09:29", open: 418, high: 444, low: 417, close: 439, note: "FOMO Wick" },
+  // Round 2: 09:35 Sweep of overnight low (414) + crisp 5m reclaim (428)
+  { time: "09:32", open: 439, high: 440, low: 408, close: 412, note: "Low Sweep" },
+  { time: "09:35", open: 412, high: 431, low: 410, close: 428, note: "5m Reclaim" },
+  // Round 3: 09:39 First leg up + scary red pullback shakeout candle
+  { time: "09:37", open: 428, high: 448, low: 426, close: 445 },
+  { time: "09:39", open: 445, high: 446, low: 429, close: 432, note: "Shakeout" },
+  // Round 4: 09:46 Clean expansion to Pre-Market High Target (476)
+  { time: "09:42", open: 432, high: 460, low: 431, close: 458 },
+  { time: "09:46", open: 458, high: 478, low: 455, close: 475, note: "+2.8R Target" },
+  // Round 5: 09:52 Post-target Friday chop
+  { time: "09:50", open: 475, high: 479, low: 461, close: 464 },
+  { time: "09:52", open: 464, high: 471, low: 456, close: 462, note: "Friday Chop" },
+];
 
-const FILM_ACTS: FilmActSpec[] = [
+const TAPE_ROUNDS: TapeRound[] = [
   {
-    id: "act-1-noise",
-    actNumber: "01",
-    roman: "ACT I",
-    title: "THE NOISE",
-    theme: "Before discipline, there is chaos.",
-    line: "Every morning begins with",
-    italicPart: "a thousand possibilities.",
-    reflection:
-      "The room is still dark. Rain traces the glass while the world outside wakes in a blur of opinions, urgency, and unfinished thoughts. Without a written boundary, every flicker of movement feels like an invitation.",
-    quote: "All of humanity's problems stem from man's inability to sit quietly in a room alone.",
-    quoteAuthor: "Blaise Pascal",
-    marginNote: "08:14 AM · Pre-session tension · Unwritten mind",
-    timeStamp: "00:00:08:14",
-    localPlate: "/landing/act-1-noise.jpg",
-    accentTone: "loss",
-    promptQuestion: "08:14 AM — Pre-market noise is spiking. What is your first move?",
+    id: "r1-fomo",
+    stepNum: "01",
+    timeStamp: "09:29:45 AM NY",
+    title: "The Opening Fakeout Wick",
+    innerVoiceType: "FOMO Impulse Whisper",
+    innerWhisper:
+      "“Look at that green candle ripping before the bell! Everyone is getting long without you—click Market Buy right now!”",
+    marketContext:
+      "Price spikes upward 15 seconds before the open, but the overnight low (18,414) has NOT been swept yet. Your written plan requires a sweep + 5m close.",
+    quote: "The hardest trade is the one you choose not to take.",
+    quoteAuthor: "Edgebook Field Manual",
+    visibleCandles: 4,
+    priceLabel: "18,439.00",
     disciplineChoice: {
-      label: "Close external feeds & open blank plan",
-      outcome: "External noise muted. Mind anchored to a single session thesis.",
-      delta: "+12% Composure",
+      label: "Hands off mouse · Wait for overnight sweep",
+      sublabel: "Honour Gate 01 Thesis · Zero FOMO entry",
+      outcome:
+        "Restraint held! Sixty seconds later, the opening fakeout collapses 31 points to sweep the overnight low—trapping early chasers.",
+      rDelta: 0,
+      dollarDelta: 0,
+      composureDelta: 6,
     },
     impulseChoice: {
-      label: "Scan 10 tickers for early breakouts",
-      outcome: "Attention fragmented across random moves before the bell.",
-      delta: "−18% Composure",
+      label: "Click Market Buy to chase the green candle",
+      sublabel: "Break written plan · Unconfirmed entry",
+      outcome:
+        "Trapped at the very top of the opening wick! Price reverses immediately through your stop for an unscheduled −1.0R loss.",
+      rDelta: -1.0,
+      dollarDelta: -1000,
+      composureDelta: -14,
     },
   },
   {
-    id: "act-2-stillness",
-    actNumber: "02",
-    roman: "ACT II",
-    title: "THE STILLNESS",
-    theme: "The decision to become intentional.",
-    line: "Before you enter the market,",
-    italicPart: "enter yourself.",
-    reflection:
-      "Morning light cuts quietly across warm paper. Pen meets page. The moment you write down the single condition you are willing to wait for—and the exact state of your head—the noise outside loses its vote.",
-    quote: "Write your intention in calm so volatility cannot rewrite it in panic.",
+    id: "r2-reclaim",
+    stepNum: "02",
+    timeStamp: "09:35:00 AM NY",
+    title: "The Overnight Sweep & 5m Reclaim",
+    innerVoiceType: "Execution Moment",
+    innerWhisper:
+      "“The overnight low just swept at 18,408 and closed back inside range at 18,428. Your exact A+ setup is on the screen.”",
+    marketContext:
+      "All 4 playbook conditions are met: liquidity swept, 5-minute candle closed back inside range, and structural invalidation sits 2 ticks below the wick.",
+    quote: "When your condition appears, act without hesitation and without greed.",
+    quoteAuthor: "Edgebook Execution Protocol",
+    visibleCandles: 6,
+    priceLabel: "18,428.00",
+    disciplineChoice: {
+      label: "Execute Planned Long · Fixed 1.0R Risk",
+      sublabel: "Entry 18,428 · Hard Stop 18,406 · Target 18,475",
+      outcome:
+        "Clean execution! Risk is capped at 1.0R ($1,000) with a +2.8R ($2,800) structural target at the pre-market high.",
+      rDelta: 0.5,
+      dollarDelta: 500,
+      composureDelta: 6,
+    },
+    impulseChoice: {
+      label: "Triple size to 3.0R to make a huge week",
+      sublabel: "Violate drawdown survival envelope",
+      outcome:
+        "Over-leveraged! Because your size is 3× too large, every normal 3-tick pullback causes your heart rate to spike in panic.",
+      rDelta: -0.5,
+      dollarDelta: -500,
+      composureDelta: -16,
+    },
+  },
+  {
+    id: "r3-pullback",
+    stepNum: "03",
+    timeStamp: "09:39:15 AM NY",
+    title: "The In-Trade Shakeout Candle",
+    innerVoiceType: "Fear of Giveback Whisper",
+    innerWhisper:
+      "“You were up +$900 and now a red 1-minute candle just printed! Drag your stop to breakeven right now so you don't lose a penny!”",
+    marketContext:
+      "Price pulls back to retest the 18,430 breakout shelf. Your structural 5-minute thesis is completely intact, and dollar P&L is hidden.",
+    quote: "Count in R, never in dollars, while the decision is still alive.",
+    quoteAuthor: "Minato Pattern Engine",
+    visibleCandles: 8,
+    priceLabel: "18,432.00",
+    disciplineChoice: {
+      label: "Keep original stop · Let 5m structure breathe",
+      sublabel: "R-Multiple Mode Active · Zero interference",
+      outcome:
+        "Patience rewarded! The 18,430 retest holds to the tick and buyers step in aggressively for the main expansion leg.",
+      rDelta: 1.1,
+      dollarDelta: 1100,
+      composureDelta: 8,
+    },
+    impulseChoice: {
+      label: "Choke stop to breakeven out of fear",
+      sublabel: "React to 1-minute noise instead of 5m plan",
+      outcome:
+        "Stopped out to the exact tick at breakeven ($0)—and then you watch helplessly as price rockets +45 points to your target without you!",
+      rDelta: -0.5,
+      dollarDelta: -500,
+      composureDelta: -15,
+    },
+  },
+  {
+    id: "r4-target",
+    stepNum: "04",
+    timeStamp: "09:46:00 AM NY",
+    title: "Pre-Market High Target Reached (+2.8R)",
+    innerVoiceType: "Greed Whisper",
+    innerWhisper:
+      "“Look at that momentum! Delete your resting take-profit limit order—this thing is going to run 200 points today!”",
+    marketContext:
+      "Price tags your exact pre-session target at 18,475 (+2.8R / +$2,800). Major opposing liquidity sits right above 18,478.",
+    quote: "Enough is a decision, not an amount.",
     quoteAuthor: "Edgebook Archival Creed",
-    marginNote: "09:05 AM · Linen ledger & fountain pen · Intention set",
-    timeStamp: "00:00:24:00",
-    localPlate: "/landing/act-2-stillness.jpg",
-    accentTone: "gold",
-    promptQuestion: "09:05 AM — You sit before the open page. How do you define today?",
+    visibleCandles: 10,
+    priceLabel: "18,475.00",
     disciplineChoice: {
-      label: "Write exact invalidation & 2-loss guardrail",
-      outcome: "Rule locked in ink: wait for overnight sweep & 5m close.",
-      delta: "+15% Composure",
+      label: "Fill planned Take-Profit at +2.8R (+$2,800)",
+      sublabel: "Honour pre-committed exit · Lock clean win",
+      outcome:
+        "Target filled at 18,475! You bank +2.8R (+$2,800) with 100% plan adherence before the upper liquidity shelf rejects price.",
+      rDelta: 1.2,
+      dollarDelta: 1200,
+      composureDelta: 8,
     },
     impulseChoice: {
-      label: "Keep the plan loosely in your head",
-      outcome: "Unwritten boundaries bend the moment volatility expands.",
-      delta: "−15% Composure",
+      label: "Cancel limit target & hold for a home run",
+      sublabel: "Move goalposts mid-trade out of greed",
+      outcome:
+        "Price rejects 18,478 and snaps back 18 points in two minutes, erasing more than half of your open gain.",
+      rDelta: -0.8,
+      dollarDelta: -800,
+      composureDelta: -12,
     },
   },
   {
-    id: "act-3-temptation",
-    actNumber: "03",
-    roman: "ACT III",
-    title: "THE TEMPTATION",
-    theme: "The emotional battle.",
-    line: "The hardest trade is the one",
-    italicPart: "you choose not to take.",
-    reflection:
-      "The clock approaches the open. Your hand hovers, pulled by the oldest reflex in trading: the fear of being left behind. Then you remember what you wrote ten minutes ago—and let your hand rest.",
-    quote: "Rule your mind or it will rule you.",
-    quoteAuthor: "Horace",
-    marginNote: "09:29:58 AM · Chiaroscuro hesitation · Restraint over impulse",
-    timeStamp: "00:00:42:18",
-    localPlate: "/landing/act-3-temptation.jpg",
-    accentTone: "gold",
-    promptQuestion: "09:29:58 AM — Price surges two seconds before your confirmation.",
+    id: "r5-friday",
+    stepNum: "05",
+    timeStamp: "09:52:00 AM NY",
+    title: "The Friday Winner Circuit Breaker",
+    innerVoiceType: "Euphoria Whisper",
+    innerWhisper:
+      "“That was so easy! You feel unstoppable—take one more quick scalp in this mid-range chop to round your day up to $4,000!”",
+    marketContext:
+      "Your personal guardrail states: 'On Fridays, stop after the first clean winner.' Minato flagged that 4 of your last 5 Friday losses followed a green opener.",
+    quote: "The hardest moment to stay disciplined is right after you win.",
+    quoteAuthor: "Minato Friday Rule",
+    visibleCandles: 12,
+    priceLabel: "18,462.00",
     disciplineChoice: {
-      label: "Hands off mouse · Wait for 5m close",
-      outcome: "False opening drive rejected. Capital and composure preserved.",
-      delta: "+20% Composure",
+      label: "Close terminal · Honour Friday Winner Rule",
+      sublabel: "Protect +2.8R morning · Log 3-minute autopsy",
+      outcome:
+        "Session complete! You walk away with +2.8R (+$2,800), 100% clean process, and your entire Friday afternoon free.",
+      rDelta: 0,
+      dollarDelta: 0,
+      composureDelta: 10,
     },
     impulseChoice: {
-      label: "Click market buy so you don't miss it",
-      outcome: "Trapped at the top of an unconfirmed opening wick.",
-      delta: "−24% Composure",
-    },
-  },
-  {
-    id: "act-4-mirror",
-    actNumber: "04",
-    roman: "ACT IV",
-    title: "THE MIRROR",
-    theme: "Learning from yourself.",
-    line: "Every decision leaves something behind.",
-    italicPart: "Learn from it.",
-    reflection:
-      "Pages accumulate across weeks and seasons. Not a spreadsheet of numbers, but an honest mirror of your own character under pressure—where every named mistake becomes a pattern you no longer have to repeat.",
-    quote: "Until you make the unconscious conscious, it will direct your life and you will call it fate.",
-    quoteAuthor: "Carl Jung",
-    marginNote: "10:45 AM · Layered autopsies & marginalia · Self-knowledge",
-    timeStamp: "00:01:02:09",
-    localPlate: "/landing/act-4-mirror.jpg",
-    accentTone: "profit",
-    promptQuestion: "10:45 AM — The trade is closed. How do you record it?",
-    disciplineChoice: {
-      label: "Complete 5-question psychological autopsy",
-      outcome: "Early-stop urge named and queued for evening Time Machine drill.",
-      delta: "+16% Composure",
-    },
-    impulseChoice: {
-      label: "Log only the dollar P&L and walk away",
-      outcome: "The hidden behavioural flaw remains unnamed for tomorrow.",
-      delta: "−14% Composure",
-    },
-  },
-  {
-    id: "act-5-quiet-edge",
-    actNumber: "05",
-    roman: "ACT V",
-    title: "THE QUIET EDGE",
-    theme: "Mastery through consistency.",
-    line: "Your edge was never in the market.",
-    italicPart: "It was in the person you became.",
-    reflection:
-      "You close the notebook. The session is over, and nothing carries over into your evening. Calm is no longer a mood you hope for—it is the natural result of a process you trust.",
-    quote: "Mastery is not a stroke of luck; it is the quiet compound interest of kept promises.",
-    quoteAuthor: "Edgebook Epilogue",
-    marginNote: "SESSION CLOSED · Sovereign process · Edgebook",
-    timeStamp: "00:01:20:00",
-    localPlate: "/landing/act-5-quiet-edge.jpg",
-    accentTone: "profit",
-    promptQuestion: "SESSION CLOSED — Your daily 20-card review feed is complete.",
-    disciplineChoice: {
-      label: "Close the ledger & step away in calm",
-      outcome: "Zero carryover stress. Process sovereignty achieved.",
-      delta: "Sovereign State",
-    },
-    impulseChoice: {
-      label: "Keep staring at after-hours ticks",
-      outcome: "Mental fatigue bleeds into tomorrow's preparation.",
-      delta: "Fatigue Risk",
+      label: "Force a second trade in mid-range chop",
+      sublabel: "Overtrade out of post-win euphoria",
+      outcome:
+        "Classic Friday giveback! You get chopped up twice in the mid-range and hand back −1.6R of your hard-earned morning profit.",
+      rDelta: -1.6,
+      dollarDelta: -1600,
+      composureDelta: -18,
     },
   },
 ];
 
-function formatTimecode(progress: number): string {
-  const totalSec = progress * 80;
-  const mins = Math.floor(totalSec / 60);
-  const secs = Math.floor(totalSec % 60);
-  const frames = Math.floor((totalSec % 1) * 24);
-  return `00:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
-}
-
-/* ========================================================================== */
-/*  60fps Full-Screen Widescreen Graphic-Novel & Cinema Renderer              */
-/* ========================================================================== */
-
-function drawTheatreFrame(opts: {
-  ctx: CanvasRenderingContext2D;
-  W: number;
-  H: number;
-  p: number;
-  velocity: number;
-  pointerX: number;
-  pointerY: number;
-  time: number;
-  plates: (HTMLImageElement | null)[];
-  branches: Record<number, DecisionBranch>;
-}) {
-  const { ctx, W, H, p, velocity, pointerX, pointerY, time, plates, branches } = opts;
-  const scaled = clamp(p, 0, 0.9999) * FILM_ACTS.length;
-  const actIdx = Math.min(FILM_ACTS.length - 1, Math.floor(scaled));
-  const localP = clamp(scaled - actIdx, 0, 1);
-  const absVel = Math.min(1, Math.abs(velocity) * 16);
-
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "#120f0b";
-  ctx.fillRect(0, 0, W, H);
-
-  const renderActScene = (idx: number, prog: number, alpha: number) => {
-    if (alpha <= 0.005) return;
-    const branch = branches[idx] ?? "discipline";
-    const isImpulse = branch === "impulse";
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    // 1. 3D Camera Dolly & Pointer Parallax on Base Photographic Plate
-    const camScale = lerp(1.02, 1.18, smooth(prog)) + absVel * 0.015;
-    const camPanX = lerp(idx % 2 === 0 ? -28 : 28, 0, smooth(prog)) + pointerX * -20;
-    const camPanY = lerp(16, -16, smooth(prog)) + pointerY * -12;
-
-    const img = plates[idx];
-    if (img && img.complete && img.naturalWidth > 0) {
-      ctx.save();
-      ctx.translate(W * 0.5 + camPanX, H * 0.5 + camPanY);
-      ctx.scale(camScale, camScale);
-      const coverScale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-      const dw = img.naturalWidth * coverScale;
-      const dh = img.naturalHeight * coverScale;
-      ctx.drawImage(img, -dw * 0.5, -dh * 0.5, dw, dh);
-      ctx.restore();
-    }
-
-    // 2. Act-Specific Graphic-Novel Cartoon & Spatial Choreography
-    if (idx === 0) {
-      // ACT I: THE NOISE — Graphic-Novel Trader Silhouette at Rain-Streaked Window
-      const dollyZoom = lerp(1.0, 1.28, smooth(prog));
-      const bokehCount = isImpulse ? 52 : 34;
-
-      for (let i = 0; i < bokehCount; i++) {
-        const seed1 = Math.sin(i * 19.7) * 0.5 + 0.5;
-        const seed2 = Math.cos(i * 31.3) * 0.5 + 0.5;
-        const depth = 0.4 + (i % 4) * 0.25;
-        const bx =
-          W * (0.24 + seed1 * 0.62) +
-          Math.sin(prog * 5 + time * (isImpulse ? 1.1 : 0.35) + i) * 30 * depth +
-          pointerX * -24 * depth;
-        const by =
-          H * (0.14 + seed2 * 0.6) +
-          (prog - 0.5) * -90 * depth +
-          pointerY * -16 * depth;
-        const rad = (14 + (i % 6) * 13) * dollyZoom;
-
-        const colors = isImpulse
-          ? ["218, 98, 88", "238, 158, 86", "205, 132, 132", "246, 200, 160"]
-          : ["238, 178, 96", "118, 168, 212", "218, 108, 88", "246, 222, 178"];
-        const c = colors[i % 4]!;
-        const g = ctx.createRadialGradient(bx, by, 0, bx, by, rad);
-        g.addColorStop(0, `rgba(${c}, ${isImpulse ? 0.3 : 0.22})`);
-        g.addColorStop(0.65, `rgba(${c}, 0.08)`);
-        g.addColorStop(1, `rgba(${c}, 0)`);
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(bx, by, rad, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Graphic-novel silhouette of the contemplative trader standing by the rain window
-      ctx.save();
-      const figX = W * 0.32 + pointerX * -14;
-      const figY = H * 0.56 + pointerY * -8;
-      ctx.fillStyle = "rgba(14, 11, 8, 0.88)";
-      ctx.strokeStyle = isImpulse ? "rgba(205, 132, 132, 0.55)" : "rgba(223, 190, 130, 0.55)";
-      ctx.lineWidth = 2;
-      // Head & shoulders silhouette
-      ctx.beginPath();
-      ctx.arc(figX, figY - 74, 24, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.roundRect(figX - 52, figY - 44, 104, 130, [28, 28, 8, 8]);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-
-      // Rain rivulets
-      ctx.save();
-      for (let i = 0; i < 85; i++) {
-        const rx = ((i * 79.3) % W) + pointerX * -10;
-        const scrollFall = prog * H * (0.95 + (i % 5) * 0.35);
-        const ambientFall = time * (isImpulse ? 64 : 28);
-        const ry = ((i * 113.7 + scrollFall + ambientFall) % (H + 150)) - 75;
-        const streakLen = (30 + (i % 6) * 22) * (1 + absVel * 0.7);
-
-        const sg = ctx.createLinearGradient(rx, ry, rx - 2.5, ry + streakLen);
-        sg.addColorStop(0, "rgba(225, 238, 250, 0)");
-        sg.addColorStop(0.5, "rgba(228, 240, 255, 0.26)");
-        sg.addColorStop(1, "rgba(255, 244, 218, 0.44)");
-        ctx.strokeStyle = sg;
-        ctx.lineWidth = 1.2 + (i % 3) * 0.4;
-        ctx.beginPath();
-        ctx.moveTo(rx, ry);
-        ctx.lineTo(rx - 2, ry + streakLen);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // Window mullions
-      ctx.save();
-      ctx.translate(W * 0.5 + pointerX * -30, H * 0.5 + pointerY * -18);
-      ctx.scale(dollyZoom, dollyZoom);
-      const mullionW = 14;
-      ctx.fillStyle = "rgba(11, 9, 7, 0.9)";
-      ctx.fillRect(-W * 0.19, -H * 0.6, mullionW, H * 1.2);
-      ctx.fillRect(W * 0.21, -H * 0.6, mullionW, H * 1.2);
-      ctx.fillRect(-W * 0.6, H * 0.18, W * 1.2, 12);
-      ctx.fillStyle = "rgba(228, 184, 114, 0.24)";
-      ctx.fillRect(-W * 0.19 + mullionW, -H * 0.6, 2, H * 1.2);
-      ctx.fillRect(W * 0.21 + mullionW, -H * 0.6, 2, H * 1.2);
-      ctx.restore();
-    } else if (idx === 1) {
-      // ACT II: THE STILLNESS — Open linen ledger & fountain pen writing live with scroll
-      ctx.save();
-      const sheetX = W * 0.54 + pointerX * -16;
-      const sheetY = H * 0.42 + lerp(26, -12, smooth(prog)) + pointerY * -10;
-      const sheetRot = lerp(-0.065, -0.015, smooth(prog));
-      const sheetScale = lerp(0.94, 1.06, smooth(prog));
-
-      ctx.translate(sheetX, sheetY);
-      ctx.rotate(sheetRot);
-      ctx.scale(sheetScale, sheetScale);
-
-      ctx.shadowColor = "rgba(10, 7, 4, 0.68)";
-      ctx.shadowBlur = 54;
-      ctx.shadowOffsetX = -14;
-      ctx.shadowOffsetY = 26;
-
-      const jw = Math.min(580, W * 0.46);
-      const jh = Math.min(340, H * 0.48);
-      ctx.fillStyle = "#f7f4ee";
-      ctx.beginPath();
-      ctx.roundRect(-jw * 0.5, -jh * 0.5, jw, jh, 16);
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-
-      ctx.strokeStyle = "rgba(172, 81, 87, 0.32)";
-      ctx.lineWidth = 1.3;
-      ctx.beginPath();
-      ctx.moveTo(-jw * 0.5 + 52, -jh * 0.5);
-      ctx.lineTo(-jw * 0.5 + 52, jh * 0.5);
-      ctx.stroke();
-
-      ctx.strokeStyle = "rgba(110, 102, 87, 0.18)";
-      ctx.lineWidth = 1;
-      for (let y = -jh * 0.5 + 64; y < jh * 0.5 - 24; y += 32) {
-        ctx.beginPath();
-        ctx.moveTo(-jw * 0.5 + 22, y);
-        ctx.lineTo(jw * 0.5 - 22, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = isImpulse ? "#ac5157" : "#8c6d2e";
-      ctx.font = "600 11px monospace";
-      ctx.fillText(
-        isImpulse
-          ? "UNWRITTEN SESSION · NO GUARDRAILS SET"
-          : "SESSION PLAN · 09:05 AM NY · WRITTEN IN CALM",
-        -jw * 0.5 + 68,
-        -jh * 0.5 + 42,
-      );
-
-      const lines = isImpulse
-        ? [
-            "No written thesis — reacting to price ticks...",
-            "Stop level undecided — watching P&L fluctuate...",
-            "Impulse risk elevated before the opening bell.",
-          ]
-        : [
-            "If the overnight low sweeps and 5m closes inside,",
-            "I take the single planned entry with defined risk.",
-            "If the open is loud and choppy, I sit on my hands.",
-          ];
-      let penTipX = -jw * 0.5 + 68;
-      let penTipY = -jh * 0.5 + 88;
-      const writeProg = clamp(prog * 1.25, 0, 1);
-
-      ctx.font = "italic 19.5px Georgia, serif";
-      ctx.fillStyle = isImpulse ? "#8f4149" : "#26221a";
-
-      lines.forEach((lineText, row) => {
-        const rowStart = row / lines.length;
-        const rowEnd = (row + 1) / lines.length;
-        const rowLocal = clamp((writeProg - rowStart) / (rowEnd - rowStart), 0, 1);
-        if (rowLocal > 0) {
-          const chars = Math.ceil(lineText.length * rowLocal);
-          const visibleStr = lineText.slice(0, chars);
-          const ry = -jh * 0.5 + 90 + row * 64;
-          ctx.fillText(visibleStr, -jw * 0.5 + 68, ry);
-          const measured = ctx.measureText(visibleStr).width;
-          penTipX = -jw * 0.5 + 68 + measured;
-          penTipY = ry - 6;
-        }
-      });
-
-      ctx.save();
-      ctx.translate(penTipX + 8, penTipY - 4);
-      ctx.rotate(-0.52 + Math.sin(prog * 32) * 0.025);
-      ctx.shadowColor = "rgba(15, 11, 6, 0.42)";
-      ctx.shadowBlur = 16;
-      ctx.shadowOffsetY = 8;
-      ctx.fillStyle = "#d8b062";
-      ctx.beginPath();
-      ctx.moveTo(-8, 0);
-      ctx.lineTo(14, -6);
-      ctx.lineTo(14, 6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = "#1c1813";
-      ctx.beginPath();
-      ctx.roundRect(14, -8, 165, 16, 7);
-      ctx.fill();
-      ctx.fillStyle = "#cba76b";
-      ctx.fillRect(14, -8, 11, 16);
-      ctx.restore();
-      ctx.restore();
-    } else if (idx === 2) {
-      // ACT III: THE TEMPTATION — Chiaroscuro Chronograph & Pressure Tunnel Ring
-      const cx = W * 0.54 + pointerX * -16;
-      const cy = H * 0.41 + pointerY * -12;
-      const dialR = Math.min(W, H) * 0.23 * lerp(0.92, 1.08, smooth(prog));
-
-      const impulseAlpha = isImpulse ? 0.48 : 0.32 * (1 - smooth(prog));
-      const restraintAlpha = isImpulse ? 0.08 : 0.14 + 0.34 * smooth(prog);
-
-      const leftGlow = ctx.createRadialGradient(cx - dialR * 1.1, cy, 10, cx - dialR * 0.8, cy, dialR * 1.8);
-      leftGlow.addColorStop(0, `rgba(172, 81, 87, ${impulseAlpha})`);
-      leftGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = leftGlow;
-      ctx.fillRect(0, 0, W, H);
-
-      const rightGlow = ctx.createRadialGradient(cx + dialR * 0.6, cy, 10, cx, cy, dialR * 1.9);
-      rightGlow.addColorStop(0, `rgba(203, 167, 107, ${restraintAlpha})`);
-      rightGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = rightGlow;
-      ctx.fillRect(0, 0, W, H);
-
-      ctx.save();
-      ctx.translate(cx, cy);
-
-      for (let ring = 1; ring <= 2; ring++) {
-        const rr = dialR + ring * 18 + Math.sin(time * 2.5 + ring) * 3;
-        ctx.strokeStyle = isImpulse
-          ? `rgba(205, 132, 132, ${0.42 / ring})`
-          : `rgba(203, 167, 107, ${(0.3 + 0.55 * smooth(prog)) / ring})`;
-        ctx.lineWidth = ring === 1 ? 2.4 : 1.2;
-        ctx.beginPath();
-        ctx.arc(0, 0, rr, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * smooth(prog * 1.15));
-        ctx.stroke();
-      }
-
-      ctx.shadowColor = "rgba(0,0,0,0.75)";
-      ctx.shadowBlur = 56;
-      ctx.shadowOffsetY = 20;
-      ctx.fillStyle = "rgba(21, 18, 13, 0.88)";
-      ctx.beginPath();
-      ctx.arc(0, 0, dialR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-
-      ctx.strokeStyle = "rgba(203, 167, 107, 0.55)";
-      ctx.lineWidth = 2.8;
-      ctx.stroke();
-
-      for (let i = 0; i < 60; i++) {
-        const ang = (i / 60) * Math.PI * 2 - Math.PI * 0.5;
-        const isMaj = i % 5 === 0;
-        const r0 = isMaj ? dialR - 20 : dialR - 10;
-        const r1 = dialR - 4;
-        ctx.strokeStyle = isMaj ? "rgba(232, 198, 132, 0.85)" : "rgba(200, 180, 145, 0.26)";
-        ctx.lineWidth = isMaj ? 2 : 1;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(ang) * r0, Math.sin(ang) * r0);
-        ctx.lineTo(Math.cos(ang) * r1, Math.sin(ang) * r1);
-        ctx.stroke();
-      }
-
-      const secs = Math.min(60, 50 + prog * 10);
-      const secWhole = Math.floor(secs);
-      const timeStr = secWhole >= 60 ? "09 : 30 : 00  NY" : `09 : 29 : ${String(secWhole).padStart(2, "0")}  NY`;
-      ctx.fillStyle = "rgba(226, 192, 124, 0.88)";
-      ctx.font = "600 13px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(timeStr, 0, -dialR * 0.36);
-
-      ctx.font = "italic 17.5px Georgia, serif";
-      ctx.fillStyle = isImpulse
-        ? "rgba(205, 132, 132, 0.92)"
-        : prog > 0.55
-          ? "rgba(116, 176, 140, 0.92)"
-          : "rgba(240, 234, 224, 0.68)";
-      ctx.fillText(
-        isImpulse
-          ? "Impulse clicked · Unconfirmed entry"
-          : prog > 0.55
-            ? "Impulse passed · Stillness held"
-            : "Approaching the bell…",
-        0,
-        dialR * 0.44,
-      );
-
-      const hourAng = ((9 + 29.9 / 60) / 12) * Math.PI * 2 - Math.PI * 0.5;
-      ctx.save();
-      ctx.rotate(hourAng);
-      ctx.strokeStyle = "#cba76b";
-      ctx.lineWidth = 4.8;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-14, 0);
-      ctx.lineTo(dialR * 0.5, 0);
-      ctx.stroke();
-      ctx.restore();
-
-      const minAng = ((29.83 + prog * 0.17) / 60) * Math.PI * 2 - Math.PI * 0.5;
-      ctx.save();
-      ctx.rotate(minAng);
-      ctx.strokeStyle = "#f0eae0";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(-20, 0);
-      ctx.lineTo(dialR * 0.74, 0);
-      ctx.stroke();
-      ctx.restore();
-
-      const secAng = (secs / 60) * Math.PI * 2 - Math.PI * 0.5;
-      ctx.save();
-      ctx.rotate(secAng);
-      ctx.strokeStyle = isImpulse ? "#cd8484" : prog > 0.55 ? "#74b08c" : "#cd8484";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-26, 0);
-      ctx.lineTo(dialR * 0.84, 0);
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.beginPath();
-      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
-      ctx.fillStyle = "#cba76b";
-      ctx.fill();
-      ctx.restore();
-    } else if (idx === 3) {
-      // ACT IV: THE MIRROR — 3D Corridor of Floating Archival Autopsy Pages
-      const cards = [
-        {
-          date: "14 SEPT · AUTOPSY #12",
-          quote: "“Moved the stop early because I watched P&L instead of structure.”",
-          badge: "Mistake Named",
-          tone: "#ac5157",
-          baseX: -200,
-          baseY: 20,
-          baseRot: -0.11,
-        },
-        {
-          date: "03 OCT · AUTOPSY #29",
-          quote: "“Paused after one loss instead of forcing a revenge entry.”",
-          badge: "Habit Shifting",
-          tone: "#8c6d2e",
-          baseX: 0,
-          baseY: -6,
-          baseRot: -0.02,
-        },
-        {
-          date: "02 NOV · AUTOPSY #48",
-          quote: "“Waited 40 minutes for the clean 5m close. Zero interference.”",
-          badge: isImpulse ? "Autopsy Skipped" : "Pattern Retired · A+",
-          tone: isImpulse ? "#ac5157" : "#40795b",
-          baseX: 200,
-          baseY: -28,
-          baseRot: 0.06,
-        },
-      ];
-
-      cards.forEach((c, cIdx) => {
-        const reveal = smooth(clamp(prog * 1.35 - cIdx * 0.22, 0, 1));
-        const depthFactor = 0.7 + cIdx * 0.25;
-        const cx =
-          W * 0.54 +
-          c.baseX * lerp(0.55, 1.05, smooth(prog)) +
-          pointerX * -18 * depthFactor;
-        const cy =
-          H * 0.4 +
-          c.baseY +
-          (1 - reveal) * 50 +
-          pointerY * -12 * depthFactor;
-        const rot = c.baseRot * lerp(1.35, 0.75, smooth(prog));
-
-        ctx.save();
-        ctx.globalAlpha = alpha * (0.25 + 0.75 * reveal);
-        ctx.translate(cx, cy);
-        ctx.rotate(rot);
-
-        const cw = Math.min(340, W * 0.32);
-        const ch = Math.min(210, H * 0.34);
-
-        ctx.shadowColor = "rgba(8, 6, 4, 0.60)";
-        ctx.shadowBlur = 40;
-        ctx.shadowOffsetX = -10;
-        ctx.shadowOffsetY = 18;
-
-        ctx.fillStyle = cIdx === 2 ? "#fcfaf5" : "#f7f4ee";
-        ctx.beginPath();
-        ctx.roundRect(-cw * 0.5, -ch * 0.5, cw, ch, 14);
-        ctx.fill();
-        ctx.shadowColor = "transparent";
-
-        ctx.strokeStyle = "rgba(172, 81, 87, 0.26)";
-        ctx.lineWidth = 1.1;
-        ctx.beginPath();
-        ctx.moveTo(-cw * 0.5 + 34, -ch * 0.5);
-        ctx.lineTo(-cw * 0.5 + 34, ch * 0.5);
-        ctx.stroke();
-
-        ctx.fillStyle = c.tone;
-        ctx.font = "600 10.5px monospace";
-        ctx.fillText(c.date, -cw * 0.5 + 48, -ch * 0.5 + 34);
-
-        ctx.fillStyle = "#26221a";
-        ctx.font = "italic 15.5px Georgia, serif";
-        const words = c.quote.split(" ");
-        const mid = Math.ceil(words.length / 2);
-        ctx.fillText(words.slice(0, mid).join(" "), -cw * 0.5 + 48, -ch * 0.5 + 74);
-        ctx.fillText(words.slice(mid).join(" "), -cw * 0.5 + 48, -ch * 0.5 + 100);
-
-        ctx.fillStyle = c.tone;
-        ctx.font = "600 11px sans-serif";
-        ctx.fillText(`● ${c.badge}`, -cw * 0.5 + 48, ch * 0.5 - 26);
-
-        ctx.restore();
-      });
-    } else if (idx === 4) {
-      // ACT V: THE QUIET EDGE — Sunrise rises with scroll & golden lake reflections
-      const sunX = W * 0.54 + pointerX * -12;
-      const sunY = H * lerp(0.56, 0.38, smooth(prog)) + pointerY * -8;
-      const bloomR = Math.max(W, H) * lerp(0.32, 0.58, smooth(prog));
-
-      const sunGrad = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, bloomR);
-      sunGrad.addColorStop(0, `rgba(255, 248, 224, ${0.42 + 0.35 * smooth(prog)})`);
-      sunGrad.addColorStop(0.35, `rgba(203, 167, 107, ${0.22 + 0.18 * smooth(prog)})`);
-      sunGrad.addColorStop(1, "rgba(20, 16, 12, 0)");
-      ctx.fillStyle = sunGrad;
-      ctx.fillRect(0, 0, W, H);
-
-      ctx.save();
-      for (let i = 0; i < 44; i++) {
-        const tRow = i / 44;
-        const wy = H * 0.56 + Math.pow(tRow, 1.3) * (H * 0.24);
-        const waveOffset = Math.sin(prog * 14 + time * 1.4 + i * 0.9) * (16 + tRow * 32);
-        const wLen = (34 + (1 - tRow) * 125) * (0.7 + 0.3 * smooth(prog));
-        ctx.strokeStyle = `rgba(255, 232, 182, ${(1 - tRow) * 0.34})`;
-        ctx.lineWidth = 1.1 + (1 - tRow) * 1.3;
-        ctx.beginPath();
-        ctx.moveTo(sunX + waveOffset - wLen * 0.5, wy);
-        ctx.lineTo(sunX + waveOffset + wLen * 0.5, wy);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    ctx.restore();
-  };
-
-  const transitionWindow = 0.22;
-  if (actIdx < FILM_ACTS.length - 1 && localP > 1 - transitionWindow) {
-    const tBlend = smooth((localP - (1 - transitionWindow)) / transitionWindow);
-    renderActScene(actIdx, localP, 1);
-    renderActScene(actIdx + 1, 0, tBlend);
-  } else {
-    renderActScene(actIdx, localP, 1);
-  }
-
-  // Editorial readability gradient scrim
-  const scrim = ctx.createLinearGradient(0, 0, 0, H);
-  scrim.addColorStop(0, "rgba(12, 10, 8, 0.68)");
-  scrim.addColorStop(0.24, "rgba(12, 10, 8, 0.14)");
-  scrim.addColorStop(0.52, "rgba(12, 10, 8, 0.32)");
-  scrim.addColorStop(1, "rgba(12, 10, 8, 0.94)");
-  ctx.fillStyle = scrim;
-  ctx.fillRect(0, 0, W, H);
-}
-
-/* ========================================================================== */
-/*  Main StoryFilmScroll Component (100vw × 100svh Fullscreen Game Theatre)   */
-/* ========================================================================== */
-
 export function StoryFilmScroll() {
-  const trackRef = useRef<HTMLElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
+  const game = useLandingGame();
 
-  const targetProgressRef = useRef(0);
-  const smoothProgressRef = useRef(0);
-  const velocityRef = useRef(0);
-  const pointerRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
-  const playingRef = useRef(false);
-  const draggingTimelineRef = useRef(false);
-
-  const platesRef = useRef<(HTMLImageElement | null)[]>([null, null, null, null, null]);
-  const branchesRef = useRef<Record<number, DecisionBranch>>({
-    0: "discipline",
-    1: "discipline",
-    2: "discipline",
-    3: "discipline",
-    4: "discipline",
-  });
-
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [actProgress, setActProgress] = useState(0);
-  const [overallProgress, setOverallProgress] = useState(0);
-  const [currentFrame, setCurrentFrame] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
   const [decisions, setDecisions] = useState<Record<number, DecisionBranch>>({
     0: "discipline",
-    1: "discipline",
-    2: "discipline",
-    3: "discipline",
-    4: "discipline",
   });
 
-  const chooseBranch = (actIdx: number, branch: DecisionBranch) => {
-    const next = { ...branchesRef.current, [actIdx]: branch };
-    branchesRef.current = next;
-    setDecisions(next);
-    const countDiscipline = Object.values(next).filter((b) => b === "discipline").length;
-    updateComposureScore(35 + countDiscipline * 13);
-  };
+  const currentRound = TAPE_ROUNDS[activeStep] ?? TAPE_ROUNDS[0]!;
+  const currentChoice = decisions[activeStep];
 
-  const syncUiState = useCallback((p: number) => {
-    const clamped = clamp(p, 0, 1);
-    const scaled = clamped * FILM_ACTS.length;
-    const idx = Math.min(FILM_ACTS.length - 1, Math.floor(scaled));
-    const local = clamp(scaled - idx, 0, 1);
-    const frame = Math.max(1, Math.min(TOTAL_FRAMES, Math.round(1 + clamped * (TOTAL_FRAMES - 1))));
+  // Calculate cumulative session R and $ across answered steps
+  let sessionR = 0;
+  let sessionDollars = 0;
+  let disciplineSteps = 0;
+  const answeredCount = Object.keys(decisions).length;
 
-    setActiveIndex((prev) => (prev === idx ? prev : idx));
-    setActProgress((prev) => (Math.abs(prev - local) < 0.005 ? prev : local));
-    setOverallProgress((prev) => (Math.abs(prev - clamped) < 0.002 ? prev : clamped));
-    setCurrentFrame((prev) => (prev === frame ? prev : frame));
-  }, []);
+  TAPE_ROUNDS.forEach((r, idx) => {
+    const pick = decisions[idx];
+    if (pick === "discipline") {
+      sessionR += r.disciplineChoice.rDelta;
+      sessionDollars += r.disciplineChoice.dollarDelta;
+      disciplineSteps += 1;
+    } else if (pick === "impulse") {
+      sessionR += r.impulseChoice.rDelta;
+      sessionDollars += r.impulseChoice.dollarDelta;
+    }
+  });
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    FILM_ACTS.forEach((act, idx) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.src = act.localPlate;
-      platesRef.current[idx] = img;
+  const handleDecision = (stepIdx: number, branch: DecisionBranch) => {
+    const round = TAPE_ROUNDS[stepIdx]!;
+    const info =
+      branch === "discipline" ? round.disciplineChoice : round.impulseChoice;
+
+    const nextDecisions = { ...decisions, [stepIdx]: branch };
+    setDecisions(nextDecisions);
+
+    const allFiveAnswered = Object.keys(nextDecisions).length >= TAPE_ROUNDS.length;
+    const allDiscipline =
+      allFiveAnswered &&
+      Object.values(nextDecisions).every((b) => b === "discipline");
+
+    awardGameAction({
+      xpDelta: branch === "discipline" ? 45 : 10,
+      composureDelta: info.composureDelta,
+      equityDelta: branch === "discipline" ? 560 : -350,
+      streakIncrement: branch === "discipline",
+      streakReset: branch === "impulse",
+      questId: allDiscipline ? "q2_tape" : undefined,
+      title:
+        branch === "discipline"
+          ? `Tick 0${stepIdx + 1}: Disciplined Execution`
+          : `Tick 0${stepIdx + 1}: Impulse Trap Triggered`,
+      subtitle: info.outcome,
+      tone: branch === "discipline" ? "profit" : "loss",
     });
-  }, []);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const track = trackRef.current;
-    if (!canvas || !track) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let rafId = 0;
-    let lastTime = performance.now();
-    let inViewport = true;
-
-    const io =
-      typeof IntersectionObserver !== "undefined"
-        ? new IntersectionObserver(
-            (entries) => {
-              inViewport = entries.some((e) => e.isIntersecting);
-            },
-            { rootMargin: "200px 0px" },
-          )
-        : null;
-    io?.observe(track);
-
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
-      const nextW = Math.max(320, Math.floor(rect.width * dpr));
-      const nextH = Math.max(220, Math.floor(rect.height * dpr));
-      if (canvas.width !== nextW || canvas.height !== nextH) {
-        canvas.width = nextW;
-        canvas.height = nextH;
-      }
-    };
-
-    resize();
-    window.addEventListener("resize", resize, { passive: true });
-
-    const tick = (now: number) => {
-      rafId = window.requestAnimationFrame(tick);
-      if (!inViewport || document.hidden) return;
-
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
-      lastTime = now;
-
-      if (playingRef.current && !draggingTimelineRef.current) {
-        const nextTarget = targetProgressRef.current + dt / 24;
-        if (nextTarget >= 1) {
-          targetProgressRef.current = 1;
-          playingRef.current = false;
-          setIsPlaying(false);
-        } else {
-          targetProgressRef.current = nextTarget;
-        }
-      }
-
-      const prevSmooth = smoothProgressRef.current;
-      const diff = targetProgressRef.current - prevSmooth;
-      const springStep = Math.abs(diff) < 0.0002 ? diff : diff * Math.min(1, dt * 15);
-      const curSmooth = clamp(prevSmooth + springStep, 0, 1);
-      smoothProgressRef.current = curSmooth;
-      velocityRef.current = springStep / Math.max(0.008, dt);
-
-      const ptr = pointerRef.current;
-      ptr.x += (ptr.targetX - ptr.x) * Math.min(1, dt * 10);
-      ptr.y += (ptr.targetY - ptr.y) * Math.min(1, dt * 10);
-
-      syncUiState(curSmooth);
-
-      drawTheatreFrame({
-        ctx,
-        W: canvas.width,
-        H: canvas.height,
-        p: curSmooth,
-        velocity: velocityRef.current,
-        pointerX: ptr.x,
-        pointerY: ptr.y,
-        time: now / 1000,
-        plates: platesRef.current,
-        branches: branchesRef.current,
-      });
-    };
-
-    rafId = window.requestAnimationFrame(tick);
-    return () => {
-      if (rafId) window.cancelAnimationFrame(rafId);
-      io?.disconnect();
-      window.removeEventListener("resize", resize);
-    };
-  }, [syncUiState]);
-
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
-    const track = trackRef.current;
-    if (!track) return;
-
-    const unbind = bindScrollProgress(
-      track,
-      (progress) => {
-        if (!playingRef.current && !draggingTimelineRef.current) {
-          targetProgressRef.current = progress;
-        }
-      },
-      { pinned: true },
-    );
-
-    const stopAutoOnUserScroll = () => {
-      if (playingRef.current) {
-        playingRef.current = false;
-        setIsPlaying(false);
-      }
-    };
-    window.addEventListener("wheel", stopAutoOnUserScroll, { passive: true });
-    window.addEventListener("touchmove", stopAutoOnUserScroll, { passive: true });
-
-    return () => {
-      unbind();
-      window.removeEventListener("wheel", stopAutoOnUserScroll);
-      window.removeEventListener("touchmove", stopAutoOnUserScroll);
-    };
-  }, []);
-
-  const togglePlay = () => {
-    if (playingRef.current) {
-      playingRef.current = false;
-      setIsPlaying(false);
-    } else {
-      if (targetProgressRef.current >= 0.98) {
-        targetProgressRef.current = 0;
-        smoothProgressRef.current = 0;
-      }
-      playingRef.current = true;
-      setIsPlaying(true);
+    // Auto-advance after a short moment if not on the final step and user clicked a fresh step
+    if (stepIdx < TAPE_ROUNDS.length - 1 && decisions[stepIdx] === undefined) {
+      window.setTimeout(() => {
+        setActiveStep((prev) => (prev === stepIdx ? stepIdx + 1 : prev));
+      }, 650);
     }
   };
 
-  const selectAct = (idx: number) => {
-    playingRef.current = false;
-    setIsPlaying(false);
-    const targetP = (idx + 0.08) / FILM_ACTS.length;
-    targetProgressRef.current = targetP;
-    scrollToPinnedProgress(trackRef.current, targetP, true);
+  const simulateFullPath = (mode: DecisionBranch) => {
+    const next: Record<number, DecisionBranch> = {};
+    TAPE_ROUNDS.forEach((_, i) => {
+      next[i] = mode;
+    });
+    setDecisions(next);
+    setActiveStep(TAPE_ROUNDS.length - 1);
+
+    awardGameAction({
+      xpDelta: mode === "discipline" ? 120 : 15,
+      composureDelta: mode === "discipline" ? 12 : -22,
+      equityDelta: mode === "discipline" ? 2800 : -1800,
+      streakIncrement: mode === "discipline",
+      streakReset: mode === "impulse",
+      questId: mode === "discipline" ? "q2_tape" : undefined,
+      title:
+        mode === "discipline"
+          ? "Full Disciplined Session Completed (+2.8R)"
+          : "Impulse Session Simulated (−4.4R)",
+      subtitle:
+        mode === "discipline"
+          ? "5/5 disciplined decisions kept. +$2,800 banked with 100% composure."
+          : "See how chasing, over-sizing, and Friday overtrading turn a winning setup into a red day.",
+      tone: mode === "discipline" ? "profit" : "loss",
+    });
   };
 
-  const scrubFromClientX = useCallback((clientX: number) => {
-    const bar = timelineRef.current;
-    if (!bar) return;
-    const r = bar.getBoundingClientRect();
-    const nextP = clamp((clientX - r.left) / Math.max(1, r.width), 0, 1);
-    playingRef.current = false;
-    setIsPlaying(false);
-    targetProgressRef.current = nextP;
-    scrollToPinnedProgress(trackRef.current, nextP, false);
-  }, []);
+  // Price range for SVG chart scaling (404 to 484)
+  const minP = 404;
+  const maxP = 484;
+  const priceToY = (p: number) => 220 - ((p - minP) / (maxP - minP)) * 185;
 
-  const onTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    draggingTimelineRef.current = true;
-    scrubFromClientX(e.clientX);
-
-    const onMove = (ev: PointerEvent) => {
-      if (draggingTimelineRef.current) scrubFromClientX(ev.clientX);
-    };
-    const onUp = () => {
-      draggingTimelineRef.current = false;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
-
-  const currentAct = FILM_ACTS[activeIndex] ?? FILM_ACTS[0]!;
-  const currentBranch = decisions[activeIndex] ?? "discipline";
-  const branchInfo =
-    currentBranch === "discipline" ? currentAct.disciplineChoice : currentAct.impulseChoice;
+  const visibleBars = SESSION_CANDLES.slice(0, currentRound.visibleCandles);
+  const questCleared = game.questsCompleted.q2_tape;
 
   return (
-    <>
-      {/* ---------------- Full-Width Prologue Header into Scene 02 ---------------- */}
-      <div className="lp-wide pb-6 pt-16 sm:pb-10 sm:pt-24">
-        <div
-          data-scrub-reveal
-          className="flex flex-col items-start justify-between gap-6 border-t border-line pt-10 lg:flex-row lg:items-end"
-        >
-          <div>
-            <Eyebrow n="02">CH.02 · The Inner Film (Fullscreen Game Theatre)</Eyebrow>
-            <h2 className="mt-4 max-w-4xl font-display text-[clamp(2rem,4.6vw,3.8rem)] font-semibold leading-[1.04] tracking-[-0.04em] text-ink">
-              The market is external.{" "}
-              <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
-                The battle is inside.
+    <section
+      id="film"
+      className="lp-wide py-16 sm:py-24"
+      aria-labelledby="tape-game-title"
+    >
+      {/* Section Header */}
+      <div className="mb-8 flex flex-col justify-between gap-6 border-t border-line pt-10 lg:flex-row lg:items-end">
+        <div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Eyebrow n="02">QUEST 02 · 09:30 NY LIVE TAPE SIMULATOR</Eyebrow>
+            {questCleared && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-profit/40 bg-profit/12 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-profit">
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+                QUEST 02 CLEARED
               </span>
-            </h2>
+            )}
           </div>
-          <p className="max-w-lg text-[15.5px] leading-relaxed text-muted">
-            Scroll to scrub the full-viewport 600-frame cinema, press <strong className="font-medium text-ink">Play Film</strong>, or make live <strong className="font-medium text-ink">Discipline vs. Impulse</strong> choices inside every Act.
+          <h2
+            id="tape-game-title"
+            className="mt-3 max-w-4xl font-display text-[clamp(2rem,4.4vw,3.6rem)] font-semibold leading-[1.03] tracking-[-0.042em] text-ink"
+          >
+            The market is external.{" "}
+            <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+              The battle is inside.
+            </span>
+          </h2>
+          <p className="mt-3 max-w-2xl text-[15.5px] leading-relaxed text-muted">
+            Step into the 09:30 AM NY bell. Advance through all 5 live market ticks below and silence FOMO, fear, and Friday euphoria using the rules you wrote in Quest 01.
           </p>
+        </div>
+
+        {/* Fast Path Comparison Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => simulateFullPath("discipline")}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full border border-profit/45 bg-profit/12 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-profit transition hover:bg-profit/20"
+          >
+            <SparklesIcon className="h-3.5 w-3.5" />
+            Run 5/5 Disciplined Path (+2.8R)
+          </button>
+          <button
+            type="button"
+            onClick={() => simulateFullPath("impulse")}
+            className="inline-flex h-10 items-center gap-1.5 rounded-full border border-loss/40 bg-loss/10 px-4 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-loss transition hover:bg-loss/20"
+          >
+            Test Impulse Path (−4.4R)
+          </button>
         </div>
       </div>
 
-      {/* ---------------- True 100vw × 100svh Edge-to-Edge Fullscreen Theatre ---------------- */}
-      <section
-        id="film"
-        ref={trackRef}
-        aria-label="The Inner Film — Fullscreen interactive theatre sequence"
-        className="lp-pinned relative w-full"
+      {/* 5-Tick Stepper Bar */}
+      <div
+        className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-5"
+        role="tablist"
+        aria-label="Five ticks of the 09:30 NY session"
       >
-        <div
-          onPointerMove={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            pointerRef.current.targetX = ((e.clientX - r.left) / Math.max(1, r.width)) * 2 - 1;
-            pointerRef.current.targetY = ((e.clientY - r.top) / Math.max(1, r.height)) * 2 - 1;
-          }}
-          onPointerLeave={() => {
-            pointerRef.current.targetX = 0;
-            pointerRef.current.targetY = 0;
-          }}
-          className="sticky top-0 flex h-svh w-full flex-col justify-between overflow-hidden border-y border-line-strong/80 bg-[#120f0b]"
-        >
-          {/* 100vw × 100svh Full-Bleed Canvas */}
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 block h-full w-full"
-            aria-label={`Act ${activeIndex + 1}: ${currentAct.title} — ${currentAct.line} ${currentAct.italicPart}`}
-          />
-
-          <div className="lp-film-grain pointer-events-none absolute inset-0 opacity-25" aria-hidden="true" />
-
-          {/* TOP WIDESCREEN HUD BAR (Full Width across the screen) */}
-          <div className="lp-wide relative z-10 flex flex-wrap items-center justify-between gap-3 pt-16 sm:pt-20">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-black/55 px-4 py-1.5 backdrop-blur-xl">
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    currentBranch === "impulse"
-                      ? "bg-[#cd8484] animate-pulse"
-                      : currentAct.accentTone === "gold"
-                        ? "bg-[#cba76b]"
-                        : "bg-[#74b08c]"
-                  }`}
-                />
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-[#f0eae0]">
-                  {currentAct.roman} · {currentAct.title}
+        {TAPE_ROUNDS.map((r, idx) => {
+          const isCurrent = idx === activeStep;
+          const pick = decisions[idx];
+          return (
+            <button
+              key={r.id}
+              type="button"
+              role="tab"
+              aria-selected={isCurrent}
+              onClick={() => setActiveStep(idx)}
+              className={`flex flex-col justify-between rounded-2xl border p-3 text-left transition ${
+                isCurrent
+                  ? "border-gold bg-raised shadow-[var(--shadow-rest)]"
+                  : "border-line bg-surface hover:border-line-strong"
+              }`}
+            >
+              <div className="flex w-full items-center justify-between font-mono text-[10px] uppercase tracking-[0.1em]">
+                <span className={isCurrent ? "font-bold text-gold" : "text-faint"}>
+                  TICK {r.stepNum}
                 </span>
-                <span className="hidden font-mono text-[11px] text-[#a69d8c] md:inline">
-                  — {currentAct.theme}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[9.5px] font-semibold ${
+                    pick === "discipline"
+                      ? "bg-profit/15 text-profit"
+                      : pick === "impulse"
+                        ? "bg-loss/15 text-loss"
+                        : "bg-ink/[0.06] text-muted"
+                  }`}
+                >
+                  {pick === "discipline"
+                    ? "✓ CLEAN"
+                    : pick === "impulse"
+                      ? "! IMPULSE"
+                      : "PENDING"}
                 </span>
               </div>
+              <p className="mt-1.5 truncate font-display text-[13px] font-semibold text-ink">
+                {r.title}
+              </p>
+              <p className="font-mono text-[10.5px] text-muted">{r.timeStamp}</p>
+            </button>
+          );
+        })}
+      </div>
 
-              {/* Act Philosophical Quote Pill */}
-              <div className="hidden items-center gap-2 rounded-full border border-[#cba76b]/30 bg-black/45 px-4 py-1.5 backdrop-blur-xl xl:inline-flex">
-                <span className="font-serif text-[14px] italic text-[#f7f4ee]">
-                  &ldquo;{currentAct.quote}&rdquo;
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#cba76b]">
-                  — {currentAct.quoteAuthor}
-                </span>
+      {/* Main Widescreen Simulator Arena: Left 7 Cols (Live Chart & Telemetry) | Right 5 Cols (Inner Voice & Decision Card) */}
+      <div className="grid items-stretch gap-6 lg:grid-cols-12 xl:gap-8">
+        {/* LEFT 7 COLS: Theme-Aware Interactive Candlestick Chart & Session Readout */}
+        <div className="lp-game-card flex flex-col justify-between overflow-hidden lg:col-span-7">
+          {/* Top Chart Header Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-canvas/70 px-5 py-3.5 sm:px-6">
+            <div className="flex items-center gap-2.5">
+              <span className="inline-grid h-8 w-8 place-items-center rounded-xl border border-line-strong bg-raised text-gold">
+                <CandlestickIcon className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-[14.5px] font-semibold text-ink">
+                    MNQ · Micro Nasdaq Futures
+                  </span>
+                  <span className="rounded-md border border-line bg-raised px-2 py-0.5 font-mono text-[10px] text-gold">
+                    5m Structure
+                  </span>
+                </div>
+                <p className="font-mono text-[11px] text-muted">
+                  {currentRound.timeStamp} · Last:{" "}
+                  <strong className="text-ink">{currentRound.priceLabel}</strong>
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5">
-              <span className="hidden rounded-full border border-white/12 bg-black/55 px-3.5 py-1.5 font-mono text-[11px] tabular-nums tracking-[0.1em] text-[#d6cebd] backdrop-blur-xl sm:inline-block">
-                {formatTimecode(overallProgress)} · FRM {String(currentFrame).padStart(3, "0")}/{TOTAL_FRAMES}
+            {/* Live Session Scoreboard Pills */}
+            <div className="flex items-center gap-2">
+              <div className="rounded-xl border border-line bg-raised px-3 py-1.5 text-right">
+                <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-faint">
+                  Session R-Multiple
+                </span>
+                <span
+                  className={`num font-mono text-[14px] font-bold ${
+                    sessionR >= 0 ? "text-profit" : "text-loss"
+                  }`}
+                >
+                  {sessionR >= 0 ? `+${sessionR.toFixed(1)}R` : `${sessionR.toFixed(1)}R`}
+                  {" "}
+                  ({sessionDollars >= 0 ? `+$${sessionDollars.toLocaleString()}` : `-$${Math.abs(sessionDollars).toLocaleString()}`})
+                </span>
+              </div>
+
+              <div className="rounded-xl border border-line bg-raised px-3 py-1.5 text-right">
+                <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-faint">
+                  Process Grade
+                </span>
+                <span
+                  className={`font-mono text-[14px] font-bold ${
+                    disciplineSteps === answeredCount
+                      ? "text-profit"
+                      : disciplineSteps >= 3
+                        ? "text-gold"
+                        : "text-loss"
+                  }`}
+                >
+                  {disciplineSteps === 5
+                    ? "A+ SOVEREIGN"
+                    : disciplineSteps >= 4
+                      ? "A CLEAN"
+                      : disciplineSteps >= 3
+                        ? "B MIXED"
+                        : "D IMPULSIVE"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive SVG Candlestick Chart (100% Theme Variable Driven) */}
+          <div className="grid-backdrop relative flex-1 px-4 py-5 sm:px-6">
+            <svg
+              viewBox="0 0 680 250"
+              className="h-full min-h-[240px] w-full overflow-visible"
+              role="img"
+              aria-label={`Candlestick chart at ${currentRound.timeStamp} showing ${currentRound.title}`}
+            >
+              {/* Key Structural Levels */}
+              {/* Target 18,475 (+2.8R) */}
+              <line
+                x1="16"
+                y1={priceToY(475)}
+                x2="650"
+                y2={priceToY(475)}
+                stroke="var(--color-profit)"
+                strokeWidth="1.5"
+                strokeDasharray="5 5"
+              />
+              <rect
+                x="518"
+                y={priceToY(475) - 18}
+                width="130"
+                height="16"
+                rx="4"
+                fill="var(--color-raised)"
+                stroke="var(--color-profit)"
+                strokeWidth="1"
+              />
+              <text
+                x="583"
+                y={priceToY(475) - 7}
+                textAnchor="middle"
+                fontSize="9.5"
+                fontWeight="600"
+                fill="var(--color-profit)"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                TARGET · 18,475 (+2.8R)
+              </text>
+
+              {/* Entry Reclaim Level 18,428 */}
+              <line
+                x1="16"
+                y1={priceToY(428)}
+                x2="650"
+                y2={priceToY(428)}
+                stroke="var(--color-gold)"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+              />
+              <rect
+                x="518"
+                y={priceToY(428) - 18}
+                width="130"
+                height="16"
+                rx="4"
+                fill="var(--color-raised)"
+                stroke="var(--color-gold)"
+                strokeWidth="1"
+              />
+              <text
+                x="583"
+                y={priceToY(428) - 7}
+                textAnchor="middle"
+                fontSize="9.5"
+                fontWeight="600"
+                fill="var(--color-gold)"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                5M RECLAIM · 18,428
+              </text>
+
+              {/* Overnight Low Sweep Shelf 18,414 */}
+              <line
+                x1="16"
+                y1={priceToY(414)}
+                x2="650"
+                y2={priceToY(414)}
+                stroke="var(--color-loss)"
+                strokeWidth="1.5"
+                strokeDasharray="3 4"
+              />
+              <rect
+                x="508"
+                y={priceToY(414) + 4}
+                width="140"
+                height="16"
+                rx="4"
+                fill="var(--color-raised)"
+                stroke="var(--color-loss)"
+                strokeWidth="1"
+              />
+              <text
+                x="578"
+                y={priceToY(414) + 15}
+                textAnchor="middle"
+                fontSize="9.5"
+                fontWeight="600"
+                fill="var(--color-loss)"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                OVERNIGHT LOW · 18,414
+              </text>
+
+              {/* Candlesticks */}
+              {visibleBars.map((bar, idx) => {
+                const cx = 42 + idx * 40;
+                const isBull = bar.close >= bar.open;
+                const highY = priceToY(bar.high);
+                const lowY = priceToY(bar.low);
+                const topY = priceToY(Math.max(bar.open, bar.close));
+                const botY = priceToY(Math.min(bar.open, bar.close));
+                const bodyH = Math.max(4, botY - topY);
+                const isLast = idx === visibleBars.length - 1;
+
+                const strokeColor = isBull
+                  ? "var(--color-profit)"
+                  : "var(--color-loss)";
+                const fillColor = isBull
+                  ? "var(--color-profit)"
+                  : "var(--color-loss)";
+
+                return (
+                  <g key={bar.time}>
+                    {/* Active candle highlight halo */}
+                    {isLast && (
+                      <rect
+                        x={cx - 15}
+                        y={highY - 8}
+                        width={30}
+                        height={lowY - highY + 16}
+                        rx={8}
+                        fill="var(--color-gold)"
+                        fillOpacity="0.12"
+                        stroke="var(--color-gold)"
+                        strokeWidth="1"
+                        strokeDasharray="2 2"
+                      />
+                    )}
+                    {/* Wick */}
+                    <line
+                      x1={cx}
+                      y1={highY}
+                      x2={cx}
+                      y2={lowY}
+                      stroke={strokeColor}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    {/* Body */}
+                    <rect
+                      x={cx - 8}
+                      y={topY}
+                      width={16}
+                      height={bodyH}
+                      rx={3}
+                      fill={fillColor}
+                    />
+                    {/* Time label */}
+                    <text
+                      x={cx}
+                      y={240}
+                      textAnchor="middle"
+                      fontSize="9.5"
+                      fill={isLast ? "var(--color-ink)" : "var(--color-faint)"}
+                      fontWeight={isLast ? "700" : "400"}
+                      style={{ fontFamily: "var(--font-mono)" }}
+                    >
+                      {bar.time}
+                    </text>
+                    {/* Callout pill on key candles */}
+                    {bar.note && (
+                      <g>
+                        <rect
+                          x={cx - 32}
+                          y={highY - 24}
+                          width={64}
+                          height={15}
+                          rx={4}
+                          fill="var(--color-raised)"
+                          stroke="var(--color-line-strong)"
+                        />
+                        <text
+                          x={cx}
+                          y={highY - 14}
+                          textAnchor="middle"
+                          fontSize="8.5"
+                          fontWeight="600"
+                          fill="var(--color-ink)"
+                          style={{ fontFamily: "var(--font-mono)" }}
+                        >
+                          {bar.note}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+
+          {/* Bottom Market Structure Context Bar */}
+          <div className="border-t border-line bg-surface px-5 py-4 sm:px-6">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <p className="text-[13.5px] leading-snug text-muted">
+                <strong className="font-semibold text-ink">Tape Readout:</strong>{" "}
+                {currentRound.marketContext}
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  disabled={activeStep === 0}
+                  onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
+                  className="rounded-full border border-line-strong bg-raised px-3.5 py-1.5 font-mono text-[11px] font-medium text-ink transition hover:border-gold disabled:opacity-40"
+                >
+                  ← Prev Tick
+                </button>
+                <button
+                  type="button"
+                  disabled={activeStep === TAPE_ROUNDS.length - 1}
+                  onClick={() =>
+                    setActiveStep((s) => Math.min(TAPE_ROUNDS.length - 1, s + 1))
+                  }
+                  className="rounded-full border border-line-strong bg-raised px-3.5 py-1.5 font-mono text-[11px] font-medium text-ink transition hover:border-gold disabled:opacity-40"
+                >
+                  Next Tick →
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT 5 COLS: Inner Voice Temptation Card & Playable Decision Buttons */}
+        <div className="lp-game-card flex flex-col justify-between p-5 sm:p-7 lg:col-span-5">
+          <div>
+            <div className="flex items-center justify-between border-b border-line pb-3.5">
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-gold">
+                TICK {currentRound.stepNum} OF 05 · {currentRound.timeStamp}
               </span>
+              <span className="rounded-full border border-loss/35 bg-loss/10 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-loss">
+                {currentRound.innerVoiceType}
+              </span>
+            </div>
+
+            <h3 className="mt-4 font-display text-[22px] font-semibold leading-tight tracking-[-0.025em] text-ink">
+              {currentRound.title}
+            </h3>
+
+            {/* Temptation / Inner Whisper Box */}
+            <div className="mt-3.5 rounded-2xl border border-gold/35 bg-gold/[0.07] p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-gold">
+                The Voice in Your Head Right Now:
+              </p>
+              <p className="mt-1.5 font-serif text-[18.5px] italic leading-snug text-ink">
+                {currentRound.innerWhisper}
+              </p>
+            </div>
+
+            {/* Two Playable Choices */}
+            <div className="mt-4 space-y-2.5">
+              {/* Option A: Discipline */}
               <button
                 type="button"
-                onClick={togglePlay}
-                aria-label={isPlaying ? "Pause story film" : "Play story film"}
-                className="inline-flex items-center gap-2 rounded-full border border-[#cba76b]/60 bg-[#1c1813]/90 px-4 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-[#f0eae0] backdrop-blur-xl transition hover:border-[#cba76b] hover:bg-[#272219] active:scale-[0.97]"
+                onClick={() => handleDecision(activeStep, "discipline")}
+                className={`lp-game-tile flex w-full items-start gap-3.5 p-4 text-left ${
+                  currentChoice === "discipline"
+                    ? "!border-profit !bg-profit/[0.09]"
+                    : ""
+                }`}
               >
-                <span className="text-[#cba76b]">{isPlaying ? "❚❚" : "▶"}</span>
-                <span>{isPlaying ? "Pause Film" : "Play Film"}</span>
+                <span
+                  className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[12px] font-bold ${
+                    currentChoice === "discipline"
+                      ? "bg-profit text-canvas"
+                      : "border border-profit/40 bg-profit/10 text-profit"
+                  }`}
+                >
+                  A
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-profit">
+                      Disciplined Operator Move
+                    </span>
+                    <span className="font-mono text-[10px] font-semibold text-profit">
+                      +45 XP
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[14.5px] font-semibold leading-snug text-ink">
+                    {currentRound.disciplineChoice.label}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-muted">
+                    {currentRound.disciplineChoice.sublabel}
+                  </p>
+                </div>
+              </button>
+
+              {/* Option B: Impulse */}
+              <button
+                type="button"
+                onClick={() => handleDecision(activeStep, "impulse")}
+                className={`lp-game-tile flex w-full items-start gap-3.5 p-4 text-left ${
+                  currentChoice === "impulse"
+                    ? "!border-loss !bg-loss/[0.09]"
+                    : ""
+                }`}
+              >
+                <span
+                  className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[12px] font-bold ${
+                    currentChoice === "impulse"
+                      ? "bg-loss text-canvas"
+                      : "border border-loss/40 bg-loss/10 text-loss"
+                  }`}
+                >
+                  B
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-loss">
+                      Impulse Reflex
+                    </span>
+                    <span className="font-mono text-[10px] font-semibold text-loss">
+                      {currentRound.impulseChoice.composureDelta}% Composure
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[14.5px] font-semibold leading-snug text-ink">
+                    {currentRound.impulseChoice.label}
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-muted">
+                    {currentRound.impulseChoice.sublabel}
+                  </p>
+                </div>
               </button>
             </div>
+
+            {/* Instant Outcome Consequence Box */}
+            {currentChoice && (
+              <div
+                className={`mt-4 rounded-2xl border p-3.5 text-[13px] leading-snug ${
+                  currentChoice === "discipline"
+                    ? "border-profit/45 bg-profit/10 text-ink"
+                    : "border-loss/45 bg-loss/10 text-ink"
+                }`}
+              >
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  {currentChoice === "discipline" ? (
+                    <span className="text-profit">✓ Consequence · Plan Kept</span>
+                  ) : (
+                    <span className="text-loss">! Consequence · Process Break</span>
+                  )}
+                </p>
+                <p className="mt-1">
+                  {currentChoice === "discipline"
+                    ? currentRound.disciplineChoice.outcome
+                    : currentRound.impulseChoice.outcome}
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* LOWER WIDESCREEN HUD: Narrative Left + Playable Game Decision Node Right + Full-Width Scrubber */}
-          <div className="lp-wide relative z-10 pb-16 sm:pb-20">
-            <div className="grid items-end gap-6 lg:grid-cols-12 xl:gap-10">
-              {/* Left 7 Cols: Cinema Narrative & Quote */}
-              <div
-                className="transition-transform duration-150 ease-out lg:col-span-7"
-                style={{
-                  transform: `translate3d(0, ${(1 - smooth(Math.min(1, actProgress * 3.5))) * 14}px, 0)`,
-                }}
+          {/* Footer Quote & Next Quest Link */}
+          <div className="mt-5 border-t border-line pt-4">
+            <blockquote className="font-serif text-[16px] italic text-gold">
+              &ldquo;{currentRound.quote}&rdquo;{" "}
+              <span className="font-mono text-[10px] not-italic uppercase tracking-[0.1em] text-faint">
+                — {currentRound.quoteAuthor}
+              </span>
+            </blockquote>
+
+            <div className="mt-3 flex items-center justify-between text-[13px]">
+              <span className="font-mono text-[11px] text-muted">
+                Disciplined Ticks: <strong className="text-profit">{disciplineSteps}/5</strong>
+              </span>
+              <a
+                href="#gap"
+                className="group inline-flex items-center gap-1 font-medium text-gold transition-colors hover:text-ink"
               >
-                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#cba76b]">
-                  {currentAct.marginNote}
-                </p>
-
-                <h3 className="mt-2 font-display text-[clamp(1.75rem,3.8vw,3.6rem)] font-semibold leading-[1.04] tracking-[-0.038em] text-[#f7f4ee]">
-                  {currentAct.line}{" "}
-                  <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.015em] text-[#dfbe82]">
-                    {currentAct.italicPart}
-                  </span>
-                </h3>
-
-                <p className="mt-3 max-w-2xl text-[14.5px] leading-relaxed text-[#d6cebd] sm:text-[16px]">
-                  {currentAct.reflection}
-                </p>
-
-                {activeIndex === 4 && (
-                  <div className="mt-5 flex flex-wrap items-center gap-4">
-                    <Link
-                      href="/login?mode=signup"
-                      className="inline-flex h-11 items-center rounded-full bg-gold-strong px-6 text-[15px] font-medium text-on-gold transition duration-200 hover:bg-gold-strong-hover active:scale-[0.98]"
-                    >
-                      Begin your Edgebook
-                    </Link>
-                    <a
-                      href="#how"
-                      className="group inline-flex items-center gap-1 text-[15px] text-[#dfbe82] transition-colors hover:text-white"
-                    >
-                      Continue to The 5-Gate Ritual
-                      <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-                    </a>
-                  </div>
-                )}
-              </div>
-
-              {/* Right 5 Cols: Playable Game Decision Node Card */}
-              <div className="rounded-[24px] border border-white/15 bg-[#15120d]/88 p-4 backdrop-blur-xl sm:p-5 lg:col-span-5">
-                <div className="flex items-center justify-between font-mono text-[10.5px] uppercase tracking-[0.14em] text-[#cba76b]">
-                  <span>Playable Decision · {currentAct.roman}</span>
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 font-semibold ${
-                      currentBranch === "discipline"
-                        ? "bg-[#74b08c]/20 text-[#74b08c]"
-                        : "bg-[#cd8484]/20 text-[#cd8484]"
-                    }`}
-                  >
-                    {branchInfo.delta}
-                  </span>
-                </div>
-
-                <p className="mt-2 text-[13.5px] font-medium leading-snug text-[#f7f4ee]">
-                  {currentAct.promptQuestion}
-                </p>
-
-                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => chooseBranch(activeIndex, "discipline")}
-                    className={`rounded-xl border px-3 py-2.5 text-left text-[12px] font-medium transition ${
-                      currentBranch === "discipline"
-                        ? "border-[#74b08c]/70 bg-[#74b08c]/20 text-[#f7f4ee]"
-                        : "border-white/10 bg-white/[0.04] text-[#a69d8c] hover:border-white/25 hover:text-white"
-                    }`}
-                  >
-                    <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-[#74b08c]">
-                      [A] Discipline
-                    </span>
-                    <span className="mt-0.5 block leading-tight">
-                      {currentAct.disciplineChoice.label}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => chooseBranch(activeIndex, "impulse")}
-                    className={`rounded-xl border px-3 py-2.5 text-left text-[12px] font-medium transition ${
-                      currentBranch === "impulse"
-                        ? "border-[#cd8484]/70 bg-[#cd8484]/20 text-[#f7f4ee]"
-                        : "border-white/10 bg-white/[0.04] text-[#a69d8c] hover:border-white/25 hover:text-white"
-                    }`}
-                  >
-                    <span className="block font-mono text-[9.5px] uppercase tracking-[0.1em] text-[#cd8484]">
-                      [B] Impulse
-                    </span>
-                    <span className="mt-0.5 block leading-tight">
-                      {currentAct.impulseChoice.label}
-                    </span>
-                  </button>
-                </div>
-
-                <p className="mt-2.5 border-t border-white/10 pt-2 text-[12px] leading-snug text-[#d6cebd]">
-                  <strong className="font-medium text-[#f0eae0]">Consequence:</strong> {branchInfo.outcome}
-                </p>
-              </div>
-            </div>
-
-            {/* Full-Width Timeline Scrubber & 5-Act Selector Bar */}
-            <div className="mt-4 rounded-[20px] border border-white/15 bg-[#1a1610]/90 px-4 py-2.5 backdrop-blur-xl sm:px-6">
-              <div
-                ref={timelineRef}
-                role="slider"
-                tabIndex={0}
-                aria-label="Scrub through The Inner Film"
-                aria-valuemin={1}
-                aria-valuemax={TOTAL_FRAMES}
-                aria-valuenow={currentFrame}
-                onPointerDown={onTimelinePointerDown}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowRight") {
-                    e.preventDefault();
-                    const next = clamp(targetProgressRef.current + 0.05, 0, 1);
-                    targetProgressRef.current = next;
-                    scrollToPinnedProgress(trackRef.current, next, false);
-                  } else if (e.key === "ArrowLeft") {
-                    e.preventDefault();
-                    const next = clamp(targetProgressRef.current - 0.05, 0, 1);
-                    targetProgressRef.current = next;
-                    scrollToPinnedProgress(trackRef.current, next, false);
-                  }
-                }}
-                className="group relative flex h-5 cursor-ew-resize touch-none items-center select-none"
-              >
-                <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/15 transition-[height] duration-150 group-hover:h-2.5">
-                  {[0.2, 0.4, 0.6, 0.8].map((pos) => (
-                    <span
-                      key={pos}
-                      aria-hidden="true"
-                      style={{ left: `${pos * 100}%` }}
-                      className="absolute inset-y-0 z-10 w-px bg-black/70"
-                    />
-                  ))}
-                  <div
-                    className="h-full rounded-full bg-gold-strong"
-                    style={{ width: `${overallProgress * 100}%` }}
-                  />
-                </div>
-                <span
-                  aria-hidden="true"
-                  style={{ left: `calc(${overallProgress * 100}% - 7px)` }}
-                  className="pointer-events-none absolute h-3.5 w-3.5 rounded-full border-2 border-[#15120d] bg-gold-strong shadow-md transition-transform duration-150 group-hover:scale-125"
-                />
-              </div>
-
-              <div
-                className="mt-1 grid grid-cols-5 gap-1.5 sm:gap-3"
-                role="tablist"
-                aria-label="Five acts of The Inner Film"
-              >
-                {FILM_ACTS.map((act, idx) => {
-                  const isCurrent = idx === activeIndex;
-                  const actBranch = decisions[idx] ?? "discipline";
-                  return (
-                    <button
-                      key={act.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isCurrent}
-                      onClick={() => selectAct(idx)}
-                      className={`flex items-center justify-between rounded-xl px-2.5 py-1 text-left transition ${
-                        isCurrent
-                          ? "bg-[#cba76b]/20 font-semibold text-[#f7f4ee]"
-                          : "text-[#a69d8c] hover:bg-white/[0.06] hover:text-white"
-                      }`}
-                    >
-                      <span className="truncate text-[11px] sm:text-[12px]">
-                        <span className="mr-1.5 font-mono text-[10px] text-[#cba76b]">{act.actNumber}</span>
-                        {act.title.replace("THE ", "")}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className={`hidden h-1.5 w-1.5 shrink-0 rounded-full sm:inline-block ${
-                          actBranch === "discipline" ? "bg-[#74b08c]" : "bg-[#cd8484]"
-                        }`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
+                Next: Quest 03 Autopsy X-Ray
+                <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+              </a>
             </div>
           </div>
         </div>
-      </section>
-
-      {/* ---------------- Reduced Motion Static Fallback ---------------- */}
-      <section className="lp-static lp-wide py-16" aria-label="The Inner Film — Five Acts">
-        <div className="space-y-8">
-          {FILM_ACTS.map((act) => (
-            <article
-              key={act.id}
-              className="lp-sq grid overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface md:grid-cols-2"
-            >
-              <div
-                className="min-h-[260px] bg-cover bg-center"
-                style={{ backgroundImage: `url(${act.localPlate})` }}
-              />
-              <div className="flex flex-col justify-center p-6 sm:p-8">
-                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-gold">
-                  {act.roman} · {act.title} — {act.theme}
-                </p>
-                <h3 className="mt-3 font-display text-2xl font-semibold leading-tight tracking-[-0.03em] text-ink sm:text-3xl">
-                  {act.line}{" "}
-                  <span className="font-serif font-normal italic text-gold">{act.italicPart}</span>
-                </h3>
-                <p className="mt-3 text-[15px] leading-relaxed text-muted">{act.reflection}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-    </>
+      </div>
+    </section>
   );
 }

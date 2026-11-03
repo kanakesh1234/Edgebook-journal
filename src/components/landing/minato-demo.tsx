@@ -1,30 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
-  bindScrollProgress,
-  lerp,
-  prefersReducedMotion,
-  rangeProgress,
-  smooth,
-} from "./motion-utils";
+  AwardIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  ShieldIcon,
+  SparklesIcon,
+} from "@/components/ui/icons";
 import { Eyebrow } from "./ledger";
+import { awardGameAction, useLandingGame } from "./game-state";
 
-const POINTS = [
-  {
-    t: "It reads what you wrote.",
-    d: "Journal notes, plans, reflections, practice sessions and screenshots all count.",
-  },
-  {
-    t: "It remembers the conversation.",
-    d: "Pick up tomorrow where you stopped today.",
-  },
-  {
-    t: "It reviews process, not markets.",
-    d: "No signals, no predictions, no financial advice.",
-  },
-] as const;
+/* ========================================================================== */
+/*  QUEST 05 — MINATO AI PATTERN INVESTIGATION & MEMORY GRAPH (#minato)       */
+/*  100% Edgebook Theme Tokens & Fonts (Inter Variable, Instrument Serif,     */
+/*  JetBrains Mono). Uses .minato-finding classes from globals.css.           */
+/* ========================================================================== */
+
+interface MemoryNode {
+  label: string;
+  date: string;
+  excerpt: string;
+  tag: string;
+}
 
 interface DialogueBranch {
   id: string;
@@ -32,54 +31,146 @@ interface DialogueBranch {
   userPrompt: string;
   minatoReply: string;
   findingBadge: string;
+  supportingPoints: string[];
   followUpPrompt: string;
   followUpReply: string;
+  guardrailRule: string;
   recommendedDrill: string;
-  memoryNodes: string[];
+  memoryNodes: MemoryNode[];
   quote: string;
 }
 
 const DIALOGUE_BRANCHES: DialogueBranch[] = [
   {
     id: "fridays",
-    chip: "Friday givebacks",
+    chip: "Friday Givebacks",
     userPrompt: "Why do I keep giving back my Friday gains?",
     minatoReply:
-      "You tend to take a second trade right after a green one, and your notes in those trades mention feeling “ahead”. A simple rule may help: on Fridays, stop after the first winner.",
-    findingBadge: "4 of 5 Friday losses followed a green opener",
-    followUpPrompt: "Okay. What should I practise?",
+      "You tend to take a second unscheduled trade within 12 minutes of a green Friday opener. In your notes on those trades, you wrote about feeling “ahead” and wanting to “round up the week.”",
+    findingBadge: "4 of 5 Friday losses followed a green opener within 12 minutes",
+    supportingPoints: [
+      "First Friday trade win rate: 82% (+2.1R avg)",
+      "Second Friday trade win rate: 18% (−1.4R avg)",
+    ],
+    followUpPrompt: "Lock in the rule: what should my Friday guardrail be?",
     followUpReply:
-      "Your last two mistakes were moving the stop early. A short Time Machine drill on that is a good next step.",
+      "Guardrail ready: On Fridays, your session ends immediately after your first clean winner—or after two total attempts.",
+    guardrailRule: "Friday Rule: Hard stop after 1st clean Friday winner",
     recommendedDrill: "Time Machine · Friday Winner Stop-Rule",
-    memoryNodes: ["14 Oct Plan", "21 Oct Autopsy #31", "28 Oct Reflection", "01 Nov Lab"],
+    memoryNodes: [
+      {
+        label: "14 Oct Plan",
+        date: "14 Oct · 08:48 AM",
+        excerpt: "“Goal today: one clean A+ setup and done before 10:30 AM.”",
+        tag: "Written Intention",
+      },
+      {
+        label: "21 Oct Autopsy #31",
+        date: "21 Oct · 10:14 AM",
+        excerpt: "“Was up +$1,400, took a random mid-range long out of boredom and gave back $950.”",
+        tag: "Process Break",
+      },
+      {
+        label: "28 Oct Reflection",
+        date: "28 Oct · 11:05 AM",
+        excerpt: "“Did it again on Friday. Felt invincible after the first win.”",
+        tag: "Repeat Habit",
+      },
+      {
+        label: "01 Nov Lab",
+        date: "01 Nov · Weekend Review",
+        excerpt: "“Excluding 2nd Friday trades increases monthly net expectancy by +34%.”",
+        tag: "Lab Proof",
+      },
+    ],
     quote: "The hardest moment to stay disciplined is right after you win.",
   },
   {
     id: "early-stop",
-    chip: "Early stop moves",
-    userPrompt: "Why did I choke my stop to breakeven at 09:42?",
+    chip: "Early Stop Chokes",
+    userPrompt: "Why did I choke my stop to breakeven at 09:39?",
     minatoReply:
-      "In 6 of your last 9 entries, you moved your stop within 4 minutes whenever you kept dollar P&L visible. When you switch to R-multiples, your premature exits drop by 70%.",
-    findingBadge: "Trigger identified: Watching live dollar P&L",
-    followUpPrompt: "How do I lock that habit out tomorrow?",
+      "In 6 of your last 9 entries, you dragged your stop to breakeven within 4 minutes whenever you left dollar P&L visible. When you switch display to R-multiples, premature exits drop by 70%.",
+    findingBadge: "Trigger identified: Watching live dollar P&L during 1m pullbacks",
+    supportingPoints: [
+      "Avg R when watching Dollars: +0.4R (choked early)",
+      "Avg R when watching R-Multiples: +2.3R (held to target)",
+    ],
+    followUpPrompt: "How do I lock that habit out tomorrow morning?",
     followUpReply:
-      "I've added a pre-session guardrail reminder for 09:25 AM: hide dollar P&L and wait for the 5-minute candle close.",
+      "I have armed a pre-bell reminder for 09:25 AM: hide dollar P&L and only evaluate exits on a 5-minute candle close.",
+    guardrailRule: "Display Rule: Hide dollar P&L · Exit only on 5m close",
     recommendedDrill: "Matrix Arena · R-Multiple Patience",
-    memoryNodes: ["09:05 AM Thesis", "Autopsy #42", "Autopsy #48", "Playbook Rule #3"],
+    memoryNodes: [
+      {
+        label: "09:05 AM Thesis",
+        date: "04 Nov · Pre-Bell",
+        excerpt: "“Target is 18,475 (+2.8R). Do not touch stop unless 18,406 breaks.”",
+        tag: "Pre-Commitment",
+      },
+      {
+        label: "Autopsy #42",
+        date: "19 Oct · 09:44 AM",
+        excerpt: "“Saw +$800 dip to +$350, panicked and moved stop to entry. Wicked out.”",
+        tag: "Fear Exit",
+      },
+      {
+        label: "Autopsy #48",
+        date: "27 Oct · 09:51 AM",
+        excerpt: "“Switched to R-mode today. Held through the 09:39 pullback and hit +2.8R.”",
+        tag: "Clean Execution",
+      },
+      {
+        label: "Playbook Rule #3",
+        date: "Playbook · Exit Protocol",
+        excerpt: "“1-minute pullbacks inside a 5-minute expansion leg are noise, not invalidation.”",
+        tag: "Playbook Law",
+      },
+    ],
     quote: "Count in R, never in dollars, while the decision is still alive.",
   },
   {
     id: "size-up",
-    chip: "Readiness to size up",
+    chip: "Readiness to Size Up",
     userPrompt: "Am I disciplined enough to increase my risk per trade?",
     minatoReply:
-      "Your clean-process rate over the last 20 sessions is 88%, and you logged two disciplined No-Trade Days during chop. Your process supports a 1.25× step-up with a hard two-loss circuit breaker.",
-    findingBadge: "88% clean process across 20 sessions",
-    followUpPrompt: "What would invalidate the size increase?",
+      "Your clean-process rate over the last 20 sessions is 88%, and you logged two disciplined No-Trade Days during FOMC chop. Your process supports a 1.25× step-up with a hard two-loss circuit breaker.",
+    findingBadge: "88% clean process across 20 sessions · 2 No-Trade Days honoured",
+    supportingPoints: [
+      "Drawdown envelope respected: 20 / 20 sessions",
+      "Impulse FOMO entries in last 14 days: 0",
+    ],
+    followUpPrompt: "What automatically resets my size back to baseline?",
     followUpReply:
-      "Any single unscheduled revenge entry immediately resets sizing back to baseline until three clean reviews are logged.",
+      "Any single unscheduled revenge entry immediately resets sizing back to 1.0× baseline until three consecutive clean autopsies are logged.",
+    guardrailRule: "Sizing Protocol: 1.25× earned · Instant reset on any impulse trade",
     recommendedDrill: "Weekend Boss · Drawdown Envelope Test",
-    memoryNodes: ["20-Day Process Log", "2 No-Trade Days", "Challenge #04", "Risk Envelope"],
+    memoryNodes: [
+      {
+        label: "20-Day Log",
+        date: "Oct–Nov Ledger",
+        excerpt: "“18 of 20 sessions graded A or A+ on process regardless of P&L outcome.”",
+        tag: "Consistency",
+      },
+      {
+        label: "2 No-Trade Days",
+        date: "18 Oct & 01 Nov",
+        excerpt: "“Sat on hands all morning because overnight sweep condition never triggered.”",
+        tag: "Restraint Badge",
+      },
+      {
+        label: "Challenge #04",
+        date: "Trading Lab",
+        excerpt: "“Passed $50k simulation with $1,840 of $2,000 drawdown buffer intact.”",
+        tag: "Survival Proof",
+      },
+      {
+        label: "Risk Envelope",
+        date: "Account Settings",
+        excerpt: "“Max daily risk capped at 2.0R; auto-alert triggers after 1st loss.”",
+        tag: "Hard Ceiling",
+      },
+    ],
     quote: "Size is earned by kept rules, never by a single lucky week.",
   },
 ];
@@ -87,327 +178,395 @@ const DIALOGUE_BRANCHES: DialogueBranch[] = [
 function Bubble({
   me,
   children,
-  bubbleRef,
 }: {
   me?: boolean;
   children: React.ReactNode;
-  bubbleRef?: (el: HTMLDivElement | null) => void;
 }) {
   return (
-    <div
-      ref={bubbleRef}
-      className={`transition-transform duration-150 will-change-transform ${
-        me ? "flex justify-end" : "flex justify-start"
-      }`}
-    >
-      <p
-        className={`max-w-[88%] rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.45] ${
+    <div className={me ? "flex justify-end" : "flex justify-start"}>
+      <div
+        className={`max-w-[90%] rounded-[20px] px-4 py-2.5 text-[14px] leading-[1.45] ${
           me
             ? "rounded-br-[6px] bg-ink text-canvas"
-            : "rounded-bl-[6px] bg-ink/[0.06] text-ink"
+            : "rounded-bl-[6px] border border-line bg-raised text-ink"
         }`}
       >
         {children}
-      </p>
+      </div>
     </div>
   );
 }
 
-/**
- * CHAPTER 04B — MINATO COMPANION COMMAND DECK (#minato)
- * Full-width widescreen 12-column game layout (.lp-wide) featuring:
- * - Left (4 cols): Editorial copy + Philosophical quote + 3 core principles
- * - Center (5 cols): Interactive RPG Dialogue Tree Simulator
- * - Right (3 cols): Animated Neural Memory Map & Recommended Practice Drill Card
- */
 export function MinatoDemo() {
-  const secRef = useRef<HTMLElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const bubbleRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const game = useLandingGame();
 
   const [branchIdx, setBranchIdx] = useState(0);
+  const [selectedNodeIdx, setSelectedNodeIdx] = useState(1);
+  const [equippedBranches, setEquippedBranches] = useState<Record<string, boolean>>({});
+
   const branch = DIALOGUE_BRANCHES[branchIdx] ?? DIALOGUE_BRANCHES[0]!;
+  const activeNode =
+    branch.memoryNodes[selectedNodeIdx] ?? branch.memoryNodes[0]!;
+  const isEquipped = !!equippedBranches[branch.id];
 
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
+  const handleSelectBranch = (idx: number) => {
+    setBranchIdx(idx);
+    setSelectedNodeIdx(1);
+  };
 
-    return bindScrollProgress(
-      secRef.current,
-      (p) => {
-        if (panelRef.current) {
-          const panelProg = smooth(rangeProgress(p, 0.0, 0.45));
-          const y = lerp(24, 0, panelProg);
-          const scale = lerp(0.96, 1, panelProg);
-          panelRef.current.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(4)})`;
-        }
+  const handleInspectNode = (idx: number) => {
+    setSelectedNodeIdx(idx);
+    const node = branch.memoryNodes[idx];
+    if (node) {
+      awardGameAction({
+        xpDelta: 15,
+        title: `Memory Node Cited: ${node.label}`,
+        subtitle: node.excerpt,
+        tone: "gold",
+      });
+    }
+  };
 
-        bubbleRefs.current.forEach((b, idx) => {
-          if (!b) return;
-          const start = 0.06 + idx * 0.14;
-          const bProg = smooth(rangeProgress(p, start, start + 0.24));
-          b.style.opacity = String(lerp(0.22, 1, bProg));
-          b.style.transform = `translate3d(0, ${lerp(12, 0, bProg).toFixed(1)}px, 0)`;
-        });
-      },
-      { startRatio: 0.88, endRatio: 0.2 },
-    );
-  }, []);
+  const handleEquipGuardrail = () => {
+    setEquippedBranches((prev) => ({ ...prev, [branch.id]: true }));
+    awardGameAction({
+      xpDelta: 60,
+      composureDelta: 6,
+      equityDelta: 800,
+      streakIncrement: true,
+      questId: "q5_minato",
+      guardrail: branch.guardrailRule,
+      title: "Minato Guardrail Equipped",
+      subtitle: branch.guardrailRule,
+      tone: "profit",
+    });
+  };
+
+  const nodeCoords = [
+    { x: 52, y: 34 },
+    { x: 208, y: 34 },
+    { x: 52, y: 122 },
+    { x: 208, y: 122 },
+  ];
 
   return (
     <section
       id="minato"
-      ref={secRef}
-      className="lp-wide py-24 sm:py-32"
+      className="lp-wide py-16 sm:py-24"
       aria-labelledby="minato-title"
     >
-      <div className="grid w-full items-stretch gap-8 lg:grid-cols-12 xl:gap-10">
-        {/* LEFT 4 COLS: Editorial Copy & Principles */}
-        <div className="flex flex-col justify-between lg:col-span-4">
-          <div>
-            <div data-scrub-reveal>
-              <Eyebrow n="05">CH.04B · Minato AI Companion</Eyebrow>
-              <h2
-                id="minato-title"
-                className="mt-5 font-display text-[clamp(2rem,4vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink"
-              >
-                Ask the one who has{" "}
-                <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
-                  read every entry.
-                </span>
-              </h2>
-            </div>
-
-            <ul className="mt-8 divide-y divide-line border-y border-line">
-              {POINTS.map((p) => (
-                <li key={p.t} className="py-4">
-                  <p className="font-display text-[18px] font-semibold tracking-[-0.02em] text-ink">
-                    {p.t}
-                  </p>
-                  <p className="mt-1 text-[14.5px] leading-relaxed text-muted">
-                    {p.d}
-                  </p>
-                </li>
-              ))}
-            </ul>
+      <div className="mb-8 flex flex-col justify-between gap-6 border-t border-line pt-10 lg:flex-row lg:items-end">
+        <div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Eyebrow n="05">QUEST 05 · MINATO AI PATTERN INVESTIGATION</Eyebrow>
+            {game.questsCompleted.q5_minato && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-profit/40 bg-profit/12 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-profit">
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+                QUEST 05 CLEARED
+              </span>
+            )}
           </div>
-
-          <div className="mt-6">
-            <Link
-              href="/login?mode=signup"
-              className="group inline-flex items-center gap-1.5 text-[16.5px] font-medium text-gold transition-colors hover:text-ink"
-            >
-              Meet Minato in your journal
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="m9 6 6 6-6 6" />
-              </svg>
-            </Link>
-          </div>
+          <h2
+            id="minato-title"
+            className="mt-3 font-display text-[clamp(2rem,4.4vw,3.6rem)] font-semibold leading-[1.03] tracking-[-0.042em] text-ink"
+          >
+            Ask the one who has{" "}
+            <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+              read every entry.
+            </span>
+          </h2>
+          <p className="mt-3 max-w-2xl text-[15.5px] leading-relaxed text-muted">
+            Minato doesn&apos;t predict markets or give signals—it reads your plans, autopsies, and screenshots to uncover the hidden habits costing you R. Investigate a habit below and <strong className="font-semibold text-ink">equip Minato&apos;s guardrail</strong> (+200 XP).
+          </p>
         </div>
 
-        {/* CENTER 5 COLS: Interactive RPG Dialogue Tree Simulator */}
-        <div className="lg:col-span-5">
-          <div
-            ref={panelRef}
-            className="lp-sq flex h-full flex-col justify-between overflow-hidden rounded-[28px] border border-line-strong/80 bg-surface shadow-[var(--shadow-overlay)] will-change-transform"
-            role="region"
-            aria-label="Interactive conversation with Minato about a trading habit"
-          >
-            <div>
-              <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
+        {/* Active Equipped Guardrail Pill */}
+        <div className="panel flex items-center gap-3 px-4 py-3">
+          <ShieldIcon className="h-5 w-5 shrink-0 text-gold" />
+          <div>
+            <p className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-faint">
+              Active Equipped Guardrail
+            </p>
+            <p className="font-mono text-[12px] font-semibold text-ink">
+              {game.guardrailEquipped}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid w-full items-stretch gap-6 lg:grid-cols-12 xl:gap-8">
+        {/* LEFT 7 COLS: Interactive RPG Dialogue Tree Simulator */}
+        <div className="lp-game-card flex flex-col justify-between overflow-hidden lg:col-span-7">
+          <div>
+            {/* Top Minato Header */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-canvas/70 px-5 py-4 sm:px-6">
+              <div className="flex items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/minato-avatar.jpg"
-                  alt=""
-                  width={38}
-                  height={38}
-                  className="h-9.5 w-9.5 rounded-full border border-gold/40 object-cover"
+                  alt="Minato companion avatar"
+                  width={40}
+                  height={40}
+                  className="h-10 w-10 rounded-full border border-gold/50 object-cover"
                 />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">
-                    Minato
+                <div>
+                  <p className="font-display text-[15.5px] font-semibold leading-tight text-ink">
+                    Minato · Journal-Grounded Companion
                   </p>
-                  <p className="flex items-center gap-1.5 text-[12px] text-muted">
-                    <span className="h-1.5 w-1.5 rounded-full bg-profit" />
-                    Journal-Grounded Companion
+                  <p className="flex items-center gap-1.5 font-mono text-[11px] text-muted">
+                    <span className="h-2 w-2 rounded-full bg-profit" />
+                    Cross-referencing 48 logged sessions · Zero market predictions
                   </p>
                 </div>
-                <span className="rounded-full bg-ink/[0.06] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-gold">
-                  Select Prompt
-                </span>
               </div>
 
-              {/* 3 Playable Dialogue Branch Chips */}
-              <div className="flex flex-wrap gap-1.5 border-b border-line bg-canvas/55 px-4 py-2.5">
-                {DIALOGUE_BRANCHES.map((b, idx) => {
-                  const active = idx === branchIdx;
-                  return (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => setBranchIdx(idx)}
-                      className={`rounded-full px-3 py-1 font-mono text-[10.5px] transition ${
-                        active
-                          ? "bg-gold-strong font-medium text-on-gold shadow-sm"
-                          : "border border-line bg-raised text-muted hover:text-ink"
-                      }`}
-                    >
-                      [{idx + 1}] {b.chip}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="space-y-3 px-5 py-5">
-                <Bubble
-                  me
-                  bubbleRef={(el) => {
-                    bubbleRefs.current[0] = el;
-                  }}
-                >
-                  {branch.userPrompt}
-                </Bubble>
-                <Bubble
-                  bubbleRef={(el) => {
-                    bubbleRefs.current[1] = el;
-                  }}
-                >
-                  {branch.minatoReply}
-                </Bubble>
-
-                <div
-                  ref={(el) => {
-                    bubbleRefs.current[2] = el;
-                  }}
-                  className="minato-finding transition-transform duration-150"
-                >
-                  <span className="minato-finding-number">!</span>
-                  <span className="font-mono text-[11.5px] font-medium text-ink">
-                    {branch.findingBadge}
-                  </span>
-                </div>
-
-                <Bubble
-                  me
-                  bubbleRef={(el) => {
-                    bubbleRefs.current[3] = el;
-                  }}
-                >
-                  {branch.followUpPrompt}
-                </Bubble>
-                <Bubble
-                  bubbleRef={(el) => {
-                    bubbleRefs.current[4] = el;
-                  }}
-                >
-                  {branch.followUpReply}
-                </Bubble>
-              </div>
+              <span className="rounded-full border border-line-strong bg-raised px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-gold">
+                Select Investigation [1–3]
+              </span>
             </div>
 
-            <div className="px-4 pb-4">
-              <div className="flex items-center gap-2 rounded-[22px] bg-ink/[0.06] py-1.5 pl-4 pr-1.5">
-                <span className="flex-1 text-[14px] text-faint">
-                  Choose branch [1–3] above to test Minato…
-                </span>
-                <span
-                  className="grid h-8 w-8 place-items-center rounded-full bg-gold-strong text-on-gold"
-                  aria-hidden="true"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+            {/* 3 Playable Investigation Branch Tabs */}
+            <div className="flex flex-wrap gap-2 border-b border-line bg-surface px-5 py-3 sm:px-6">
+              {DIALOGUE_BRANCHES.map((b, idx) => {
+                const active = idx === branchIdx;
+                const done = !!equippedBranches[b.id];
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => handleSelectBranch(idx)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 font-mono text-[11px] transition ${
+                      active
+                        ? "bg-gold-strong font-semibold text-on-gold shadow-[var(--shadow-rest)]"
+                        : "border border-line bg-raised text-muted hover:border-line-strong hover:text-ink"
+                    }`}
                   >
-                    <path d="M12 19V5M5 12l7-7 7 7" />
-                  </svg>
-                </span>
+                    <span>
+                      [{idx + 1}] {b.chip}
+                    </span>
+                    {done && <span>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Dialogue Stream using globals.css .minato-finding classes */}
+            <div className="space-y-3.5 px-5 py-5 sm:px-6">
+              <Bubble me>{branch.userPrompt}</Bubble>
+              <Bubble>{branch.minatoReply}</Bubble>
+
+              {/* Authentic .minato-finding & .minato-supporting-point from globals.css */}
+              <div className="minato-finding">
+                <span className="minato-finding-number">!</span>
+                <div>
+                  <p className="font-mono text-[12px] font-semibold text-ink">
+                    {branch.findingBadge}
+                  </p>
+                  <div className="mt-1.5">
+                    {branch.supportingPoints.map((pt) => (
+                      <div key={pt} className="minato-supporting-point">
+                        <span>•</span>
+                        <span className="font-mono text-[11.5px]">{pt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
+
+              <Bubble me>{branch.followUpPrompt}</Bubble>
+              <Bubble>{branch.followUpReply}</Bubble>
+            </div>
+          </div>
+
+          {/* Bottom Action Bar: Equip Guardrail */}
+          <div className="border-t border-line bg-canvas/60 p-5 sm:px-6">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-gold">
+                  Prescribed Personal Guardrail
+                </p>
+                <p className="mt-0.5 text-[14px] font-semibold text-ink">
+                  {branch.guardrailRule}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleEquipGuardrail}
+                className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-5 text-[14px] font-semibold transition active:scale-[0.98] ${
+                  isEquipped
+                    ? "border border-profit/50 bg-profit/15 text-profit"
+                    : "bg-gold-strong text-on-gold hover:bg-gold-strong-hover"
+                }`}
+              >
+                {isEquipped ? (
+                  <>
+                    <CheckCircleIcon className="h-4 w-4" />
+                    <span>Guardrail Equipped (+200 XP)</span>
+                  </>
+                ) : (
+                  <>
+                    <AwardIcon className="h-4 w-4" />
+                    <span>Equip Guardrail Rule (+200 XP)</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
 
-        {/* RIGHT 3 COLS: Animated Neural Memory Graph & Drill Dossier */}
-        <div className="lp-sq flex flex-col justify-between rounded-[28px] border border-line-strong/80 bg-surface p-6 shadow-[var(--shadow-rest)] lg:col-span-3">
+        {/* RIGHT 5 COLS: Interactive Neural Memory Graph & Cited Entry Inspector */}
+        <div className="lp-game-card flex flex-col justify-between p-5 sm:p-7 lg:col-span-5">
           <div>
-            <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-gold">
-              Memory Graph · Sources Cited
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-gold">
+                INTERACTIVE MEMORY GRAPH · CLICK ANY NODE
+              </p>
+              <span className="font-mono text-[10px] text-profit">+15 XP / Node</span>
+            </div>
             <p className="mt-1 text-[13px] text-muted">
-              Entries Minato cross-referenced for this answer:
+              Click any of the 4 journal nodes below to read the exact past entry Minato cross-referenced:
             </p>
 
-            {/* Animated SVG Neural Memory Constellation */}
-            <div className="my-4 rounded-2xl border border-line bg-canvas/80 p-3">
+            {/* Interactive SVG Memory Graph */}
+            <div className="my-4 rounded-2xl border border-line bg-canvas/80 p-3.5">
               <svg
-                viewBox="0 0 260 150"
+                viewBox="0 0 260 156"
                 className="w-full overflow-visible"
                 role="img"
                 aria-label="Minato neural memory graph connecting past journal entries"
               >
-                <line x1="130" y1="75" x2="45" y2="30" stroke="var(--color-gold)" strokeWidth="1.5" strokeDasharray="3 3" />
-                <line x1="130" y1="75" x2="215" y2="30" stroke="var(--color-gold)" strokeWidth="1.5" strokeDasharray="3 3" />
-                <line x1="130" y1="75" x2="45" y2="120" stroke="var(--color-profit)" strokeWidth="1.5" />
-                <line x1="130" y1="75" x2="215" y2="120" stroke="var(--color-profit)" strokeWidth="1.5" />
+                {nodeCoords.map((c, i) => {
+                  const isSelected = i === selectedNodeIdx;
+                  return (
+                    <line
+                      key={`line-${i}`}
+                      x1="130"
+                      y1="78"
+                      x2={c.x}
+                      y2={c.y}
+                      stroke={
+                        isSelected ? "var(--color-profit)" : "var(--color-gold)"
+                      }
+                      strokeWidth={isSelected ? "2.4" : "1.5"}
+                      strokeDasharray={isSelected ? undefined : "3 3"}
+                    />
+                  );
+                })}
 
-                <circle cx="130" cy="75" r="18" fill="var(--color-gold-strong)" />
-                <text x="130" y="79" textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--color-on-gold)">
+                <circle cx="130" cy="78" r="20" fill="var(--color-gold-strong)" />
+                <text
+                  x="130"
+                  y="81"
+                  textAnchor="middle"
+                  fontSize="8.5"
+                  fontWeight="700"
+                  fill="var(--color-on-gold)"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
                   MINATO
                 </text>
 
-                {[
-                  { x: 45, y: 30, label: branch.memoryNodes[0] },
-                  { x: 215, y: 30, label: branch.memoryNodes[1] },
-                  { x: 45, y: 120, label: branch.memoryNodes[2] },
-                  { x: 215, y: 120, label: branch.memoryNodes[3] },
-                ].map((n, i) => (
-                  <g key={i}>
-                    <circle cx={n.x} cy={n.y} r="7" fill="var(--color-raised)" stroke="var(--color-gold)" strokeWidth="2" />
-                    <text
-                      x={n.x}
-                      y={i < 2 ? n.y - 12 : n.y + 18}
-                      textAnchor="middle"
-                      fontSize="9"
-                      fill="var(--color-ink)"
-                      style={{ fontFamily: "var(--font-mono)" }}
+                {branch.memoryNodes.map((n, i) => {
+                  const c = nodeCoords[i]!;
+                  const isSelected = i === selectedNodeIdx;
+                  return (
+                    <g
+                      key={n.label}
+                      onClick={() => handleInspectNode(i)}
+                      className="cursor-pointer"
                     >
-                      {n.label}
-                    </text>
-                  </g>
-                ))}
+                      {isSelected && (
+                        <circle
+                          cx={c.x}
+                          cy={c.y}
+                          r="14"
+                          fill="var(--color-profit)"
+                          fillOpacity="0.18"
+                        />
+                      )}
+                      <circle
+                        cx={c.x}
+                        cy={c.y}
+                        r="8.5"
+                        fill={
+                          isSelected
+                            ? "var(--color-profit)"
+                            : "var(--color-raised)"
+                        }
+                        stroke={
+                          isSelected
+                            ? "var(--color-profit)"
+                            : "var(--color-gold)"
+                        }
+                        strokeWidth="2"
+                      />
+                      <text
+                        x={c.x}
+                        y={i < 2 ? c.y - 13 : c.y + 20}
+                        textAnchor="middle"
+                        fontSize="9.5"
+                        fontWeight={isSelected ? "700" : "500"}
+                        fill="var(--color-ink)"
+                        style={{ fontFamily: "var(--font-mono)" }}
+                      >
+                        {n.label}
+                      </text>
+                    </g>
+                  );
+                })}
               </svg>
             </div>
 
-            <div className="rounded-2xl border border-profit/30 bg-profit/10 p-3.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-profit">
-                Recommended Next Quest
+            {/* Cited Journal Entry Inspector Card */}
+            <div className="rounded-2xl border border-line-strong bg-raised p-4 shadow-[var(--shadow-rest)]">
+              <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em]">
+                <span className="font-semibold text-gold">
+                  {activeNode.label} · {activeNode.date}
+                </span>
+                <span className="rounded-full bg-profit/12 px-2.5 py-0.5 font-semibold text-profit">
+                  {activeNode.tag}
+                </span>
+              </div>
+              <p className="mt-2 font-serif text-[17.5px] italic leading-snug text-ink">
+                {activeNode.excerpt}
               </p>
-              <p className="mt-1 text-[14px] font-semibold text-ink">
-                {branch.recommendedDrill}
-              </p>
+            </div>
+
+            {/* Recommended Next Practice Drill */}
+            <div className="mt-3.5 flex items-center justify-between rounded-2xl border border-profit/35 bg-profit/10 px-4 py-3">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-profit">
+                  Auto-Queued Practice Drill
+                </p>
+                <p className="mt-0.5 text-[14px] font-semibold text-ink">
+                  {branch.recommendedDrill}
+                </p>
+              </div>
+              <SparklesIcon className="h-5 w-5 text-profit" />
             </div>
           </div>
 
-          <blockquote className="mt-5 border-t border-line pt-4">
-            <p className="font-serif text-[16.5px] italic leading-snug text-ink">
+          <div className="mt-5 border-t border-line pt-4">
+            <blockquote className="font-serif text-[16.5px] italic leading-snug text-ink">
               &ldquo;{branch.quote}&rdquo;
-            </p>
-            <footer className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
-              — Minato Pattern Engine
-            </footer>
-          </blockquote>
+            </blockquote>
+            <div className="mt-3 flex items-center justify-between text-[13.5px]">
+              <Link
+                href="/login?mode=signup"
+                className="font-medium text-muted transition-colors hover:text-ink"
+              >
+                Meet Minato in your journal →
+              </Link>
+              <a
+                href="#road"
+                className="group inline-flex items-center gap-1 font-medium text-gold transition-colors hover:text-ink"
+              >
+                Final Quest: Road &amp; Vault
+                <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </section>

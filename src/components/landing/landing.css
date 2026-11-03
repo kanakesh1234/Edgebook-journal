@@ -1,166 +1,100 @@
 /* ============================================================
-   Landing — Full-Screen Widescreen Game & Interactive Theatre
-   built strictly on top of the original Edgebook tokens in globals.css.
-   Zero wasted left/right desktop margins; 100% Light & Dark parity.
+   Edgebook — Interactive Game Landing Page ("The Operator's Trial")
+   Strictly adheres to project theme tokens and font families
+   defined in src/app/globals.css:
+   - Fonts: --font-sans (Inter Variable), --font-mono (JetBrains Mono Variable),
+     --font-serif (Instrument Serif)
+   - Colors: --canvas, --surface, --raised, --overlay, --line, --line-soft,
+     --line-strong, --ink, --muted, --faint, --profit, --loss, --gold,
+     --gold-strong, --on-gold, --info, --road-*
 =========================================================== */
 
 .lp-root {
   --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  background-color: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
 }
 
-/* Full-bleed widescreen container for desktop game layouts */
+/* Full-bleed widescreen container for game arenas */
 .lp-wide {
   width: 100%;
-  padding-inline: 1.25rem;
+  max-width: 92rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
 }
 @media (min-width: 640px) {
   .lp-wide {
-    padding-inline: 2rem;
+    padding-inline: 1.75rem;
   }
 }
 @media (min-width: 1024px) {
   .lp-wide {
-    padding-inline: 3rem;
+    padding-inline: 2.75rem;
   }
 }
 @media (min-width: 1440px) {
   .lp-wide {
-    padding-inline: 4rem;
+    padding-inline: 3.5rem;
   }
 }
 
-/* Frosted bar (nav) — uses original --canvas token */
+/* Frosted HUD glass — uses original --surface / --canvas tokens */
 .lp-glass {
-  background: color-mix(in srgb, var(--canvas) 82%, transparent);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
-  backdrop-filter: saturate(180%) blur(24px);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+  backdrop-filter: saturate(150%) blur(18px);
 }
 
-/* Continuous (squircle) corners where the browser supports them */
+/* Tactile game card surface matching practice/ui.tsx */
+.lp-game-card {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 26px;
+  box-shadow: var(--shadow-lift);
+}
+
+.lp-game-tile {
+  background: linear-gradient(180deg, var(--raised), var(--surface));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-rest);
+  transition:
+    border-color 0.2s var(--lp-ease),
+    transform 0.2s var(--lp-ease),
+    box-shadow 0.2s var(--lp-ease),
+    background-color 0.2s var(--lp-ease);
+}
+@media (hover: hover) {
+  .lp-game-tile:hover:not(:disabled) {
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+.lp-game-tile:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+/* Ledger ruled paper surface — adapts to light and dark theme */
+.lp-ledger-sheet {
+  background-color: var(--raised);
+  background-image: linear-gradient(
+    to bottom,
+    transparent 31px,
+    color-mix(in srgb, var(--line-strong) 45%, transparent) 32px
+  );
+  background-size: 100% 32px;
+}
+
+/*Continuous (squircle) corners where supported */
 .lp-sq {
   corner-shape: squircle;
 }
 
-/* Initial entrance choreography */
-@keyframes lp-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 24px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes lp-win-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 48px, 0) scale(0.975);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.lp-rise {
-  animation: lp-rise 0.95s var(--lp-ease) both;
-  animation-delay: var(--d, 0s);
-}
-.lp-win-in {
-  animation: lp-win-in 1.2s var(--lp-ease) 0.28s both;
-}
-
-/* ---------------- Pinned Scroll Game Stages ---------------- */
-/* Scene 01: Entrance (Full-bleed split-screen Writer's Room) */
-.lp-entrance-pin {
-  height: 205svh;
-}
-@media (max-width: 1023px) {
-  .lp-entrance-pin {
-    height: auto;
-  }
-}
-
-/* Scene 02: The Inner Film (100vw x 100svh Edge-to-Edge Fullscreen Theatre) */
-.lp-pinned {
-  --lp-track: 480svh;
-  height: var(--lp-track);
-}
-@media (max-width: 1023px) {
-  .lp-pinned {
-    --lp-track: 380svh;
-  }
-}
-.lp-static {
-  display: none;
-}
-
-/* Scene 03: The Decision (5-Gate Widescreen Game Cockpit) */
-.lp-ritual-pin {
-  height: 350svh;
-}
-@media (max-width: 1023px) {
-  .lp-ritual-pin {
-    height: 270svh;
-  }
-}
-
-/* Scene 04A: The Gap (Scroll-Scrubbed Autopsy Scanner) */
-.lp-gap-pin {
-  height: 225svh;
-}
-@media (max-width: 1023px) {
-  .lp-gap-pin {
-    height: auto;
-  }
-}
-
-/* ---------------- Theatre Mode (Scene 02 Immersion) ---------------- */
-html[data-theatre-mode="true"] .lp-nav-header:not(:hover):not(:focus-within) {
-  opacity: 0.14;
-  transform: translate3d(0, -40%, 0);
-}
-
-/* Subtle 35mm film grain */
-.lp-film-grain {
-  background-image: radial-gradient(rgba(255, 248, 232, 0.12) 0.75px, transparent 0.75px);
-  background-size: 4px 4px;
-}
-
-/* ---------------- Scene 05B: Toolkit (Full-bleed Horizontal Scroll) ---------------- */
-@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
-  .lp-toolkit-stage {
-    position: sticky;
-    top: 0;
-    height: 100svh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-  .lp-toolkit-track {
-    will-change: transform;
-  }
-}
-@media (max-width: 1023px), (prefers-reduced-motion: reduce) {
-  .lp-toolkit-track {
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-    padding-inline: 1.25rem;
-    scroll-padding-inline: 1.25rem;
-  }
-  .lp-toolkit-track::-webkit-scrollbar {
-    display: none;
-  }
-  .lp-toolkit-card {
-    scroll-snap-align: start;
-  }
-}
-
-/* Road milestones light up as the line reaches them */
+/* Road milestone states */
 .lp-ms circle.lp-ms-dot {
-  transition: fill 0.4s ease, stroke 0.4s ease;
+  transition: fill 0.35s ease, stroke 0.35s ease;
 }
 .lp-ms[data-on="true"] circle.lp-ms-dot {
   fill: var(--profit);
@@ -171,34 +105,37 @@ html[data-theatre-mode="true"] .lp-nav-header:not(:hover):not(:focus-within) {
 }
 .lp-ms circle.lp-ms-ring {
   opacity: 0;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.4s ease;
 }
 .lp-ms text {
-  transition: fill 0.4s ease;
+  transition: fill 0.35s ease;
 }
 .lp-ms[data-on="true"] text {
   fill: var(--profit);
 }
 
-/* ---------------- Reduced motion: no pinning, no scrubbing ---------------- */
+/* Subtle pulse for active quest markers */
+@keyframes lp-quest-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.35;
+  }
+}
+.lp-pulse-ring {
+  animation: lp-quest-pulse 2.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .lp-pinned {
-    display: none;
-  }
-  .lp-static {
-    display: block;
-  }
-  .lp-entrance-pin,
-  .lp-ritual-pin,
-  .lp-gap-pin {
-    height: auto !important;
-  }
-  .lp-rise,
-  .lp-win-in {
+  .lp-pulse-ring {
     animation: none;
   }
-  html[data-theatre-mode="true"] .lp-nav-header {
-    opacity: 1 !important;
-    transform: none !important;
+  .lp-game-tile:hover:not(:disabled),
+  .lp-game-tile:active:not(:disabled) {
+    transform: none;
   }
 }

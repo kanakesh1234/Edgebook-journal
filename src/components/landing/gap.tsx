@@ -1,249 +1,578 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
-  bindScrollProgress,
-  clamp,
-  lerp,
-  prefersReducedMotion,
-  rangeProgress,
-  smooth,
-} from "./motion-utils";
+  AlertTriangleIcon,
+  AwardIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  SparklesIcon,
+} from "@/components/ui/icons";
 import { Eyebrow } from "./ledger";
+import { awardGameAction, useLandingGame } from "./game-state";
 
-interface AutopsyQuestion {
-  q: string;
-  a: string;
-  tone: string;
-  insight: string;
-  metric: string;
+/* ========================================================================== */
+/*  QUEST 03 — THE AUTOPSY X-RAY DETECTIVE GAME (#gap)                        */
+/*  Separating Sloppy Wins from Valid Losses using the 5-Question Autopsy     */
+/* ========================================================================== */
+
+type VerdictType = "valid_process" | "process_break";
+
+interface AutopsyCase {
+  id: string;
+  caseNum: string;
+  title: string;
+  spreadsheetRow: {
+    date: string;
+    symbol: string;
+    side: string;
+    pnl: string;
+    isGreen: boolean;
+    naiveTake: string;
+  };
+  correctVerdict: VerdictType;
+  verdictTitle: string;
+  verdictExplanation: string;
+  questions: {
+    q: string;
+    a: string;
+    tone: "profit" | "gold" | "loss" | "ink";
+    insight: string;
+  }[];
+  metricBadge: string;
 }
 
-const QUESTIONS: AutopsyQuestion[] = [
+const AUTOPSY_CASES: AutopsyCase[] = [
   {
-    q: "Did you follow the plan?",
-    a: "Yes — Entry matched thesis",
-    tone: "text-profit bg-profit/10 border-profit/25",
-    insight: "Overnight low swept at 09:32 NY and reclaimed on the 5-minute close before entry.",
-    metric: "Entry Discipline: 100%",
+    id: "case-1-sloppy-win",
+    caseNum: "CASE 01",
+    title: "The +$940 Green Mirage",
+    spreadsheetRow: {
+      date: "04 Mar · 09:31",
+      symbol: "MNQ",
+      side: "Long",
+      pnl: "+$940 (+1.9R)",
+      isGreen: true,
+      naiveTake: "Spreadsheet says: Green trade! Great job!",
+    },
+    correctVerdict: "process_break",
+    verdictTitle: "Sloppy Win = Process Break",
+    verdictExplanation:
+      "Making money on an unconfirmed FOMO entry with 2.5× oversized risk reinforces the exact habit that blows up accounts.",
+    metricBadge: "Hidden Risk: 2.5× Oversized FOMO",
+    questions: [
+      {
+        q: "Did you follow the plan?",
+        a: "No — Chased 09:31 spike before 5m close",
+        tone: "loss",
+        insight: "Entered 4 minutes before the 5-minute candle closed without a liquidity sweep.",
+      },
+      {
+        q: "What were you feeling?",
+        a: "Urgency & Fear of Missing Out",
+        tone: "gold",
+        insight: "Heart rate spiked watching fast green ticks at the opening bell.",
+      },
+      {
+        q: "Was it good process, whatever the result?",
+        a: "Process failure on entry & sizing",
+        tone: "loss",
+        insight: "Risked 2.5R on an unconfirmed candle. A lucky payout does not make a valid decision.",
+      },
+      {
+        q: "What was the mistake, or the lesson?",
+        a: "Rewarded bad behaviour with a green number",
+        tone: "ink",
+        insight: "Dangerous positive reinforcement—logged to prevent tomorrow's blowup.",
+      },
+      {
+        q: "What will you watch next time?",
+        a: "Hands off mouse until 09:35 5m close",
+        tone: "profit",
+        insight: "Queued into Matrix Arena · Opening Bell Restraint Drill.",
+      },
+    ],
   },
   {
-    q: "What were you feeling?",
-    a: "Calm, then rushed",
-    tone: "text-gold bg-gold/10 border-gold/30",
-    insight: "Heart rate and urgency spiked 4 minutes after entry when a single red 1-minute candle printed.",
-    metric: "Emotional Shift @ 09:39",
+    id: "case-2-valid-loss",
+    caseNum: "CASE 02",
+    title: "The −$350 Textbook Stop-Out",
+    spreadsheetRow: {
+      date: "06 Mar · 09:40",
+      symbol: "ES",
+      side: "Long",
+      pnl: "−$350 (−1.0R)",
+      isGreen: false,
+      naiveTake: "Spreadsheet says: Red trade! Something went wrong!",
+    },
+    correctVerdict: "valid_process",
+    verdictTitle: "Clean Rules = Valid Edge Expense",
+    verdictExplanation:
+      "Even an 84% win-rate edge loses 16% of the time. Honouring your exact 1.0R stop without flinching is an A+ operator performance.",
+    metricBadge: "100% Plan Adherence · A+ Loss",
+    questions: [
+      {
+        q: "Did you follow the plan?",
+        a: "Yes — Exact overnight sweep + 5m close",
+        tone: "profit",
+        insight: "All 4 playbook checklist gates were verified before order entry.",
+      },
+      {
+        q: "What were you feeling?",
+        a: "Calm, composed, accepted the 1.0R risk",
+        tone: "profit",
+        insight: "Zero hesitation on entry; zero negotiation when price hit invalidation.",
+      },
+      {
+        q: "Was it good process, whatever the result?",
+        a: "100% Clean Process — Valid Loss",
+        tone: "profit",
+        insight: "Edgebook scores this session as a process win so you never abandon a working edge.",
+      },
+      {
+        q: "What was the mistake, or the lesson?",
+        a: "No mistake — normal statistical variance",
+        tone: "ink",
+        insight: "A losing trade with clean rules is simply the business overhead of trading.",
+      },
+      {
+        q: "What will you watch next time?",
+        a: "Execute the exact same setup tomorrow",
+        tone: "gold",
+        insight: "Confidence protected. Zero strategy-hopping triggered.",
+      },
+    ],
   },
   {
-    q: "Was it good process, whatever the result?",
-    a: "Process failure on exit",
-    tone: "text-loss bg-loss/10 border-loss/25",
-    insight: "Even if a trade makes or loses money, breaking your exit rule is logged as a process break.",
-    metric: "Exit Rule Broken",
-  },
-  {
-    q: "What was the mistake, or the lesson?",
-    a: "Moved the stop early",
-    tone: "text-ink bg-ink/[0.05] border-line-strong",
-    insight: "Choked the stop to breakeven out of fear of giveback; price tapped the stop and ran +3.2R to target.",
-    metric: "Cost of Fear: −3.2R",
-  },
-  {
-    q: "What will you watch next time?",
-    a: "The 5m close first",
-    tone: "text-profit bg-profit/10 border-profit/25",
-    insight: "Queued into your evening Time Machine practice feed until early-exit interference drops to zero.",
-    metric: "Queued for Practice",
+    id: "case-3-early-choke",
+    caseNum: "CASE 03",
+    title: "The +$60 Breakeven Choke",
+    spreadsheetRow: {
+      date: "08 Mar · 09:39",
+      symbol: "MNQ",
+      side: "Long",
+      pnl: "+$60 (+0.1R)",
+      isGreen: true,
+      naiveTake: "Spreadsheet says: Harmless scratch trade, no big deal.",
+    },
+    correctVerdict: "process_break",
+    verdictTitle: "Fear Exit = −3.1R Opportunity Cost",
+    verdictExplanation:
+      "A normal spreadsheet ignores what happened after you exited. Edgebook's autopsy reveals that choking your stop early cost you a +3.2R winner.",
+    metricBadge: "Cost of Fear: −3.1R Missed",
+    questions: [
+      {
+        q: "Did you follow the plan?",
+        a: "Entry matched thesis · Broke exit rule",
+        tone: "gold",
+        insight: "Overnight low swept at 09:32 NY and reclaimed on the 5m close.",
+      },
+      {
+        q: "What were you feeling?",
+        a: "Calm at entry, then rushed on 1m red bar",
+        tone: "gold",
+        insight: "Watched live dollar P&L flicker from +$800 to +$300 and panicked.",
+      },
+      {
+        q: "Was it good process, whatever the result?",
+        a: "Process failure on exit management",
+        tone: "loss",
+        insight: "Breaking your exit rule out of fear is logged as a process break.",
+      },
+      {
+        q: "What was the mistake, or the lesson?",
+        a: "Moved the stop early to breakeven",
+        tone: "loss",
+        insight: "Price wicked breakeven to the tick and ran +3.2R ($3,200) to target without you.",
+      },
+      {
+        q: "What will you watch next time?",
+        a: "Hide dollar P&L · Wait for 5m close",
+        tone: "profit",
+        insight: "Queued into your evening Time Machine practice feed until retired.",
+      },
+    ],
   },
 ];
 
-/**
- * CHAPTER 04A — THE GAP (#gap)
- * Full-width widescreen desktop game layout (.lp-wide) contrasting a shallow
- * P&L spreadsheet row against an interactive 5-Question Autopsy X-Ray Scanner.
- */
 export function Gap() {
-  const secRef = useRef<HTMLElement>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const game = useLandingGame();
 
-  const [scannedIdx, setScannedIdx] = useState(3);
-  const [manualScan, setManualScan] = useState<number | null>(null);
+  const [activeCaseIdx, setActiveCaseIdx] = useState(0);
+  const [scannedQIdx, setScannedQIdx] = useState(2);
+  const [verdicts, setVerdicts] = useState<Record<string, VerdictType>>({});
 
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
+  const currentCase = AUTOPSY_CASES[activeCaseIdx] ?? AUTOPSY_CASES[0]!;
+  const playerVerdict = verdicts[currentCase.id];
+  const isCurrentCorrect = playerVerdict === currentCase.correctVerdict;
 
-    return bindScrollProgress(
-      secRef.current,
-      (p) => {
-        if (cardRef.current) {
-          const lift = smooth(rangeProgress(p, 0.0, 0.35));
-          const y = lerp(24, 0, lift);
-          const scale = lerp(0.965, 1, lift);
-          cardRef.current.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${scale.toFixed(4)})`;
-        }
+  const solvedCount = AUTOPSY_CASES.filter(
+    (c) => verdicts[c.id] === c.correctVerdict,
+  ).length;
 
-        rowRefs.current.forEach((row, idx) => {
-          if (!row) return;
-          const start = 0.06 + idx * 0.14;
-          const rowP = smooth(rangeProgress(p, start, start + 0.24));
-          row.style.opacity = String(lerp(0.28, 1, rowP));
-          row.style.transform = `translate3d(${lerp(16, 0, rowP).toFixed(1)}px, 0, 0)`;
-        });
+  const submitVerdict = (caseItem: AutopsyCase, choice: VerdictType) => {
+    const isCorrect = choice === caseItem.correctVerdict;
+    const nextVerdicts = { ...verdicts, [caseItem.id]: choice };
+    setVerdicts(nextVerdicts);
 
-        if (manualScan === null) {
-          const autoIdx = Math.min(4, Math.floor(clamp(p, 0, 0.999) * 5));
-          setScannedIdx((prev) => (prev === autoIdx ? prev : autoIdx));
-        }
-      },
-      { pinned: true },
+    const allSolved = AUTOPSY_CASES.every(
+      (c) => nextVerdicts[c.id] === c.correctVerdict,
     );
-  }, [manualScan]);
 
-  const activeQ = QUESTIONS[scannedIdx] ?? QUESTIONS[0]!;
+    if (isCorrect) {
+      awardGameAction({
+        xpDelta: 55,
+        composureDelta: 5,
+        equityDelta: 450,
+        streakIncrement: true,
+        questId: allSolved ? "q3_autopsy" : undefined,
+        title: `${caseItem.caseNum} Solved: ${caseItem.verdictTitle}`,
+        subtitle: caseItem.verdictExplanation,
+        tone: "profit",
+      });
+    } else {
+      awardGameAction({
+        composureDelta: -5,
+        streakReset: true,
+        title: `${caseItem.caseNum} Misdiagnosed`,
+        subtitle: "Look past the dollar P&L—inspect the 5-Question X-Ray on the right!",
+        tone: "loss",
+      });
+    }
+  };
+
+  const toneBadgeClass = (tone: "profit" | "gold" | "loss" | "ink") => {
+    if (tone === "profit") return "text-profit bg-profit/10 border-profit/30";
+    if (tone === "gold") return "text-gold bg-gold/10 border-gold/30";
+    if (tone === "loss") return "text-loss bg-loss/10 border-loss/30";
+    return "text-ink bg-ink/[0.06] border-line-strong";
+  };
 
   return (
     <section
       id="gap"
-      ref={secRef}
-      className="lp-gap-pin relative w-full py-20 lg:py-0"
+      className="lp-wide py-16 sm:py-24"
       aria-labelledby="gap-title"
     >
-      <div className="lg:sticky lg:top-0 lg:flex lg:min-h-svh lg:w-full lg:flex-col lg:justify-center">
-        <div className="lp-wide grid w-full items-stretch gap-8 lg:grid-cols-12 xl:gap-10">
-          {/* LEFT 5 COLS: Headline + Shallow Spreadsheet vs. X-Ray Diagnostic Cartoon */}
-          <div className="flex flex-col justify-between lg:col-span-5">
-            <div>
-              <div data-scrub-reveal>
-                <Eyebrow n="04">CH.04 · The Autopsy X-Ray</Eyebrow>
-                <h2
-                  id="gap-title"
-                  className="mt-5 font-display text-[clamp(2.1rem,4.4vw,3.8rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-ink"
+      {/* Top Section Header */}
+      <div className="mb-8 flex flex-col justify-between gap-6 border-t border-line pt-10 lg:flex-row lg:items-end">
+        <div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Eyebrow n="03">QUEST 03 · THE AUTOPSY X-RAY DETECTIVE</Eyebrow>
+            {game.questsCompleted.q3_autopsy && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-profit/40 bg-profit/12 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-profit">
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+                QUEST 03 CLEARED
+              </span>
+            )}
+          </div>
+          <h2
+            id="gap-title"
+            className="mt-3 font-display text-[clamp(2rem,4.4vw,3.6rem)] font-semibold leading-[1.03] tracking-[-0.042em] text-ink"
+          >
+            A normal journal logs the result.{" "}
+            <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
+              Yours should log the decision.
+            </span>
+          </h2>
+          <p className="mt-3 max-w-2xl text-[15.5px] leading-relaxed text-muted">
+            A spreadsheet only sees green or red dollars. Inspect the <strong className="font-semibold text-ink">3 Trade Cases</strong> below using Edgebook&apos;s 5-Question X-Ray and judge whether each trade was <strong className="font-medium text-profit">Valid Process</strong> or a <strong className="font-medium text-loss">Process Break</strong>.
+          </p>
+        </div>
+
+        {/* Case Progress Pill */}
+        <div className="panel flex items-center gap-4 px-5 py-3.5">
+          <EyeIcon className="h-5 w-5 text-gold" />
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
+              Autopsy Detective Score
+            </p>
+            <p className="font-display text-[16px] font-semibold text-ink">
+              <span className="num text-profit">{solvedCount}</span> / 3 Cases Diagnosed
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 3 Case Dossier Tabs */}
+      <div
+        className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3"
+        role="tablist"
+        aria-label="Three Trade Autopsy Cases"
+      >
+        {AUTOPSY_CASES.map((c, idx) => {
+          const isSelected = idx === activeCaseIdx;
+          const v = verdicts[c.id];
+          const solved = v === c.correctVerdict;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              role="tab"
+              aria-selected={isSelected}
+              onClick={() => setActiveCaseIdx(idx)}
+              className={`flex flex-col justify-between rounded-[22px] border p-4 text-left transition ${
+                isSelected
+                  ? "border-gold bg-raised shadow-[var(--shadow-rest)]"
+                  : "border-line bg-surface hover:border-line-strong"
+              }`}
+            >
+              <div className="flex w-full items-center justify-between font-mono text-[10.5px] uppercase tracking-[0.12em]">
+                <span className={isSelected ? "font-bold text-gold" : "text-faint"}>
+                  {c.caseNum} · {c.spreadsheetRow.symbol}
+                </span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                    solved
+                      ? "bg-profit/15 text-profit"
+                      : v
+                        ? "bg-loss/15 text-loss"
+                        : "bg-ink/[0.06] text-muted"
+                  }`}
                 >
-                  A normal journal logs the result.{" "}
-                  <span className="font-serif text-[1.08em] font-normal italic tracking-[-0.02em] text-gold">
-                    Yours should log the decision.
-                  </span>
-                </h2>
+                  {solved ? "✓ SOLVED" : v ? "! RETRY" : "INSPECT"}
+                </span>
               </div>
 
-              <p className="mt-4 text-[15.5px] leading-relaxed text-muted">
-                A row of date, symbol and P&amp;L can&apos;t tell you why you moved the stop. A winning trade with broken rules is still a process failure. A losing trade with clean rules is a valid loss.
+              <p className="mt-1.5 font-display text-[16px] font-semibold text-ink">
+                {c.title}
               </p>
 
-              {/* Visual X-Ray Comparison: Normal Spreadsheet vs. Edgebook Mind Scan */}
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-dashed border-line-strong bg-surface/65 p-4">
-                  <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
-                    <span>The Usual Spreadsheet</span>
-                    <span className="text-loss">Blind</span>
-                  </div>
-                  <p className="mt-2 font-mono text-[13px] font-medium text-muted">
-                    04 Mar · MNQ · Long · −$140
-                  </p>
-                  <p className="mt-1.5 text-[12.5px] text-faint">
-                    Zero record of what you planned, felt, or broke.
-                  </p>
-                </div>
+              <div className="mt-2 flex items-center justify-between border-t border-line pt-2 font-mono text-[11.5px]">
+                <span className="text-muted">{c.spreadsheetRow.date}</span>
+                <span
+                  className={`font-semibold ${
+                    c.spreadsheetRow.isGreen ? "text-profit" : "text-loss"
+                  }`}
+                >
+                  {c.spreadsheetRow.pnl}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
-                <div className="rounded-2xl border border-gold/40 bg-raised p-4 shadow-[var(--shadow-rest)]">
-                  <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-gold">
-                    <span>Edgebook X-Ray</span>
-                    <span className="text-profit">{activeQ.metric}</span>
+      {/* Main Split Detective Workspace: Left 5 Cols (Spreadsheet Illusion + Verdict Judge) | Right 7 Cols (5-Question X-Ray Ledger) */}
+      <div className="grid items-stretch gap-6 lg:grid-cols-12 xl:gap-8">
+        {/* LEFT 5 COLS: Normal Spreadsheet Illusion vs Operator Verdict Controls */}
+        <div className="lp-game-card flex flex-col justify-between p-5 sm:p-7 lg:col-span-5">
+          <div>
+            <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-gold">
+              {currentCase.caseNum} · {currentCase.title}
+            </p>
+
+            {/* 1. What a Normal Spreadsheet Sees */}
+            <div className="mt-3 rounded-2xl border border-dashed border-line-strong bg-canvas/70 p-4">
+              <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
+                <span>1. What a Normal Spreadsheet Logs</span>
+                <span className="text-loss">Surface Only</span>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between rounded-xl border border-line bg-surface px-3.5 py-2.5 font-mono text-[13px]">
+                <span className="text-ink">
+                  {currentCase.spreadsheetRow.date} · {currentCase.spreadsheetRow.symbol}{" "}
+                  {currentCase.spreadsheetRow.side}
+                </span>
+                <strong
+                  className={
+                    currentCase.spreadsheetRow.isGreen ? "text-profit" : "text-loss"
+                  }
+                >
+                  {currentCase.spreadsheetRow.pnl}
+                </strong>
+              </div>
+              <p className="mt-2 text-[12.5px] italic text-muted">
+                {currentCase.spreadsheetRow.naiveTake}
+              </p>
+            </div>
+
+            {/* 2. Cast Your Operator Verdict */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink">
+                  2. Cast Your Autopsy Verdict (+55 XP)
+                </p>
+                <span className="font-mono text-[10px] text-muted">
+                  Read X-Ray →
+                </span>
+              </div>
+              <p className="mt-1 text-[13.5px] text-muted">
+                After reading the 5-Question X-Ray on the right, how should Edgebook classify this trade?
+              </p>
+
+              <div className="mt-3.5 grid grid-cols-1 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => submitVerdict(currentCase, "valid_process")}
+                  className={`lp-game-tile flex items-center justify-between gap-3 p-4 text-left ${
+                    playerVerdict === "valid_process"
+                      ? isCurrentCorrect
+                        ? "!border-profit !bg-profit/10"
+                        : "!border-loss !bg-loss/10"
+                      : ""
+                  }`}
+                >
+                  <div>
+                    <span className="block font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-profit">
+                      [Verdict A] · Valid Process
+                    </span>
+                    <span className="mt-0.5 block text-[14.5px] font-semibold text-ink">
+                      Clean Rules Kept — Protect Confidence
+                    </span>
                   </div>
-                  <p className="mt-2 text-[13px] font-semibold text-ink">
-                    {activeQ.a}
-                  </p>
-                  <p className="mt-1 text-[12px] leading-snug text-muted">
-                    {activeQ.insight}
-                  </p>
-                </div>
+                  <CheckCircleIcon className="h-5 w-5 shrink-0 text-profit" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => submitVerdict(currentCase, "process_break")}
+                  className={`lp-game-tile flex items-center justify-between gap-3 p-4 text-left ${
+                    playerVerdict === "process_break"
+                      ? isCurrentCorrect
+                        ? "!border-profit !bg-profit/10"
+                        : "!border-loss !bg-loss/10"
+                      : ""
+                  }`}
+                >
+                  <div>
+                    <span className="block font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-loss">
+                      [Verdict B] · Process Break
+                    </span>
+                    <span className="mt-0.5 block text-[14.5px] font-semibold text-ink">
+                      Rule Broken — Queue Mistake for Practice
+                    </span>
+                  </div>
+                  <AlertTriangleIcon className="h-5 w-5 shrink-0 text-loss" />
+                </button>
               </div>
             </div>
 
-            {/* Philosophical Quote Card */}
-            <blockquote className="mt-6 rounded-2xl border border-line bg-surface p-5 shadow-[var(--shadow-rest)]">
-              <p className="font-serif text-[19px] italic leading-snug text-ink">
-                &ldquo;An unexamined trade is a tuition fee paid for nothing. Name the mistake once so you never pay for it twice.&rdquo;
-              </p>
-              <footer className="mt-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-gold">
-                — The Edgebook Autopsy Principle
-              </footer>
-            </blockquote>
+            {/* Verdict Explanation Box */}
+            {playerVerdict && (
+              <div
+                className={`mt-4 rounded-2xl border p-4 text-[13px] leading-snug ${
+                  isCurrentCorrect
+                    ? "border-profit/45 bg-profit/10 text-ink"
+                    : "border-loss/45 bg-loss/10 text-ink"
+                }`}
+              >
+                <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em]">
+                  {isCurrentCorrect ? (
+                    <span className="text-profit">
+                      ✓ Correct Diagnosis · {currentCase.verdictTitle}
+                    </span>
+                  ) : (
+                    <span className="text-loss">
+                      ! Look Closer at the 5-Question X-Ray
+                    </span>
+                  )}
+                </p>
+                <p className="mt-1">{currentCase.verdictExplanation}</p>
+              </div>
+            )}
           </div>
 
-          {/* RIGHT 7 COLS: Interactive 5-Question Autopsy Scanner Ledger */}
-          <div
-            ref={cardRef}
-            className="lp-sq relative flex flex-col justify-between overflow-hidden rounded-[32px] border border-line-strong/80 bg-surface shadow-[var(--shadow-overlay)] will-change-transform lg:col-span-7"
-          >
-            {/* The ledger's red margin rule */}
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 left-12 w-px bg-loss/25 sm:left-16"
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-4 pl-16 sm:px-6 sm:pl-20">
-              <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-gold">
-                Interactive 5-Question Autopsy · Click or Scroll to Scan
+          {/* Bottom Case Switcher & Quote */}
+          <div className="mt-5 border-t border-line pt-4">
+            <blockquote className="font-serif text-[16.5px] italic text-gold">
+              &ldquo;An unexamined trade is a tuition fee paid for nothing. Name the mistake once so you never pay for it twice.&rdquo;
+            </blockquote>
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveCaseIdx((activeCaseIdx + 1) % AUTOPSY_CASES.length)
+                }
+                className="inline-flex h-9 items-center gap-1 rounded-full border border-line-strong bg-raised px-4 font-mono text-[11px] font-semibold text-ink transition hover:border-gold"
+              >
+                Inspect Next Case ({((activeCaseIdx + 1) % 3) + 1}/3) →
+              </button>
+              <a
+                href="#toolkit"
+                className="group inline-flex items-center gap-1 text-[13.5px] font-medium text-gold transition-colors hover:text-ink"
+              >
+                Quest 04: Arenas
+                <ChevronRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT 7 COLS: Interactive 5-Question Autopsy X-Ray Scanner Ledger */}
+        <div className="lp-game-card relative flex flex-col justify-between overflow-hidden lg:col-span-7">
+          {/* Red Archival Ledger Margin Rule */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-12 w-px bg-loss/25 sm:left-16"
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-canvas/70 px-5 py-4 pl-16 sm:px-6 sm:pl-20">
+            <div>
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-gold">
+                EDGEBOOK 5-QUESTION AUTOPSY X-RAY · {currentCase.caseNum}
               </p>
-              <span className="rounded-full border border-profit/30 bg-profit/10 px-3 py-0.5 font-mono text-[10.5px] font-medium text-profit">
-                Scanning Node 0{scannedIdx + 1} of 05
-              </span>
+              <p className="text-[12px] text-muted">
+                Click any question below to inspect the psychological telemetry
+              </p>
             </div>
+            <span className="rounded-full border border-gold/40 bg-gold/10 px-3 py-1 font-mono text-[10.5px] font-semibold text-gold">
+              {currentCase.metricBadge}
+            </span>
+          </div>
 
-            <ol className="divide-y divide-line">
-              {QUESTIONS.map((x, i) => {
-                const isScanned = i === scannedIdx;
-                return (
-                  <li
-                    key={x.q}
-                    ref={(el) => {
-                      rowRefs.current[i] = el;
-                    }}
-                    onClick={() => {
-                      setManualScan(i);
-                      setScannedIdx(i);
-                    }}
-                    onMouseEnter={() => setScannedIdx(i)}
-                    className={`cursor-pointer py-4 pr-5 transition-colors duration-150 sm:pr-6 ${
-                      isScanned ? "bg-gold/[0.06]" : "hover:bg-ink/[0.02]"
-                    }`}
-                  >
-                    <div className="grid grid-cols-[2.75rem_1fr] items-center gap-x-4 sm:grid-cols-[3.75rem_1fr_auto]">
-                      <span
-                        className={`pl-4 font-mono text-[13px] sm:pl-6 ${
-                          isScanned ? "font-bold text-gold" : "text-faint"
-                        }`}
-                      >
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <div>
-                        <p className="pl-2 font-display text-[clamp(1.05rem,1.6vw,1.25rem)] font-semibold leading-snug tracking-[-0.02em] text-ink sm:pl-4">
-                          {x.q}
-                        </p>
-                        {isScanned && (
-                          <p className="mt-1 pl-2 text-[13px] leading-snug text-muted sm:pl-4">
-                            {x.insight}
-                          </p>
-                        )}
-                      </div>
-                      <span
-                        className={`col-start-2 mt-2 w-fit rounded-full border px-3 py-1 text-[12px] font-medium sm:col-start-3 sm:mt-0 ${x.tone}`}
-                      >
-                        {x.a}
-                      </span>
+          <ol className="divide-y divide-line">
+            {currentCase.questions.map((item, i) => {
+              const isScanned = i === scannedQIdx;
+              return (
+                <li
+                  key={item.q}
+                  onClick={() => setScannedQIdx(i)}
+                  onMouseEnter={() => setScannedQIdx(i)}
+                  className={`cursor-pointer py-4 pr-5 transition-colors duration-150 sm:pr-6 ${
+                    isScanned ? "bg-gold/[0.07]" : "hover:bg-ink/[0.02]"
+                  }`}
+                >
+                  <div className="grid grid-cols-[2.75rem_1fr] items-center gap-x-4 sm:grid-cols-[3.75rem_1fr_auto]">
+                    <span
+                      className={`pl-4 font-mono text-[13px] sm:pl-6 ${
+                        isScanned ? "font-bold text-gold" : "text-faint"
+                      }`}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <div>
+                      <p className="pl-2 font-display text-[clamp(1.02rem,1.4vw,1.2rem)] font-semibold leading-snug tracking-[-0.02em] text-ink sm:pl-4">
+                        {item.q}
+                      </p>
+                      <p className="mt-1 pl-2 text-[13px] leading-snug text-muted sm:pl-4">
+                        {item.insight}
+                      </p>
                     </div>
-                  </li>
-                );
-              })}
-            </ol>
+                    <span
+                      className={`col-start-2 mt-2 w-fit rounded-full border px-3 py-1 text-[12px] font-medium sm:col-start-3 sm:mt-0 ${toneBadgeClass(
+                        item.tone,
+                      )}`}
+                    >
+                      {item.a}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
 
-            <div className="flex items-center justify-between border-t border-line bg-canvas/60 px-5 py-3.5 pl-16 text-[12.5px] text-muted sm:px-6 sm:pl-20">
-              <span>Diagnostic output: <strong className="font-medium text-ink">{activeQ.metric}</strong></span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-gold">
-                Indexed for Minato AI →
-              </span>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-canvas/60 px-5 py-3.5 pl-16 text-[12.5px] text-muted sm:px-6 sm:pl-20">
+            <span>
+              Three-minute reflection complete ·{" "}
+              <strong className="font-medium text-ink">
+                Indexed locally &amp; in Google Drive
+              </strong>
+            </span>
+            <span className="inline-flex items-center gap-1 font-mono text-[11px] font-semibold uppercase tracking-[0.1em] text-gold">
+              <SparklesIcon className="h-3.5 w-3.5" />
+              Feeds Quest 04 Arenas →
+            </span>
           </div>
         </div>
       </div>

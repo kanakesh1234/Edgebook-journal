@@ -2,60 +2,64 @@
 
 import { useEffect, useState } from "react";
 import {
-  SCENE_META,
-  landingScrollState,
-  prefersReducedMotion,
-  subscribeLandingScroll,
-} from "./motion-utils";
+  AwardIcon,
+  CheckCircleIcon,
+  SparklesIcon,
+  TrophyIcon,
+} from "@/components/ui/icons";
+import {
+  QUEST_SPECS,
+  getRankForXp,
+  resetLandingGame,
+  useLandingGame,
+} from "./game-state";
+import { prefersReducedMotion } from "./motion-utils";
 
 /**
- * Diegetic Game-Style Director HUD Dock
- * - Displays active chapter (CH.01 – CH.06), live scroll depth %, and Composure Score.
- * - Lets the visitor jump directly to any scene or enter Theatre Mode (#film) in one click
- *   or via keyboard hotkeys [1]–[6].
- * - Built strictly with Edgebook's original tokens (lp-glass, border-line-strong, text-ink, text-gold, text-profit).
+ * Bottom Quest Log & Live Reward Toast Dock
+ * - Pops up floating XP / Badge toasts when the player completes actions.
+ * - Lets the player inspect all 6 Quests, unlocked Badges, and jump via hotkeys [1]–[6].
+ * - Built strictly with Edgebook's theme tokens and fonts.
  */
 export function DirectorHud() {
-  const [scene, setScene] = useState(1);
-  const [depthPct, setDepthPct] = useState(0);
-  const [theatre, setTheatre] = useState(false);
-  const [composure, setComposure] = useState(88);
+  const game = useLandingGame();
   const [expanded, setExpanded] = useState(false);
+  const [visibleToastId, setVisibleToastId] = useState<number | null>(null);
 
   useEffect(() => {
-    const unsub = subscribeLandingScroll((st) => {
-      setScene(st.activeScene);
-      setDepthPct(Math.round(st.pageProgress * 100));
-      setTheatre(st.theatreMode);
-      setComposure(st.composureScore);
-    });
+    if (!game.lastToast) return;
+    setVisibleToastId(game.lastToast.id);
+    const timer = window.setTimeout(() => {
+      setVisibleToastId((current) =>
+        current === game.lastToast?.id ? null : current,
+      );
+    }, 3600);
+    return () => window.clearTimeout(timer);
+  }, [game.lastToast]);
 
-    // Keyboard chapter hotkeys [1]–[6] when not typing in an input
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       const num = Number(e.key);
-      if (num >= 1 && num <= 6) {
-        const targetMeta = SCENE_META[num - 1];
-        if (!targetMeta) return;
-        const el = document.querySelector<HTMLElement>(targetMeta.anchor);
+      if (num >= 1 && num <= QUEST_SPECS.length) {
+        const targetQuest = QUEST_SPECS[num - 1];
+        if (!targetQuest) return;
+        const el = document.querySelector<HTMLElement>(targetQuest.anchor);
         if (el) {
           e.preventDefault();
-          el.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
+          el.scrollIntoView({
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+          });
         }
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => {
-      unsub();
-      window.removeEventListener("keydown", onKeyDown);
-    };
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  const currentMeta = SCENE_META[scene - 1] ?? SCENE_META[0]!;
 
   const jumpTo = (anchor: string) => {
     setExpanded(false);
@@ -65,83 +69,181 @@ export function DirectorHud() {
     }
   };
 
+  const currentQuest =
+    QUEST_SPECS[game.activeQuestIndex] ?? QUEST_SPECS[0]!;
+  const completedCount = Object.values(game.questsCompleted).filter(Boolean).length;
+  const { rank } = getRankForXp(game.xp);
+  const showToast =
+    game.lastToast && visibleToastId === game.lastToast.id ? game.lastToast : null;
+
   return (
     <aside
-      aria-label="Interactive chapter director HUD"
-      className={`fixed bottom-4 left-1/2 z-40 -translate-x-1/2 transition-all duration-300 ${
-        theatre ? "opacity-90 hover:opacity-100" : "opacity-100"
-      }`}
+      aria-label="Operator Quest Log and Live Telemetry Dock"
+      className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 flex-col items-center gap-2"
     >
-      {/* Expanded Chapter Select Matrix (Game Menu Style) */}
-      {expanded && (
-        <div className="lp-glass lp-sq mb-2.5 w-[min(92vw,560px)] rounded-[24px] border border-line-strong p-3 shadow-[var(--shadow-overlay)]">
-          <div className="mb-2 flex items-center justify-between px-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">
-            <span>Select Scene · Keys [1–6]</span>
-            <span className="text-profit">Composure {composure}%</span>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            {SCENE_META.map((m) => {
-              const active = m.id === scene;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => jumpTo(m.anchor)}
-                  className={`flex flex-col items-start rounded-2xl border px-3 py-2 text-left transition ${
-                    active
-                      ? "border-gold/60 bg-gold/12 text-ink shadow-[var(--shadow-rest)]"
-                      : "border-line bg-raised/75 text-muted hover:border-line-strong hover:text-ink"
-                  }`}
-                >
-                  <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-gold">
-                    [{m.id}] {m.code}
-                  </span>
-                  <span className="mt-0.5 truncate text-[12px] font-semibold tracking-[-0.01em] text-ink">
-                    {m.title}
-                  </span>
-                </button>
-              );
-            })}
+      {/* Floating Live Game Reward Toast */}
+      {showToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="lp-glass flex items-center gap-3 rounded-full border border-gold/50 px-4 py-2 shadow-[var(--shadow-lift)]"
+        >
+          <span
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-full font-mono text-[11px] font-bold ${
+              showToast.tone === "profit"
+                ? "bg-profit text-canvas"
+                : showToast.tone === "loss"
+                  ? "bg-loss text-canvas"
+                  : "bg-gold-strong text-on-gold"
+            }`}
+          >
+            {showToast.xpDelta > 0 ? "+" : "★"}
+          </span>
+          <div className="text-left">
+            <p className="text-[12.5px] font-semibold leading-tight text-ink">
+              {showToast.title}{" "}
+              {showToast.xpDelta !== 0 && (
+                <span className="font-mono text-[11px] text-gold">
+                  ({showToast.xpDelta > 0 ? `+${showToast.xpDelta}` : showToast.xpDelta} XP)
+                </span>
+              )}
+            </p>
+            <p className="text-[11px] leading-tight text-muted">
+              {showToast.subtitle}
+            </p>
           </div>
         </div>
       )}
 
-      {/* Compact Diegetic HUD Pill */}
-      <div className="lp-glass flex items-center gap-2 rounded-full border border-line-strong/90 px-2.5 py-1.5 shadow-[var(--shadow-lift)] sm:gap-3 sm:px-3.5">
+      {/* Expanded Quest Matrix & Trophy Case */}
+      {expanded && (
+        <div className="lp-glass lp-sq mb-1 w-[min(94vw,640px)] rounded-[26px] border border-line-strong p-4 shadow-[var(--shadow-overlay)]">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2.5">
+            <div className="flex items-center gap-2">
+              <TrophyIcon className="h-4 w-4 text-gold" />
+              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-ink">
+                Operator Quest Log · Keys [1–6]
+              </span>
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[11px] text-muted">
+              <span>
+                Rank: <strong className="text-gold">{rank.title}</strong>
+              </span>
+              <span>·</span>
+              <span>
+                Cleared: <strong className="text-profit">{completedCount}/6</strong>
+              </span>
+              <button
+                type="button"
+                onClick={resetLandingGame}
+                className="rounded-full border border-line bg-raised px-2.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted hover:border-line-strong hover:text-ink"
+              >
+                Reset Run
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {QUEST_SPECS.map((q, idx) => {
+              const active = idx === game.activeQuestIndex;
+              const done = game.questsCompleted[q.id];
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  onClick={() => jumpTo(q.anchor)}
+                  className={`flex items-start justify-between gap-2 rounded-2xl border p-3 text-left transition ${
+                    active
+                      ? "border-gold bg-gold/10 text-ink shadow-[var(--shadow-rest)]"
+                      : done
+                        ? "border-profit/40 bg-profit/[0.06] text-ink hover:border-profit"
+                        : "border-line bg-raised/85 text-muted hover:border-line-strong hover:text-ink"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em]">
+                      <span className="text-gold">[{idx + 1}] {q.code}</span>
+                      <span>·</span>
+                      <span className={done ? "font-semibold text-profit" : "text-faint"}>
+                        {done ? "✓ CLEARED" : `+${q.xpReward} XP`}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 truncate font-display text-[13.5px] font-semibold tracking-[-0.01em] text-ink">
+                      {q.title}
+                    </p>
+                    <p className="mt-0.5 line-clamp-1 text-[11.5px] text-muted">
+                      {q.description}
+                    </p>
+                  </div>
+                  {done && (
+                    <CheckCircleIcon className="mt-0.5 h-4 w-4 shrink-0 text-profit" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Unlocked Badges Strip */}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
+              Unlocked Badges ({game.badges.length}/6):
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {game.badges.length === 0 ? (
+                <span className="text-[11.5px] italic text-faint">
+                  Complete any quest on the page to unlock your first badge…
+                </span>
+              ) : (
+                game.badges.map((b) => (
+                  <span
+                    key={b}
+                    className="inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/12 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-gold"
+                  >
+                    <AwardIcon className="h-3 w-3" />
+                    {b}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Compact Diegetic Quest Bar */}
+      <div className="lp-glass flex items-center gap-2 rounded-full border border-line-strong px-3 py-1.5 shadow-[var(--shadow-lift)] sm:gap-3 sm:px-4">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
-          className="inline-flex items-center gap-2 rounded-full bg-raised px-3 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-ink transition hover:border-gold/50 active:scale-[0.98]"
+          className="inline-flex items-center gap-2 rounded-full border border-line bg-raised px-3 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-ink transition hover:border-gold/60 active:scale-[0.98]"
         >
-          <span
-            className={`h-2 w-2 rounded-full ${
-              theatre ? "bg-gold animate-pulse" : "bg-profit"
-            }`}
-            aria-hidden="true"
-          />
-          <span className="text-gold">{currentMeta.code}</span>
-          <span className="hidden sm:inline">{currentMeta.title}</span>
+          <SparklesIcon className="h-3.5 w-3.5 text-gold" />
+          <span className="font-semibold text-gold">{currentQuest.code}</span>
+          <span className="hidden sm:inline">{currentQuest.shortTitle}</span>
           <span className="text-[9px] text-faint">{expanded ? "▼" : "▲"}</span>
         </button>
 
-        {/* Mini 6-dot scene progress bar */}
-        <div className="hidden items-center gap-1 md:flex" role="group" aria-label="Scene jump dots">
-          {SCENE_META.map((m) => {
-            const active = m.id === scene;
-            const passed = m.id < scene;
+        {/* 6-Quest Completion Dots */}
+        <div
+          className="hidden items-center gap-1.5 md:flex"
+          role="group"
+          aria-label="Quest progress dots"
+        >
+          {QUEST_SPECS.map((q, idx) => {
+            const active = idx === game.activeQuestIndex;
+            const done = game.questsCompleted[q.id];
             return (
               <button
-                key={m.id}
+                key={q.id}
                 type="button"
-                onClick={() => jumpTo(m.anchor)}
-                title={`${m.code}: ${m.title}`}
-                aria-label={`Jump to ${m.title}`}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
+                onClick={() => jumpTo(q.anchor)}
+                title={`${q.code}: ${q.title} (${done ? "Cleared" : `+${q.xpReward} XP`})`}
+                aria-label={`Jump to ${q.title}`}
+                className={`h-2 rounded-full transition-all duration-300 ${
                   active
                     ? "w-6 bg-gold-strong"
-                    : passed
-                      ? "w-2.5 bg-profit/70 hover:bg-gold"
+                    : done
+                      ? "w-2.5 bg-profit hover:bg-gold"
                       : "w-2 bg-line-strong hover:bg-muted"
                 }`}
               />
@@ -151,24 +253,16 @@ export function DirectorHud() {
 
         <div className="h-3.5 w-px bg-line-strong" aria-hidden="true" />
 
-        {/* Live Composure & Scroll Depth Telemetry */}
-        <div className="flex items-center gap-2.5 font-mono text-[10.5px] tabular-nums tracking-[0.08em] text-muted">
-          <span className="hidden sm:inline">
-            EDGE <strong className="font-semibold text-profit">{composure}%</strong>
+        {/* Quest Counter & XP */}
+        <div className="flex items-center gap-2.5 font-mono text-[11px] tabular-nums text-muted">
+          <span>
+            QUESTS <strong className="font-semibold text-profit">{completedCount}/6</strong>
           </span>
-          <span>{String(depthPct).padStart(3, "0")}%</span>
+          <span className="hidden sm:inline">·</span>
+          <span className="hidden sm:inline">
+            <strong className="font-semibold text-gold">{game.xp} XP</strong>
+          </span>
         </div>
-
-        {/* Quick Theatre Mode Jump if not currently in Scene 02 */}
-        {scene !== 2 && (
-          <button
-            type="button"
-            onClick={() => jumpTo("#film")}
-            className="hidden rounded-full bg-gold-strong px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-on-gold transition hover:bg-gold-strong-hover sm:inline-block"
-          >
-            Theatre
-          </button>
-        )}
       </div>
     </aside>
   );

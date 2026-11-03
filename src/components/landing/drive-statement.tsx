@@ -1,152 +1,278 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { bindScrollProgress, clamp, lerp, prefersReducedMotion } from "./motion-utils";
+import { useState } from "react";
+import {
+  CheckCircleIcon,
+  CloudIcon,
+  DownloadIcon,
+  ShieldIcon,
+} from "@/components/ui/icons";
 import { Eyebrow } from "./ledger";
+import { awardGameAction, getRankForXp, useLandingGame } from "./game-state";
 
-const SENTENCE =
-  "Your journal is one file in your own Google Drive. Open it, export it, or walk away with it whenever you like.";
+/* ========================================================================== */
+/*  QUEST 06B — SOVEREIGN GOOGLE DRIVE VAULT SIMULATOR (#drive)               */
+/*  Interactive Vault Switcher & Live journal.json Inspector                  */
+/* ========================================================================== */
 
-const FACTS = [
-  { t: "Sign in with Google", d: "Your journal syncs to a folder only you control." },
-  { t: "Prefer to stay local?", d: "Use an email session and keep everything on this device." },
-  { t: "Export in one click", d: "Your whole journal as JSON, any time." },
-];
-
-/**
- * CHAPTER 05A — YOUR DRIVE (#drive)
- * Full-width widescreen vault card (.lp-wide) with animated SVG sovereignty diagram,
- * philosophical quote, and word-by-word scroll illumination.
- */
 export function DriveStatement() {
-  const sec = useRef<HTMLElement>(null);
-  const card = useRef<HTMLDivElement>(null);
-  const text = useRef<HTMLParagraphElement>(null);
+  const game = useLandingGame();
+  const { rank } = getRankForXp(game.xp);
 
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
-    const words = Array.from(text.current?.querySelectorAll<HTMLElement>("[data-w]") ?? []);
-    return bindScrollProgress(
-      sec.current,
-      (p) => {
-        const cardProg = clamp(p * 1.35, 0, 1);
-        if (card.current) {
-          const scale = lerp(0.95, 1, cardProg);
-          const radius = Math.round(lerp(56, 36, cardProg));
-          card.current.style.transform = `scale(${scale})`;
-          card.current.style.borderRadius = `${radius}px`;
-        }
-        const wordProg = clamp((p - 0.12) / 0.78, 0, 1);
-        const total = Math.max(1, words.length);
-        words.forEach((w, i) => {
-          const threshold = i / total;
-          const local = clamp((wordProg - threshold) * 5, 0, 1);
-          w.style.opacity = String(lerp(0.24, 1, local));
-        });
+  const [storageMode, setStorageMode] = useState<"drive" | "local">("drive");
+  const [showJson, setShowJson] = useState(false);
+  const [exported, setExported] = useState(false);
+
+  const handleToggleStorage = (mode: "drive" | "local") => {
+    setStorageMode(mode);
+    awardGameAction({
+      xpDelta: 20,
+      title:
+        mode === "drive"
+          ? "Google Drive Vault Synced"
+          : "Local IndexedDB Mode Active",
+      subtitle:
+        mode === "drive"
+          ? "Synced directly to EdgeBook/journals/journal.json in your own Drive."
+          : "100% offline device storage—zero external servers.",
+      tone: "gold",
+    });
+  };
+
+  const handleSimulateExport = () => {
+    setExported(true);
+    setShowJson(true);
+    awardGameAction({
+      xpDelta: 45,
+      composureDelta: 3,
+      questId: "q6_vault",
+      title: "journal.json Verified & Exported",
+      subtitle: "You own 100% of your journal data in plain, portable JSON.",
+      tone: "profit",
+    });
+  };
+
+  const liveJsonPreview = JSON.stringify(
+    {
+      schema: "edgebook.journal.v1",
+      owner: "you@google-drive",
+      storage:
+        storageMode === "drive"
+          ? "Google Drive / EdgeBook / journals / journal.json"
+          : "Local Device / IndexedDB",
+      operatorProfile: {
+        level: rank.level,
+        rank: rank.title,
+        xp: game.xp,
+        composureScore: `${game.composure}%`,
+        simulatedEquity: `$${game.equity.toLocaleString()}`,
+        activeGuardrail: game.guardrailEquipped,
+        unlockedBadges: game.badges,
       },
-      { startRatio: 0.92, endRatio: 0.2 },
-    );
-  }, []);
+    },
+    null,
+    2,
+  );
 
   return (
-    <section id="drive" ref={sec} className="lp-wide relative py-12 sm:py-16">
-      <div
-        ref={card}
-        className="lp-sq relative w-full overflow-hidden rounded-[36px] border border-line-strong/70 bg-surface px-6 py-16 text-ink shadow-[var(--shadow-overlay)] will-change-transform sm:px-12 sm:py-24 lg:px-16"
-      >
+    <section id="drive" className="lp-wide relative py-12 sm:py-16">
+      <div className="lp-game-card relative w-full overflow-hidden px-6 py-12 sm:px-10 sm:py-16 lg:px-14">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              "radial-gradient(880px 420px at 12% 0%, color-mix(in srgb, var(--gold) 13%, transparent), transparent 70%), radial-gradient(640px 360px at 100% 100%, color-mix(in srgb, var(--profit) 8%, transparent), transparent 70%)",
+              "radial-gradient(820px 380px at 10% 0%, color-mix(in srgb, var(--gold) 12%, transparent), transparent 70%), radial-gradient(640px 360px at 100% 100%, color-mix(in srgb, var(--profit) 8%, transparent), transparent 70%)",
           }}
         />
 
-        <div className="relative grid items-center gap-10 lg:grid-cols-12">
-          <div className="lg:col-span-8">
-            <div className="mb-6">
-              <Eyebrow n="06">CH.05 · Sovereign Data Vault</Eyebrow>
-            </div>
-            <p
-              ref={text}
-              className=" font-display text-[clamp(1.85rem,4.2vw,3.7rem)] font-semibold leading-[1.1] tracking-[-0.035em]"
-            >
-              {SENTENCE.split(" ").map((w, i) => (
-                <span key={i} data-w className="inline-block pr-[0.28em]">
-                  {w}
-                </span>
-              ))}
-            </p>
+        <div className="relative grid items-center gap-8 lg:grid-cols-12">
+          {/* Left 7 Cols: Sovereign Statement & Interactive Storage Controls */}
+          <div className="lg:col-span-7">
+            <Eyebrow n="06B">SOVEREIGN DATA VAULT · ZERO LOCK-IN</Eyebrow>
+            <h2 className="mt-4 font-display text-[clamp(1.85rem,3.8vw,3.2rem)] font-semibold leading-[1.08] tracking-[-0.038em] text-ink">
+              Your journal is one file in{" "}
+              <span className="font-serif text-[1.08em] font-normal italic text-gold">
+                your own Google Drive.
+              </span>{" "}
+              Open it, export it, or walk away with it whenever you like.
+            </h2>
 
-            {/* The file badge + quote */}
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <div className="inline-flex max-w-full items-center gap-3 overflow-x-auto rounded-2xl border border-line bg-raised px-4 py-3 shadow-[var(--shadow-rest)]">
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-5 w-5 shrink-0 text-gold"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
+            {/* Interactive Storage Mode Switcher + JSON Inspector Buttons */}
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <div className="segmented">
+                <button
+                  type="button"
+                  aria-selected={storageMode === "drive"}
+                  onClick={() => handleToggleStorage("drive")}
                 >
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                </svg>
-                <code className="break-all font-mono text-[12px] text-muted sm:whitespace-nowrap sm:text-sm">
-                  EdgeBook / journals / journal.json
-                </code>
+                  Google Drive Sync
+                </button>
+                <button
+                  type="button"
+                  aria-selected={storageMode === "local"}
+                  onClick={() => handleToggleStorage("local")}
+                >
+                  Local Device Only
+                </button>
               </div>
 
-              <span className="font-serif text-[18px] italic text-gold">
+              <button
+                type="button"
+                onClick={() => setShowJson((prev) => !prev)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line-strong bg-raised px-4 font-mono text-[11px] font-semibold text-ink transition hover:border-gold"
+              >
+                <ShieldIcon className="h-3.5 w-3.5 text-gold" />
+                {showJson ? "Hide Live JSON" : "Inspect Your Live journal.json"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSimulateExport}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 font-mono text-[11px] font-semibold transition ${
+                  exported
+                    ? "border border-profit/45 bg-profit/12 text-profit"
+                    : "bg-gold-strong text-on-gold hover:bg-gold-strong-hover"
+                }`}
+              >
+                {exported ? (
+                  <>
+                    <CheckCircleIcon className="h-3.5 w-3.5" />
+                    <span>JSON Verified (+45 XP)</span>
+                  </>
+                ) : (
+                  <>
+                    <DownloadIcon className="h-3.5 w-3.5" />
+                    <span>Verify 1-Click Export (+45 XP)</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* File Path Badge */}
+            <div className="mt-5 flex flex-wrap items-center gap-4">
+              <div className="inline-flex max-w-full items-center gap-2.5 rounded-2xl border border-line bg-raised px-4 py-2.5 shadow-[var(--shadow-rest)]">
+                <CloudIcon className="h-4 w-4 shrink-0 text-gold" />
+                <code className="font-mono text-[12px] text-ink">
+                  {storageMode === "drive"
+                    ? "Google Drive / EdgeBook / journals / journal.json"
+                    : "IndexedDB / edgebook.local.journal.json"}
+                </code>
+              </div>
+              <span className="font-serif text-[17.5px] italic text-gold">
                 &ldquo;Own your words. Own your history. Own your edge.&rdquo;
               </span>
             </div>
           </div>
 
-          {/* Right 4 Cols: Animated SVG Vault Architecture Diagram */}
-          <div className="rounded-[24px] border border-line bg-canvas/80 p-5 lg:col-span-4">
-            <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
-              <span>Zero-Lock Architecture</span>
-              <span className="text-profit">● Direct Sync</span>
+          {/* Right 5 Cols: Live Architecture Diagram OR Live Game JSON Payload */}
+          <div className="rounded-[24px] border border-line-strong bg-canvas/85 p-5 lg:col-span-5">
+            <div className="mb-2.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-faint">
+              <span>
+                {showJson
+                  ? "Live Game State -> journal.json"
+                  : "Zero-Lock Vault Architecture"}
+              </span>
+              <span className="font-semibold text-profit">
+                ● {storageMode === "drive" ? "Direct Drive Sync" : "Local IndexedDB"}
+              </span>
             </div>
-            <svg
-              viewBox="0 0 320 140"
-              className="w-full"
-              role="img"
-              aria-label="Direct sync diagram between your browser and your own Google Drive vault"
-            >
-              <rect x="12" y="34" width="96" height="72" rx="14" fill="var(--color-raised)" stroke="var(--color-line-strong)" strokeWidth="1.5" />
-              <text x="60" y="66" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-ink)">
-                Your Device
-              </text>
-              <text x="60" y="84" textAnchor="middle" fontSize="9.5" fill="var(--color-muted)" style={{ fontFamily: "var(--font-mono)" }}>
-                IndexedDB Local
-              </text>
 
-              <path d="M114 62 H202" stroke="var(--color-gold)" strokeWidth="2" strokeDasharray="5 5" style={{ animation: "dash-flow 1.4s linear infinite" }} />
-              <path d="M202 78 H114" stroke="var(--color-profit)" strokeWidth="2" strokeDasharray="5 5" style={{ animation: "dash-flow 1.4s linear infinite" }} />
+            {showJson ? (
+              <pre className="max-h-[210px] overflow-auto rounded-xl border border-line bg-surface p-3.5 font-mono text-[11px] leading-relaxed text-ink">
+                {liveJsonPreview}
+              </pre>
+            ) : (
+              <svg
+                viewBox="0 0 320 140"
+                className="w-full"
+                role="img"
+                aria-label="Direct sync diagram between your browser and your own Google Drive vault"
+              >
+                <rect
+                  x="12"
+                  y="30"
+                  width="102"
+                  height="78"
+                  rx="14"
+                  fill="var(--color-raised)"
+                  stroke="var(--color-line-strong)"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="63"
+                  y="64"
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="600"
+                  fill="var(--color-ink)"
+                >
+                  Your Device
+                </text>
+                <text
+                  x="63"
+                  y="82"
+                  textAnchor="middle"
+                  fontSize="9.5"
+                  fill="var(--color-muted)"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
+                  IndexedDB Local
+                </text>
 
-              <rect x="210" y="34" width="98" height="72" rx="14" fill="var(--color-raised)" stroke="var(--color-gold)" strokeWidth="2" />
-              <text x="259" y="66" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-ink)">
-                Your Google Drive
-              </text>
-              <text x="259" y="84" textAnchor="middle" fontSize="9.5" fill="var(--color-gold)" style={{ fontFamily: "var(--font-mono)" }}>
-                journal.json
-              </text>
-            </svg>
+                <path
+                  d="M120 60 H198"
+                  stroke="var(--color-gold)"
+                  strokeWidth="2"
+                  strokeDasharray="5 5"
+                  style={{ animation: "dash-flow 1.4s linear infinite" }}
+                />
+                <path
+                  d="M198 78 H120"
+                  stroke="var(--color-profit)"
+                  strokeWidth="2"
+                  strokeDasharray="5 5"
+                  style={{ animation: "dash-flow 1.4s linear infinite" }}
+                />
+
+                <rect
+                  x="204"
+                  y="30"
+                  width="104"
+                  height="78"
+                  rx="14"
+                  fill="var(--color-raised)"
+                  stroke={
+                    storageMode === "drive"
+                      ? "var(--color-gold)"
+                      : "var(--color-line-strong)"
+                  }
+                  strokeWidth="2"
+                />
+                <text
+                  x="256"
+                  y="64"
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="600"
+                  fill="var(--color-ink)"
+                >
+                  {storageMode === "drive" ? "Your Google Drive" : "JSON Export"}
+                </text>
+                <text
+                  x="256"
+                  y="82"
+                  textAnchor="middle"
+                  fontSize="9.5"
+                  fill="var(--color-gold)"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
+                  journal.json
+                </text>
+              </svg>
+            )}
           </div>
         </div>
-
-        <ul className="relative mt-12 grid gap-8 border-t border-line pt-8 sm:mt-14 md:grid-cols-3 md:gap-10">
-          {FACTS.map((f) => (
-            <li key={f.t}>
-              <p className="text-[17px] font-medium">{f.t}</p>
-              <p className="mt-1.5 text-[15px] leading-relaxed text-muted">{f.d}</p>
-            </li>
-          ))}
-        </ul>
       </div>
     </section>
   );

@@ -1,3 +1,5 @@
+import { QUEST_SPECS, awardGameAction, setActiveQuestIndex } from "./game-state";
+
 export const clamp = (v: number, min = 0, max = 1) => Math.min(max, Math.max(min, v));
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -22,33 +24,27 @@ export const prefersReducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia(REDUCED_QUERY).matches;
 
 export interface LandingScrollState {
-  /** Normalized overall page scroll progress [0..1] */
   pageProgress: number;
-  /** True when the visitor is immersed inside the full-screen Theatre sequence (#film) */
   theatreMode: boolean;
-  /** Current major scene number [1..6] */
   activeScene: number;
-  /** Current scene label for the diegetic HUD */
   sceneTitle: string;
-  /** Player's interactive Composure / Discipline score [0..100] from choices & scroll */
   composureScore: number;
 }
 
-export const SCENE_META: { id: number; anchor: string; code: string; title: string }[] = [
-  { id: 1, anchor: "#top", code: "CH.01", title: "THE ENTRANCE" },
-  { id: 2, anchor: "#film", code: "CH.02", title: "THE INNER FILM" },
-  { id: 3, anchor: "#how", code: "CH.03", title: "THE DECISION" },
-  { id: 4, anchor: "#gap", code: "CH.04", title: "THE REFLECTION" },
-  { id: 5, anchor: "#drive", code: "CH.05", title: "THE EXPERIENCE" },
-  { id: 6, anchor: "#finale", code: "CH.06", title: "THE INVITATION" },
-];
+export const SCENE_META: { id: number; anchor: string; code: string; title: string }[] =
+  QUEST_SPECS.map((q, idx) => ({
+    id: idx + 1,
+    anchor: q.anchor,
+    code: q.code,
+    title: q.title.toUpperCase(),
+  }));
 
 export const landingScrollState: LandingScrollState = {
   pageProgress: 0,
   theatreMode: false,
   activeScene: 1,
-  sceneTitle: "THE ENTRANCE",
-  composureScore: 88,
+  sceneTitle: "THE PRE-BELL RITUAL",
+  composureScore: 84,
 };
 
 type ScrollStateListener = (state: LandingScrollState) => void;
@@ -66,14 +62,25 @@ export function notifyLandingScroll(): void {
 }
 
 export function updateComposureScore(nextScore: number): void {
-  landingScrollState.composureScore = Math.round(clamp(nextScore, 0, 100));
+  const clamped = Math.round(clamp(nextScore, 0, 100));
+  const diff = clamped - landingScrollState.composureScore;
+  landingScrollState.composureScore = clamped;
+  if (diff !== 0) {
+    awardGameAction({
+      composureDelta: diff,
+      xpDelta: diff > 0 ? 15 : 0,
+      title: diff > 0 ? "Composure Increased" : "Composure Tested",
+      subtitle: `Operator composure now at ${clamped}%`,
+      tone: diff > 0 ? "profit" : "loss",
+    });
+  }
   notifyLandingScroll();
 }
 
-/**
- * Compute scroll progress [0..1] for an element between two viewport anchor ratios.
- * - When `opts.pinned = true`, returns `0` when `el.top == 0` and `1` when `el.bottom == window.innerHeight`.
- */
+export function syncQuestFromScene(sceneNumber: number): void {
+  setActiveQuestIndex(Math.max(0, Math.min(QUEST_SPECS.length - 1, sceneNumber - 1)));
+}
+
 export function computeScrollProgress(
   el: Element,
   opts: { startRatio?: number; endRatio?: number; pinned?: boolean } = {},
@@ -91,10 +98,6 @@ export function computeScrollProgress(
   return clamp((startY - rect.top) / span, 0, 1);
 }
 
-/**
- * Subscribe a callback to 60fps scroll & resize updates for a target element.
- * Works identically when scrolling forward or backward.
- */
 export function bindScrollProgress(
   el: Element | null,
   onProgress: (progress: number) => void,
@@ -127,9 +130,6 @@ export function bindScrollProgress(
   };
 }
 
-/**
- * Smoothly scrolls the window to a specific normalized progress [0..1] inside a pinned container.
- */
 export function scrollToPinnedProgress(
   container: HTMLElement | null,
   targetProgress: number,
