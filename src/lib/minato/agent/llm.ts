@@ -94,7 +94,7 @@ export function cleanModelList(models: (string | undefined | null)[]): string[] 
   return out;
 }
 
-const isFreeTier = (m: string) => m === FREE_ROUTER || m.endsWith(":free");
+const isFreeTier = (m: string) => m === FREE_ROUTER || m.endsWith(":free") || m.startsWith("stealth/");
 
 export function getAgentLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfig | null {
   const base = getOpenRouterConfig();
@@ -108,7 +108,7 @@ export function getAgentLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConf
   // discovery: free slugs get retired without notice, and one dead slug must never silence Minato. A paid chain is
   // left exactly as configured — it never quietly degrades to a free model.
   const freeOnly = picked.every(isFreeTier);
-  const models = (freeOnly ? cleanModelList([...picked, FREE_ROUTER]) : picked).slice(0, 5);
+  const models = (freeOnly ? cleanModelList([...picked, FREE_ROUTER]) : picked).slice(0, 8);
   const tokens = Number(env.MINATO_MAX_OUTPUT_TOKENS);
   const effort = (env.MINATO_REASONING_EFFORT ?? "").toLowerCase();
   const endpoint = env.MINATO_LLM_ENDPOINT?.trim() || "https://openrouter.ai/api/v1/chat/completions";
@@ -342,7 +342,7 @@ export async function complete(o: CompletionOptions): Promise<CompletionResult> 
   const sleep = o.sleep ?? defaultSleep;
   const attempts: Attempt[] = [];
   const preferred = o.preferModel && o.config.models.includes(o.preferModel) ? o.preferModel : null;
-  const configured = [...new Set([...(preferred ? [preferred] : []), ...o.config.models])].slice(0, 5);
+  const configured = [...new Set([...(preferred ? [preferred] : []), ...o.config.models])].slice(0, 8);
   let lastFailure: CompletionFailure = "empty";
   let toolsRejected = false;
   let lastDetail: string | undefined;

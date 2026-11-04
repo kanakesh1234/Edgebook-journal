@@ -177,17 +177,20 @@ export interface OpenRouterConfig {
 export function getOpenRouterConfig(): OpenRouterConfig | null {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
-  const primary = process.env.MINATO_MODEL || "openrouter/free";
-  const rawFallback = process.env.MINATO_FALLBACK_MODEL || "google/gemma-3-27b-it:free";
+  const primary = process.env.MINATO_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
+  const rawFallback = process.env.MINATO_FALLBACK_MODEL || "stealth/crouton-alpha";
   const fallback = rawFallback === "z-ai/glm-5.2:free" ? "openrouter/free" : rawFallback;
   const models = [
     ...new Set(
       [
         primary,
         fallback,
+        "stealth/crouton-alpha",
+        "dots-studio/dots-3-note-preview:free",
+        "recursive/flint-v1.0:free",
+        "nvidia/nemotron-3.5-super-vl:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
         "openrouter/free",
-        "google/gemma-3-27b-it:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
       ].filter(Boolean),
     ),
   ];

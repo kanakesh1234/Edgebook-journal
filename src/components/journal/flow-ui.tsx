@@ -18,9 +18,9 @@ export const FLOW_EASE = [0.16, 1, 0.3, 1] as const;
 export const FLOW_SMOOTH = [0.32, 0.72, 0, 1] as const;
 /**
  * Height unfold. A tween on the iOS curve instead of a spring: a spring on `height: auto` overshoots its measured
- * height and makes the content below stutter. Kept brisk (0.34s) so the flow never feels like it is waiting.
+ * height and makes the content below stutter. Kept measured (0.4s) so reveals breathe without ever feeling slow.
  */
-export const FLOW_EXPAND = { duration: 0.34, ease: FLOW_SMOOTH } as const;
+export const FLOW_EXPAND = { duration: 0.4, ease: FLOW_SMOOTH } as const;
 /** Leaving is always quicker than arriving, so nothing lingers. */
 export const FLOW_COLLAPSE = { duration: 0.26, ease: [0.4, 0, 0.6, 1] } as const;
 /** Quick cross-fade for one-line micro feedback. */
@@ -284,7 +284,7 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
     return () => window.clearTimeout(t);
   }, [focus, delay]);
   const shut = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.22, delay } } };
+  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.26, delay } } };
   const gone = reduce ? { opacity: 0, transition: { duration: 0.12 } } : { opacity: 0, height: 0, transition: { height: FLOW_COLLAPSE, opacity: { duration: 0.14 } } };
   return (
     <motion.section
@@ -302,7 +302,7 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
       <motion.div
         className="pt-8"
         initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
-        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.32, delay: delay + 0.04, ease: FLOW_SMOOTH } }}
+        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.4, delay: delay + 0.05, ease: FLOW_SMOOTH } }}
         exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.16 } }}
       >
         {children}
@@ -322,8 +322,8 @@ export function Stagger({ children, className, delay = 0.05 }: { children: React
           className="inline-flex"
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.97 }}
           animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-          // Starts after the question's own room has begun to open (0.08s), then the chips follow one by one.
-          transition={{ duration: 0.28, ease: FLOW_SMOOTH, delay: 0.08 + Math.min(i * delay, 0.24) }}
+          // Starts after the question's own room has begun to open (0.12s), then the chips follow one by one.
+          transition={{ duration: 0.3, ease: FLOW_SMOOTH, delay: 0.12 + Math.min(i * delay, 0.28) }}
         >
           {child}
         </motion.span>

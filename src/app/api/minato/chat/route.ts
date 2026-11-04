@@ -481,7 +481,7 @@ export async function GET(request: Request) {
   const out: Record<string, unknown> = { keyConfigured: true, models: config.models, endpoint: config.endpoint };
   if (url.searchParams.get("probe")) {
     out.probe = await Promise.all(
-      config.models.slice(0, 5).map(async (model) => {
+      config.models.slice(0, 8).map(async (model) => {
         const t0 = Date.now();
         try {
           const res = await fetch(config.endpoint, {

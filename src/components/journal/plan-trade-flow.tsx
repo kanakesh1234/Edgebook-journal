@@ -210,7 +210,15 @@ const minutesBetween = (a: string, b: string): number | null => {
 };
 const fmtHeld = (min: number) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}`);
 
-function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open: boolean, minChars = 3, delayMs = 680): { settled: boolean } {
+/**
+ * Pacing for the progressive question reveal inside the Plan step. The flow waits a beat after you
+ * pause typing (`REVEAL_SETTLE_MS`) or tap an answer (`REVEAL_AFTER_PICK_MS`) before the next question
+ * slides in — enough time to breathe, not so long it feels like the app is thinking.
+ */
+const REVEAL_SETTLE_MS = 900;
+const REVEAL_AFTER_PICK_MS = 500;
+
+function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open: boolean, minChars = 3, delayMs = REVEAL_SETTLE_MS): { settled: boolean } {
   const [latched, setLatched] = useState(false);
   useEffect(() => {
     if (!open) setLatched(false);
@@ -230,6 +238,20 @@ function useSettledReveal(text: string, alreadyAnsweredDownstream: boolean, open
   return {
     settled: latched || alreadyAnsweredDownstream,
   };
+}
+
+/** Latch a flag a beat after it turns true, so tapping an answer chip reveals the follow-up question with intent. */
+function useDelayedFlag(flag: boolean, open: boolean, delayMs = REVEAL_AFTER_PICK_MS): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    if (!open || !flag) {
+      setOn(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setOn(true), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [flag, open, delayMs]);
+  return on;
 }
 
 export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -428,12 +450,13 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     return seen;
   }, [entries]);
 
-  // Smooth delayed question reveals
-  const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, 680);
-  const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, 680);
+  // Smooth delayed question reveals — each next question waits a beat before sliding in.
+  const thesisReveal = useSettledReveal(thesis, emotion !== "", open, 3, REVEAL_SETTLE_MS);
+  const reasonReveal = useSettledReveal(emotionReason, newsAnswer !== null, open, 3, REVEAL_SETTLE_MS);
 
   const showFeeling = thesisReveal.settled;
-  const showReason = emotion !== "" || emotionReason.trim().length > 0;
+  // The reason question follows the feeling chips with a short, deliberate pause rather than instantly.
+  const showReason = useDelayedFlag(emotion !== "" || emotionReason.trim().length > 0, open);
   const showNews = reasonReveal.settled;
 
   // Minato ForexFactory Major-Impact News check & autofill
