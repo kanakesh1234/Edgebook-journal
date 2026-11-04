@@ -1,25 +1,17 @@
 import type { Metadata } from "next";
+import "@fontsource/instrument-serif/400-italic.css";
 import "@/components/landing/landing.css";
-import { LandingNav } from "@/components/landing/nav";
-import { SmoothScroll } from "@/components/landing/smooth-scroll";
-import { DirectorHud } from "@/components/landing/director-hud";
-import { JourneyStage, DecisionRitualStage } from "@/components/landing/journey-stage";
-import { StoryFilmScroll } from "@/components/landing/story-film-scroll";
-import { Gap } from "@/components/landing/gap";
-import { Toolkit } from "@/components/landing/toolkit";
-import { MinatoDemo } from "@/components/landing/minato-demo";
-import { Road } from "@/components/landing/road";
-import { DriveStatement } from "@/components/landing/drive-statement";
-import { Calm } from "@/components/landing/calm";
-import { FinalCta, SiteFooter } from "@/components/landing/footer-cta";
+import { LandingHeader } from "@/components/landing/header";
+import { LandingShell } from "@/components/landing/shell";
+import { ScrollController } from "@/components/landing/scroll-controller";
+import { Cinema } from "@/components/landing/cinema";
+import { Quotes, Statement } from "@/components/landing/statement";
+import { Finale, LandingFooter } from "@/components/landing/finale";
 
 export const metadata: Metadata = {
-  title: {
-    absolute:
-      "Edgebook — The Operator's Trial · Most journals record the result. Edgebook records the decision.",
-  },
+  title: { absolute: "Edgebook — Record the decision" },
   description:
-    "Play through a full trading process session: lock your pre-bell intention, survive the 09:30 live tape, X-ray trade autopsies, battle across 5 practice arenas, and grow your ledger from $10k to $20k.",
+    "Edgebook is the trading journal that reviews with you. Plan before the bell, review every decision, replay, practise, and ask Minato. Your journal stays in your own Google Drive.",
   openGraph: {
     title: "Edgebook — the trading journal that reviews with you",
     description:
@@ -30,31 +22,18 @@ export const metadata: Metadata = {
 
 export default function LandingPage() {
   return (
-    <div className="lp-root relative min-h-dvh">
-      <SmoothScroll />
-      <LandingNav />
-      <DirectorHud />
+    // data-theme="dark" scopes the app's dark tokens to the landing, whatever theme the app uses.
+    <div className="lp-root" data-theme="dark" data-lp-root data-fx="full">
+      <LandingShell />
+      <ScrollController />
+      <LandingHeader />
       <main>
-        {/* Quest 01: 08:45 AM Pre-Bell Intention Builder */}
-        <JourneyStage />
-        {/* Quest 02: 09:30 NY Live Tape & Impulse Defense Simulator */}
-        <StoryFilmScroll />
-        {/* 5-Gate Daily Operating Circuit */}
-        <DecisionRitualStage />
-        {/* Quest 03: The Autopsy X-Ray Detective Game */}
-        <Gap />
-        {/* Quest 04: The 5 Practice Arenas Gauntlet */}
-        <Toolkit />
-        {/* Quest 05: Minato AI Pattern Investigation & Memory Graph */}
-        <MinatoDemo />
-        {/* Quest 06: Interactive Equity Road ($10k -> $20k) & Sovereign Google Drive Vault */}
-        <Road />
-        <DriveStatement />
-        {/* Evening Sanctuary & Final Operator Scorecard */}
-        <Calm />
-        <FinalCta />
+        <Cinema />
+        <Statement />
+        <Quotes />
+        <Finale />
       </main>
-      <SiteFooter />
+      <LandingFooter />
     </div>
   );
 }

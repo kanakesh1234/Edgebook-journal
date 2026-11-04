@@ -1,0 +1,30 @@
+After copying the files in this zip over your project (same paths, replacing when asked),
+DELETE these retired files from the old game-style landing. Nothing else in the app uses them.
+
+src/components/landing/calm.tsx
+src/components/landing/director-hud.tsx
+src/components/landing/drive-statement.tsx
+src/components/landing/footer-cta.tsx
+src/components/landing/game-state.ts
+src/components/landing/gap.tsx
+src/components/landing/journey-stage.tsx
+src/components/landing/ledger.tsx
+src/components/landing/minato-demo.tsx
+src/components/landing/motion-utils.ts
+src/components/landing/nav.tsx
+src/components/landing/road.tsx
+src/components/landing/smooth-scroll.tsx
+src/components/landing/story-film-scroll.tsx
+src/components/landing/toolkit.tsx
+
+public/landing/act-1-noise.jpg
+public/landing/act-2-stillness.jpg
+public/landing/act-3-temptation.jpg
+public/landing/act-4-mirror.jpg
+public/landing/act-5-quiet-edge.jpg
+public/landing/hero-atelier.jpg
+public/landing/inner-film.mp4
+
+KEEP (do not delete, the rest of the app imports them):
+src/components/landing/logo.tsx
+src/components/landing/reveal.tsx
