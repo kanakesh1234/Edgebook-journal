@@ -41,7 +41,7 @@ type Replay = ReturnType<typeof useReplayTrade>;
  * AI never appears here: tagging runs silently in the background (see tag-panel.tsx); only its result is shown.
  */
 export function EntryDetailModal({
-  open, onClose, entry, onEdit, onDelete, position, onStep,
+  open, onClose, entry, onEdit, onMove, onDelete, position, onStep,
 }: {
   position?: { index: number; total: number };
   /** Step through the list the trade was opened from (1 = next in the visible order). */
@@ -50,6 +50,7 @@ export function EntryDetailModal({
   onClose: () => void;
   entry: JournalEntry | null;
   onEdit?: (entry: JournalEntry) => void;
+  onMove?: (entry: JournalEntry) => void;
   onDelete?: (entry: JournalEntry) => void;
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null);
@@ -118,12 +119,13 @@ export function EntryDetailModal({
                 )}
               </div>
               <div className="pointer-events-auto flex items-center gap-1">
-                {(onEdit || onDelete) && (
-                  <Popover width={188} trigger={({ open: o, toggle }) => <IconButton label="More" icon="ellipsis" active={o} onClick={toggle} />}>
+                {(onEdit || onMove || onDelete) && (
+                  <Popover width={216} trigger={({ open: o, toggle }) => <IconButton label="More" icon="ellipsis" active={o} onClick={toggle} />}>
                     {(close) => (
                       <>
                         {onEdit && <MenuItem icon="pencil" onClick={() => { close(); onEdit(entry); }}>Edit</MenuItem>}
-                        {onEdit && onDelete && <MenuDivider />}
+                        {onMove && <MenuItem icon="folder" onClick={() => { close(); onMove(entry); }}>Move to challenge</MenuItem>}
+                        {(onEdit || onMove) && onDelete && <MenuDivider />}
                         {onDelete && <MenuItem icon="trash" danger onClick={() => { close(); onDelete(entry); }}>Delete</MenuItem>}
                       </>
                     )}

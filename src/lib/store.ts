@@ -70,6 +70,8 @@ interface AppState {
   updateEntryFast(id: string, draft: EntryDraft, blobs?: Map<string, Blob>): Promise<JournalEntry>;
   deleteEntry(id: string): Promise<void>;
   deleteEntries(ids: string[]): Promise<number>;
+  /** Re-file a trade under another challenge (or none) without touching its evidence, review or screenshots. */
+  moveEntryToChallenge(entryId: string, challengeId: string | null): Promise<void>;
 
   saveReflection(entryId: string, reflection: TradeReflection): Promise<void>;
   setEntryLessons(entryId: string, lessonIds: string[]): Promise<void>;
@@ -490,6 +492,33 @@ export const useApp = create<AppState>((set, get) => ({
     } else {
       await persist(user.id, entries, settings, dayLogs, next);
     }
+  },
+
+  async moveEntryToChallenge(entryId, challengeId) {
+    const { user, entries, settings, dayLogs, plans } = get();
+    if (!user) throw new Error("Not signed in");
+    const prev = entries.find((e) => e.id === entryId);
+    if (!prev) throw new Error("Entry not found");
+    if ((prev.challengeId ?? null) === challengeId) return; // already filed there
+
+    const nextEntries = entries.map((e) =>
+      e.id === entryId ? { ...e, challengeId: challengeId ?? undefined, updatedAt: Date.now() } : e,
+    );
+
+    // Keep the executed plan in step with its trade: move the linked plan only when it
+    // shared the trade's old challenge (they were created together in the same scope).
+    let nextPlans = plans;
+    if (prev.planId) {
+      const plan = plans.find((p) => p.id === prev.planId);
+      if (plan && (plan.challengeId ?? null) === (prev.challengeId ?? null)) {
+        nextPlans = plans.map((p) =>
+          p.id === plan.id ? { ...p, challengeId: challengeId ?? undefined, updatedAt: Date.now() } : p,
+        );
+      }
+    }
+
+    set({ entries: nextEntries, plans: nextPlans });
+    await persist(user.id, nextEntries, settings, dayLogs, nextPlans);
   },
 
   async saveChallenge(challenge) {

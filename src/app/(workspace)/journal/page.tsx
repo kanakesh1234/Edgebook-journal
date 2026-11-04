@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { toast } from "@/components/ui/toast";
 import { EntryDetailModal } from "@/components/journal/entry-detail-modal";
 import { EntryFormModal } from "@/components/journal/entry-form-modal";
+import { MoveToChallengeModal } from "@/components/journal/move-to-challenge";
 import { SetupDetail } from "@/components/lab/setup-detail";
 import { LessonPicker } from "@/components/journal/lesson-links";
 import { useLessonIndex } from "@/components/lessons/use-lesson-index";
@@ -96,6 +97,7 @@ export default function JournalPage() {
   const [openSetupId, setOpenSetupId] = useState<string | null>(null);
   const [editing, setEditing] = useState<JournalEntry | null>(null);
   const [deleting, setDeleting] = useState<JournalEntry | null>(null);
+  const [moving, setMoving] = useState<JournalEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [menu, setMenu] = useState<{ entry: JournalEntry; x: number; y: number } | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
@@ -235,7 +237,7 @@ export default function JournalPage() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable;
-      if (typing) return;
+      if (typing || moving) return;
       if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
       else if (e.key === "Escape" && selectMode && !viewingId) exitSelect();
       else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selectMode) { e.preventDefault(); setSelectedIds(new Set(filtered.map((x) => x.id))); }
@@ -243,7 +245,7 @@ export default function JournalPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectMode, viewingId, editing, deleting, path, filtered, exitSelect, setPath]);
+  }, [selectMode, viewingId, editing, deleting, moving, path, filtered, exitSelect, setPath]);
 
   // ── review sheet ──────────────────────────────────────────────
   const viewing = entries.find((e) => e.id === viewingId) ?? null;
@@ -444,6 +446,7 @@ export default function JournalPage() {
           <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
             <MenuItem icon="book" onClick={() => { setViewingId(menu.entry.id); setMenu(null); }}>Open</MenuItem>
             <MenuItem icon="pencil" onClick={() => { setEditing(menu.entry); setMenu(null); }}>Edit entry</MenuItem>
+            <MenuItem icon="folder" onClick={() => { setMoving(menu.entry); setMenu(null); }}>Move to challenge…</MenuItem>
             <MenuItem icon="link" onClick={() => { setLinkingId(menu.entry.id); setMenu(null); }}>Link a lesson…</MenuItem>
             <MenuItem icon="check" onClick={() => { setSelectMode(true); setSelectedIds(new Set([menu.entry.id])); anchorRef.current = menu.entry.id; setMenu(null); }}>Select</MenuItem>
             <MenuDivider />
@@ -469,9 +472,10 @@ export default function JournalPage() {
       <EntryDetailModal
         open={!!viewing && !editing && !deleting} onClose={() => setViewingId(null)} entry={viewing}
         position={viewIndex >= 0 ? { index: viewIndex, total: filtered.length } : undefined} onStep={stepView}
-        onEdit={(e) => setEditing(e)} onDelete={(e) => setDeleting(e)}
+        onEdit={(e) => setEditing(e)} onMove={(e) => { setViewingId(null); setMoving(e); }} onDelete={(e) => setDeleting(e)}
       />
       {editing && <EntryFormModal open onClose={() => setEditing(null)} entry={editing} />}
+      <MoveToChallengeModal open={!!moving} entry={moving} onClose={() => setMoving(null)} />
       <LessonPicker open={!!linkingId} entry={entries.find((e) => e.id === linkingId) ?? null} onClose={() => setLinkingId(null)} />
 
       <ConfirmDialog
