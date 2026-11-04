@@ -1,0 +1,2 @@
+Update zip (round 2). Copy these files over your project, same paths, replacing the existing ones.
+No files to delete and no new dependencies. page.tsx, header.tsx, catalog-rail.tsx etc. are unchanged.

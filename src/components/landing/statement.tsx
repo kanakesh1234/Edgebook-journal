@@ -2,6 +2,9 @@ import type { CSSProperties } from "react";
 import { QUOTES, STATEMENT } from "./scene-config";
 
 /** Pinned statement: words light up as you scroll, then two pop-ups land beside it. */
+/** Words picked out in gold. */
+const GOLD = new Set(["Google", "Drive.", "yours."]);
+
 export function Statement() {
   const words = STATEMENT.text.split(" ");
   return (
@@ -9,7 +12,7 @@ export function Statement() {
       <div className="st-pin">
         <p className="st-text">
           {words.map((w, i) => (
-            <span key={i} style={{ "--i": i } as CSSProperties}>{w} </span>
+            <span key={i} className={GOLD.has(w) ? "st-gold" : undefined} style={{ "--i": i } as CSSProperties}>{w} </span>
           ))}
         </p>
         <div className="st-pops">

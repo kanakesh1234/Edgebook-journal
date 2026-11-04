@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Rise } from "./rise";
+import { Wordmark } from "./logo";
 import { FINALE, FOOTER } from "./scene-config";
 
 export function Finale() {
@@ -25,6 +26,7 @@ export function LandingFooter() {
   return (
     <footer className="lp-footer">
       <div className="lp-footer-in">
+        <span className="lp-footer-brand"><Wordmark /></span>
         <p className="lp-fine">{FOOTER.disclaimer}</p>
         <div className="lp-foot-row">
           <span>&copy; {new Date().getFullYear()} Edgebook</span>

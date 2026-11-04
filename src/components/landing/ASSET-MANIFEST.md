@@ -12,11 +12,11 @@ All layers are inline SVG: no text, no raster, no loading. Component → `scene-
 | 20 Midground | `MidLayer` | transparent top | scale +34%, pointer −10px | hills + 10 "candle stones" + shore strip |
 | 25 Water | `WaterLayer` | opaque below y = 735 | scale +50%, pointer −14px | ripples + sun-reflection column |
 | 30 Gate core | `GateCoreLayer` | transparent | with gate group | paper page + light bloom (`--glow`) behind the doors |
-| 40 Left door | `DoorLeftLayer` | transparent | gate scale · slides −3%, grows, exits | foreground occluder, red candle emblem |
-| 41 Right door | `DoorRightLayer` | transparent | mirror of 40 | gold candle emblem |
+| 40 Left door | `DoorLeftLayer` | transparent | gate scale · slides −3%, grows, exits | foreground occluder: cornice + dentils, double gold inlay frame, fluting, studs, plinth steps, reflection, red candle emblem |
+| 41 Right door | `DoorRightLayer` | transparent | exact mirror of 40 (one drawing, mirrored) | gold candle emblem |
 | — Shade | `.cx-shade` (CSS) | — | static | vignette + tint (`--tint`) + `public/landing/grain.png` (160×160 tile, 32 KB) |
 
-Anchors: gate base-centre = (1000, 775); gate top = y 480; doors meet at x = 1000 (seam gap 2 units).
+Anchors: gate base-centre = (1000, 775); door face top = y 470 (cornice to 448), half-width 92 → 112; doors meet at x = 1000 (seam gap 2 units). Resting size and drop are CSS (`--rest`, `--rest-lift`), so the gate can be resized without touching the art.
 Pointer parallax opposes between far (negative) and near (positive) layers; max ≈ 18px, off on coarse pointers.
 To replace art with photographic layers: keep the same 5:3 master, horizon, light direction and anchors, give each PNG/WebP
 10–20% bleed and straight alpha, then swap the SVG for an `<img width height>` inside the same `.cx-layer` wrapper.

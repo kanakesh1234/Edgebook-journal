@@ -38,9 +38,9 @@ export function computeScene(p: number): SceneVars {
   const popB2 = easeOutBack(rp(p, T.popsB[1]!)) * b;
 
   // World softening is focus support, never permanent fog.
-  const focus = segmentInOut(p, ...T.focus.in, ...T.focus.out);
-
   const cat = easeOutCubic(rp(p, T.catalog));
+  // Beat 6 softening, then again (a touch lighter) behind the catalog so the cards read as frosted glass.
+  const focus = Math.max(segmentInOut(p, ...T.focus.in, ...T.focus.out), cat * 0.8);
   const ctrl = smoothstep(rp(p, T.controls));
 
   // Light bloom from behind the doors: swells as they open, dissolves as they pass.
@@ -64,10 +64,11 @@ export function computeScene(p: number): SceneVars {
     popB1,
     popB2,
     focus,
-    tint: clamp(focus * 0.6 + cat * 0.62),
+    tint: clamp(focus * 0.45 + cat * 0.05),
     glow,
     cat,
     ctrl,
+    rail: rp(p, T.railScrub),
   };
 }
 

@@ -202,7 +202,7 @@ export function WaterLayer() {
 
 /* 30 · GATE CORE — the light and the page behind the doors ------------------ */
 export function GateCoreLayer() {
-  const lines = Array.from({ length: 19 }, (_, i) => 506 + i * 14.2);
+  const lines = Array.from({ length: 20 }, (_, i) => 488 + i * 14.2);
   return (
     <svg viewBox={VB} aria-hidden="true" focusable="false">
       <defs>
@@ -220,62 +220,149 @@ export function GateCoreLayer() {
         <rect x="-400" y="-300" width="2800" height="1800" fill="url(#core-bloom)" />
       </g>
       <g className="cx-core">
-        <rect x="931" y="481" width="138" height="294" fill="url(#core-paper)" />
+        <rect x="910" y="472" width="180" height="303" fill="url(#core-paper)" />
         {lines.map((y, i) => (
-          <line key={i} x1="940" y1={y.toFixed(1)} x2="1060" y2={y.toFixed(1)} stroke="#8a6a38" strokeWidth="0.5" opacity="0.2" />
+          <line key={i} x1="922" y1={y.toFixed(1)} x2="1078" y2={y.toFixed(1)} stroke="#8a6a38" strokeWidth="0.5" opacity="0.2" />
         ))}
-        <line x1="952" y1="490" x2="952" y2="768" stroke="#b78e3e" strokeWidth="0.6" opacity="0.45" />
+        <line x1="940" y1="482" x2="940" y2="768" stroke="#b78e3e" strokeWidth="0.6" opacity="0.45" />
       </g>
     </svg>
   );
 }
 
 /* 40 / 41 · DOORS — split foreground occluders ------------------------------- */
+/**
+ * One half of the gate. Drawn for the left side and mirrored for the right with a transform, so
+ * both halves are guaranteed symmetric. Geometry (in master units): top y 470, base y 775,
+ * half-width 92 at the top → 112 at the base, with a cornice above and two plinth steps below.
+ */
 function Door({ side }: { side: "l" | "r" }) {
-  const left = side === "l";
-  const outer = left ? "930,480 999,480 999,775 915,775" : "1001,480 1070,480 1085,775 1001,775";
-  const frame = left ? "941,494 990,494 990,762 928,762" : "1010,494 1059,494 1072,762 1010,762";
-  const refl = left ? "915,775 999,775 999,1070 930,1070" : "1001,775 1085,775 1070,1070 1001,1070";
-  const id = left ? "dl" : "dr";
+  const id = side === "l" ? "dl" : "dr";
+  // Left-door geometry; the right door reuses it mirrored about x = 1000.
+  const face = "908,470 999,470 999,775 888,775";
+  const cornice = "895,448 999,448 999,470 904,470";
+  const step1 = "880,775 999,775 999,783 872,783";
+  const step2 = "864,783 999,783 999,791 856,791";
+  const frameOuter = "919,482 989,482 989,763 899,763";
+  const frameInner = "928,494 984,494 984,751 909,751";
+  // outer edge x at height y (face edge runs 908@470 → 888@775)
+  const edgeX = (y: number) => 908 - ((y - 470) * 20) / 305;
+  const studs = [520, 580, 640, 700, 748].map((y) => ({ x: edgeX(y) + 4.6, y }));
+  const dentils = Array.from({ length: 8 }, (_, i) => 903 + i * 12);
+
   return (
     <svg viewBox={VB} aria-hidden="true" focusable="false">
       <defs>
-        <linearGradient id={`${id}-face`} x1={left ? "0" : "1"} y1="0" x2={left ? "1" : "0"} y2="0">
-          <stop offset="0" stopColor="#2b2118" />
-          <stop offset="0.7" stopColor="#15100b" />
-          <stop offset="1" stopColor="#0c0906" />
+        <clipPath id={`${id}-clip`}><polygon points={face} /></clipPath>
+        <linearGradient id={`${id}-face`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#34271b" />
+          <stop offset="0.55" stopColor="#19120c" />
+          <stop offset="1" stopColor="#0a0705" />
         </linearGradient>
-        <linearGradient id={`${id}-edge`} x1={left ? "1" : "0"} y1="0" x2={left ? "0" : "1"} y2="0">
-          <stop offset="0" stopColor="#ffd592" stopOpacity="0.8" />
+        <linearGradient id={`${id}-sheen`} x1="0" y1="470" x2="0" y2="775" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffe2aa" stopOpacity="0.14" />
+          <stop offset="0.45" stopColor="#ffe2aa" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id={`${id}-edge`} x1="1" y1="0" x2="0" y2="0">
+          <stop offset="0" stopColor="#ffd592" stopOpacity="0.9" />
           <stop offset="1" stopColor="#ffd592" stopOpacity="0" />
         </linearGradient>
-        <linearGradient id={`${id}-refl`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#0d0906" stopOpacity="0.55" />
+        <linearGradient id={`${id}-rim`} x1="0" y1="470" x2="0" y2="775" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#f0cf94" stopOpacity="0.85" />
+          <stop offset="1" stopColor="#f0cf94" stopOpacity="0.05" />
+        </linearGradient>
+        <linearGradient id={`${id}-cornice`} x1="0" y1="448" x2="0" y2="470" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#5a4430" />
+          <stop offset="1" stopColor="#1d150e" />
+        </linearGradient>
+        <linearGradient id={`${id}-refl`} x1="0" y1="775" x2="0" y2="470" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#0d0906" stopOpacity="0.6" />
           <stop offset="1" stopColor="#0d0906" stopOpacity="0" />
         </linearGradient>
         <linearGradient id={`${id}-gold`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#e6c585" />
+          <stop offset="0" stopColor="#f3dba0" />
           <stop offset="1" stopColor="#b78e3e" />
         </linearGradient>
+        <linearGradient id={`${id}-red`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#d27078" />
+          <stop offset="1" stopColor="#8e3f46" />
+        </linearGradient>
+        <radialGradient id={`${id}-halo`} cx="999" cy="612" r="74" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffd592" stopOpacity="0.42" />
+          <stop offset="1" stopColor="#ffd592" stopOpacity="0" />
+        </radialGradient>
       </defs>
-      <polygon points={refl} fill={`url(#${id}-refl)`} />
-      <polygon points={outer} fill={`url(#${id}-face)`} />
-      {/* sun-side rim on the seam edge */}
-      <rect x={left ? 985 : 1001} y="480" width="14" height="295" fill={`url(#${id}-edge)`} />
-      <polygon points={frame} fill="none" stroke="#cba76b" strokeWidth="0.8" opacity="0.42" />
-      <line x1={left ? 930 : 1001} y1="480.5" x2={left ? 999 : 1070} y2="480.5" stroke="#6b5538" strokeWidth="1" />
-      {/* emblem: the red candle on the left door, the gold candle on the right, parted by the seam */}
-      {left ? (
-        <g>
-          <line x1="984" y1="582" x2="984" y2="650" stroke="#ac5157" strokeWidth="1.4" opacity="0.85" />
-          <rect x="979" y="600" width="10" height="22" rx="2" fill="#ac5157" opacity="0.82" />
+
+      {/* everything is drawn once for the left half; the right half mirrors it about x = 1000 */}
+      <g transform={side === "r" ? "translate(2000 0) scale(-1 1)" : undefined}>
+        {/* reflection in the water */}
+        <g transform="translate(0 1550) scale(1 -1)" fill={`url(#${id}-refl)`}>
+          <polygon points={face} />
+          <polygon points={step1} />
+          <polygon points={step2} />
         </g>
-      ) : (
-        <g>
-          <line x1="1016" y1="566" x2="1016" y2="660" stroke={`url(#${id}-gold)`} strokeWidth="1.4" />
-          <rect x="1011" y="584" width="10" height="34" rx="2" fill={`url(#${id}-gold)`} />
+
+        {/* plinth steps */}
+        <polygon points={step2} fill="#120d08" />
+        <polygon points={step1} fill="#1b140d" />
+        <line x1="872" y1="775.5" x2="999" y2="775.5" stroke="#8a6c40" strokeWidth="0.8" opacity="0.7" />
+        <line x1="856" y1="783.5" x2="999" y2="783.5" stroke="#8a6c40" strokeWidth="0.7" opacity="0.45" />
+
+        {/* face */}
+        <polygon points={face} fill={`url(#${id}-face)`} />
+        <polygon points={face} fill={`url(#${id}-sheen)`} />
+        <g clipPath={`url(#${id}-clip)`}>
+          {/* backlight along the seam + candle glow */}
+          <rect x="981" y="470" width="18" height="305" fill={`url(#${id}-edge)`} />
+          <circle cx="999" cy="612" r="74" fill={`url(#${id}-halo)`} />
+          {/* fluting */}
+          {[938, 954, 970].map((x) => (
+            <line key={x} x1={x} y1="506" x2={x - 2} y2="742" stroke="#e6c585" strokeWidth="0.7" opacity="0.09" />
+          ))}
         </g>
-      )}
+
+        {/* double gold inlay frame */}
+        <polygon points={frameOuter} fill="none" stroke="#cba76b" strokeWidth="1.3" opacity="0.62" />
+        <polygon points={frameInner} fill="none" stroke="#cba76b" strokeWidth="0.7" opacity="0.32" />
+        <line x1="926" y1="526" x2="986" y2="526" stroke="#cba76b" strokeWidth="0.7" opacity="0.38" />
+        <line x1="916" y1="706" x2="986" y2="706" stroke="#cba76b" strokeWidth="0.7" opacity="0.38" />
+
+        {/* studs */}
+        {studs.map((d, i) => (
+          <g key={i}>
+            <circle cx={d.x.toFixed(1)} cy={d.y} r="3.1" fill="#0c0805" />
+            <circle cx={d.x.toFixed(1)} cy={d.y} r="2.1" fill={`url(#${id}-gold)`} />
+          </g>
+        ))}
+
+        {/* outer rim light + top bevel */}
+        <line x1="908" y1="470" x2="888" y2="775" stroke={`url(#${id}-rim)`} strokeWidth="1.6" />
+        <line x1="908" y1="470.6" x2="999" y2="470.6" stroke="#8a6c40" strokeWidth="1" />
+
+        {/* cornice with dentils */}
+        <polygon points={cornice} fill={`url(#${id}-cornice)`} />
+        <line x1="895" y1="448.6" x2="999" y2="448.6" stroke="#e6c585" strokeWidth="1" opacity="0.8" />
+        {dentils.map((x) => (
+          <rect key={x} x={x} y="460" width="6.5" height="5.5" fill="#0d0906" opacity="0.65" />
+        ))}
+
+        {/* emblem — the red (loss) candle belongs to the left door, the gold one to the right */}
+        {side === "l" ? (
+          <g>
+            <line x1="981" y1="558" x2="981" y2="655" stroke={`url(#${id}-red)`} strokeWidth="1.8" strokeLinecap="round" opacity="0.9" />
+            <rect x="974.5" y="586" width="13" height="40" rx="2.6" fill={`url(#${id}-red)`} opacity="0.94" />
+            <rect x="977" y="589" width="2.2" height="30" rx="1" fill="#ffc4c8" opacity="0.35" />
+          </g>
+        ) : null}
+      </g>
+
+      {side === "r" ? (
+        <g>
+          <line x1="1019" y1="536" x2="1019" y2="668" stroke={`url(#${id}-gold)`} strokeWidth="1.8" strokeLinecap="round" />
+          <rect x="1012.5" y="566" width="13" height="58" rx="2.6" fill={`url(#${id}-gold)`} />
+          <rect x="1015" y="569" width="2.2" height="48" rx="1" fill="#fffbe9" opacity="0.5" />
+        </g>
+      ) : null}
     </svg>
   );
 }

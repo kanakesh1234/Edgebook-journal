@@ -96,7 +96,7 @@ export function Cinema() {
         </div>
 
         {/* BEAT 8–9 — catalog rail + final call to action */}
-        <div id="flow-features" className="cx-cat" data-cx-show="0.93-1">
+        <div id="flow-features" className="cx-cat" data-cx-show="0.9-1">
           <div className="cx-cat-head">
             <div>
               <p className="lp-eyebrow">{c.catalog.eyebrow}</p>

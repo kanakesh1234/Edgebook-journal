@@ -29,19 +29,22 @@ authored SVG, so there is nothing to load, nothing to pop in, and zoom stays sha
 
 `logo.tsx` and `reveal.tsx` are untouched (the rest of the app imports them).
 
-## Timeline map (progress p of the film; ~5200px desktop, 4300px tablet, 3900px phone)
+## Timeline map (progress p of the film; ~6200px desktop, 5000px tablet, 4400px phone)
 | p | Beat |
 |---|---|
-| 0.00–0.03 | Hero hold: gate on the water, title + CTA |
-| 0.03–0.17 | Title and intro copy exit; camera pushes in |
+| 0.00–0.02 | Hero hold: ornate gate on the water, title + CTA |
+| 0.02–0.10 | Title and intro copy exit; camera pushes in |
 | 0.15–0.27 | Gate doors split, light blooms |
 | 0.22–0.43 | Narrative A "Decide before the bell" inside the opened gate (+2 pop-ups) |
 | 0.36–0.46 | Doors and light pass the camera and exit |
 | 0.45–0.55 | Clean panorama + quote "Calm is a position you can hold." |
-| 0.55–0.75 | Narrative B "Review with someone who remembers" over a softened world (+chat pop-ups) |
+| 0.55–0.73 | Narrative B "Review with someone who remembers" over a softened world (+chat pop-ups) |
 | 0.72–0.78 | World returns to focus |
-| 0.78–0.96 | Catalog rail slides in horizontally |
-| 0.91–1.00 | Controls + CTA settle; final state stays interactive |
+| 0.78–0.88 | Catalog rail slides in; scene blurs and warms behind frosted-glass cards |
+| 0.86–0.93 | Rail controls + CTA settle |
+| 0.90–1.00 | **Scrolling carries the rail through all eight cards** (buttons, keys, drag and swipe still work) |
+
+After the film: statement (words light up, sunrise rises behind), pinned quotes, golden-dawn finale, quiet footer.
 
 Retime by editing `TIMELINE` in `scene-config.ts`; no animation math needs to change.
 Everything is a pure function of `p`, so scrolling up reverses every state exactly.

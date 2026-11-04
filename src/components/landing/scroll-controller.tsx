@@ -78,9 +78,16 @@ function setup(): () => void {
     let tmx = 0;
     let tmy = 0;
 
+    // The rail is scroll-linked during the final phase. Max travel is cached on resize so the
+    // frame loop never reads layout.
+    const track = stage.querySelector<HTMLElement>(".cx-track");
+    let railMax = 0;
+    let lastRail = -1;
+
     const measure = () => {
       top = section.getBoundingClientRect().top + window.scrollY;
       travel = Math.max(1, section.offsetHeight - stage.offsetHeight);
+      if (track) railMax = Math.max(0, track.scrollWidth - track.clientWidth);
     };
     measures.push(measure);
 
@@ -109,6 +116,16 @@ function setup(): () => void {
       for (const key in vars) setVar(stage, cache, key, vars[key]!);
       setVar(stage, cache, "mx", mx);
       setVar(stage, cache, "my", my);
+
+      // Scroll carries the rail. Only write when the value changes, so a person who then uses
+      // the buttons / drag / keys is never fought by the engine while the page is idle.
+      if (track && Math.abs(vars.rail! - lastRail) > 1e-4) {
+        lastRail = vars.rail!;
+        const driven = lastRail > 0 && lastRail < 1;
+        if (driven) track.dataset.driven = "1"; // scroll-snap off while scroll-linked
+        else delete track.dataset.driven;
+        track.scrollLeft = lastRail * railMax;
+      }
 
       const b = beatAt(head);
       if (b !== beat) {

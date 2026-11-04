@@ -14,7 +14,7 @@ export const TIMELINE = {
   /** Hero gate grows toward the viewer. */
   push: [0, 0.27] as Range,
   /** Opening title + intro copy leave. */
-  introExit: [0.03, 0.17] as Range,
+  introExit: [0.02, 0.1] as Range,
   /** The two doors split. */
   open: [0.15, 0.27] as Range,
   /** The doors and the light behind them pass the camera and are gone. */
@@ -32,7 +32,7 @@ export const TIMELINE = {
   quote: { in: [0.45, 0.48] as Range, out: [0.52, 0.55] as Range },
 
   /** Narrative B (over the softened world). */
-  panelB: { in: [0.55, 0.61] as Range, out: [0.7, 0.745] as Range },
+  panelB: { in: [0.55, 0.61] as Range, out: [0.69, 0.73] as Range },
   popsB: [
     [0.6, 0.63],
     [0.645, 0.68],
@@ -40,10 +40,12 @@ export const TIMELINE = {
   /** World softens for B, then returns to focus. */
   focus: { in: [0.52, 0.6] as Range, out: [0.72, 0.78] as Range },
 
-  /** Catalog rail slides in horizontally. */
-  catalog: [0.78, 0.96] as Range,
+  /** Catalog rail slides in horizontally; the world softens behind it. */
+  catalog: [0.78, 0.88] as Range,
   /** Rail controls + final call-to-action settle. */
-  controls: [0.91, 1] as Range,
+  controls: [0.86, 0.93] as Range,
+  /** Scrolling itself carries the rail through every card (so nothing is stranded off-screen). */
+  railScrub: [0.9, 1] as Range,
 } as const;
 
 /**
@@ -55,7 +57,7 @@ export const MARKERS = [
   { id: "top", p: 0, flow: null },
   { id: "method", p: 0.31, flow: "flow-method" },
   { id: "minato", p: 0.66, flow: "flow-minato" },
-  { id: "features", p: 1, flow: "flow-features" },
+  { id: "features", p: 0.93, flow: "flow-features" },
 ] as const;
 
 export const NAV_LINKS = [
@@ -122,7 +124,7 @@ export const CATALOG: CatalogItem[] = [
   { glyph: "minato", title: "Minato", line: "An assistant that has read every entry." },
   { glyph: "progress", title: "Progress", line: "See the journey, not only the P&L." },
   { glyph: "weekly", title: "Weekly review", line: "Three minutes. Then close the cover." },
-  { glyph: "drive", title: "Your Drive", line: "Your journal lives in your own Google Drive." },
+  { glyph: "drive", title: "Your Drive", line: "Lives in your own Google Drive." },
 ];
 
 /** Motivational lines for the pinned quote section. Original; deliberately unattributed. */

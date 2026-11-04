@@ -32,7 +32,7 @@
   --lp-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
   --lp-sans: "Inter Variable", -apple-system, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
   --lp-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
-  --t-hero: clamp(3rem, 8.4vw, 7.6rem);
+  --t-hero: clamp(2.8rem, 7.2vw, 6.8rem);
   --t-h2: clamp(2.1rem, 4.4vw, 3.8rem);
   --t-body: clamp(1rem, 1.25vw, 1.2rem);
   /* space, radii, depth */
@@ -221,7 +221,7 @@
    THE FILM
    ========================================================================== */
 .cx {
-  --travel: 5200px; /* scroll distance of the whole film; JS reads the real value */
+  --travel: 6200px; /* scroll distance of the whole film; JS reads the real value */
   position: relative;
   height: calc(100vh + var(--travel));
 }
@@ -232,12 +232,12 @@
 }
 @media (max-width: 900px) {
   .cx {
-    --travel: 4300px;
+    --travel: 5000px;
   }
 }
 @media (max-width: 520px) {
   .cx {
-    --travel: 3900px;
+    --travel: 4400px;
   }
 }
 
@@ -259,8 +259,10 @@
   --focus: 0; --tint: 0; --glow: 0; --cat: 0; --ctrl: 0;
   --mx: 0; --my: 0;
   --gate-gap: 3%; /* how far each door slides, as a share of the layer width */
-  --push-k: 4.3; /* how large the gate grows */
-  --lift: 11; /* camera tilt: svh the gate sinks as it grows, to centre the opening */
+  --rest: 1.18; /* resting size of the gate (1 = master art scale) */
+  --rest-lift: 7; /* svh the resting gate sits lower, clear of the hero copy */
+  --push-k: 4.1; /* how much larger the gate grows while the camera pushes in */
+  --lift: 11; /* svh the gate has sunk by the end of the push, to centre the opening */
 
   position: sticky;
   top: 0;
@@ -336,8 +338,12 @@
 .cx-l-hero {
   z-index: 5;
   /* the gate grows with the push, then keeps growing as the camera passes through it */
-  transform: translate3d(calc(var(--mx) * 18px), calc(var(--my) * 8px + var(--push) * var(--lift) * 1svh), 0)
-    scale(calc(1 + var(--push) * var(--push-k) + var(--exit) * 3));
+  transform: translate3d(
+      calc(var(--mx) * 18px),
+      calc(var(--my) * 8px + (var(--rest-lift) + var(--push) * (var(--lift) - var(--rest-lift))) * 1svh),
+      0
+    )
+    scale(calc(var(--rest) + var(--push) * var(--push-k) + var(--exit) * 3));
 }
 .cx-core {
   opacity: calc(1 - var(--exit) * 1.25);
@@ -369,6 +375,8 @@
   z-index: 10;
   pointer-events: none;
   background: radial-gradient(120% 95% at 50% 55%, transparent 52%, rgb(7 5 3 / 0.55) 100%),
+    /* gold sunrise wash that grows behind the catalog */
+    radial-gradient(80% 60% at 50% 105%, rgb(244 200 124 / calc(var(--cat) * 0.42)), transparent 72%),
     rgb(10 8 6 / calc(var(--tint) * 0.78));
 }
 .cx-shade::after {
@@ -390,7 +398,7 @@
 
 /* Beat 1: hero */
 .cx-intro {
-  inset: calc(var(--hdr) + clamp(20px, 7svh, 84px)) 0 auto 0;
+  inset: calc(var(--hdr) + clamp(10px, 3.4svh, 40px)) 0 auto 0;
   padding-inline: var(--gutter);
   text-align: center;
   opacity: clamp(0, calc(1.12 - var(--intro) * 1.25), 1);
@@ -407,12 +415,27 @@
   text-wrap: balance;
 }
 .cx-title em,
+.fin h2 em,
+.st-gold {
+  background: linear-gradient(180deg, #fff1c8 0%, #e6c585 48%, #b98a3f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.cx-title em,
 .fin h2 em {
   font-style: italic;
-  color: var(--lp-gold-hi);
+  padding: 0 0.05em 0.08em 0;
+}
+.cx-intro .lp-eyebrow {
+  margin-bottom: 0.6rem;
+}
+.cx-intro .cx-cta {
+  margin-top: clamp(14px, 2.4svh, 24px);
 }
 .cx-sub {
-  margin: clamp(14px, 2.2svh, 22px) 0 0;
+  margin: clamp(10px, 1.6svh, 16px) 0 0;
   font-size: var(--t-body);
   color: var(--lp-ink-2);
   letter-spacing: -0.01em;
@@ -742,8 +765,11 @@
 .cx-track::-webkit-scrollbar {
   display: none;
 }
+.cx-track[data-drag],
+.cx-track[data-driven] {
+  scroll-snap-type: none; /* off while dragging, and while scroll is moving the rail */
+}
 .cx-track[data-drag] {
-  scroll-snap-type: none;
   cursor: grabbing;
 }
 .cx-track:focus-visible {
@@ -758,12 +784,15 @@
   scroll-snap-align: start;
   overflow: hidden;
   border-radius: var(--r-card);
-  background: linear-gradient(180deg, rgb(24 18 12 / 0.62), rgb(14 10 7 / 0.74));
-  border: 1px solid rgb(255 244 222 / 0.16);
+  background: linear-gradient(180deg, rgb(24 18 12 / 0.66), rgb(14 10 7 / 0.78));
+  border: 1px solid rgb(255 244 222 / 0.18);
 }
+/* Where blur is affordable the cards become real frosted glass over the softened scene. */
 .lp-root[data-fx="full"] .cx-card {
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  backdrop-filter: blur(16px) saturate(140%);
+  background: linear-gradient(180deg, rgb(40 29 17 / 0.34), rgb(18 13 8 / 0.5));
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  backdrop-filter: blur(26px) saturate(160%);
+  box-shadow: 0 30px 60px -30px rgb(0 0 0 / 0.6), 0 1px 0 rgb(255 244 222 / 0.16) inset;
 }
 .cx-card-art {
   flex: 1 1 auto;
@@ -875,6 +904,8 @@
 @media (max-width: 900px) {
   .cx-stage {
     --gate-gap: 2%;
+    --rest: 1;
+    --rest-lift: 4;
     --push-k: 3.6;
     --lift: 6;
   }
@@ -906,6 +937,14 @@
     gap: 10px 20px;
   }
 }
+/* Shorter laptop screens: the hero copy takes a larger share of the height, so the resting gate
+   steps down a little and sits lower to keep clear air under the buttons. */
+@media (max-height: 920px) and (min-width: 901px) {
+  .cx-stage {
+    --rest: 1.06;
+    --rest-lift: 9.5;
+  }
+}
 @media (max-height: 700px) {
   .cx-rail {
     --card-h: clamp(210px, 38svh, 300px);
@@ -924,7 +963,23 @@
   --p: 0; --card: 0; --note: 0; --n: 12;
   position: relative;
   height: 300vh;
-  background: linear-gradient(#0b0907, var(--lp-bg) 18%);
+  /* The sun rises through the section as you scroll (the gradient scrolls under the pinned text). */
+  background: radial-gradient(75% 26% at 80% 94%, rgb(240 196 120 / 0.5), transparent 72%),
+    radial-gradient(60% 16% at 14% 46%, rgb(203 167 107 / 0.12), transparent 75%),
+    linear-gradient(180deg, #0d0a07 0%, #1b120a 55%, #2d1e0f 100%);
+}
+.st::before {
+  content: "";
+  position: absolute;
+  left: 80%;
+  top: 90%;
+  width: 96vmin;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  border: 1px solid rgb(230 197 133 / 0.22);
+  box-shadow: 0 0 0 7vmin rgb(230 197 133 / 0.05), 0 0 0 16vmin rgb(230 197 133 / 0.035);
+  pointer-events: none;
 }
 .st-pin {
   position: sticky;
@@ -946,6 +1001,9 @@
   letter-spacing: -0.04em;
   text-wrap: balance;
 }
+.st-text {
+  position: relative;
+}
 .st-text span {
   /* word i lights up as p·n passes i; CSS owns the curve */
   opacity: clamp(0.16, calc(0.16 + (var(--p) * var(--n) * 1.2 - var(--i)) * 0.55), 1);
@@ -963,7 +1021,8 @@
   margin: 0;
   padding: 18px 20px 20px;
   border-radius: 20px;
-  background: rgb(22 17 12 / 0.9);
+  background: rgb(22 15 9 / 0.88);
+  border: 1px solid rgb(230 197 133 / 0.28);
   box-shadow: var(--shadow-float);
   opacity: var(--card);
   transform: translate3d(0, calc((1 - var(--card)) * 56px), 0) rotate(calc((1 - var(--card)) * 4deg))
@@ -1055,7 +1114,9 @@
   --p: 0; --q0: 1; --q1: 0; --q2: 0; --qy0: 0; --qy1: 0; --qy2: 0;
   position: relative;
   height: 340vh;
-  background: var(--lp-bg);
+  background: radial-gradient(80% 20% at 50% 62%, rgb(240 196 120 / 0.34), transparent 75%),
+    radial-gradient(40% 12% at 50% 30%, rgb(203 167 107 / 0.1), transparent 75%),
+    linear-gradient(180deg, #2d1e0f 0%, #1a1109 40%, #130d08 100%);
 }
 .qs-pin {
   position: sticky;
@@ -1086,6 +1147,19 @@
   opacity: var(--qv);
   transform: translate3d(0, calc(var(--qyv) * 34px), 0);
 }
+.qs-q::before {
+  content: "\201C";
+  display: block;
+  height: 0.5em;
+  font-family: var(--lp-serif);
+  font-size: clamp(5rem, 11vw, 9rem);
+  line-height: 0.9;
+  background: linear-gradient(180deg, #fff1c8, #cba76b 70%, #9a7239);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
 .qs-q blockquote {
   margin: 0;
   font-family: var(--lp-serif);
@@ -1100,15 +1174,54 @@
 
 /* ---------- Finale ---------- */
 .fin {
+  position: relative;
   display: grid;
   place-content: center;
   justify-items: center;
   gap: clamp(28px, 5svh, 48px);
   min-height: 100vh;
   min-height: 100svh;
-  padding: 16svh var(--gutter) 12svh;
+  padding: 14svh var(--gutter) 22svh;
   text-align: center;
-  background: radial-gradient(80% 55% at 50% 108%, rgb(214 164 98 / 0.3), transparent 70%), var(--lp-bg);
+  overflow: hidden;
+  /* dark sky → dawn horizon at ~80% → warm lake, the same world as the film */
+  background: radial-gradient(52% 30% at 50% 80%, rgb(255 236 190 / 0.9), rgb(240 200 128 / 0.42) 40%, transparent 74%),
+    linear-gradient(180deg, #130d08 0%, #20150b 36%, #40291a 62%, #9a7239 76%, #e1b672 80%, #8c6a38 86%, #3a2815 94%, #1f1409 100%);
+}
+.fin > * {
+  position: relative;
+  z-index: 1;
+}
+/* half-sun on the horizon */
+.fin::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 80%;
+  width: clamp(120px, 15vmin, 220px);
+  aspect-ratio: 1;
+  translate: -50% -100%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fffbe6 0 40%, #ffe3a6 70%, rgb(255 227 166 / 0) 72%);
+  clip-path: inset(0 0 50% 0);
+  opacity: 0.95;
+}
+/* shimmering reflection on the water */
+.fin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 80.6%;
+  bottom: 0;
+  width: min(60vw, 640px);
+  translate: -50% 0;
+  background: repeating-linear-gradient(180deg, rgb(255 240 204 / 0.5) 0 2px, transparent 2px 13px);
+  -webkit-mask-image: radial-gradient(60% 100% at 50% 0%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(60% 100% at 50% 0%, #000 0%, transparent 78%);
+  opacity: 0.55;
+}
+.fin .lp-pill {
+  box-shadow: 0 10px 30px -10px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 236 190 / 0.35) inset;
 }
 .fin h2 {
   margin: 0;
@@ -1136,10 +1249,18 @@
 /* ---------- Footer: one quiet block ---------- */
 .lp-footer {
   padding: 26px var(--gutter) max(26px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--lp-line);
-  background: var(--lp-bg);
+  border-top: 1px solid rgb(230 197 133 / 0.28);
+  background: #1b130a;
   font-size: 0.75rem;
-  color: var(--lp-ink-3);
+  color: rgb(245 237 221 / 0.6);
+}
+.lp-footer-brand {
+  display: inline-flex;
+  margin-bottom: 18px;
+}
+.lp-footer-brand svg {
+  width: 30px;
+  height: 30px;
 }
 .lp-footer-in {
   max-width: 1200px;
