@@ -170,8 +170,8 @@ export function defaultMnqSymbol(date: string): string {
   return `MNQZ${(y + 1) % 10}`;
 }
 
-/** Uppercased instrument as typed, or the default MNQ contract for that date when blank. */
-export function resolveInstrument(instrument: string, date: string): string {
+/** Uppercased instrument as typed, or MNQ when blank. */
+export function resolveInstrument(instrument: string, date?: string): string {
   const v = instrument.trim().toUpperCase();
-  return v && v !== "—" ? v : defaultMnqSymbol(date);
+  return v && v !== "—" ? v : "MNQ";
 }

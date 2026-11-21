@@ -66,6 +66,9 @@ import {
   GlyphTarget,
   GlyphTimer,
   IconTile,
+  TicketCard,
+  TimeField,
+  StatStrip,
 } from "./flow-ui";
 
 /**
@@ -289,7 +292,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const [watch, setWatch] = useState<string[]>([]);
   const [moreWatch, setMoreWatch] = useState(false);
   const [autoWatchApplied, setAutoWatchApplied] = useState(false);
-  const [instrument, setInstrument] = useState("");
+  const [instrument, setInstrument] = useState(DEFAULT_INSTRUMENT);
   const [draw, setDraw] = useState("");
 
   // setup + rules
@@ -562,7 +565,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
     setNewsAnswer(null);
     setNewsEvents([]);
     setThoughts([{ id: uid("th"), text: "" }]);
-    setInstrument("");
+    setInstrument(DEFAULT_INSTRUMENT);
     setDraw("");
     setWatch([]);
     setMoreWatch(false);
@@ -645,7 +648,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       setWatch(cached.watch ?? []);
       setMoreWatch(false);
       setAutoWatchApplied(Boolean(cached.watch?.length));
-      setInstrument(cached.instrument ?? "");
+      setInstrument(cached.instrument || DEFAULT_INSTRUMENT);
       setDraw(cached.draw ?? "");
       const only = useApp.getState().settings.playbook ?? [];
       setPlaybookId(cached.playbookId || (only.length === 1 ? only[0]!.id : ""));
@@ -1471,7 +1474,6 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                             value={instrument}
                             onChange={(e) => setInstrument(e.target.value.toUpperCase())}
                             placeholder="MNQ"
-                            className="font-mono"
                           />
                           {suggestedInstruments.length > 1 && (
                             <div className="flex flex-wrap gap-1.5">
@@ -1484,7 +1486,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                     setInstrument(i);
                                   }}
                                   className={cn(
-                                    "rounded-full border px-2.5 py-0.5 font-mono text-[11.5px] font-medium transition-colors",
+                                    "rounded-full border px-2.5 py-0.5 text-[11.5px] font-medium transition-colors",
                                     finalInstrument === i
                                       ? "border-gold/55 bg-gold/12 text-gold-deep dark:text-gold"
                                       : "border-line bg-raised text-muted hover:text-ink",
@@ -1653,7 +1655,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                           aria-invalid={pnlInvalid || undefined}
                           style={{ width: `${Math.max(pnl.length, 4)}ch` }}
                           className={cn(
-                            "max-w-full border-0 bg-transparent p-0 text-center font-mono text-[44px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/60",
+                            "max-w-full border-0 bg-transparent p-0 text-center text-[44px] font-semibold tracking-[-0.03em] tabular-nums !shadow-none !outline-none !ring-0 placeholder:text-faint/60",
                             pnlValue > 0 && "text-profit",
                             pnlValue < 0 && "text-loss",
                             pnlInvalid && "text-loss",
@@ -1729,7 +1731,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                 >
                                   <span className="h-1.5 w-1.5 rounded-full bg-loss" aria-hidden />
                                   <span>{ev.name}</span>
-                                  <span className="font-mono text-[11.5px] text-muted">{ev.time}</span>
+                                  <span className="text-[11.5px] tabular-nums text-muted">{ev.time}</span>
                                 </span>
                               ))}
                             </div>
@@ -1815,7 +1817,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                                 value={quantity}
                                 onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ""))}
                                 placeholder="1"
-                                className="w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[26px] tracking-tight text-ink !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
+                                className="w-full min-w-0 border-0 bg-transparent p-0 text-[26px] font-semibold tracking-tight text-ink tabular-nums !shadow-none !outline-none !ring-0 placeholder:text-faint/60"
                               />
                             </div>
                             <Stepper label="Quantity" onStep={stepQuantity} canDecrement={!(quantityValue <= 1)} />
@@ -1841,7 +1843,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               placeholder={realizedR !== null ? realizedR.toFixed(2) : "2.5"}
                               value={rr}
                               onChange={(e) => setRr(cleanNumber(e.target.value))}
-                              className="font-mono"
+                              className="tabular-nums font-medium"
                             />
                           </div>
                         </div>
@@ -1899,7 +1901,7 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                               <span className="text-muted">
                                 {r.date} · <span className="text-ink">{r.instrument}</span>
                               </span>
-                              <span className={cn("font-mono tabular-nums", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>
+                              <span className={cn("tabular-nums font-semibold", r.pnl > 0 ? "text-profit" : r.pnl < 0 ? "text-loss" : "text-muted")}>
                                 {r.pnl}
                               </span>
                             </li>
@@ -2013,135 +2015,5 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
         </div>
       </Modal>
     </>
-  );
-}
-
-function TicketCard({
-  id,
-  title,
-  tile,
-  glyph,
-  price,
-  onPrice,
-  foot,
-  invalid,
-  time,
-  onTime,
-  timeId,
-}: {
-  id: string;
-  title: string;
-  tile: string;
-  glyph: React.ReactNode;
-  price: string;
-  onPrice: (v: string) => void;
-  foot?: React.ReactNode;
-  invalid?: boolean;
-  time?: string;
-  onTime?: (v: string) => void;
-  timeId?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col overflow-hidden rounded-[22px] border bg-raised transition-[border-color,box-shadow] duration-150 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10",
-        invalid ? "border-loss/45" : "border-line",
-      )}
-    >
-      <div onClick={() => document.getElementById(id)?.focus()} className="cursor-text px-4 pb-3.5 pt-3.5">
-        <div className="flex items-center gap-2.5">
-          <IconTile tile={tile}>{glyph}</IconTile>
-          <label htmlFor={id} className="text-[14px] font-medium tracking-[-0.01em] text-ink">
-            {title}
-          </label>
-        </div>
-        <input
-          id={id}
-          inputMode="decimal"
-          enterKeyHint="next"
-          autoComplete="off"
-          value={price}
-          onChange={(e) => onPrice(e.target.value)}
-          placeholder="0.00"
-          aria-invalid={invalid || undefined}
-          className={cn(
-            "mt-3.5 w-full min-w-0 border-0 bg-transparent p-0 font-mono text-[22px] tracking-tight !shadow-none !outline-none !ring-0 placeholder:text-faint/50 sm:text-[26px]",
-            invalid ? "text-loss" : "text-ink",
-          )}
-        />
-        {foot !== undefined && <p className="mt-1.5 min-h-4 text-[12px] leading-4 text-faint">{foot}</p>}
-      </div>
-      {onTime && timeId && (
-        <div className="mt-auto border-t border-line-soft">
-          <TimeField id={timeId} label={title} value={time ?? ""} onChange={onTime} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TimeField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const open = (e: React.MouseEvent) => {
-    const el = ref.current;
-    if (!el || e.target === el) return;
-    el.focus();
-    try {
-      el.showPicker?.();
-    } catch {
-      /* ignore */
-    }
-  };
-  return (
-    <div onClick={open} className="flex h-11 cursor-pointer items-center gap-1.5 px-3.5 transition-colors hover:bg-ink/[0.03]">
-      <span className="shrink-0 text-faint">
-        <GlyphTimer />
-      </span>
-      <input
-        ref={ref}
-        id={id}
-        type="time"
-        aria-label={`${label} time`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(
-          "min-w-0 flex-1 border-0 bg-transparent p-0 text-right font-mono text-[14px] !shadow-none !outline-none !ring-0 sm:text-[15px]",
-          value ? "text-ink" : "text-faint",
-        )}
-      />
-      {value && (
-        <button
-          type="button"
-          aria-label={`Clear ${label.toLowerCase()} time`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onChange("");
-          }}
-          className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
-        >
-          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-            <path d="M3 3l6 6M9 3l-6 6" />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
-}
-
-function StatStrip({ stats }: { stats: { k: string; v: string; tone?: "profit" | "loss" }[] }) {
-  return (
-    <div
-      className="mt-0.5 grid divide-x divide-line-soft overflow-hidden rounded-2xl border border-line-soft bg-ink/[0.03]"
-      style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
-    >
-      {stats.map((x) => (
-        <div key={x.k} className="px-2 py-2.5 text-center">
-          <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-faint">{x.k}</p>
-          <p className={cn("mt-0.5 font-mono text-[14px] tabular-nums sm:text-[15px]", x.tone === "profit" ? "text-profit" : x.tone === "loss" ? "text-loss" : "text-ink")}>
-            {x.v}
-          </p>
-        </div>
-      ))}
-    </div>
   );
 }

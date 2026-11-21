@@ -414,7 +414,7 @@ export function resolveMinatoTasks(params: {
   ) {
     const dateMatch = low.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
     const targetDate = dateMatch ? dateMatch[1]! : today;
-    const isPureSyncImperative = /\b(autofill|sync|fill\s+in)\b.*\bnews\b/i.test(low);
+    const isPureSyncImperative = /\b(autofill|sync|fill\s+in|check)\b.*\bnews\b/i.test(low);
     const newsAction: MinatoAction = {
       kind: "check_forexfactory_news",
       label: `Sync ForexFactory News (${targetDate})`,

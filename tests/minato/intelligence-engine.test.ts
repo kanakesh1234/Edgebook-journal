@@ -622,7 +622,7 @@ function makeDbCtx(overrides: Partial<TraderDatabaseContext> = {}): TraderDataba
 
   const ctx = makeDbCtx();
   const engineRes = await runMinatoIntelligenceEngine({
-    config: { apiKey: "test-key", model: "test/model", fallbackModel: null },
+    config: { apiKey: "test-key", model: "test/model", fallbackModel: undefined, models: ["test/model"] },
     systemPrompt: "You are MINATO.",
     question: "Tell me what happened on trade t4",
     history: [{ role: "user", text: "Tell me what happened on trade t4" }],

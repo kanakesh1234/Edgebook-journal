@@ -232,6 +232,15 @@ export const GlyphArrowOut = () => <G><path d="M7 17 17 7M8 7h9v9" /></G>;
 export const GlyphTimer = () => <G><circle cx="12" cy="13.5" r="7" /><path d="M12 10v3.8l2.4 1.4M9.5 3.5h5" /></G>;
 /** flag */
 export const GlyphFlag = () => <G><path d="M6 21V4.5M6 5h11l-2.2 3.8L17 12.5H6" /></G>;
+/** calendar */
+export const GlyphCalendar = () => (
+  <svg viewBox="0 0 24 24" className={glyph} fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
 /** minus.circle — the stop */
 export const GlyphStop = () => <G><circle cx="12" cy="12" r="8.5" /><path d="M8.5 12h7" /></G>;
 /** scope — the target */
@@ -270,22 +279,49 @@ export function Collapse({ children, id, className }: { children: React.ReactNod
 
 /**
  * A question unfolds when it appears (and folds away when it leaves, if wrapped in <AnimatePresence>).
- * The 32px lead-in lives INSIDE the step, so collapsing it leaves no stray gap. Clipping applies only
+ * The 28px lead-in lives INSIDE the step, so collapsing it leaves no stray gap. Clipping applies only
  * while animating, so focus rings are never cut off. `focus` moves the caret into the first field.
+ * `glow` adds a slow, calm, Apple-like luminous wash sweeping from top to bottom on reveal.
  */
-export function Reveal({ children, focus = false, delay = 0 }: { children: React.ReactNode; focus?: boolean; delay?: number }) {
+export function Reveal({
+  children,
+  focus = false,
+  delay = 0,
+  glow = true,
+  className,
+}: {
+  children: React.ReactNode;
+  focus?: boolean;
+  delay?: number;
+  glow?: boolean;
+  className?: string;
+}) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLElement>(null);
   const [clip, setClip] = useState(true);
   useEffect(() => {
     if (!focus) return;
     // Wait until the question is mostly open, so the caret never lands in a field that is still sliding.
-    const t = window.setTimeout(() => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }), 200 + delay * 1000);
+    const t = window.setTimeout(
+      () => ref.current?.querySelector<HTMLElement>("textarea, input")?.focus({ preventScroll: true }),
+      260 + delay * 1000,
+    );
     return () => window.clearTimeout(t);
   }, [focus, delay]);
   const shut = reduce ? { opacity: 0 } : { opacity: 0, height: 0 };
-  const open = reduce ? { opacity: 1, transition: { duration: 0.18, delay } } : { opacity: 1, height: "auto", transition: { height: { ...FLOW_EXPAND, delay }, opacity: { duration: 0.26, delay } } };
-  const gone = reduce ? { opacity: 0, transition: { duration: 0.12 } } : { opacity: 0, height: 0, transition: { height: FLOW_COLLAPSE, opacity: { duration: 0.14 } } };
+  const open = reduce
+    ? { opacity: 1, transition: { duration: 0.24, delay } }
+    : {
+        opacity: 1,
+        height: "auto",
+        transition: {
+          height: { duration: 0.52, ease: FLOW_SMOOTH, delay },
+          opacity: { duration: 0.38, delay: delay + 0.04 },
+        },
+      };
+  const gone = reduce
+    ? { opacity: 0, transition: { duration: 0.12 } }
+    : { opacity: 0, height: 0, transition: { height: FLOW_COLLAPSE, opacity: { duration: 0.14 } } };
   return (
     <motion.section
       ref={ref}
@@ -300,11 +336,53 @@ export function Reveal({ children, focus = false, delay = 0 }: { children: React
       {/* The room opens first; the question then settles into it — a short rise, a soft de-blur and a fade.
           Transform + opacity + filter only, so it stays on the GPU and never jitters the layout below. */}
       <motion.div
-        className="pt-8"
-        initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
-        animate={reduce ? undefined : { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.4, delay: delay + 0.05, ease: FLOW_SMOOTH } }}
+        className={cn("relative pt-7", className)}
+        initial={reduce ? false : { opacity: 0, y: 16, filter: "blur(6px)" }}
+        animate={
+          reduce
+            ? undefined
+            : {
+                opacity: 1,
+                y: 0,
+                filter: "blur(0px)",
+                transition: { duration: 0.48, delay: delay + 0.06, ease: FLOW_SMOOTH },
+              }
+        }
         exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.16 } }}
       >
+        {/* Apple-style slow glowing sweep from top to down */}
+        {glow && !reduce && (
+          <div className="pointer-events-none absolute inset-0 -top-2 overflow-hidden rounded-3xl" aria-hidden>
+            {/* Soft ambient golden/radiant beam gliding downwards */}
+            <motion.div
+              initial={{ opacity: 0, y: "-40%" }}
+              animate={{
+                opacity: [0, 0.45, 0.7, 0.25, 0],
+                y: ["-30%", "140%"],
+              }}
+              transition={{
+                duration: 1.35,
+                delay: delay + 0.1,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className="pointer-events-none absolute -inset-x-8 h-36 bg-gradient-to-b from-transparent via-gold/18 to-transparent blur-xl"
+            />
+            {/* Ultra-fine luminous leading light line */}
+            <motion.div
+              initial={{ opacity: 0, y: "-100%" }}
+              animate={{
+                opacity: [0, 0.55, 0.85, 0.3, 0],
+                y: ["-100%", "280%"],
+              }}
+              transition={{
+                duration: 1.35,
+                delay: delay + 0.1,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className="pointer-events-none absolute inset-x-6 h-[1.5px] bg-gradient-to-r from-transparent via-gold/60 to-transparent blur-[0.5px]"
+            />
+          </div>
+        )}
         {children}
       </motion.div>
     </motion.section>
@@ -395,7 +473,7 @@ export function PrimaryButton({ children, onClick, disabled, loading, shortcut =
       {loading && <Spinner className="absolute h-4 w-4" />}
       <span className={cn("inline-flex items-center", loading && "opacity-0")}>
         {children}
-        {shortcut && !disabled && <kbd className="ml-2.5 hidden rounded-md bg-black/10 px-1.5 py-0.5 font-mono text-[11px] font-medium opacity-70 lg:inline">{mac ? "⌘" : "Ctrl"} ↵</kbd>}
+        {shortcut && !disabled && <kbd className="ml-2.5 hidden rounded-md bg-black/10 px-1.5 py-0.5 text-[11px] font-medium opacity-70 lg:inline">{mac ? "⌘" : "Ctrl"} ↵</kbd>}
       </span>
     </button>
   );
@@ -478,7 +556,7 @@ export function ChoiceCard({ selected, onClick, title, meta }: { selected: boole
       onClick={() => { haptic.selection(); onClick(); }}
       className={cn(
         "relative w-full rounded-[22px] border px-5 py-4 text-left transition-all duration-200 active:scale-[0.985]",
-        selected ? "border-gold/60 bg-gold/[0.07] shadow-[0_10px_24px_-14px_var(--gold-strong)]" : "border-line bg-raised hover:border-line-strong hover:shadow-rest",
+        selected ? "border-gold/60 bg-gold/[0.07] shadow-[0_10px_24px_-14px_var(--gold-strong)]" : "border-line bg-raised hover:border-line-strong hover:shadow-panel",
       )}
     >
       <span className="block truncate pr-7 text-[16px] font-semibold tracking-[-0.01em] text-ink">{title}</span>
@@ -575,3 +653,144 @@ export function Disclosure({ label, children, defaultOpen = false, autoFocusOnOp
     </div>
   );
 }
+
+/** Inset time field inside a TicketCard or list item. */
+export function TimeField({ id, label, value, onChange }: { id: string; label: string; value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const open = (e: React.MouseEvent) => {
+    const el = ref.current;
+    if (!el || e.target === el) return;
+    el.focus();
+    try {
+      el.showPicker?.();
+    } catch {
+      /* ignore */
+    }
+  };
+  return (
+    <div onClick={open} className="flex h-11 cursor-pointer items-center gap-2 px-3.5 transition-colors hover:bg-ink/[0.03]">
+      <span className={cn("shrink-0 transition-colors", value ? "text-gold" : "text-faint")}>
+        <GlyphTimer />
+      </span>
+      <span className="text-[12.5px] font-medium text-muted">
+        {label} time
+      </span>
+      <input
+        ref={ref}
+        id={id}
+        type="time"
+        aria-label={`${label} time`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          "min-w-0 flex-1 border-0 bg-transparent p-0 text-right text-[15px] font-medium tabular-nums !shadow-none !outline-none !ring-0 sm:text-[16px]",
+          value ? "text-ink" : "text-faint",
+        )}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label={`Clear ${label.toLowerCase()} time`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange("");
+          }}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-ink/[0.1] text-muted transition-colors hover:bg-ink/[0.18] hover:text-ink"
+        >
+          <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+            <path d="M3 3l6 6M9 3l-6 6" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Apple HIG Execution Ticket Card — carries icon squircle, price, integrated time, and live foot notes. */
+export function TicketCard({
+  id,
+  title,
+  tile,
+  glyph,
+  price,
+  onPrice,
+  placeholder = "0.00",
+  foot,
+  invalid,
+  time,
+  onTime,
+  timeId,
+}: {
+  id: string;
+  title: string;
+  tile: string;
+  glyph: React.ReactNode;
+  price: string;
+  onPrice: (v: string) => void;
+  placeholder?: string;
+  foot?: React.ReactNode;
+  invalid?: boolean;
+  time?: string;
+  onTime?: (v: string) => void;
+  timeId?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative flex flex-col overflow-hidden rounded-[22px] border bg-raised shadow-panel transition-all duration-200 focus-within:border-gold/50 focus-within:ring-4 focus-within:ring-gold/10 hover:shadow-lift",
+        invalid ? "border-loss/45" : "border-line",
+      )}
+    >
+      {/* Subtle top edge specular hairline highlight */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/60 to-transparent dark:via-white/10" aria-hidden />
+      <div onClick={() => document.getElementById(id)?.focus()} className="cursor-text px-4 pb-3.5 pt-3.5">
+        <div className="flex items-center gap-2.5">
+          <IconTile tile={tile}>{glyph}</IconTile>
+          <label htmlFor={id} className="text-[14px] font-medium tracking-[-0.01em] text-ink">
+            {title}
+          </label>
+        </div>
+        <input
+          id={id}
+          inputMode="decimal"
+          enterKeyHint="next"
+          autoComplete="off"
+          value={price}
+          onChange={(e) => onPrice(e.target.value)}
+          placeholder={placeholder}
+          aria-invalid={invalid || undefined}
+          className={cn(
+            "mt-3.5 w-full min-w-0 border-0 bg-transparent p-0 text-[24px] font-semibold tracking-[-0.02em] tabular-nums !shadow-none !outline-none !ring-0 placeholder:text-faint/50 sm:text-[28px]",
+            invalid ? "text-loss" : "text-ink",
+          )}
+        />
+        {foot !== undefined && <p className="mt-1.5 min-h-4 text-[12px] leading-4 text-faint">{foot}</p>}
+      </div>
+      {onTime && timeId && (
+        <div className="mt-auto border-t border-line-soft">
+          <TimeField id={timeId} label={title} value={time ?? ""} onChange={onTime} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Segmented summary bar for execution or review stats. */
+export function StatStrip({ stats }: { stats: { k: string; v: string; tone?: "profit" | "loss" }[] }) {
+  return (
+    <div
+      className="mt-0.5 grid divide-x divide-line-soft overflow-hidden rounded-2xl border border-line-soft bg-ink/[0.03]"
+      style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
+    >
+      {stats.map((x) => (
+        <div key={x.k} className="px-2 py-2.5 text-center">
+          <p className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-faint">{x.k}</p>
+          <p className={cn("mt-0.5 text-[14px] font-semibold tabular-nums sm:text-[15px]", x.tone === "profit" ? "text-profit" : x.tone === "loss" ? "text-loss" : "text-ink")}>
+            {x.v}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+

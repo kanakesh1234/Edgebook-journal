@@ -37,6 +37,7 @@ export interface EntryDraft {
   checklist?: JournalEntry["checklist"];
   /** Canonical pre-trade execution checklist — captured before recording. */
   preTradeChecklist?: JournalEntry["preTradeChecklist"];
+  reflection?: JournalEntry["reflection"];
   review?: JournalEntry["review"];
   reviewStatus?: JournalEntry["reviewStatus"];
   planId?: string;
