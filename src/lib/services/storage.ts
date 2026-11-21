@@ -172,6 +172,88 @@ export function clearPlanDraftCache(): void {
   }
 }
 
+/* -------------------- In-Progress Add Trade Draft Cache (Local Only) -------------------- */
+
+export interface CachedAddTradeDraft {
+  updatedAt: number;
+  step: "trade" | "thought" | "setup" | "chart" | "autopsy";
+  date: string;
+  pnl: string;
+  instrument: string;
+  direction: TradeDirection | null;
+  entryTime: string;
+  exitTime: string;
+  entryPrice: string;
+  exitPrice: string;
+  stopLoss: string;
+  takeProfit: string;
+  levelsOpen: boolean;
+  quantity: string;
+  challengeId: string;
+  thoughts: { id: string; text: string; kind?: "thought" | "idea" | "impulse" }[];
+  watch: string[];
+  draw: string;
+  setupId: string;
+  ruleStates: Record<string, PlanRuleState>;
+  notes: string;
+  images: EntryImage[];
+}
+
+const ADD_TRADE_DRAFT_KEY = "edgebook:active-add-trade-draft:v1";
+const localDraftImageKey = (imageId: string) => `draft-img:${imageId}`;
+
+export function saveAddTradeDraftCache(draft: CachedAddTradeDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ADD_TRADE_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+export function loadAddTradeDraftCache(): CachedAddTradeDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ADD_TRADE_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedAddTradeDraft;
+    if (!parsed) return null;
+    const hasContent =
+      Boolean(parsed.pnl?.trim()) ||
+      Boolean(parsed.direction) ||
+      Boolean(parsed.thoughts?.some((t) => t.text?.trim())) ||
+      Boolean(parsed.images?.length);
+    return hasContent ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAddTradeDraftCache(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(ADD_TRADE_DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function putLocalDraftImage(imageId: string, blob: Blob): Promise<void> {
+  await set(localDraftImageKey(imageId), blob).catch(() => undefined);
+}
+
+export async function getLocalDraftImage(imageId: string): Promise<Blob | undefined> {
+  try {
+    return await get<Blob>(localDraftImageKey(imageId));
+  } catch {
+    return undefined;
+  }
+}
+
+export async function deleteLocalDraftImage(imageId: string): Promise<void> {
+  await del(localDraftImageKey(imageId)).catch(() => undefined);
+}
+
 /* -------------------- Cloud persistence (Google Drive + Offline Queue) -------------------- */
 
 let _prefetchedJournal: { at: number; promise: Promise<Response> } | null = null;

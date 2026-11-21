@@ -25,11 +25,21 @@ export function AutoField({ className, minRows = 2, maxVh = 40, value, count, ..
   useLayoutEffect(fit, [value, maxVh]); // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
+    if (!el) return;
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) fit();
+      });
+    }
+    if (typeof ResizeObserver === "undefined") return () => { cancelled = true; };
     let width = el.clientWidth;
     const ro = new ResizeObserver(() => { if (el.clientWidth !== width) { width = el.clientWidth; fit(); } });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const near = count && count.n > count.max * 0.85;
@@ -38,9 +48,10 @@ export function AutoField({ className, minRows = 2, maxVh = 40, value, count, ..
       <textarea
         ref={ref}
         rows={minRows}
+        wrap="soft"
         value={value}
         className={cn(
-          "block w-full resize-none rounded-2xl border border-line bg-raised px-4 py-3.5 text-[16px] leading-[1.5] tracking-[-0.011em] text-ink placeholder:text-faint sm:text-[17px] lg:px-5",
+          "block w-full min-w-0 max-w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words rounded-2xl border border-line bg-raised px-4 py-3.5 text-[16px] leading-[1.5] tracking-[-0.011em] text-ink placeholder:text-faint sm:text-[17px] lg:px-5",
           "transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10 aria-[invalid=true]:border-loss/55",
           near && "pb-8",
           className,

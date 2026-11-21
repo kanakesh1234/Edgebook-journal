@@ -456,6 +456,7 @@ export default function LessonPage() {
                     </label>
                     <textarea
                       id="comment-box"
+                      wrap="soft"
                       value={text}
                       onChange={(e) => setText(e.target.value)}
                       onKeyDown={(e) => {
@@ -467,7 +468,7 @@ export default function LessonPage() {
                       maxLength={1000}
                       rows={3}
                       placeholder="Add to the discussion"
-                      className="min-h-[88px] w-full resize-y rounded-control border border-line bg-raised px-3.5 py-3 text-base leading-relaxed text-ink transition-[border-color,box-shadow] duration-200 placeholder:text-faint hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10 sm:text-[15px]"
+                      className="min-h-[88px] w-full min-w-0 max-w-full resize-y overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-control border border-line bg-raised px-3.5 py-3 text-base leading-relaxed text-ink transition-[border-color,box-shadow] duration-200 placeholder:text-faint hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10 sm:text-[15px]"
                     />
                     <div className="mt-3 flex items-center justify-end gap-3">
                       <span className="hidden text-[12px] text-faint sm:inline">⌘↵ to send</span>

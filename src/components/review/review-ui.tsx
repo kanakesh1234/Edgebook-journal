@@ -502,9 +502,19 @@ export function AutoText({
   };
   useLayoutEffect(fit, [value]);
   useEffect(() => {
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) fit();
+      });
+    }
+    if (typeof ResizeObserver === "undefined") return () => { cancelled = true; };
     const ro = new ResizeObserver(fit);
     if (ref.current) ro.observe(ref.current);
-    return () => ro.disconnect();
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+    };
   }, []);
 
   return (
@@ -512,6 +522,7 @@ export function AutoText({
       <div className="group rounded-[18px] border border-line-soft bg-ink/[0.03] transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.045] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)]">
         <textarea
           ref={ref}
+          wrap="soft"
           aria-label={label}
           value={value}
           rows={minRows}
@@ -527,7 +538,7 @@ export function AutoText({
               onChipSelect?.();
             }
           }}
-          className="block w-full resize-none rounded-[18px] bg-transparent px-4 py-3 text-[14.5px] leading-[1.55] text-ink outline-none placeholder:text-faint"
+          className="block w-full min-w-0 max-w-full resize-none overflow-hidden whitespace-pre-wrap break-words rounded-[18px] bg-transparent px-4 py-3 text-[14.5px] leading-[1.55] text-ink outline-none placeholder:text-faint"
         />
       </div>
     </div>

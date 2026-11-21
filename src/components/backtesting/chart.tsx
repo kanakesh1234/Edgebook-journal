@@ -1060,7 +1060,8 @@ export default function BacktestChart({
       {textEdit && (
         <textarea
           autoFocus
-          className="tv-text-edit"
+          wrap="soft"
+          className="tv-text-edit overflow-x-hidden whitespace-pre-wrap break-words"
           style={{ left: textEdit.x, top: textEdit.y - 12 }}
           defaultValue={textEdit.value}
           placeholder="Add text"

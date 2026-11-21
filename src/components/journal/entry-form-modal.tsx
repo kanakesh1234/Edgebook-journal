@@ -16,7 +16,16 @@ import { useForexFactoryNews } from "./use-forexfactory-news";
 import { findNearbyMajorNews } from "@/lib/minato/forexfactory";
 import { useMinatoReminders } from "@/lib/minato/reminders";
 import { haptic } from "@/lib/haptics";
-import { getSyncState, subscribeSyncState } from "@/lib/services/storage";
+import {
+  clearAddTradeDraftCache,
+  deleteLocalDraftImage,
+  getLocalDraftImage,
+  getSyncState,
+  loadAddTradeDraftCache,
+  putLocalDraftImage,
+  saveAddTradeDraftCache,
+  subscribeSyncState,
+} from "@/lib/services/storage";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import { RiskMeter } from "./risk-meter";
 import { WinOddsRing } from "./win-odds-ring";
@@ -297,7 +306,7 @@ export function EntryFormModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(editing?.id ?? null);
-  const autopsy = useAutopsy(createdId, open && (step === "autopsy" || step === "done"));
+  const discardingRef = useRef(false);
 
   const [entryEdited, setEntryEdited] = useState(false);
   const [showPremature, setShowPremature] = useState(false);
@@ -341,14 +350,15 @@ export function EntryFormModal({
     return seen;
   }, [entries]);
 
-  // Hydrate on open
+  // Hydrate on open (from editing entry, or local draft cache if resuming, else fresh)
   useEffect(() => {
     if (!open) return;
+    discardingRef.current = false;
     useMinatoReminders.getState().triggerContextReminders("Before Logging Trade");
-    setStep("trade");
     setDir(1);
     setSaveError(null);
     if (editing) {
+      setStep("trade");
       setCreatedId(editing.id);
       setDate(editing.date);
       setPnl(String(editing.pnl));
@@ -384,46 +394,159 @@ export function EntryFormModal({
         setRuleStates({});
       }
     } else {
+      const cached = loadAddTradeDraftCache();
       setCreatedId(null);
-      setDate(presetDate && presetDate <= todayKey() ? presetDate : todayKey());
-      setPnl("");
-      setInstrument(DEFAULT_INSTRUMENT);
-      setDirection(null);
-      setThoughts([{ id: "th-1", text: "" }]);
-      setWatch([]);
-      setMoreWatch(false);
-      setDraw("");
-      setSetupId(playbook[0]?.id ?? "");
-      setPickingSetup(false);
-      if (playbook[0]) {
-        const pRules = setupRules(playbook[0]);
-        const initStates: Record<string, PlanRuleState> = {};
-        pRules.forEach((_, i) => {
-          initStates[String(i)] = "ready";
-        });
-        setRuleStates(initStates);
-      } else {
-        setRuleStates({});
-      }
-      setNotes("");
-      setImages([]);
-      setCompareImage([]);
-      setEntryTime(DEFAULT_TIME);
-      setExitTime(DEFAULT_TIME);
-      setEntryPrice("");
-      setExitPrice("");
-      setStopLoss("");
-      setTakeProfit("");
-      setLevelsOpen(false);
-      setQuantity("1");
-      setChallengeId(settings.primaryChallengeId ?? challenges[0]?.id ?? "");
       setMode("manual");
+      if (cached) {
+        setStep(cached.step);
+        setDate(cached.date && cached.date <= todayKey() ? cached.date : todayKey());
+        setPnl(cached.pnl ?? "");
+        setInstrument(cached.instrument || DEFAULT_INSTRUMENT);
+        setDirection(cached.direction ?? null);
+        setThoughts(cached.thoughts?.length ? cached.thoughts : [{ id: "th-1", text: "" }]);
+        setWatch(cached.watch ?? []);
+        setMoreWatch(false);
+        setDraw(cached.draw ?? "");
+        setSetupId(cached.setupId || (playbook[0]?.id ?? ""));
+        setPickingSetup(false);
+        setRuleStates(cached.ruleStates ?? {});
+        setNotes(cached.notes ?? "");
+        setEntryTime(cached.entryTime || DEFAULT_TIME);
+        setExitTime(cached.exitTime || DEFAULT_TIME);
+        setEntryPrice(cached.entryPrice ?? "");
+        setExitPrice(cached.exitPrice ?? "");
+        setStopLoss(cached.stopLoss ?? "");
+        setTakeProfit(cached.takeProfit ?? "");
+        setLevelsOpen(Boolean(cached.levelsOpen || cached.stopLoss || cached.takeProfit));
+        setQuantity(cached.quantity || "1");
+        setChallengeId(cached.challengeId || settings.primaryChallengeId || challenges[0]?.id || "");
+        if (cached.images?.length) {
+          void Promise.all(
+            cached.images.map(async (meta) => ({
+              meta,
+              blob: (await getLocalDraftImage(meta.id)) ?? null,
+            })),
+          ).then((restoredImgs) => {
+            if (!discardingRef.current) setImages(restoredImgs);
+          });
+        } else {
+          setImages([]);
+        }
+        setCompareImage([]);
+      } else {
+        setStep("trade");
+        setDate(presetDate && presetDate <= todayKey() ? presetDate : todayKey());
+        setPnl("");
+        setInstrument(DEFAULT_INSTRUMENT);
+        setDirection(null);
+        setThoughts([{ id: "th-1", text: "" }]);
+        setWatch([]);
+        setMoreWatch(false);
+        setDraw("");
+        setSetupId(playbook[0]?.id ?? "");
+        setPickingSetup(false);
+        if (playbook[0]) {
+          const pRules = setupRules(playbook[0]);
+          const initStates: Record<string, PlanRuleState> = {};
+          pRules.forEach((_, i) => {
+            initStates[String(i)] = "ready";
+          });
+          setRuleStates(initStates);
+        } else {
+          setRuleStates({});
+        }
+        setNotes("");
+        setImages([]);
+        setCompareImage([]);
+        setEntryTime(DEFAULT_TIME);
+        setExitTime(DEFAULT_TIME);
+        setEntryPrice("");
+        setExitPrice("");
+        setStopLoss("");
+        setTakeProfit("");
+        setLevelsOpen(false);
+        setQuantity("1");
+        setChallengeId(settings.primaryChallengeId ?? challenges[0]?.id ?? "");
+      }
     }
     setEntryEdited(false);
     setShowPremature(false);
     imp.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, presetDate]);
+
+  // Keep in-progress Add Trade draft strictly in local browser cache until Autopsy Finish
+  const updateImagesLocalCache = (nextImages: UploadItem[]) => {
+    const nextIds = new Set(nextImages.map((i) => i.meta.id));
+    for (const prev of images) {
+      if (!nextIds.has(prev.meta.id)) {
+        void deleteLocalDraftImage(prev.meta.id);
+      }
+    }
+    for (const item of nextImages) {
+      if (item.blob) {
+        void putLocalDraftImage(item.meta.id, item.blob);
+      }
+    }
+    setImages(nextImages);
+  };
+
+  useEffect(() => {
+    if (!open || editing || discardingRef.current || createdId || step === "done") return;
+    const timer = window.setTimeout(() => {
+      if (discardingRef.current) return;
+      saveAddTradeDraftCache({
+        updatedAt: Date.now(),
+        step: step === "trade" || step === "thought" || step === "setup" || step === "chart" || step === "autopsy" ? step : "trade",
+        date,
+        pnl,
+        instrument,
+        direction,
+        entryTime,
+        exitTime,
+        entryPrice,
+        exitPrice,
+        stopLoss,
+        takeProfit,
+        levelsOpen,
+        quantity,
+        challengeId,
+        thoughts,
+        watch,
+        draw,
+        setupId,
+        ruleStates,
+        notes,
+        images: images.map((i) => i.meta),
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    editing,
+    createdId,
+    step,
+    date,
+    pnl,
+    instrument,
+    direction,
+    entryTime,
+    exitTime,
+    entryPrice,
+    exitPrice,
+    stopLoss,
+    takeProfit,
+    levelsOpen,
+    quantity,
+    challengeId,
+    thoughts,
+    watch,
+    draw,
+    setupId,
+    ruleStates,
+    notes,
+    images,
+  ]);
 
   /* ---------------- Price & Timing calculations ---------------- */
   const pnlText = pnl.trim();
@@ -596,43 +719,108 @@ export function EntryFormModal({
     };
   };
 
-  const saveTradeAndAdvance = async () => {
-    if (saving) return;
+  // In-memory preview entry so Autopsy works with live stats/checklist/charts BEFORE anything is saved to Drive
+  const draftEntry = useMemo<JournalEntry | null>(() => {
+    if (Number.isNaN(pnlNumber)) return editing ?? null;
+    const d = buildDraft();
+    return {
+      id: createdId ?? editing?.id ?? "draft-add-trade",
+      date: d.date,
+      pnl: d.pnl,
+      rr: d.rr,
+      instrument: d.instrument,
+      direction: d.direction,
+      setup: d.setup,
+      setupId: d.setupId,
+      notes: d.notes,
+      images: d.images,
+      compareImage: d.compareImage,
+      challengeId: d.challengeId,
+      tradeNumber: d.tradeNumber,
+      entryTime: d.entryTime,
+      exitTime: d.exitTime,
+      entryPrice: d.entryPrice,
+      exitPrice: d.exitPrice,
+      stopLoss: d.stopLoss,
+      takeProfit: d.takeProfit,
+      quantity: d.quantity,
+      holdDuration: d.holdDuration,
+      preTradeChecklist: d.preTradeChecklist,
+      checklist: editing?.checklist,
+      review: editing?.review,
+      reflection: editing?.reflection,
+      createdAt: editing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createdId, editing, date, pnlNumber, effectiveRr, finalInstrument, direction, selectedPlaybookSetup, setupId, notes, nonEmptyThoughts, draw, images, compareImage, challengeId, entryTime, exitTime, entryN, exitN, stopN, targetN, quantityValue, autoHoldDuration, ruleStates]);
+
+  const autopsy = useAutopsy(createdId, open && (step === "autopsy" || step === "done"), draftEntry);
+
+  const validateTradeStep = (): boolean => {
     if (!date || date > todayKey() || Number.isNaN(pnlNumber)) {
       setStep("trade");
       setDir(-1);
       setSaveError("Check the trade details — something needs fixing.");
-      return;
+      return false;
     }
     if (!entryTime.trim() || !exitTime.trim() || heldMin === null) {
       setStep("trade");
       setDir(-1);
       setSaveError(heldMin === null ? "Exit time must be at or after entry time." : "Enter both entry and exit times.");
-      return;
+      return false;
     }
     if (levelNote) {
       setStep("trade");
       setDir(-1);
       setSaveError(levelNote);
-      return;
+      return false;
     }
+    return true;
+  };
 
+  /** Advance from Setup/Thoughts to Chart without writing to Drive — stays in local cache until Autopsy Finish. */
+  const advanceToChart = () => {
+    if (saving || !validateTradeStep()) return;
+    go("chart");
+  };
+
+  /** Advance from Chart to Autopsy without writing to Drive — stays in local cache until Autopsy Finish. */
+  const advanceToAutopsy = () => {
+    if (saving) return;
+    go("autopsy");
+  };
+
+  /** Commit the full trade, charts, and autopsy review to store & Google Drive ONLY when Finish is clicked. */
+  const completeAutopsy = async () => {
+    if (saving || !validateTradeStep()) return;
     setSaving(true);
     setSaveError(null);
-
-    const draft = buildDraft();
-    const blobs = new Map<string, Blob>();
-    for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-
     try {
+      const draft = buildDraft();
+      const blobs = new Map<string, Blob>();
+      for (const item of images) {
+        const blob = item.blob ?? (await getLocalDraftImage(item.meta.id));
+        if (blob) blobs.set(item.meta.id, blob);
+      }
+
+      let committed: JournalEntry;
       if (editing || createdId) {
         const idToUpdate = editing?.id ?? createdId!;
         await useApp.getState().updateEntry(idToUpdate, draft, blobs);
-        go("chart");
+        committed = useApp.getState().entries.find((e) => e.id === idToUpdate) ?? { ...draftEntry!, id: idToUpdate };
       } else {
-        const created = await useApp.getState().createEntry(draft, blobs);
-        setCreatedId(created.id);
-        go("chart");
+        committed = await useApp.getState().createEntry(draft, blobs);
+        setCreatedId(committed.id);
+      }
+
+      const ok = await autopsy.submit(committed);
+      if (ok) {
+        clearAddTradeDraftCache();
+        for (const item of images) {
+          void deleteLocalDraftImage(item.meta.id);
+        }
+        go("done");
       }
     } catch {
       setSaveError("Couldn't save trade — try again.");
@@ -641,55 +829,17 @@ export function EntryFormModal({
     }
   };
 
-  const saveCharts = async () => {
-    const live = createdId ? useApp.getState().entries.find((e) => e.id === createdId) : undefined;
-    if (!live) {
-      go("autopsy");
-      return;
+  /** Pressing Close (×) without finishing clears every locally cached draft and image blob without touching Drive. */
+  const handleAbortAndClose = () => {
+    haptic.selection();
+    discardingRef.current = true;
+    if (step !== "done") {
+      clearAddTradeDraftCache();
+      for (const item of images) {
+        void deleteLocalDraftImage(item.meta.id);
+      }
     }
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const blobs = new Map<string, Blob>();
-      for (const item of images) if (item.blob) blobs.set(item.meta.id, item.blob);
-      await useApp.getState().updateEntryFast(
-        live.id,
-        {
-          date: live.date,
-          pnl: live.pnl,
-          rr: live.rr,
-          instrument: live.instrument,
-          direction: live.direction,
-          setup: live.setup,
-          setupId: live.setupId,
-          notes: live.notes,
-          images: images.map((i) => i.meta),
-          compareImage: live.compareImage,
-          challengeId: live.challengeId,
-          tradeNumber: live.tradeNumber ?? null,
-          entryTime: live.entryTime,
-          exitTime: live.exitTime,
-          entryPrice: live.entryPrice,
-          exitPrice: live.exitPrice,
-          stopLoss: live.stopLoss,
-          takeProfit: live.takeProfit,
-          quantity: live.quantity,
-          preTradeChecklist: live.preTradeChecklist,
-        },
-        blobs,
-      );
-      go("autopsy");
-    } catch {
-      setSaveError("Couldn't save the chart — try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const completeAutopsy = async () => {
-    if (await autopsy.submit()) {
-      go("done");
-    }
+    onClose();
   };
 
   const importing = mode === "import" && !editing;
@@ -742,15 +892,15 @@ export function EntryFormModal({
       go("thought");
     } else if (step === "thought") {
       if (playbook.length > 0) go("setup");
-      else void saveTradeAndAdvance();
+      else advanceToChart();
     } else if (step === "setup") {
-      void saveTradeAndAdvance();
+      advanceToChart();
     } else if (step === "chart") {
-      void saveCharts();
+      advanceToAutopsy();
     } else if (step === "autopsy") {
       void completeAutopsy();
     } else if (step === "done") {
-      onClose();
+      handleAbortAndClose();
     }
   };
 
@@ -863,10 +1013,10 @@ export function EntryFormModal({
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
 
   return (
-    <Modal open={open} onClose={onClose} size={desktop ? "xl" : "md"} label={editing ? "Edit trade" : "Add trade"}>
+    <Modal open={open} onClose={handleAbortAndClose} size={desktop ? "xl" : "md"} label={editing ? "Edit trade" : "Add trade"}>
       <SheetFrame
         rail={rail}
-        onClose={onClose}
+        onClose={handleAbortAndClose}
         onBack={back ? () => go(back) : undefined}
         hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
         actions={
@@ -1519,7 +1669,7 @@ export function EntryFormModal({
                 title="Add your chart"
                 subtitle="Up to two screenshots."
               />
-              <ImageUploader items={images} onChange={setImages} max={2} />
+              <ImageUploader items={images} onChange={updateImagesLocalCache} max={2} />
             </div>
           )}
 

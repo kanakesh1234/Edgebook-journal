@@ -55,13 +55,18 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const live = useApp((s) => (entryId ? s.entries.find((e) => e.id === entryId) : undefined));
   const currency = useApp((s) => s.settings.currency);
   const entry = live ?? fallback ?? null;
+  const effectiveId = entryId ?? fallback?.id ?? null;
   const entryRef = useRef(entry);
   entryRef.current = entry;
-  // The day's loss limit against the day as it really went. Live, so it includes the trade that was just saved.
+  // The day's loss limit against the day as it really went. Includes the pending trade when not yet committed to store.
   const allEntries = useApp((s) => s.entries);
   const plans = useApp((s) => s.plans);
   const dayLimits = useApp((s) => s.settings.dayLimits);
-  const risk = useMemo(() => (entry ? dayRisk(entry.date, allEntries, plans, dayLimits) : null), [entry, allEntries, plans, dayLimits]);
+  const risk = useMemo(() => {
+    if (!entry) return null;
+    const list = live ? allEntries : [...allEntries, entry];
+    return dayRisk(entry.date, list, plans, dayLimits);
+  }, [entry, live, allEntries, plans, dayLimits]);
 
   const [followedPlan, setFollowedPlan] = useState<boolean | null>(null);
   const [emotion, setEmotion] = useState<Emotion>("");
@@ -93,12 +98,12 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const auditedFor = useRef<string | null>(null);
   useEffect(() => { if (!active) { auditedFor.current = null; setAudit(null); setAuditDismissed(false); } }, [active]);
   useEffect(() => {
-    if (!active || !entryId || auditedFor.current === entryId) return;
+    if (!active || !effectiveId || auditedFor.current === effectiveId) return;
     const e = entryRef.current; if (!e) return;
-    auditedFor.current = entryId;
+    auditedFor.current = effectiveId;
     const st = useApp.getState();
-    void auditTrade(e, st.entries, st.plans, undefined, st.settings.dayLimits).then((a) => { if (auditedFor.current === entryId) setAudit(a); });
-  }, [active, entryId]);
+    void auditTrade(e, st.entries, st.plans, undefined, st.settings.dayLimits).then((a) => { if (auditedFor.current === effectiveId) setAudit(a); });
+  }, [active, effectiveId]);
   /** The just-tapped option, shown selected for a beat before its step folds away. */
   const [pending, setPending] = useState<{ kind: "mistake" | "blunder"; value: string } | null>(null);
   const settleTimer = useRef<number | undefined>(undefined);
@@ -111,9 +116,9 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const hydratedFor = useRef<string | null>(null);
   useEffect(() => { if (!active) hydratedFor.current = null; }, [active]);
   useEffect(() => {
-    if (!active || !entryId) return;
-    if (hydratedFor.current === entryId) return;
-    hydratedFor.current = entryId;
+    if (!active || !effectiveId) return;
+    if (hydratedFor.current === effectiveId) return;
+    hydratedFor.current = effectiveId;
     const e = entryRef.current;
     const r = e?.review;
     setFollowedPlan(r?.outcome?.followedPlan ?? null);
@@ -166,13 +171,13 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   // Live: re-read a moment after the trader stops typing or picks a mistake, so AI tags are ready right away.
   const liveKey = JSON.stringify([mistake, mistakeOther.trim(), mistakeNote.trim(), lesson.trim(), followedPlan, emotion, goodProcess, blunder, category?.source === "you" ? category.key : null]);
   useEffect(() => {
-    if (!active || !entryId) return;
+    if (!active || !effectiveId) return;
     if (mistake === "" || mistake === "none") { setTagging(null); return; }
     if (mistake === "other" && !otherDone && mistakeOther.trim().length < 3) return;
     const t = window.setTimeout(() => void runTagging(inputsNow()), 650);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveKey, active, entryId, otherDone]);
+  }, [liveKey, active, effectiveId, otherDone]);
   const chooseCategory = (key: MistakeKey) => {
     sortRun.current++; // an answer still in flight must not overwrite the trader's choice
     setSorting(false);
@@ -236,9 +241,12 @@ export function useAutopsy(entryId: string | null, active: boolean, fallback?: J
   const hasChart = (entry?.images.length ?? 0) > 0;
 
   /** Saves the review. Resolves true on success; failures are reported inline via `error`. */
-  const submit = async (): Promise<boolean> => {
+  const submit = async (overrideEntry?: JournalEntry): Promise<boolean> => {
     // Read the trade again at the moment of saving — screenshots may have just been attached.
-    const current = (entryId ? useApp.getState().entries.find((e) => e.id === entryId) : undefined) ?? entryRef.current;
+    const current =
+      overrideEntry ??
+      (entryId ? useApp.getState().entries.find((e) => e.id === entryId) : undefined) ??
+      entryRef.current;
     if (!current || !ready) return false;
     setSaving(true);
     setError(null);

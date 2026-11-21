@@ -321,9 +321,21 @@ function Writer({ initial, author, editId }: { initial: Draft; author: string; e
   });
 
   /* ----- title / subtitle ----- */
-  const grow = (el: HTMLTextAreaElement | null) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } };
-  useEffect(() => grow(titleRef.current), [title]);
-  useEffect(() => grow(subRef.current), [subtitle]);
+  const grow = useCallback((el: HTMLTextAreaElement | null) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }, []);
+  useEffect(() => grow(titleRef.current), [title, grow]);
+  useEffect(() => grow(subRef.current), [subtitle, grow]);
+  useEffect(() => {
+    let cancelled = false;
+    const refit = () => { if (!cancelled) { grow(titleRef.current); grow(subRef.current); } };
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(refit);
+    }
+    if (typeof ResizeObserver === "undefined") return () => { cancelled = true; };
+    const ro = new ResizeObserver(refit);
+    if (titleRef.current) ro.observe(titleRef.current);
+    if (subRef.current) ro.observe(subRef.current);
+    return () => { cancelled = true; ro.disconnect(); };
+  }, [grow]);
 
   /* ----- autosave + version history ----- */
   const words = ed ? ed.getText().split(/\s+/).filter(Boolean).length : 0;
@@ -594,10 +606,10 @@ function Writer({ initial, author, editId }: { initial: Draft; author: string; e
             </div>
           )}
 
-          <textarea ref={titleRef} rows={1} className="wr-title" placeholder="Title" aria-label="Title" value={title} maxLength={200}
+          <textarea ref={titleRef} rows={1} wrap="soft" className="wr-title" placeholder="Title" aria-label="Title" value={title} maxLength={200}
             onChange={(e) => setTitle(e.target.value.replace(/\n/g, " "))}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); subRef.current?.focus(); } }} />
-          <textarea ref={subRef} rows={1} className="wr-subtitle" placeholder="Add a subtitle…" aria-label="Subtitle" value={subtitle} maxLength={300}
+          <textarea ref={subRef} rows={1} wrap="soft" className="wr-subtitle" placeholder="Add a subtitle…" aria-label="Subtitle" value={subtitle} maxLength={300}
             onChange={(e) => setSubtitle(e.target.value.replace(/\n/g, " "))}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ed.commands.focus("start"); } }} />
 
@@ -676,9 +688,9 @@ function Writer({ initial, author, editId }: { initial: Draft; author: string; e
             <ModalHead title="Header & footer" onClose={() => setModal(null)} />
             <p className="wr-note">Optional notes that frame the lesson. The header sits above the text and the footer closes it.</p>
             <div className="wr-label" style={{ padding: "0 0 4px" }}>Header</div>
-            <textarea className="wr-area" value={header} maxLength={400} placeholder="e.g. Part 2 of my risk series" onChange={(e) => setHeader(e.target.value)} />
+            <textarea wrap="soft" className="wr-area" value={header} maxLength={400} placeholder="e.g. Part 2 of my risk series" onChange={(e) => setHeader(e.target.value)} />
             <div className="wr-label" style={{ padding: "12px 0 4px" }}>Footer</div>
-            <textarea className="wr-area" value={footer} maxLength={400} placeholder="e.g. Questions? Drop a comment below." onChange={(e) => setFooter(e.target.value)} />
+            <textarea wrap="soft" className="wr-area" value={footer} maxLength={400} placeholder="e.g. Questions? Drop a comment below." onChange={(e) => setFooter(e.target.value)} />
             <div className="wr-actions"><button type="button" className="wr-pill is-orange" onClick={() => setModal(null)}>Done</button></div>
           </div>
         </Backdrop>

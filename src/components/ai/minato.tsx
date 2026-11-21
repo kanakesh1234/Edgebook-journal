@@ -627,6 +627,53 @@ export function Minato() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
+  const fitInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const nextHeight = el.scrollHeight;
+    if (nextHeight > 136) {
+      el.style.height = "136px";
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = `${nextHeight}px`;
+      el.style.overflowY = "hidden";
+    }
+  }, []);
+
+  useEffect(() => {
+    fitInput();
+  }, [input, open, width, focused, fitInput]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = inputRef.current;
+    if (!el) return;
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) fitInput();
+      });
+    }
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== lastWidth) {
+        lastWidth = el.clientWidth;
+        fitInput();
+      }
+    });
+    ro.observe(el);
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+    };
+  }, [open, fitInput]);
+
   useEffect(() => {
     if (open && !busy) {
       const t = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 260);
@@ -729,7 +776,10 @@ export function Minato() {
       ];
       setMessages(next);
       setInput("");
-      if (inputRef.current) inputRef.current.style.height = "";
+      if (inputRef.current) {
+        inputRef.current.style.height = "";
+        inputRef.current.style.overflowY = "hidden";
+      }
 
       // 5. Check Jarvis / Siri / Bixby Task Engine on the client FIRST!
       //    If the user issued a direct task command ("take me to play of this trade", "navigate me to there",
@@ -1105,7 +1155,7 @@ export function Minato() {
             {/* Conversation Stream (~70ch readable line length, full paragraphs visible, generous spacing) */}
             <div
               ref={listRef}
-              className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 pb-5 pt-5 md:px-6"
+              className="min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-5 pt-5 md:px-6"
               aria-live="polite"
             >
               {empty && (
@@ -1265,6 +1315,7 @@ export function Minato() {
                 <textarea
                   ref={inputRef}
                   rows={1}
+                  wrap="soft"
                   aria-label="Message Minato"
                   placeholder={
                     pendingSlot
@@ -1274,8 +1325,6 @@ export function Minato() {
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
-                    e.currentTarget.style.height = "auto";
-                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 136)}px`;
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1283,7 +1332,7 @@ export function Minato() {
                       void ask(input);
                     }
                   }}
-                  className="max-h-[136px] min-h-[32px] flex-1 resize-none self-center bg-transparent py-[4px] text-[15px] leading-[22px] text-ink outline-none placeholder:text-faint"
+                  className="max-h-[136px] min-h-[32px] min-w-0 max-w-full flex-1 resize-none self-center overflow-x-hidden overflow-y-hidden whitespace-pre-wrap break-words bg-transparent py-[4px] text-[15px] leading-[22px] text-ink outline-none placeholder:text-faint"
                 />
                 <button type="submit" aria-label="Send" disabled={busy || !input.trim()} className="mn-send group">
                   <span className="transition-transform duration-300 ease-out group-enabled:group-hover:-translate-y-px">
