@@ -113,7 +113,7 @@ export function Modal({ open, onClose, title, description, size = "md", children
                 </button>
               </header>
             )}
-            <div className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName)}>{children}</div>
+            <div className={cn("min-h-0 flex-1 overflow-x-hidden overflow-y-auto", bodyClassName)}>{children}</div>
           </motion.div>
         </motion.div>
       )}

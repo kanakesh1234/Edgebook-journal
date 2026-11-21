@@ -157,8 +157,8 @@ export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: {
           {rail && idx >= 0 && <p className="text-[12.5px] font-medium tabular-nums text-faint lg:hidden">Step {idx + 1} of {rail.steps.length}</p>}
           <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
         </header>
-        <div className={cn("flex-1 px-7 pb-8 pt-2 sm:px-10", rail && "lg:px-14 lg:pb-12 lg:pt-4")}>
-          <div className={cn(rail && "lg:mx-auto lg:max-w-[34rem]")}>{children}</div>
+        <div className={cn("min-w-0 flex-1 overflow-x-clip px-7 pb-8 pt-2 sm:px-10", rail && "lg:px-14 lg:pb-12 lg:pt-4")}>
+          <div className={cn("min-w-0", rail && "lg:mx-auto lg:max-w-[34rem]")}>{children}</div>
         </div>
         <footer className={cn("sticky bottom-0 z-20 shrink-0 border-t border-line/60 px-5 py-3.5", rail && "lg:px-14 lg:py-4", glass.bar)}>
           <div className={cn("flex items-center justify-between gap-4", rail && "lg:mx-auto lg:max-w-[34rem]")}>
@@ -514,22 +514,103 @@ export function Label({ children, done, hint, htmlFor }: { children: React.React
 }
 
 const box =
-  "w-full rounded-2xl border border-line bg-raised px-4 py-3 text-[16px] leading-snug text-ink placeholder:text-faint " +
+  "w-full min-w-0 max-w-full rounded-2xl border border-line bg-raised px-4 py-3 text-[16px] leading-snug text-ink placeholder:text-faint " +
   "transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus:border-gold/60 focus:outline-none focus:ring-4 focus:ring-gold/10";
 
 export function TextBox({ className, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "ref">) {
   return <input className={cn(box, className)} {...props} />;
 }
-/** Grows with what is typed, so a long answer is never cut off mid-line (it scrolls only past ~20 lines). */
-export function TextBlock({ className, value, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
+
+/**
+ * Auto-grows a textarea cleanly up to `maxHeight`, toggling vertical scrolling only when needed
+ * and re-measuring after webfont load or container resize so production font-swap never leaves
+ * a stale height or unwanted scrollbars.
+ */
+function useAutoGrowTextarea(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  value: React.TextareaHTMLAttributes<HTMLTextAreaElement>["value"],
+  maxHeight: number,
+  extraPx = 0,
+) {
+  const fit = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight + 2, 520)}px`;
-  }, [value]);
-  return <textarea ref={ref} value={value} className={cn(box, "min-h-24 resize-none overflow-y-auto", className)} {...props} />;
+    const nextHeight = el.scrollHeight + extraPx;
+    if (nextHeight > maxHeight) {
+      el.style.height = `${maxHeight}px`;
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = `${nextHeight}px`;
+      el.style.overflowY = "hidden";
+    }
+  }, [ref, maxHeight, extraPx]);
+
+  useLayoutEffect(() => {
+    fit();
+  }, [fit, value]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) fit();
+      });
+    }
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        cancelled = true;
+      };
+    }
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== lastWidth) {
+        lastWidth = el.clientWidth;
+        fit();
+      }
+    });
+    ro.observe(el);
+    return () => {
+      cancelled = true;
+      ro.disconnect();
+    };
+  }, [ref, fit]);
+}
+
+/** Grows with what is typed, so a long answer is never cut off mid-line (it scrolls only past ~20 lines). */
+export function TextBlock({ className, value, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useAutoGrowTextarea(ref, value, 520, 2);
+  return (
+    <textarea
+      ref={ref}
+      wrap="soft"
+      value={value}
+      className={cn(box, "min-h-24 resize-none overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words", className)}
+      {...props}
+    />
+  );
+}
+
+/** Auto-growing textarea for thought rows — grows with content, wraps cleanly, scrolls vertically only past 200px. */
+export function ThoughtTextarea({ className, value, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useAutoGrowTextarea(ref, value, 200, 0);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      wrap="soft"
+      value={value}
+      {...props}
+      className={cn(
+        "block w-full min-w-0 max-w-full resize-none overflow-x-hidden overflow-y-hidden whitespace-pre-wrap break-words bg-transparent text-[15.5px] leading-snug text-ink outline-none placeholder:text-faint",
+        className,
+      )}
+    />
+  );
 }
 
 export function Chip({ selected, onClick, children, tone = "gold" }: { selected: boolean; onClick: () => void; children: React.ReactNode; tone?: "gold" | "profit" | "loss" }) {

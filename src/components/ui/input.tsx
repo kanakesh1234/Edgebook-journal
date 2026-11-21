@@ -65,9 +65,10 @@ export function TextArea({
   return (
     <textarea
       aria-invalid={invalid || undefined}
+      wrap="soft"
       className={cn(
         controlBase,
-        "min-h-28 resize-y leading-relaxed",
+        "min-h-28 min-w-0 max-w-full resize-y overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words leading-relaxed",
         invalid && "border-loss/50 focus:border-loss focus:ring-loss/10",
         className,
       )}

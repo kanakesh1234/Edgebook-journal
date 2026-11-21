@@ -57,6 +57,7 @@ import {
   StepTransition,
   TextBlock,
   TextBox,
+  ThoughtTextarea,
   useIsDesktop,
   type Rail,
   GlyphArrowIn,
@@ -168,25 +169,6 @@ function thoughtVisual(text: string, manualKind?: ThoughtKind): { kind: ThoughtK
   };
 }
 
-/** Auto-growing textarea for thought rows — grows with content, no scroll, seamless in the list. */
-function ThoughtTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const fit = () => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  };
-  useEffect(fit, [props.value]);
-  return (
-    <textarea
-      ref={ref}
-      rows={1}
-      {...props}
-      className="block w-full resize-none bg-transparent text-[15.5px] leading-snug text-ink outline-none placeholder:text-faint"
-    />
-  );
-}
 
 const cleanNumber = (v: string) => v.replace(/[^\d.\-−]/g, "").replace("−", "-");
 const DEFAULT_INSTRUMENT = "MNQ";
