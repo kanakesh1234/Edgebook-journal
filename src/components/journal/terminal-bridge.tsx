@@ -6,6 +6,7 @@ import { Sym } from "./symbols";
 import { toast } from "@/components/ui/toast";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/lib/store";
 
 interface TerminalBridgeProps {
   visible: boolean;
@@ -17,12 +18,55 @@ const FALLBACK_COMMAND = "curl -fsSL https://edgebook.trade/api/cli/bridge | bas
 export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
   const [copied, setCopied] = useState(false);
   const [command, setCommand] = useState(FALLBACK_COMMAND);
+  const [syncing, setSyncing] = useState(false);
+  const [syncedCount, setSyncedCount] = useState<number | null>(null);
+
+  const entries = useApp((s) => s.entries);
+  const settings = useApp((s) => s.settings);
+  const plans = useApp((s) => s.plans);
+  const dayLogs = useApp((s) => s.dayLogs);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setCommand(`curl -fsSL ${window.location.origin}/api/cli/bridge | bash && cd edgebook-journal && agy`);
+    if (typeof window === "undefined") return;
+    let active = true;
+
+    async function registerSync() {
+      setSyncing(true);
+      try {
+        const origin = window.location.origin;
+        const res = await fetch("/api/cli/bridge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entries,
+            challenges: settings.challenges ?? [],
+            plans: plans ?? [],
+            dayLogs: dayLogs ?? [],
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (active && data.key) {
+            setCommand(`curl -fsSL "${origin}/api/cli/bridge?k=${data.key}" | bash && cd edgebook-journal && agy`);
+            setSyncedCount(entries.length);
+          }
+        }
+      } catch {
+        // Fallback to origin without key
+        if (active) {
+          setCommand(`curl -fsSL "${window.location.origin}/api/cli/bridge" | bash && cd edgebook-journal && agy`);
+        }
+      } finally {
+        if (active) setSyncing(false);
+      }
     }
-  }, []);
+
+    registerSync();
+    return () => {
+      active = false;
+    };
+  }, [entries, settings.challenges, plans, dayLogs]);
 
   const copyCommand = async () => {
     try {
@@ -81,7 +125,9 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
               {/* Status pill */}
               <div className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-canvas/70 px-2.5 py-1 text-[11.5px] font-medium text-muted">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Zero download required</span>
+                <span>
+                  {syncedCount !== null ? `${syncedCount} trades linked` : syncing ? "Connecting..." : "Zero download required"}
+                </span>
               </div>
             </div>
 
