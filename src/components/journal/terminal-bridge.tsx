@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sym } from "./symbols";
+import { SPRING } from "./journal-ui";
 import { toast } from "@/components/ui/toast";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
@@ -18,8 +19,7 @@ const FALLBACK_COMMAND = "curl -fsSL https://edgebook.trade/api/cli/bridge | bas
 export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
   const [copied, setCopied] = useState(false);
   const [command, setCommand] = useState(FALLBACK_COMMAND);
-  const [syncing, setSyncing] = useState(false);
-  const [syncedCount, setSyncedCount] = useState<number | null>(null);
+  const [ready, setReady] = useState(false);
 
   const entries = useApp((s) => s.entries);
   const settings = useApp((s) => s.settings);
@@ -31,7 +31,6 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
     let active = true;
 
     async function registerSync() {
-      setSyncing(true);
       try {
         const origin = window.location.origin;
         const lessons = await fetch("/api/lessons", { cache: "no-store" })
@@ -60,15 +59,12 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
           if (data.key) qs.set("k", data.key);
           const query = qs.toString() ? `?${qs.toString()}` : "";
           setCommand(`curl -fsSL "${origin}/api/cli/bridge${query}" | bash && cd edgebook-journal && agy`);
-          setSyncedCount(entries.length);
+          setReady(true);
         }
       } catch {
-        // Fallback to origin without key
         if (active) {
           setCommand(`curl -fsSL "${window.location.origin}/api/cli/bridge" | bash && cd edgebook-journal && agy`);
         }
-      } finally {
-        if (active) setSyncing(false);
       }
     }
 
@@ -76,18 +72,18 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
     return () => {
       active = false;
     };
-  }, [entries, settings.challenges, plans, dayLogs]);
+  }, [entries, settings, plans, dayLogs]);
 
   const copyCommand = async () => {
     try {
       await navigator.clipboard.writeText(command);
       haptic.success();
       setCopied(true);
-      toast.success("Command copied to clipboard", "Paste in your terminal to bridge data to agy.");
-      setTimeout(() => setCopied(false), 2400);
+      toast.success("Copied to clipboard", "Paste in Terminal to open your workspace in agy.");
+      setTimeout(() => setCopied(false), 2200);
     } catch {
       haptic.error();
-      toast.error("Could not copy automatically", "Please select and copy the command manually.");
+      toast.error("Could not copy command");
     }
   };
 
@@ -95,103 +91,62 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
     <AnimatePresence>
       {visible && (
         <motion.section
-          aria-label="Terminal AI Bridge"
-          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          aria-label="Terminal AI"
+          initial={{ opacity: 0, y: 14, scale: 0.99 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 16, scale: 0.99 }}
-          transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+          exit={{ opacity: 0, y: 10, scale: 0.99 }}
+          transition={SPRING}
           className={cn(
-            "relative mx-auto mt-12 w-full max-w-[960px] overflow-hidden rounded-[20px] border border-line bg-surface/90 p-5 shadow-[0_16px_40px_-16px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur-xl sm:p-6",
+            "mx-auto mt-14 w-full max-w-[960px] rounded-[20px] border border-line-soft bg-surface/80 px-5 py-4 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.12),0_0_0_0.5px_rgb(0_0_0/0.05)] backdrop-blur-2xl dark:shadow-[0_12px_36px_-12px_rgb(0_0_0/0.45),0_0_0_0.5px_rgb(255_255_255/0.08)]",
             className,
           )}
         >
-          {/* Subtle gradient aura */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-gold/10 blur-3xl"
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -bottom-20 -left-20 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl"
-          />
-
-          <div className="relative z-10 flex flex-col gap-4">
-            {/* Top metadata row */}
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2">
-                <span className="grid h-7 w-7 place-items-center rounded-lg border border-line-strong bg-raised/90 text-gold shadow-sm">
-                  <span className="font-mono text-[13px] font-bold tracking-tight">&gt;_</span>
-                </span>
-                <div>
-                  <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-ink sm:text-[16px]">
-                    Terminal AI Bridge
-                  </h3>
-                  <p className="text-[12.5px] text-muted">
-                    Private analysis in your terminal with Gemini Pro via <code className="font-mono text-ink">agy</code>
-                  </p>
-                </div>
+          <div className="flex flex-col gap-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+            {/* Left — quiet Apple-style title lockup */}
+            <div className="flex min-w-0 items-center gap-3.5">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] border border-line-soft bg-ink/[0.035] text-ink">
+                <span className="font-mono text-[13px] font-semibold tracking-tight text-gold">&gt;_</span>
               </div>
-
-              {/* Status pill */}
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-canvas/70 px-2.5 py-1 text-[11.5px] font-medium text-muted">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>
-                  {syncedCount !== null ? `${syncedCount} trades linked` : syncing ? "Connecting..." : "Zero download required"}
-                </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="truncate text-[14.5px] font-semibold tracking-[-0.015em] text-ink">
+                    Terminal AI
+                  </h3>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-ink/[0.05] px-2 py-0.5 text-[11px] font-medium text-muted">
+                    <span className={cn("h-1.5 w-1.5 rounded-full", ready ? "bg-profit" : "bg-gold")} />
+                    <span>agy</span>
+                  </span>
+                </div>
+                <p className="truncate text-[12.5px] text-muted">
+                  Local workspace · Private
+                </p>
               </div>
             </div>
 
-            {/* Description */}
-            <p className="text-[13.5px] leading-relaxed text-muted">
-              Bridges your Google Drive journal directly into a local workspace folder with structured{" "}
-              <span className="font-mono text-[12px] text-ink">trades.csv</span>,{" "}
-              <span className="font-mono text-[12px] text-ink">journals/</span>, and automated{" "}
-              <span className="font-mono text-[12px] text-ink">reports/</span>. Everything stays 100% local and private.
-            </p>
-
-            {/* One line command container */}
-            <div className="group relative flex flex-col items-stretch justify-between gap-2 rounded-xl border border-line-strong bg-black/[0.88] p-2.5 shadow-inner sm:flex-row sm:items-center sm:gap-3 sm:py-2 sm:pl-3.5 sm:pr-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1 font-mono text-[12.5px] text-neutral-200 sm:text-[13px]">
-                <span className="select-none font-bold text-gold">&gt;</span>
-                <span className="select-all whitespace-nowrap font-medium tracking-tight text-neutral-100">
-                  {command}
+            {/* Right — masked command capsule + tactile Copy action (raw URL never exposed) */}
+            <div className="flex items-center justify-between gap-2 rounded-full border border-line-soft bg-canvas/70 p-1 pl-3.5 sm:justify-end">
+              <div className="flex items-center gap-2 select-none">
+                <Sym name="shield" className="h-3.5 w-3.5 text-faint" strokeWidth={1.7} />
+                <span className="font-mono text-[12px] tracking-[0.04em] text-muted">
+                  edgebook · <span className="tracking-[0.14em] text-faint">••••••••</span>
                 </span>
               </div>
 
-              <button
+              <motion.button
                 type="button"
                 onClick={copyCommand}
+                whileTap={{ scale: 0.96 }}
                 aria-label="Copy terminal command"
                 className={cn(
-                  "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-[12.5px] font-semibold transition-all duration-200 active:scale-[0.97]",
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[12.5px] font-medium transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-gold-strong/50",
                   copied
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                    : "bg-gold text-neutral-950 hover:bg-gold-strong shadow-sm hover:shadow",
+                    ? "bg-profit/15 text-profit"
+                    : "bg-ink text-canvas hover:opacity-90",
                 )}
               >
-                <Sym
-                  name={copied ? "check" : "sparkles"}
-                  className={cn("h-3.5 w-3.5", copied ? "text-emerald-300" : "text-neutral-950")}
-                  strokeWidth={2.4}
-                />
-                <span>{copied ? "Copied!" : "Copy command"}</span>
-              </button>
-            </div>
-
-            {/* Feature tags footer */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-[12px] text-faint">
-              <span className="inline-flex items-center gap-1">
-                <Sym name="shield" className="h-3.5 w-3.5 text-muted" />
-                <span>100% Local &amp; Private</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Sym name="folder" className="h-3.5 w-3.5 text-muted" />
-                <span>No zip extraction needed</span>
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Sym name="chart" className="h-3.5 w-3.5 text-muted" />
-                <span>Persistent memory in reports/</span>
-              </span>
+                <Sym name={copied ? "check" : "link"} className="h-3.5 w-3.5" strokeWidth={2} />
+                <span>{copied ? "Copied" : "Copy command"}</span>
+              </motion.button>
             </div>
           </div>
         </motion.section>

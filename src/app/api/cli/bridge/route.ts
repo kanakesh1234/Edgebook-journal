@@ -258,6 +258,8 @@ curl -fsSL "${syncUrl}" | bash -s -- "$DIR"
   const viewScript = `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const readline = require("readline");
+const { execFileSync, spawnSync } = require("child_process");
 
 const DIR = __dirname;
 const C = {
@@ -268,13 +270,42 @@ const C = {
   goldSoft: "\\x1b[38;2;250;204;21m",
   emerald: "\\x1b[38;2;52;211;153m",
   rose: "\\x1b[38;2;251;113;133m",
+  cyan: "\\x1b[38;2;56;189;248m",
+  violet: "\\x1b[38;2;167;139;250m",
   slate: "\\x1b[38;2;148;163;184m",
   white: "\\x1b[38;2;248;250;252m",
   line: "\\x1b[38;2;71;85;105m",
 };
 
-const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.replace(/\\x1b\\[[0-9;]*m/g, "").length));
-const rule = (ch = "─", w = 72) => \`\${C.line}\${ch.repeat(w)}\${C.reset}\`;
+const stripAnsi = (s) => s.replace(/\\x1b\\[[0-9;]*m/g, "");
+const pad = (s, n) => s + " ".repeat(Math.max(0, n - stripAnsi(s).length));
+const rule = (ch = "─", w = 74) => \`\${C.line}\${ch.repeat(w)}\${C.reset}\`;
+const readJson = (rel, fb = null) => {
+  try { return JSON.parse(fs.readFileSync(path.join(DIR, rel), "utf8")); } catch { return fb; }
+};
+const readText = (rel, fb = "") => {
+  try { return fs.readFileSync(path.join(DIR, rel), "utf8"); } catch { return fb; }
+};
+
+function hasGlow() {
+  try {
+    const r = spawnSync("which", ["glow"], { stdio: "ignore" });
+    return r.status === 0;
+  } catch { return false; }
+}
+
+function sparkline(values) {
+  if (!values || values.length === 0) return C.slate + "—" + C.reset;
+  const ticks = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  return values.slice(-20).map((v) => {
+    const idx = Math.min(7, Math.max(0, Math.floor(((v - min) / span) * 7)));
+    const col = v >= 0 ? C.emerald : C.rose;
+    return col + ticks[idx] + C.reset;
+  }).join("");
+}
 
 function renderMarkdown(md) {
   const lines = md.replace(/\\r\\n/g, "\\n").split("\\n");
@@ -282,14 +313,13 @@ function renderMarkdown(md) {
     const line = lines[i];
     if (/^#{1}\\s+/.test(line)) {
       const title = line.replace(/^#\\s+/, "").trim();
-      console.log(\`\\n\${C.gold}\${C.bold}━━━ \${title.toUpperCase()} ━━━\${C.reset}\`);
+      console.log(\`\\n\${C.gold}\${C.bold}━━━ 📊 \${title.toUpperCase()} ━━━\${C.reset}\`);
     } else if (/^#{2,3}\\s+/.test(line)) {
       const title = line.replace(/^#{2,3}\\s+/, "").trim();
       console.log(\`\\n\${C.goldSoft}\${C.bold}▸ \${title}\${C.reset}\`);
     } else if (/^\\s*[-*]{3,}\\s*$/.test(line)) {
-      console.log(rule("─", 68));
+      console.log(rule("─", 72));
     } else if (/^\\s*\\|/.test(line)) {
-      // Collect markdown table block
       const tbl = [];
       while (i < lines.length && /^\\s*\\|/.test(lines[i])) {
         tbl.push(lines[i]);
@@ -301,24 +331,28 @@ function renderMarkdown(md) {
         .map((r) => r.trim().replace(/^\\||\\|$/g, "").split("|").map((c) => c.trim()));
       if (rows.length > 0) {
         const widths = rows[0].map((_, col) => Math.max(...rows.map((r) => (r[col] || "").length)));
-        console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+        const wTotal = widths.reduce((a, b) => a + b + 3, 1);
+        console.log(rule("─", wTotal));
         rows.forEach((r, rIdx) => {
           const formatted = r.map((cell, cIdx) => {
             const raw = pad(cell, widths[cIdx]);
             if (rIdx === 0) return \`\${C.gold}\${C.bold}\${raw}\${C.reset}\`;
-            if (/^\\+|win|pass|a\\+/i.test(cell)) return \`\${C.emerald}\${raw}\${C.reset}\`;
-            if (/^-\\$|^-\\d|loss|fail|fomo/i.test(cell)) return \`\${C.rose}\${raw}\${C.reset}\`;
+            if (/^\\+|🟢|✓|win|pass|a\\+/i.test(cell)) return \`\${C.emerald}\${raw}\${C.reset}\`;
+            if (/^-\\$|^-\\d|🔴|✕|loss|fail|fomo/i.test(cell)) return \`\${C.rose}\${raw}\${C.reset}\`;
+            if (/🟡|⚠️|caution|be/i.test(cell)) return \`\${C.goldSoft}\${raw}\${C.reset}\`;
             return \`\${C.white}\${raw}\${C.reset}\`;
           });
-          console.log(\`\${C.line}│\${C.reset} \${formatted.join(\` \${C.line}│\${C.reset} \`)}\`);
-          if (rIdx === 0) console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+          console.log(\`\${C.line}│\${C.reset} \${formatted.join(\` \${C.line}│\${C.reset} \`)} \${C.line}│\${C.reset}\`);
+          if (rIdx === 0) console.log(rule("─", wTotal + 2));
         });
-        console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+        console.log(rule("─", wTotal + 2));
       }
     } else {
       let out = line
         .replace(/\\*\\*([^*]+)\\*\\*/g, \`\${C.white}\${C.bold}$1\${C.reset}\`)
-        .replace(/\\\`([^\\\`]+)\\\`/g, \`\${C.goldSoft}$1\${C.reset}\`)
+        .replace(/\\\`([^\\\`]+)\\\`/g, \`\${C.cyan}$1\${C.reset}\`)
+        .replace(/✓/g, \`\${C.emerald}✓\${C.reset}\`)
+        .replace(/✕/g, \`\${C.rose}✕\${C.reset}\`)
         .replace(/^\\s*[-*]\\s+/, \`  \${C.gold}●\${C.reset} \`)
         .replace(/^\\s*(\\d+\\.)\\s+/, \`  \${C.gold}$1\${C.reset} \`);
       console.log(out);
@@ -326,9 +360,22 @@ function renderMarkdown(md) {
   }
 }
 
+function showMarkdownFile(relPath) {
+  const full = path.join(DIR, relPath);
+  if (!fs.existsSync(full)) {
+    console.log(\`  \${C.rose}✕ Not found:\${C.reset} \${relPath}\`);
+    return;
+  }
+  if (hasGlow() && process.stdout.isTTY && process.env.EDGEBOOK_NO_GLOW !== "1") {
+    spawnSync("glow", ["-s", "dark", "-w", "88", full], { stdio: "inherit" });
+    return;
+  }
+  renderMarkdown(fs.readFileSync(full, "utf8"));
+}
+
 function showHeader() {
-  let summary = null;
-  try { summary = JSON.parse(fs.readFileSync(path.join(DIR, "stats/summary.json"), "utf8")); } catch {}
+  const summary = readJson("stats/summary.json", {});
+  const trades = readJson("trades/trades.json", []);
   const overall = summary?.overall || {};
   const net = typeof overall.net === "number" ? overall.net : 0;
   const wr = typeof overall.winRate === "number" ? \`\${overall.winRate.toFixed(1)}%\` : "—";
@@ -337,52 +384,112 @@ function showHeader() {
   const netColor = net >= 0 ? C.emerald : C.rose;
   const netStr = (net >= 0 ? "+$" : "-$") + Math.abs(net).toFixed(2);
 
+  const sorted = [...trades].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  let cum = 0;
+  const eq = sorted.map((t) => (cum += Number(t.pnl || 0)));
+  const form = sorted.slice(-8).map((t) => (t.pnl > 0 ? "🟢" : t.pnl < 0 ? "🔴" : "🟡")).join("");
+
   console.log("");
-  console.log(rule("━", 72));
-  console.log(\`  \${C.gold}\${C.bold}EDGEBOOK\${C.reset}  \${C.slate}·  INSTITUTIONAL TERMINAL DOSSIER\${C.reset}\`);
-  console.log(rule("─", 72));
+  console.log(\`\${C.line}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\${C.reset}\`);
+  console.log(\`\${C.line}┃\${C.reset} ⚡ \${C.gold}\${C.bold}EDGEBOOK\${C.reset}  \${C.slate}·  INSTITUTIONAL TERMINAL DOSSIER\${C.reset}            \${C.emerald}● SYNCED\${C.reset}\`);
+  console.log(\`\${C.line}┠────────────────────────────────────────────────────────────────────────\${C.reset}\`);
   console.log(
-    \`  \${C.slate}Net P&L:\${C.reset} \${netColor}\${C.bold}\${netStr}\${C.reset}   \` +
-    \`\${C.slate}Win Rate:\${C.reset} \${C.white}\${C.bold}\${wr}\${C.reset}   \` +
-    \`\${C.slate}Profit Factor:\${C.reset} \${C.white}\${C.bold}\${pf}\${C.reset}   \` +
-    \`\${C.slate}Avg R:\${C.reset} \${C.goldSoft}\${C.bold}\${avgR}\${C.reset}   \` +
-    \`\${C.slate}Trades:\${C.reset} \${C.white}\${C.bold}\${overall.count ?? 0}\${C.reset}\`
+    \`\${C.line}┃\${C.reset} 💰 \${C.slate}Net:\${C.reset} \${netColor}\${C.bold}\${netStr}\${C.reset}   \` +
+    \`🎯 \${C.slate}Win:\${C.reset} \${C.white}\${C.bold}\${wr}\${C.reset}   \` +
+    \`⚖️ \${C.slate}PF:\${C.reset} \${C.white}\${C.bold}\${pf}\${C.reset}   \` +
+    \`📐 \${C.slate}Avg R:\${C.reset} \${C.goldSoft}\${C.bold}\${avgR}\${C.reset}   \` +
+    \`📊 \${C.slate}Trades:\${C.reset} \${C.white}\${C.bold}\${overall.count ?? trades.length}\${C.reset}\`
   );
-  console.log(rule("━", 72));
+  console.log(\`\${C.line}┃\${C.reset} 📈 \${C.slate}Curve:\${C.reset} \${sparkline(eq)}   🔥 \${C.slate}Form:\${C.reset} \${form || "—"}\`);
+  console.log(\`\${C.line}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\${C.reset}\`);
+}
+
+function showLastTrade() {
+  const trades = readJson("trades/trades.json", []);
+  const challenges = readJson("playbooks/challenges.json", []);
+  if (!trades.length) {
+    console.log(\`\\n  \${C.goldSoft}🟡 No trades recorded yet.\${C.reset}\\n\`);
+    return;
+  }
+  const sorted = [...trades].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+  const t = sorted[sorted.length - 1];
+  const ch = challenges.find((c) => c.id === t.challengeId)?.name || t.challengeId || "Default";
+  const pnl = Number(t.pnl || 0);
+  const pnlColor = pnl > 0 ? C.emerald : pnl < 0 ? C.rose : C.goldSoft;
+  const badge = pnl > 0 ? "🟢 WIN" : pnl < 0 ? "🔴 LOSS" : "🟡 BE";
+  const dir = t.direction === "long" ? \`\${C.emerald}▲ LONG\${C.reset}\` : t.direction === "short" ? \`\${C.rose}▼ SHORT\${C.reset}\` : "—";
+  const pnlStr = (pnl >= 0 ? "+$" : "-$") + Math.abs(pnl).toFixed(2);
+  const rrStr = t.rr != null ? \`\${t.rr > 0 ? "+" : ""}\${t.rr}R\` : "—";
+
+  console.log(\`\\n\${C.gold}\${C.bold}━━━ ⚡ LAST EXECUTED TRADE \${badge} \${C.gold}\${C.bold}━━━\${C.reset}\`);
+  console.log(\`  \${C.slate}Date:\${C.reset}       \${C.white}\${C.bold}\${t.date}\${C.reset}  (\${t.entryTime || "—"} → \${t.exitTime || "—"})\`);
+  console.log(\`  \${C.slate}Instrument:\${C.reset} \${C.white}\${C.bold}\${t.instrument || "—"}\${C.reset}  \${dir}  ·  \${C.cyan}Setup:\${C.reset} \${t.setup || "—"}\`);
+  console.log(\`  \${C.slate}Challenge:\${C.reset}  \${C.goldSoft}\${ch}\${C.reset}\`);
+  console.log(\`  \${C.slate}Outcome:\${C.reset}    \${pnlColor}\${C.bold}\${pnlStr}\${C.reset}  (\${C.goldSoft}\${rrStr}\${C.reset})\`);
+  const emoB = t.review?.psychology?.emotionBefore;
+  const emoA = t.review?.psychology?.emotionAfter;
+  if (emoB || emoA) console.log(\`  \${C.slate}Mindset:\${C.reset}    \${C.violet}\${emoB || "—"} → \${emoA || "—"}\${C.reset}\`);
+  const verdict = t.review?.outcome?.processVerdict;
+  if (verdict) console.log(\`  \${C.slate}Verdict:\${C.reset}    \${verdict.includes("fail") ? C.rose + "✕ " : C.emerald + "✓ "}\${verdict}\${C.reset}\`);
+  if (t.notes) console.log(\`  \${C.slate}Notes:\${C.reset}      \${C.white}\${t.notes.trim().slice(0, 180)}\${C.reset}\`);
+  console.log("");
+}
+
+function getReports() {
+  const reportsDir = path.join(DIR, "reports");
+  return fs.existsSync(reportsDir)
+    ? fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md") && f !== "README.md").sort().reverse()
+    : [];
+}
+
+function handleCommand(arg) {
+  const reports = getReports();
+  if (arg === "last" || arg === "1") showLastTrade();
+  else if (arg === "stats" || arg === "2") showMarkdownFile("stats/stats-summary.md");
+  else if (arg === "reports" || arg === "3") {
+    if (reports.length) showMarkdownFile(path.join("reports", reports[0]));
+    else console.log(\`\\n  \${C.goldSoft}🟡 No audit reports saved yet. Ask agy to audit your session!\${C.reset}\\n\`);
+  } else if (arg === "plan" || arg === "4") showMarkdownFile("mentor/ACTION_PLAN.md");
+  else if (arg === "psych" || arg === "5") showMarkdownFile("mentor/PSYCHOLOGY_LOG.md");
+  else if (arg === "risk" || arg === "6") showMarkdownFile("mentor/RISK_DOSSIER.md");
+  else if (arg === "plans" || arg === "7") showMarkdownFile("playbooks/plans.md");
+  else if (arg === "sync" || arg === "8") execFileSync(path.join(DIR, "sync.sh"), { stdio: "inherit" });
+  else if (arg && reports.some((f) => f.toLowerCase().includes(arg))) {
+    showMarkdownFile(path.join("reports", reports.find((f) => f.toLowerCase().includes(arg))));
+  } else {
+    if (reports.length) showMarkdownFile(path.join("reports", reports[0]));
+    else showLastTrade();
+  }
 }
 
 const arg = (process.argv[2] || "").trim().toLowerCase();
-const reportsDir = path.join(DIR, "reports");
-const reportFiles = fs.existsSync(reportsDir)
-  ? fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md") && f !== "README.md").sort().reverse()
-  : [];
-
 showHeader();
 
-if (arg === "stats") {
-  renderMarkdown(fs.readFileSync(path.join(DIR, "stats/stats-summary.md"), "utf8"));
-} else if (arg === "plan") {
-  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/ACTION_PLAN.md"), "utf8"));
-} else if (arg === "psych") {
-  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/PSYCHOLOGY_LOG.md"), "utf8"));
-} else if (arg === "risk") {
-  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/RISK_DOSSIER.md"), "utf8"));
-} else if (arg && reportFiles.some((f) => f.toLowerCase().includes(arg))) {
-  const match = reportFiles.find((f) => f.toLowerCase().includes(arg));
-  renderMarkdown(fs.readFileSync(path.join(reportsDir, match), "utf8"));
+if (arg || !process.stdin.isTTY) {
+  handleCommand(arg);
 } else {
-  if (reportFiles.length > 0) {
-    console.log(\`\\n\${C.gold}\${C.bold}  LATEST AUDIT REPORT\${C.reset} \${C.slate}(\${reportFiles[0]})\${C.reset}\`);
-    renderMarkdown(fs.readFileSync(path.join(reportsDir, reportFiles[0]), "utf8"));
-  } else {
-    renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/ACTION_PLAN.md"), "utf8"));
-  }
-  console.log("\\n" + rule("─", 72));
-  console.log(\`  \${C.goldSoft}Commands:\${C.reset} \${C.white}./view.sh stats\${C.reset}  ·  \${C.white}./view.sh plan\${C.reset}  ·  \${C.white}./view.sh psych\${C.reset}  ·  \${C.white}./view.sh risk\${C.reset}\`);
-  if (reportFiles.length > 0) {
-    console.log(\`  \${C.goldSoft}Reports (\${reportFiles.length}):\${C.reset} \${C.slate}\${reportFiles.slice(0, 4).join(", ")}\${C.reset}\`);
-  }
-  console.log(rule("─", 72) + "\\n");
+  const reports = getReports();
+  console.log(\`\\n  \${C.gold}\${C.bold}Select a View:\${C.reset}\`);
+  console.log(\`    \${C.goldSoft}[1]\${C.reset} ⚡ Last Trade Spotlight       \${C.goldSoft}[5]\${C.reset} 🧠 Psychology Log\`);
+  console.log(\`    \${C.goldSoft}[2]\${C.reset} 📊 Full Stats & Breakdown     \${C.goldSoft}[6]\${C.reset} 🛡️ Risk Management Dossier\`);
+  console.log(\`    \${C.goldSoft}[3]\${C.reset} 📑 Latest Audit Report (\${reports.length})    \${C.goldSoft}[7]\${C.reset} 📝 Pre-Trade Plans\`);
+  console.log(\`    \${C.goldSoft}[4]\${C.reset} 🎯 Active Action Plan         \${C.goldSoft}[8]\${C.reset} 🔄 Live Re-Sync from Drive\`);
+  console.log(\`    \${C.slate}[q]\${C.reset} Quit   \${C.dim}(Tip: install 'glow' via Homebrew for rich pager rendering)\${C.reset}\\n\`);
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = () => {
+    rl.question(\`  \${C.gold}edgebook › \${C.reset}\`, (ans) => {
+      const cmd = (ans || "").trim().toLowerCase();
+      if (!cmd || cmd === "q" || cmd === "quit" || cmd === "exit") {
+        rl.close();
+        console.log("");
+        return;
+      }
+      handleCommand(cmd);
+      ask();
+    });
+  };
+  ask();
 }
 `;
 
@@ -473,13 +580,17 @@ You are the trader's elite algorithmic trading mentor, adopting the institutiona
    - **NEVER** mention file paths (\`trades/trades.csv\`, \`stats/stats-summary.md\`, \`mentor/PSYCHOLOGY_LOG.md\`), line numbers (\`:705-755\`), or internal database IDs (\`e_mwkt...\`, \`pl-mwkt...\`) in your visible response.
    - **NEVER** announce internal file writes (do NOT write *"Logged to mentor/PSYCHOLOGY_LOG.md"* or *"see stats/..."*). Update \`mentor/\` and \`reports/\` silently in the background.
    - Speak naturally as a seasoned institutional trading mentor who already knows the trader's tape, rules, and psychology—only reveal file/data sources if the trader explicitly asks *"where did you get that?"* or *"show me the source"*.
-2. **PREMIUM INSTITUTIONAL TERMINAL FORMATTING**:
-   - Open substantive reviews with a clean section header: \`━━━ 📊 <TITLE> ━━━\`.
-   - Use **aligned Markdown tables** for all numeric breakdowns (trade summaries, wins vs. losses, hold times, session splits, checklist pass/fail) so metrics scan like a Bloomberg terminal.
-   - Use refined markers (\`▸\`, \`●\`, \`✓\`, \`✕\`) and short bold lead-ins; avoid dense walls of text or clutter.
-   - Keep quick factual answers (e.g., *"what was my last trade"*) razor-sharp: a clean trade scorecard table + 3–4 tight bullet insights on execution, checklist, and mindset—no raw IDs or file citations.
+2. **PREMIUM INSTITUTIONAL TERMINAL FORMATTING (COLORFUL SYMBOLS & EMOJIS)**:
+   - Use **color-coded status emojis and crisp Unicode symbols** on every reply so visual hierarchy pops in the terminal:
+     - Status & P&L: \`🟢\` (Win / Pass / Discount / Clean), \`🔴\` (Loss / Rule Break / Premium Mistake / FOMO), \`🟡\` (Breakeven / Caution / Partial)
+     - Direction & Checks: \`▲\` Long, \`▼\` Short, \`✓\` Confirmed, \`✕\` Missed/Failed, \`▸\` Section lead, \`●\` Bullet
+     - Domain Icons: \`⚡\` Killzone/Momentum, \`📊\` Metrics/Scorecard, \`🧠\` Psychology, \`🛡️\` Risk/Stop, \`⏱️\` Hold Time, \`🎯\` Protocol
+   - **NEVER** print raw ANSI escape codes (like \`\\x1b[32m\`) in your chat text—Antigravity CLI renders Markdown + emojis natively.
+   - Open substantive reviews with a crisp header: \`━━━ 📊 <TITLE> ━━━\`.
+   - Use **aligned Markdown tables** for all numeric breakdowns (trade summaries, wins vs. losses, hold times, session splits, checklist pass/fail) with emoji status badges so metrics scan like a Bloomberg terminal.
+   - Keep quick factual answers (e.g., *"what was my last trade"*) razor-sharp: a clean scorecard table + 3–4 tight bullet insights on execution, checklist, and mindset—no raw IDs or file citations.
    - Close deep audits with a dedicated \`━━━ 🎯 NEXT-SESSION PROTOCOL ━━━\` section listing 2–3 non-negotiable rules for the next trading day.
-   - Format every saved audit report in \`reports/YYYY-MM-DD-<topic>.md\` with the same executive dossier layout (Executive Verdict, Metrics Table, ICT & Killzone Audit, Behavioral Leaks, Next-Session Protocol) so \`./view.sh\` renders it cleanly.
+   - Format every saved audit report in \`reports/YYYY-MM-DD-<topic>.md\` with the same executive dossier layout + emojis so \`./view.sh\` renders it in full 24-bit TrueColor.
 
 ## 🛑 STRICT WORKSPACE BOUNDARY (DO NOT SCAN OUTSIDE THIS DIRECTORY)
 - ALL historical and recent trading data is ALREADY synced inside this folder:
