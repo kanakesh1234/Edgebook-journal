@@ -34,6 +34,11 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
       setSyncing(true);
       try {
         const origin = window.location.origin;
+        const lessons = await fetch("/api/lessons", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => (Array.isArray(d?.lessons) ? d.lessons : undefined))
+          .catch(() => undefined);
+
         const res = await fetch("/api/cli/bridge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -43,15 +48,19 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
             plans: plans ?? [],
             dayLogs: dayLogs ?? [],
             settings,
+            lessons,
           }),
         });
 
         if (res.ok) {
-          const data = await res.json();
-          if (active && data.key) {
-            setCommand(`curl -fsSL "${origin}/api/cli/bridge?k=${data.key}" | bash && cd edgebook-journal && agy`);
-            setSyncedCount(entries.length);
-          }
+          const data = (await res.json()) as { key?: string; token?: string | null };
+          if (!active) return;
+          const qs = new URLSearchParams();
+          if (data.token) qs.set("t", data.token);
+          if (data.key) qs.set("k", data.key);
+          const query = qs.toString() ? `?${qs.toString()}` : "";
+          setCommand(`curl -fsSL "${origin}/api/cli/bridge${query}" | bash && cd edgebook-journal && agy`);
+          setSyncedCount(entries.length);
         }
       } catch {
         // Fallback to origin without key
