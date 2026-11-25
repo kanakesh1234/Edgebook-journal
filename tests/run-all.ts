@@ -29,3 +29,4 @@ import "./minato/brain2.test.ts";
 import "./minato/agent.test.ts";
 import "./minato/resilience.test.ts";
 import "./minato/intelligence-engine.test.ts";
+import "./journal/export-zip.test.ts";

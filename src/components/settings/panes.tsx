@@ -12,6 +12,7 @@ import { useApp } from "@/lib/store";
 import { useUi, type DriveStatus } from "@/lib/ui-store";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 import { dataStore } from "@/lib/services/storage";
+import { downloadFullDataZip, type ExportProgress } from "@/lib/export-zip";
 import { currencySymbol } from "@/lib/format";
 import { primaryChallenge } from "@/lib/challenges";
 import { haptic } from "@/lib/haptics";
@@ -371,12 +372,44 @@ const DRIVE: Record<DriveStatus, { label: string; dot: string; note: string }> =
   },
 };
 
+function useFullZipExport() {
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<ExportProgress | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setProgress({ stage: "preparing", label: "Preparing archive…" });
+    try {
+      const result = await downloadFullDataZip((p) => setProgress(p));
+      const c = result.manifest.counts;
+      haptic.success();
+      toast.success(
+        "Full data archive downloaded",
+        `${c.trades} ${c.trades === 1 ? "trade" : "trades"}, ${c.picturesIncluded} ${c.picturesIncluded === 1 ? "picture" : "pictures"}, stats & backups (${formatBytes(result.sizeBytes)}).`,
+      );
+    } catch (err) {
+      haptic.error();
+      toast.error(
+        "ZIP export failed",
+        err instanceof Error ? err.message : "Could not build the archive. Please try again.",
+      );
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  return { busy, label: progress?.label ?? "Packaging…", run };
+}
+
 function AccountPane() {
   const router = useRouter();
   const user = useApp((s) => s.user);
   const driveStatus = useUi((s) => s.driveStatus);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const zipExport = useFullZipExport();
   const isGoogle = !!user?.id.startsWith("g_");
   const drive = DRIVE[driveStatus];
 
@@ -418,6 +451,21 @@ function AccountPane() {
           )}
         </Group>
       )}
+
+      <Group
+        title="Your Data"
+        footer="Downloads a single ZIP containing every trade, note, reflection, plan, review, stat, lesson, backtest, AI memory, and picture."
+      >
+        <Row
+          icon={<DownloadIcon />}
+          tone="info"
+          title="Download All Data (ZIP)"
+          subtitle={zipExport.busy ? zipExport.label : "Every trade, word, stat, review & picture"}
+          busy={zipExport.busy}
+          onClick={() => void zipExport.run()}
+          chevron
+        />
+      </Group>
 
       <Group>
         <Row
@@ -608,6 +656,7 @@ function DataPane({ usage }: { usage: number | null }) {
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
   const [backfillBusy, setBackfillBusy] = useState(false);
+  const zipExport = useFullZipExport();
 
   const exportJson = () => {
     const payload = useApp.getState().exportPayload();
@@ -694,9 +743,18 @@ function DataPane({ usage }: { usage: number | null }) {
         <Row icon={<DatabaseGlyph />} tone="ink" title="Used on this device" value={usage != null ? formatBytes(usage) : "—"} />
       </Group>
 
-      <Group title="Backup" footer="Importing replaces your current journal with the contents of the backup file.">
-        <Row icon={<DownloadIcon />} tone="info" title="Export Journal" subtitle="Download everything as JSON" onClick={exportJson} chevron />
-        <Row icon={<UploadIcon />} tone="info" title="Import Backup" subtitle="Restore from an export file" onClick={() => fileRef.current?.click()} chevron />
+      <Group title="Backup" footer="The ZIP archive includes every recorded word, computed stat, lesson, backtest, and picture — plus a re-importable JSON backup inside backup/edgebook-backup.json.">
+        <Row
+          icon={<DownloadIcon />}
+          tone="info"
+          title="Download All Data (ZIP)"
+          subtitle={zipExport.busy ? zipExport.label : "Everything combined — trades, stats & pictures"}
+          busy={zipExport.busy}
+          onClick={() => void zipExport.run()}
+          chevron
+        />
+        <Row icon={<DownloadIcon />} tone="ink" title="Export Journal (JSON)" subtitle="Lightweight JSON backup only" onClick={exportJson} chevron />
+        <Row icon={<UploadIcon />} tone="info" title="Import Backup" subtitle="Restore from a JSON backup file" onClick={() => fileRef.current?.click()} chevron />
       </Group>
 
       <Group title="Tools">
