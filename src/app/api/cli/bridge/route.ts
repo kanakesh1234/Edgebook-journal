@@ -255,6 +255,137 @@ echo "🔄 [EdgeBook] Refreshing live trades, plans, stats, and lessons from Dri
 curl -fsSL "${syncUrl}" | bash -s -- "$DIR"
 `;
 
+  const viewScript = `#!/usr/bin/env node
+const fs = require("fs");
+const path = require("path");
+
+const DIR = __dirname;
+const C = {
+  reset: "\\x1b[0m",
+  bold: "\\x1b[1m",
+  dim: "\\x1b[2m",
+  gold: "\\x1b[38;2;234;179;8m",
+  goldSoft: "\\x1b[38;2;250;204;21m",
+  emerald: "\\x1b[38;2;52;211;153m",
+  rose: "\\x1b[38;2;251;113;133m",
+  slate: "\\x1b[38;2;148;163;184m",
+  white: "\\x1b[38;2;248;250;252m",
+  line: "\\x1b[38;2;71;85;105m",
+};
+
+const pad = (s, n) => s + " ".repeat(Math.max(0, n - s.replace(/\\x1b\\[[0-9;]*m/g, "").length));
+const rule = (ch = "─", w = 72) => \`\${C.line}\${ch.repeat(w)}\${C.reset}\`;
+
+function renderMarkdown(md) {
+  const lines = md.replace(/\\r\\n/g, "\\n").split("\\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^#{1}\\s+/.test(line)) {
+      const title = line.replace(/^#\\s+/, "").trim();
+      console.log(\`\\n\${C.gold}\${C.bold}━━━ \${title.toUpperCase()} ━━━\${C.reset}\`);
+    } else if (/^#{2,3}\\s+/.test(line)) {
+      const title = line.replace(/^#{2,3}\\s+/, "").trim();
+      console.log(\`\\n\${C.goldSoft}\${C.bold}▸ \${title}\${C.reset}\`);
+    } else if (/^\\s*[-*]{3,}\\s*$/.test(line)) {
+      console.log(rule("─", 68));
+    } else if (/^\\s*\\|/.test(line)) {
+      // Collect markdown table block
+      const tbl = [];
+      while (i < lines.length && /^\\s*\\|/.test(lines[i])) {
+        tbl.push(lines[i]);
+        i++;
+      }
+      i--;
+      const rows = tbl
+        .filter((r) => !/^\\s*\\|[\\s:|-]+\\|\\s*$/.test(r))
+        .map((r) => r.trim().replace(/^\\||\\|$/g, "").split("|").map((c) => c.trim()));
+      if (rows.length > 0) {
+        const widths = rows[0].map((_, col) => Math.max(...rows.map((r) => (r[col] || "").length)));
+        console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+        rows.forEach((r, rIdx) => {
+          const formatted = r.map((cell, cIdx) => {
+            const raw = pad(cell, widths[cIdx]);
+            if (rIdx === 0) return \`\${C.gold}\${C.bold}\${raw}\${C.reset}\`;
+            if (/^\\+|win|pass|a\\+/i.test(cell)) return \`\${C.emerald}\${raw}\${C.reset}\`;
+            if (/^-\\$|^-\\d|loss|fail|fomo/i.test(cell)) return \`\${C.rose}\${raw}\${C.reset}\`;
+            return \`\${C.white}\${raw}\${C.reset}\`;
+          });
+          console.log(\`\${C.line}│\${C.reset} \${formatted.join(\` \${C.line}│\${C.reset} \`)}\`);
+          if (rIdx === 0) console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+        });
+        console.log(rule("─", widths.reduce((a, b) => a + b + 3, 1)));
+      }
+    } else {
+      let out = line
+        .replace(/\\*\\*([^*]+)\\*\\*/g, \`\${C.white}\${C.bold}$1\${C.reset}\`)
+        .replace(/\\\`([^\\\`]+)\\\`/g, \`\${C.goldSoft}$1\${C.reset}\`)
+        .replace(/^\\s*[-*]\\s+/, \`  \${C.gold}●\${C.reset} \`)
+        .replace(/^\\s*(\\d+\\.)\\s+/, \`  \${C.gold}$1\${C.reset} \`);
+      console.log(out);
+    }
+  }
+}
+
+function showHeader() {
+  let summary = null;
+  try { summary = JSON.parse(fs.readFileSync(path.join(DIR, "stats/summary.json"), "utf8")); } catch {}
+  const overall = summary?.overall || {};
+  const net = typeof overall.net === "number" ? overall.net : 0;
+  const wr = typeof overall.winRate === "number" ? \`\${overall.winRate.toFixed(1)}%\` : "—";
+  const pf = typeof overall.profitFactor === "number" ? overall.profitFactor.toFixed(2) : "—";
+  const avgR = typeof overall.avgR === "number" ? \`\${overall.avgR > 0 ? "+" : ""}\${overall.avgR.toFixed(2)}R\` : "—";
+  const netColor = net >= 0 ? C.emerald : C.rose;
+  const netStr = (net >= 0 ? "+$" : "-$") + Math.abs(net).toFixed(2);
+
+  console.log("");
+  console.log(rule("━", 72));
+  console.log(\`  \${C.gold}\${C.bold}EDGEBOOK\${C.reset}  \${C.slate}·  INSTITUTIONAL TERMINAL DOSSIER\${C.reset}\`);
+  console.log(rule("─", 72));
+  console.log(
+    \`  \${C.slate}Net P&L:\${C.reset} \${netColor}\${C.bold}\${netStr}\${C.reset}   \` +
+    \`\${C.slate}Win Rate:\${C.reset} \${C.white}\${C.bold}\${wr}\${C.reset}   \` +
+    \`\${C.slate}Profit Factor:\${C.reset} \${C.white}\${C.bold}\${pf}\${C.reset}   \` +
+    \`\${C.slate}Avg R:\${C.reset} \${C.goldSoft}\${C.bold}\${avgR}\${C.reset}   \` +
+    \`\${C.slate}Trades:\${C.reset} \${C.white}\${C.bold}\${overall.count ?? 0}\${C.reset}\`
+  );
+  console.log(rule("━", 72));
+}
+
+const arg = (process.argv[2] || "").trim().toLowerCase();
+const reportsDir = path.join(DIR, "reports");
+const reportFiles = fs.existsSync(reportsDir)
+  ? fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md") && f !== "README.md").sort().reverse()
+  : [];
+
+showHeader();
+
+if (arg === "stats") {
+  renderMarkdown(fs.readFileSync(path.join(DIR, "stats/stats-summary.md"), "utf8"));
+} else if (arg === "plan") {
+  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/ACTION_PLAN.md"), "utf8"));
+} else if (arg === "psych") {
+  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/PSYCHOLOGY_LOG.md"), "utf8"));
+} else if (arg === "risk") {
+  renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/RISK_DOSSIER.md"), "utf8"));
+} else if (arg && reportFiles.some((f) => f.toLowerCase().includes(arg))) {
+  const match = reportFiles.find((f) => f.toLowerCase().includes(arg));
+  renderMarkdown(fs.readFileSync(path.join(reportsDir, match), "utf8"));
+} else {
+  if (reportFiles.length > 0) {
+    console.log(\`\\n\${C.gold}\${C.bold}  LATEST AUDIT REPORT\${C.reset} \${C.slate}(\${reportFiles[0]})\${C.reset}\`);
+    renderMarkdown(fs.readFileSync(path.join(reportsDir, reportFiles[0]), "utf8"));
+  } else {
+    renderMarkdown(fs.readFileSync(path.join(DIR, "mentor/ACTION_PLAN.md"), "utf8"));
+  }
+  console.log("\\n" + rule("─", 72));
+  console.log(\`  \${C.goldSoft}Commands:\${C.reset} \${C.white}./view.sh stats\${C.reset}  ·  \${C.white}./view.sh plan\${C.reset}  ·  \${C.white}./view.sh psych\${C.reset}  ·  \${C.white}./view.sh risk\${C.reset}\`);
+  if (reportFiles.length > 0) {
+    console.log(\`  \${C.goldSoft}Reports (\${reportFiles.length}):\${C.reset} \${C.slate}\${reportFiles.slice(0, 4).join(", ")}\${C.reset}\`);
+  }
+  console.log(rule("─", 72) + "\\n");
+}
+`;
+
   // Compact lessons JSON if raw HTML would bloat the script unnecessarily (full text is in lessons-readable.md)
   const lightLessons = lessons.map((l) => ({ ...l, html: l.html && l.html.length > 20_000 ? `${l.html.slice(0, 20_000)}…` : l.html }));
 
@@ -322,9 +453,12 @@ ${writeHeredoc(
   true,
 )}
 
-# 9. Future Live Re-Sync Script (run ./sync.sh anytime inside this folder)
+# 9. Future Live Re-Sync Script & Styled Terminal Report Viewer
 ${writeHeredoc("$DIR/sync.sh", "__EB_SYNC_SH__", syncScript)}
 chmod +x "\$DIR/sync.sh"
+
+${writeHeredoc("$DIR/view.sh", "__EB_VIEW_SH__", viewScript)}
+chmod +x "\$DIR/view.sh"
 
 # 10. GEMINI.md Instructions for agy
 ${writeHeredoc(
@@ -333,6 +467,19 @@ ${writeHeredoc(
   `# EdgeBook Institutional Trading Workspace (Gemini Pro & agy)
 
 You are the trader's elite algorithmic trading mentor, adopting the institutional analysis methodology of Michael J. Huddleston (The Inner Circle Trader - ICT) and quantitative risk principles.
+
+## 🎨 RESPONSE & FORMATTING STANDARD (CRITICAL — FOLLOW ON EVERY REPLY)
+1. **ZERO SOURCE LEAKS (UNLESS EXPLICITLY ASKED)**:
+   - **NEVER** mention file paths (\`trades/trades.csv\`, \`stats/stats-summary.md\`, \`mentor/PSYCHOLOGY_LOG.md\`), line numbers (\`:705-755\`), or internal database IDs (\`e_mwkt...\`, \`pl-mwkt...\`) in your visible response.
+   - **NEVER** announce internal file writes (do NOT write *"Logged to mentor/PSYCHOLOGY_LOG.md"* or *"see stats/..."*). Update \`mentor/\` and \`reports/\` silently in the background.
+   - Speak naturally as a seasoned institutional trading mentor who already knows the trader's tape, rules, and psychology—only reveal file/data sources if the trader explicitly asks *"where did you get that?"* or *"show me the source"*.
+2. **PREMIUM INSTITUTIONAL TERMINAL FORMATTING**:
+   - Open substantive reviews with a clean section header: \`━━━ 📊 <TITLE> ━━━\`.
+   - Use **aligned Markdown tables** for all numeric breakdowns (trade summaries, wins vs. losses, hold times, session splits, checklist pass/fail) so metrics scan like a Bloomberg terminal.
+   - Use refined markers (\`▸\`, \`●\`, \`✓\`, \`✕\`) and short bold lead-ins; avoid dense walls of text or clutter.
+   - Keep quick factual answers (e.g., *"what was my last trade"*) razor-sharp: a clean trade scorecard table + 3–4 tight bullet insights on execution, checklist, and mindset—no raw IDs or file citations.
+   - Close deep audits with a dedicated \`━━━ 🎯 NEXT-SESSION PROTOCOL ━━━\` section listing 2–3 non-negotiable rules for the next trading day.
+   - Format every saved audit report in \`reports/YYYY-MM-DD-<topic>.md\` with the same executive dossier layout (Executive Verdict, Metrics Table, ICT & Killzone Audit, Behavioral Leaks, Next-Session Protocol) so \`./view.sh\` renders it cleanly.
 
 ## 🛑 STRICT WORKSPACE BOUNDARY (DO NOT SCAN OUTSIDE THIS DIRECTORY)
 - ALL historical and recent trading data is ALREADY synced inside this folder:
@@ -347,30 +494,32 @@ You are the trader's elite algorithmic trading mentor, adopting the institutiona
   - \`backtesting/\`: Historical replay backtest sessions and trades.
   - \`mentor/\`: Living memory dossier (\`TRADER_PROFILE.md\`, \`PSYCHOLOGY_LOG.md\`, \`RISK_DOSSIER.md\`, \`ACTION_PLAN.md\`, \`ai-brain.json\`).
 - **NEVER** run commands searching the user's home directory (\`/Users/...\`, \`~\`, \`/tmp\`, etc.). Stay strictly inside this directory.
-- To pull newly added trades from the website later, tell the trader to run \`./sync.sh\` (or run it if asked to refresh).
+- To pull newly added trades from the website later, run \`./sync.sh\` if the trader asks to refresh.
 
-## Living Memory Directives
-- As you mentor the trader, continuously update the living markdown files in \`mentor/\`:
+## Living Memory Directives (Silent Background Updates)
+- Silently maintain the living markdown dossier in \`mentor/\` as you converse:
   - Record emotional realizations, triggers, FOMO, or breakthroughs in \`mentor/PSYCHOLOGY_LOG.md\`.
   - Update challenge limits or risk rules in \`mentor/RISK_DOSSIER.md\`.
   - Update \`mentor/ACTION_PLAN.md\` with actionable homework after every review.
-  - Save full session audits in \`reports/YYYY-MM-DD-audit.md\`.
+  - Save full session audits in \`reports/YYYY-MM-DD-<topic>.md\`.
 
 ## Institutional Analysis Framework (ICT Directives)
 1. **IPDA & Liquidity Delivery**: Evaluate whether trades targeted clear Buy-Side / Sell-Side Liquidity or chased mid-range price.
 2. **Time & Price (Killzones)**: Verify London (02:00–05:00 EST), NY AM (08:30–11:00 EST), Silver Bullet (10:00–11:00 EST), and NY PM (13:30–16:00 EST).
 3. **PD Arrays (Premium vs. Discount)**: Longs must originate in Discount (<50%); shorts in Premium (>50%).
 4. **Displacement & MSS**: Confirm energetic displacement leaving clean FVGs rather than retail chop.
-5. **Psychology & Discipline Audit**: Cross-reference \`playbooks/plans.md\`, \`trades/trades-full-transcript.md\`, and \`stats/stats-summary.md\` to expose hidden emotional leaks.`,
+5. **Psychology & Discipline Audit**: Cross-reference pre-trade plans, full trade transcripts, and computed stats internally to expose hidden emotional leaks.`,
 )}
 
-echo "✅ [EdgeBook] Synced ${entries.length} trades, ${plans.length} plans, ${challenges.length} challenges, ${lessons.length} lessons, and full stats into \$DIR!"
-echo ""
-echo "🚀 To launch your private AI mentor with Gemini Pro:"
-echo "   cd \$DIR"
-echo "   agy"
-echo "   (Tip: run ./sync.sh inside \$DIR anytime later to pull new trades!)"
-echo ""
+printf "\\n\\033[38;2;71;85;105m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n"
+printf "  \\033[1;38;2;234;179;8mEDGEBOOK\\033[0m  \\033[38;2;148;163;184m·  INSTITUTIONAL TERMINAL DOSSIER READY\\033[0m\\n"
+printf "\\033[38;2;71;85;105m────────────────────────────────────────────────────────────────────────\\033[0m\\n"
+printf "  \\033[38;2;52;211;153m✓\\033[0m Synced \\033[1m${entries.length}\\033[0m trades · \\033[1m${plans.length}\\033[0m plans · \\033[1m${challenges.length}\\033[0m challenges · \\033[1m${lessons.length}\\033[0m lessons\\n"
+printf "\\n"
+printf "  \\033[38;2;250;204;21m▸ agy\\033[0m          Launch your private ICT mentor (Gemini Pro)\\n"
+printf "  \\033[38;2;250;204;21m▸ ./view.sh\\033[0m    View styled stats, action plan & saved reports\\n"
+printf "  \\033[38;2;250;204;21m▸ ./sync.sh\\033[0m    Pull newly logged trades anytime\\n"
+printf "\\033[38;2;71;85;105m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\033[0m\\n\\n"
 `;
 }
 
