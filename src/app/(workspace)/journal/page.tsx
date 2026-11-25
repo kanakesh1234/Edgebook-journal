@@ -31,6 +31,7 @@ import {
   type Lens, type MistakeFilter, type Outcome, type SortKey, type ViewMode,
 } from "@/components/journal/journal-model";
 import { cn } from "@/lib/utils";
+import { TerminalBridge } from "@/components/journal/terminal-bridge";
 
 const VIEW_KEY = "edgebook.journal.view";
 
@@ -182,8 +183,10 @@ export default function JournalPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const tbRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const [tbH, setTbH] = useState(52);
   const [scrolled, setScrolled] = useState(false);
+  const [scrolledToBottom, setScrolledToBottom] = useState(false);
   useEffect(() => {
     const el = tbRef.current; if (!el) return;
     const ro = new ResizeObserver(() => setTbH(el.offsetHeight));
@@ -193,6 +196,12 @@ export default function JournalPage() {
   useEffect(() => {
     const el = sentinelRef.current; if (!el) return;
     const io = new IntersectionObserver(([e]) => setScrolled(!e.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = bottomSentinelRef.current; if (!el) return;
+    const io = new IntersectionObserver(([e]) => setScrolledToBottom(e.isIntersecting), { threshold: 0.1, rootMargin: "80px" });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -421,6 +430,10 @@ export default function JournalPage() {
             {content}
           </motion.div>
         </AnimatePresence>}
+
+        {/* Bottom Sentinel & Terminal AI Bridge (revealed when scrolled to bottom) */}
+        <div ref={bottomSentinelRef} className="h-6 w-full pointer-events-none" aria-hidden />
+        <TerminalBridge visible={scrolledToBottom} />
       </main>
 
       {/* Selection bar */}

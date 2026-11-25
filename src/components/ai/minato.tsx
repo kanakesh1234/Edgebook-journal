@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { MINATO_MAX_WIDTH, MINATO_MIN_WIDTH, useUi } from "@/lib/ui-store";
@@ -147,7 +147,6 @@ function Avatar({ className }: { className?: string }) {
 
 export function Minato() {
   const router = useRouter();
-  const pathname = usePathname();
   const allEntries = useApp((s) => s.entries);
   const rawSettings = useApp((s) => s.settings);
   const user = useApp((s) => s.user);
@@ -619,9 +618,16 @@ export function Minato() {
   }, [messages, busy, reduce, open]);
 
   useEffect(() => {
-    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented && !e.isComposing) setOpen(false);
+      if (e.defaultPrevented || e.isComposing) return;
+      if (open && e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setOpen(!open);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -983,35 +989,11 @@ export function Minato() {
     inputRef.current?.focus();
   };
 
-  const feedPhone = pathname.startsWith("/feed") && typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
   const empty = messages.length === 0 && !busy;
   const desktopPanelWidth = focused ? 720 : width;
 
   return (
     <>
-      {/* Launcher — ONLY visible when Minato is closed so there is NEVER a duplicate close button */}
-      <AnimatePresence>
-        {!feedPhone && !open && (
-          <motion.button
-            key="minato-launcher"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.7, y: 12 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.7, y: 10 }}
-            type="button"
-            aria-label="Open Minato"
-            aria-expanded={open}
-            onClick={() => setOpen(true)}
-            whileTap={{ scale: 0.94 }}
-            transition={{ duration: 0.28, ease: SPRING_EASE }}
-            className="mn-launcher fixed bottom-[calc(var(--tabbar-h)+1rem)] right-[calc(1rem+var(--safe-right))] z-[85] grid h-[52px] w-[52px] place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-gold/60 md:bottom-6 md:right-6"
-          >
-            <span className="relative">
-              <Avatar className="h-[40px] w-[40px]" />
-              <span className={cn("absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--overlay)]", STATE_DOT[state])} />
-            </span>
-          </motion.button>
-        )}
-      </AnimatePresence>
 
       {/* Mobile Scrim Backdrop */}
       <AnimatePresence>

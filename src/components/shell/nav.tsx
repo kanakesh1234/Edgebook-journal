@@ -18,6 +18,7 @@ import {
   PlusIcon,
   RouteIcon,
   SettingsIcon,
+  SparklesIcon,
   UserIcon,
 } from "@/components/ui/icons";
 import { useUi } from "@/lib/ui-store";
@@ -204,6 +205,8 @@ export function Sidebar() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const toggleSidebar = useUi((s) => s.toggleSidebar);
+  const minatoOpen = useUi((s) => s.minatoOpen);
+  const setMinatoOpen = useUi((s) => s.setMinatoOpen);
   const isNoSetupToday = useIsNoSetupToday();
 
   useEffect(() => {
@@ -251,6 +254,26 @@ export function Sidebar() {
         {NAV_ITEMS.map((item) => (
           <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} collapsed={collapsed} />
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            haptic.selection();
+            setMinatoOpen(!minatoOpen);
+          }}
+          aria-expanded={minatoOpen}
+          title={collapsed ? "Minato (⌘J)" : "Ask Minato (⌘J)"}
+          className={cn(
+            "group relative flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
+            collapsed && "justify-center px-2",
+            minatoOpen
+              ? "border border-line-strong bg-raised text-ink"
+              : "text-faint hover:bg-ink/[0.04] hover:text-muted",
+          )}
+        >
+          <SparklesIcon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", minatoOpen ? "text-gold" : "")} />
+          {!collapsed && <span className="flex-1 text-left">Minato</span>}
+          {!collapsed && <span className="font-mono text-[10px] text-faint">⌘J</span>}
+        </button>
       </nav>
 
       {!collapsed && <JourneyCard className="mx-4 mb-3" />}
@@ -312,6 +335,8 @@ function RailLink({ item, active, expanded = false }: { item: NavItem; active: b
 export function TabletRail() {
   const pathname = usePathname();
   const openNewEntry = useUi((s) => s.openNewEntry);
+  const minatoOpen = useUi((s) => s.minatoOpen);
+  const setMinatoOpen = useUi((s) => s.setMinatoOpen);
   const isNoSetupToday = useIsNoSetupToday();
   const [expanded, setExpanded] = useState(false);
 
@@ -362,6 +387,26 @@ export function TabletRail() {
         {NAV_ITEMS.map((item) => (
           <RailLink key={item.href} item={item} active={isActive(pathname, item.href)} expanded={expanded} />
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            haptic.selection();
+            setMinatoOpen(!minatoOpen);
+          }}
+          aria-expanded={minatoOpen}
+          title="Minato"
+          className={cn(
+            "relative flex min-h-[48px] w-full items-center gap-3 rounded-xl px-3 text-xs font-medium tracking-wide transition-colors duration-200",
+            !expanded && "h-14 flex-col justify-center gap-1 px-1 text-[10px]",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60",
+            minatoOpen
+              ? "border border-line-strong bg-raised text-ink"
+              : "text-faint hover:bg-ink/[0.04] hover:text-muted active:bg-ink/[0.06]",
+          )}
+        >
+          <SparklesIcon className={cn("relative h-[22px] w-[22px] shrink-0 transition-colors", minatoOpen ? "text-gold" : "")} />
+          <span className="relative truncate">Minato</span>
+        </button>
       </nav>
 
       <div className={cn("flex items-center gap-2 border-t border-line pt-3 [@media(max-height:520px)]:mt-3", expanded ? "justify-between px-1" : "flex-col px-2")}>
@@ -380,6 +425,8 @@ export function MobileTopBar({ title }: { title?: string }) {
   const current = NAV_ITEMS.find((i) => isActive(pathname, i.href));
   const heading = title ?? current?.label ?? (pathname.startsWith("/settings") ? "Settings" : "Edgebook");
   const [menuOpen, setMenuOpen] = useState(false);
+  const minatoOpen = useUi((s) => s.minatoOpen);
+  const setMinatoOpen = useUi((s) => s.setMinatoOpen);
 
   useEffect(() => setMenuOpen(false), [pathname]);
 
@@ -390,18 +437,35 @@ export function MobileTopBar({ title }: { title?: string }) {
           <LogoMark className="h-7 w-7 shrink-0" />
           <h1 className="truncate font-display text-[17px] font-semibold tracking-[-0.01em] text-ink">{heading}</h1>
         </Link>
-        <button
-          onClick={() => {
-            haptic.selection();
-            setMenuOpen(true);
-          }}
-          aria-label="Open menu"
-          aria-haspopup="dialog"
-          aria-expanded={menuOpen}
-          className="grid h-11 w-11 place-items-center rounded-full active:scale-90"
-        >
-          <Avatar />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              haptic.selection();
+              setMinatoOpen(!minatoOpen);
+            }}
+            aria-label={minatoOpen ? "Close Minato" : "Open Minato"}
+            aria-expanded={minatoOpen}
+            className={cn(
+              "grid h-11 w-11 place-items-center rounded-full transition-colors active:scale-90",
+              minatoOpen ? "bg-raised text-gold" : "text-muted hover:text-ink",
+            )}
+          >
+            <SparklesIcon className="h-[20px] w-[20px]" />
+          </button>
+          <button
+            onClick={() => {
+              haptic.selection();
+              setMenuOpen(true);
+            }}
+            aria-label="Open menu"
+            aria-haspopup="dialog"
+            aria-expanded={menuOpen}
+            className="grid h-11 w-11 place-items-center rounded-full active:scale-90"
+          >
+            <Avatar />
+          </button>
+        </div>
       </header>
       <MenuSheet open={menuOpen} onClose={() => setMenuOpen(false)} />
     </>
