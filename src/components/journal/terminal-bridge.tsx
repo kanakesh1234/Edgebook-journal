@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sym } from "./symbols";
 import { toast } from "@/components/ui/toast";
@@ -12,14 +12,21 @@ interface TerminalBridgeProps {
   className?: string;
 }
 
-const DEFAULT_COMMAND = "npx edgebook sync && cd edgebook-journal && agy";
+const FALLBACK_COMMAND = "curl -fsSL https://edgebook.trade/api/cli/bridge | bash && cd edgebook-journal && agy";
 
 export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
   const [copied, setCopied] = useState(false);
+  const [command, setCommand] = useState(FALLBACK_COMMAND);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCommand(`curl -fsSL ${window.location.origin}/api/cli/bridge | bash && cd edgebook-journal && agy`);
+    }
+  }, []);
 
   const copyCommand = async () => {
     try {
-      await navigator.clipboard.writeText(DEFAULT_COMMAND);
+      await navigator.clipboard.writeText(command);
       haptic.success();
       setCopied(true);
       toast.success("Command copied to clipboard", "Paste in your terminal to bridge data to agy.");
@@ -91,7 +98,7 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-1 font-mono text-[12.5px] text-neutral-200 sm:text-[13px]">
                 <span className="select-none font-bold text-gold">&gt;</span>
                 <span className="select-all whitespace-nowrap font-medium tracking-tight text-neutral-100">
-                  {DEFAULT_COMMAND}
+                  {command}
                 </span>
               </div>
 
