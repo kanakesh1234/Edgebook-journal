@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { tradesToCsv } from "@/lib/export-zip";
-import type { JournalEntry, TradePlan, Challenge, NoTradeLog } from "@/lib/types";
+import { tradesToCsv, tradesToMarkdown, plansToMarkdown, reviewsToMarkdown } from "@/lib/export-zip";
+import type { JournalEntry, TradePlan, Challenge, NoTradeLog, JournalSettings } from "@/lib/types";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,6 +13,7 @@ interface ExportBundle {
   challenges: Challenge[];
   plans: TradePlan[];
   dayLogs: NoTradeLog[];
+  settings?: JournalSettings;
   createdAt: number;
 }
 
@@ -57,10 +58,62 @@ function generateScript(origin: string, bundle: ExportBundle | null): string {
   const challenges = bundle?.challenges ?? [];
   const plans = bundle?.plans ?? [];
   const dayLogs = bundle?.dayLogs ?? [];
+  const settings = bundle?.settings;
+  const currency = settings?.currency ?? "USD";
 
   const csvContent = tradesToCsv(entries, plans, challenges);
+  const fullTranscript = tradesToMarkdown(entries, plans, challenges, new Map(), currency);
+  const plansMarkdown = plansToMarkdown(plans, challenges);
+  const reviewsMarkdown = settings ? reviewsToMarkdown(settings) : "# Reviews\n\nNo reviews recorded yet.\n";
   const challengesJson = JSON.stringify(challenges, null, 2);
   const tradesJson = JSON.stringify(entries, null, 2);
+
+  // Initial living memory profiles
+  const traderName = settings?.traderName || settings?.fullName || "Trader";
+  const primaryChallenge = challenges.find((c) => c.id === settings?.primaryChallengeId) || challenges[0];
+
+  const profileContent = `# Trader Profile: ${traderName}
+
+- **Name**: ${traderName}
+- **Account Currency**: ${currency}
+- **Primary Challenge**: ${primaryChallenge?.name || "None designated"}
+- **Total Trades Recorded**: ${entries.length}
+- **Plans Recorded**: ${plans.length}
+- **Trading Style**: Institutional Order Flow & ICT Methodology (IPDA, Killzones, FVGs)
+
+## Active Objectives
+- Target: ${primaryChallenge?.targetBalance ? `${primaryChallenge.targetBalance}` : "Consistent Process Execution"}
+- Max Drawdown Limit: ${primaryChallenge?.maxDrawdown ? `${primaryChallenge.maxDrawdown}` : "Strict 1% per trade"}
+`;
+
+  const psychologyContent = `# Psychology & Behavioral Log
+
+*This file tracks emotional triggers, recurring biases, and discipline breakthroughs across all trading sessions.*
+
+## Observed Patterns & Watch Items
+- Check \`trades/trades-full-transcript.md\` for per-trade "Emotion Before", "Emotion After", and "Conviction vs Urgency".
+- Watch for:
+  - Entering out of FOMO before Killzone sweeps
+  - Urgency to "make it back" after a loss
+  - Exiting early in fear vs. holding to invalidation/target
+`;
+
+  const riskContent = `# Risk Management Dossier
+
+## Hard Rules
+1. **Risk Per Trade**: Maximum 1% of account equity per idea.
+2. **Daily Loss Limit**: Hard stop for the day after 2 consecutive losses or reaching the daily loss limit.
+3. **Invalidation**: Invalidation price is non-negotiable. Moving stop losses wider is strictly forbidden.
+4. **Killzone Hours**: Entries strictly during London (02:00–05:00 EST), NY AM (08:30–11:00 EST), or Silver Bullet.
+`;
+
+  const actionPlanContent = `# Active Training Action Plan
+
+## Current Focus
+1. **Patience for Liquidity Sweeps**: Ensure BSL or SSL is definitively swept before looking for market structure shifts.
+2. **Displacement Confirmation**: Require energetic candle bodies leaving clean Fair Value Gaps (FVGs) rather than entering on weak wicks.
+3. **Pre-Trade Planning**: Every trade MUST have a recorded plan in \`playbooks/plans.md\` with a defined Draw on Liquidity.
+`;
 
   // Generate markdown files for day logs
   const dayLogScripts = dayLogs
@@ -73,6 +126,7 @@ function generateScript(origin: string, bundle: ExportBundle | null): string {
 
   const tradeCount = entries.length;
   const challengeCount = challenges.length;
+  const planCount = plans.length;
 
   return `#!/usr/bin/env bash
 # ==============================================================================
@@ -83,10 +137,10 @@ set -e
 
 DIR="\${1:-edgebook-journal}"
 
-echo "⚡ [EdgeBook] Initializing local AI workspace in ./\$DIR..."
-mkdir -p "\$DIR/trades" "\$DIR/journals" "\$DIR/playbooks" "\$DIR/reports"
+echo "⚡ [EdgeBook] Initializing complete AI trading dossier in ./\$DIR..."
+mkdir -p "\$DIR/trades" "\$DIR/journals" "\$DIR/playbooks" "\$DIR/reports" "\$DIR/mentor"
 
-# 1. Populate Real Trades Data
+# 1. Populate Tabular & Raw Trades Data
 cat << '__EDGEBOOK_TRADES_CSV__' > "\$DIR/trades/trades.csv"
 ${csvContent.replaceAll("__EDGEBOOK_TRADES_CSV__", "")}
 __EDGEBOOK_TRADES_CSV__
@@ -95,15 +149,47 @@ cat << '__EDGEBOOK_TRADES_JSON__' > "\$DIR/trades/trades.json"
 ${tradesJson.replaceAll("__EDGEBOOK_TRADES_JSON__", "")}
 __EDGEBOOK_TRADES_JSON__
 
-# 2. Populate Real Challenges Data
+# 2. Populate Full Word-For-Word Trade Transcript (Every question, answer, emotion, autopsy)
+cat << '__EDGEBOOK_TRADES_TRANSCRIPT__' > "\$DIR/trades/trades-full-transcript.md"
+${fullTranscript.replaceAll("__EDGEBOOK_TRADES_TRANSCRIPT__", "")}
+__EDGEBOOK_TRADES_TRANSCRIPT__
+
+# 3. Populate Pre-Trade Plans (Thesis, draw on liquidity, pre-trade emotions, checklist)
+cat << '__EDGEBOOK_PLANS_MD__' > "\$DIR/playbooks/plans.md"
+${plansMarkdown.replaceAll("__EDGEBOOK_PLANS_MD__", "")}
+__EDGEBOOK_PLANS_MD__
+
+# 4. Populate Challenges & Rules
 cat << '__EDGEBOOK_CHALLENGES_JSON__' > "\$DIR/playbooks/challenges.json"
 ${challengesJson.replaceAll("__EDGEBOOK_CHALLENGES_JSON__", "")}
 __EDGEBOOK_CHALLENGES_JSON__
 
-# 3. Populate Journals / Day Logs
+# 5. Populate Weekly & Monthly Review Autopsies
+cat << '__EDGEBOOK_REVIEWS_MD__' > "\$DIR/journals/weekly-reviews.md"
+${reviewsMarkdown.replaceAll("__EDGEBOOK_REVIEWS_MD__", "")}
+__EDGEBOOK_REVIEWS_MD__
+
+# 6. Populate Living Mentor Dossier
+cat << '__EDGEBOOK_PROFILE__' > "\$DIR/mentor/TRADER_PROFILE.md"
+${profileContent}
+__EDGEBOOK_PROFILE__
+
+cat << '__EDGEBOOK_PSYCHOLOGY__' > "\$DIR/mentor/PSYCHOLOGY_LOG.md"
+${psychologyContent}
+__EDGEBOOK_PSYCHOLOGY__
+
+cat << '__EDGEBOOK_RISK__' > "\$DIR/mentor/RISK_DOSSIER.md"
+${riskContent}
+__EDGEBOOK_RISK__
+
+cat << '__EDGEBOOK_ACTION_PLAN__' > "\$DIR/mentor/ACTION_PLAN.md"
+${actionPlanContent}
+__EDGEBOOK_ACTION_PLAN__
+
+# 7. Populate Day Logs
 ${dayLogScripts}
 
-# 4. Generate GEMINI.md for agy (With Strict Security Boundary & ICT Directives)
+# 8. Generate GEMINI.md for agy (With Comprehensive Context & Boundary Directives)
 cat << 'EOF' > "\$DIR/GEMINI.md"
 # EdgeBook Institutional Trading Workspace (Gemini Pro & agy)
 
@@ -111,12 +197,22 @@ You are the trader's elite algorithmic trading mentor, adopting the institutiona
 
 ## 🛑 STRICT WORKSPACE BOUNDARY (DO NOT SCAN OUTSIDE THIS DIRECTORY)
 - All trading data is ALREADY located inside this folder:
-  - \`trades/trades.csv\` and \`trades/trades.json\`: All user trades with Date, Instrument, Direction, P&L, R:R, and the specific Challenge name it was traded under.
+  - \`trades/trades.csv\`: Tabular data for quick stats, dates, instruments, outcomes, and challenges.
+  - \`trades/trades-full-transcript.md\`: Complete word-for-word transcript with EVERY question answered: why entered, emotions before/after, conviction vs urgency, pre-trade & execution checklists, reflections, and autopsy notes.
+  - \`playbooks/plans.md\`: Pre-trade plans with thesis, draw on liquidity, expected setups, and invalidation criteria.
   - \`playbooks/challenges.json\`: All user challenges (Apex, Topstep, FTMO, etc.), target, start balance, max drawdown, and status.
-  - \`journals/\`: Daily notes, psychology, and mindset reflections.
+  - \`journals/\`: Daily notes, psychology, and weekly/monthly review autopsies.
+  - \`mentor/\`: The living memory dossier (\`TRADER_PROFILE.md\`, \`PSYCHOLOGY_LOG.md\`, \`RISK_DOSSIER.md\`, \`ACTION_PLAN.md\`).
 - **NEVER** run commands searching the user's home directory (\`/Users/...\`, \`~\`, \`/tmp\`, etc.).
 - **NEVER** run commands like \`find /Users/...\` or \`ls /Users/...\`. Stay strictly within this workspace directory.
-- When asked "what was my last trade and which challenge i took", read \`trades/trades.csv\` and \`playbooks/challenges.json\` directly and answer immediately.
+- When asked about trades or challenges, inspect \`trades/trades.csv\`, \`trades/trades-full-transcript.md\`, and \`playbooks/challenges.json\` directly and answer immediately.
+
+## Living Memory Directives
+- As you mentor the trader, you are expected to update the living markdown files in \`mentor/\`:
+  - When the trader shares an emotional realization, fear, FOMO, or psychological pattern, append it to \`mentor/PSYCHOLOGY_LOG.md\`.
+  - When risk limits or challenge targets change, update \`mentor/RISK_DOSSIER.md\`.
+  - At the end of every review, update \`mentor/ACTION_PLAN.md\` with specific training homework for the next session.
+  - This ensures that ANY AI opening this workspace has 100% full context of where the trader stands and how to train them better.
 
 ## Institutional Analysis Framework (ICT Directives)
 1. **IPDA & Liquidity Delivery**:
@@ -142,7 +238,7 @@ You are the trader's elite algorithmic trading mentor, adopting the institutiona
    - When asked for future analysis, read prior reports to track whether the trader is repeating past mistakes.
 EOF
 
-# 5. Generate Playbook starter
+# 9. Generate Playbook starter
 cat << 'EOF' > "\$DIR/playbooks/ict-rules.md"
 # Institutional Trading Rules & Playbook
 
@@ -152,7 +248,7 @@ cat << 'EOF' > "\$DIR/playbooks/ict-rules.md"
 4. **Risk Limit**: Maximum 1% risk per trade. Invalidation point is non-negotiable.
 EOF
 
-# 6. Generate Reports README
+# 10. Generate Reports README
 cat << 'EOF' > "\$DIR/reports/README.md"
 # Analysis & Audit Reports
 
@@ -160,7 +256,7 @@ Audits and reviews generated by \`agy\` are persisted in this directory.
 When running subsequent sessions, \`agy\` inspects these reports to ensure compounding progress and discipline.
 EOF
 
-echo "✅ [EdgeBook] Workspace ready with ${tradeCount} trades and ${challengeCount} challenges synced into ./\$DIR!"
+echo "✅ [EdgeBook] Workspace ready with ${tradeCount} trades (${planCount} plans, ${challengeCount} challenges) synced into ./\$DIR!"
 echo ""
 echo "🚀 To launch your private AI mentor with Gemini Pro:"
 echo "   cd \$DIR"
@@ -179,6 +275,7 @@ export async function POST(request: Request) {
       challenges: Array.isArray(body.challenges) ? body.challenges : [],
       plans: Array.isArray(body.plans) ? body.plans : [],
       dayLogs: Array.isArray(body.dayLogs) ? body.dayLogs : [],
+      settings: body.settings,
       createdAt: Date.now(),
     };
 
@@ -214,6 +311,7 @@ export async function GET(request: Request) {
     command: `curl -fsSL "${origin}/api/cli/bridge${key ? `?k=${key}` : ""}" | bash && cd edgebook-journal && agy`,
     tradesSynced: bundle?.entries.length ?? 0,
     challengesSynced: bundle?.challenges.length ?? 0,
+    plansSynced: bundle?.plans.length ?? 0,
     targetDir: "edgebook-journal",
     reportsDir: "edgebook-journal/reports",
   });

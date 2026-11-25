@@ -42,6 +42,7 @@ export function TerminalBridge({ visible, className }: TerminalBridgeProps) {
             challenges: settings.challenges ?? [],
             plans: plans ?? [],
             dayLogs: dayLogs ?? [],
+            settings,
           }),
         });
 
