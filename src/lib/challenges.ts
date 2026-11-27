@@ -175,6 +175,38 @@ export function primaryChallenge(settings: Pick<JournalSettings, "challenges" | 
 }
 
 /**
+ * Entries + effective equity settings scoped to a selected challenge ID.
+ * Passing `"all"` (or an unknown/deleted ID) falls back gracefully to all
+ * entries and global settings.
+ */
+export function scopeToChallenge(
+  settings: JournalSettings,
+  entries: JournalEntry[],
+  challengeId: string | "all" | null | undefined,
+): { entries: JournalEntry[]; settings: JournalSettings; challenge: Challenge | null } {
+  const challenges = settings.challenges ?? [];
+  const challenge =
+    challengeId && challengeId !== "all"
+      ? (challenges.find((c) => c.id === challengeId) ?? null)
+      : null;
+  if (!challenge) return { entries, settings, challenge: null };
+  const scoped = entries.filter((e) => e.challengeId === challenge.id);
+  const effective: JournalSettings = {
+    ...settings,
+    startingEquity: challenge.startingBalance ?? settings.startingEquity,
+    targetEquity: challenge.targetBalance ?? settings.targetEquity,
+    maxDrawdown:
+      challenge.maxDrawdown && challenge.maxDrawdown > 0 ? challenge.maxDrawdown : settings.maxDrawdown,
+    // Effective-only: lets computeStats (Home, Reviews, Practise, MINATO) use the
+    // challenge's drawdown model. Derived per render, never persisted.
+    drawdownMode: challenge.drawdownMode ?? "static",
+    trailingBasis: challenge.trailingBasis ?? null,
+    drawdownFloor: challenge.drawdownFloor ?? null,
+  };
+  return { entries: scoped, settings: effective, challenge };
+}
+
+/**
  * Entries + effective equity settings scoped to the primary challenge.
  * When no primary challenge exists the overall/default behaviour applies
  * (all entries, global settings) — never crashes.
@@ -184,21 +216,7 @@ export function scopeToPrimary(
   entries: JournalEntry[],
 ): { entries: JournalEntry[]; settings: JournalSettings; challenge: Challenge | null } {
   const challenge = primaryChallenge(settings);
-  if (!challenge) return { entries, settings, challenge: null };
-  const scoped = entries.filter((e) => e.challengeId === challenge.id);
-  const effective: JournalSettings = {
-    ...settings,
-    startingEquity: challenge.startingBalance ?? settings.startingEquity,
-    targetEquity: challenge.targetBalance ?? settings.targetEquity,
-    maxDrawdown:
-      challenge.maxDrawdown && challenge.maxDrawdown > 0 ? challenge.maxDrawdown : settings.maxDrawdown,
-    // Effective-only: lets computeStats (Home, Practise, MINATO) use the
-    // challenge's drawdown model. Derived per render, never persisted.
-    drawdownMode: challenge.drawdownMode ?? "static",
-    trailingBasis: challenge.trailingBasis ?? null,
-    drawdownFloor: challenge.drawdownFloor ?? null,
-  };
-  return { entries: scoped, settings: effective, challenge };
+  return scopeToChallenge(settings, entries, challenge?.id ?? "all");
 }
 
 /** Context-aware motivational reminder — original wording, evidence-based. */

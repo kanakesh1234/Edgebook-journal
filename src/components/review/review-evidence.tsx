@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { useImageUrls } from "@/lib/hooks";
@@ -9,7 +9,7 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { formatDateMedium, weekdayShort } from "@/lib/format";
 import { haptic } from "@/lib/haptics";
 import { planJournalReplay } from "@/lib/backtesting/journal-replay";
-import { barDelay, endIdx, SPEEDS, type Speed } from "@/lib/feed/replay";
+import { barDelay, endIdx, FEED_SPEED, frameAt, INITIAL_PLAY_DELAY_MS, LOOP_HOLD_MS, progressOf, SPEEDS, stepIdx, type Speed } from "@/lib/feed/replay";
 import { useReplayData } from "@/components/feed/replay-chart";
 import { useReplayTrade } from "@/components/journal/replay-trade";
 import { Sym } from "@/components/journal/symbols";
@@ -122,37 +122,99 @@ function MistakeReplayCard({
   const fallbackImg = imgIds[0] ? urls[imgIds[0]] : null;
 
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<Speed>(1);
+  const [speed, setSpeed] = useState<Speed>(FEED_SPEED);
   const [idx, setIdx] = useState(0);
+  const [hud, setHud] = useState<"play" | "pause" | null>(null);
+  const [inView, setInView] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const barFillRef = useRef<HTMLElement>(null);
+  const userPausedRef = useRef(false);
+  const hudTimerRef = useRef<number | null>(null);
 
   const model = replay.status === "ready" ? replay.model : null;
   const maxBar = model ? endIdx(model) : 0;
 
   useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      (hits) => setInView(Boolean(hits[0]?.isIntersecting)),
+      { threshold: 0.45 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (!model) {
       setIdx(0);
       setPlaying(false);
+      userPausedRef.current = false;
       return;
     }
     setIdx(reduce ? maxBar : model.startIdx);
     setPlaying(false);
+    userPausedRef.current = false;
   }, [model, maxBar, reduce]);
 
+  // Smooth delayed autoplay when scrolled into view (identical cadence to Feed)
+  useEffect(() => {
+    if (!inView || !model || reduce || userPausedRef.current) {
+      if (!inView) setPlaying(false);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setIdx((cur) => (cur >= maxBar ? model.startIdx : cur));
+      setPlaying(true);
+    }, INITIAL_PLAY_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [inView, model, maxBar, reduce]);
+
+  // Continuous bar clock matching Feed (loop hold at end before wrapping)
   useEffect(() => {
     if (!playing || !model) return;
+    const atEnd = idx >= maxBar;
+    const delay = atEnd ? LOOP_HOLD_MS : barDelay(speed);
     const t = window.setTimeout(() => {
-      setIdx((cur) => (cur >= maxBar ? model.startIdx : cur + 1));
-    }, barDelay(speed));
+      setIdx((cur) => (cur >= maxBar ? model.startIdx : stepIdx(model, cur, 1)));
+    }, delay);
     return () => window.clearTimeout(t);
   }, [playing, idx, speed, model, maxBar]);
 
-  const pct = model && maxBar > model.startIdx ? Math.max(0, Math.min(1, (idx - model.startIdx) / (maxBar - model.startIdx))) : 0;
+  useEffect(() => {
+    return () => {
+      if (hudTimerRef.current != null) window.clearTimeout(hudTimerRef.current);
+    };
+  }, []);
+
+  const flashHud = (kind: "play" | "pause") => {
+    setHud(kind);
+    if (hudTimerRef.current != null) window.clearTimeout(hudTimerRef.current);
+    hudTimerRef.current = window.setTimeout(() => setHud(null), 680);
+  };
+
+  const togglePlay = () => {
+    if (!model) return;
+    haptic.selection();
+    if (idx >= maxBar) setIdx(model.startIdx);
+    setPlaying((p) => {
+      const next = !p;
+      userPausedRef.current = !next;
+      flashHud(next ? "play" : "pause");
+      return next;
+    });
+  };
+
+  const frame = model ? frameAt(model, idx) : null;
+  const long = entry.direction === "long";
+  const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "");
+  const pct = model ? progressOf(model, idx) : 0;
 
   return (
     <>
       <Card pad={false} className="overflow-hidden">
         {/* Minimal Apple Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line-soft px-5 py-3.5 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-loss/14 text-loss">
               <Sym name="repeat" className="h-4 w-4" strokeWidth={2} />
@@ -171,7 +233,21 @@ function MistakeReplayCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canInlineReplay && model && (
+              <button
+                type="button"
+                onClick={() => {
+                  haptic.selection();
+                  const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+                  setSpeed(next);
+                }}
+                aria-label={`Playback speed ${speed}x`}
+                className="num inline-flex h-8 items-center rounded-full bg-ink/[0.06] px-2.5 text-[11.5px] font-semibold text-ink transition-colors hover:bg-ink/[0.1] active:scale-95"
+              >
+                {speed}×
+              </button>
+            )}
             {countInGroup > 1 && (
               <button
                 type="button"
@@ -231,77 +307,113 @@ function MistakeReplayCard({
           </div>
         )}
 
-        {/* Embedded Interactive Candle Stage OR Attached Screenshot Fallback */}
+        {/* Feed-identical 16:9 Cinema Stage (tap to play/pause, right axis drag zooms candles, 60fps gold bottom timeline) */}
         {canInlineReplay ? (
-          <div className="relative">
-            <div
-              className={cn(
-                "relative h-[250px] w-full bg-well/40 sm:h-[300px]",
-                "[&_.fd-ohlc-bar]:pointer-events-none [&_.fd-ohlc-bar]:absolute [&_.fd-ohlc-bar]:left-3 [&_.fd-ohlc-bar]:top-2.5 [&_.fd-ohlc-bar]:z-10 [&_.fd-ohlc-bar]:flex [&_.fd-ohlc-bar]:gap-2.5 [&_.fd-ohlc-bar]:rounded-full [&_.fd-ohlc-bar]:bg-surface/80 [&_.fd-ohlc-bar]:px-3 [&_.fd-ohlc-bar]:py-1 [&_.fd-ohlc-bar]:text-[11px] [&_.fd-ohlc-bar]:tabular-nums [&_.fd-ohlc-bar]:text-ink [&_.fd-ohlc-bar]:backdrop-blur-md",
-                "[&_.fd-ohlc-bar_b]:mr-1 [&_.fd-ohlc-bar_b]:text-muted [&_.fd-up]:text-profit [&_.fd-down]:text-loss",
-              )}
-            >
-              {replay.status === "ready" && (
-                <LazyReplayCanvas model={replay.model} idx={idx} label={`Replay of ${entry.instrument} ${entry.date}`} />
-              )}
-              {replay.status === "loading" && (
-                <div className="grid h-full place-items-center text-[13px] text-muted">Loading replay candles…</div>
-              )}
-              {replay.status === "error" && (
-                <div className="grid h-full place-items-center px-6 text-center text-[13px] text-muted">
-                  {fallbackImg ? (
-                    <button type="button" onClick={() => setZoomed(fallbackImg)} className="group relative h-[220px] w-full cursor-zoom-in overflow-hidden rounded-[14px]">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={fallbackImg} alt={entry.instrument} className="h-full w-full object-contain" />
-                    </button>
-                  ) : (
-                    <span>{replay.message}</span>
-                  )}
-                </div>
-              )}
-            </div>
+          <div
+            ref={stageRef}
+            onClick={model ? togglePlay : undefined}
+            className={cn(
+              "relative aspect-video w-full select-none overflow-hidden bg-well/40",
+              model && "cursor-pointer",
+              "[&_.fd-ohlc-bar]:pointer-events-none [&_.fd-ohlc-bar]:absolute [&_.fd-ohlc-bar]:right-3 [&_.fd-ohlc-bar]:top-3 [&_.fd-ohlc-bar]:z-10 [&_.fd-ohlc-bar]:hidden [&_.fd-ohlc-bar]:sm:flex [&_.fd-ohlc-bar]:gap-2.5 [&_.fd-ohlc-bar]:rounded-full [&_.fd-ohlc-bar]:border [&_.fd-ohlc-bar]:border-line/40 [&_.fd-ohlc-bar]:bg-surface/80 [&_.fd-ohlc-bar]:px-3 [&_.fd-ohlc-bar]:py-1 [&_.fd-ohlc-bar]:text-[11px] [&_.fd-ohlc-bar]:tabular-nums [&_.fd-ohlc-bar]:text-ink [&_.fd-ohlc-bar]:backdrop-blur-md",
+              "[&_.fd-ohlc-bar_b]:mr-1 [&_.fd-ohlc-bar_b]:text-muted [&_.fd-up]:text-profit [&_.fd-down]:text-loss",
+            )}
+          >
+            {replay.status === "ready" && (
+              <LazyReplayCanvas
+                model={replay.model}
+                idx={idx}
+                stepMs={barDelay(speed)}
+                progressBarRef={barFillRef}
+                label={`Replay of ${entry.instrument} ${entry.date}`}
+              />
+            )}
+            {replay.status === "loading" && (
+              <div className="grid h-full place-items-center text-[13px] text-muted">Loading replay candles…</div>
+            )}
+            {replay.status === "error" && (
+              <div className="grid h-full place-items-center px-6 text-center text-[13px] text-muted">
+                {fallbackImg ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setZoomed(fallbackImg);
+                    }}
+                    className="group relative h-full w-full cursor-zoom-in overflow-hidden"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={fallbackImg} alt={entry.instrument} className="h-full w-full object-contain" />
+                  </button>
+                ) : (
+                  <span>{replay.message}</span>
+                )}
+              </div>
+            )}
 
+            {/* Top-left floating live phase & open R / closed P&L pill */}
+            {frame && (
+              <div
+                aria-live="off"
+                className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full border border-line/50 bg-surface/82 px-3 py-1 text-[11.5px] font-medium text-ink shadow-xs backdrop-blur-md dark:border-white/[0.12] dark:bg-black/55 dark:text-white"
+              >
+                <span className="uppercase tracking-[0.04em] text-muted dark:text-white/70">
+                  {frame.phase === "setup" ? "Setup" : frame.phase === "open" ? (long ? "Long" : "Short") : "Closed"}
+                </span>
+                {frame.done ? (
+                  <strong className={cn("num font-semibold", entry.pnl >= 0 ? "text-profit" : "text-loss")}>
+                    {signed(entry.pnl)}
+                    {typeof entry.rr === "number" ? ` · ${sign(entry.rr)}${Math.abs(entry.rr).toFixed(1)}R` : ""}
+                  </strong>
+                ) : frame.openR != null ? (
+                  <strong className={cn("num font-semibold", frame.openR >= 0 ? "text-profit" : "text-loss")}>
+                    {sign(frame.openR)}{Math.abs(frame.openR).toFixed(2)}R
+                  </strong>
+                ) : frame.openPts != null ? (
+                  <strong className={cn("num font-semibold", frame.openPts >= 0 ? "text-profit" : "text-loss")}>
+                    {sign(frame.openPts)}{Math.abs(frame.openPts).toFixed(2)} pts
+                  </strong>
+                ) : null}
+              </div>
+            )}
+
+            {/* Transient frosted Play / Pause HUD on stage tap (Feed-identical feedback) */}
+            <AnimatePresence>
+              {hud && (
+                <motion.div
+                  key={hud}
+                  aria-hidden="true"
+                  initial={{ opacity: 0, scale: 0.72 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.86 }}
+                  transition={{ duration: 0.24, ease: REVIEW_SMOOTH }}
+                  className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2"
+                >
+                  <span className="grid h-14 w-14 place-items-center rounded-full border border-white/25 bg-black/55 text-white shadow-lg backdrop-blur-xl">
+                    {hud === "play" ? (
+                      <Sym name="play" className="h-5 w-5 translate-x-[1px] fill-current" />
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current" aria-hidden>
+                        <rect x="6.5" y="5.5" width="3.8" height="13" rx="1.1" />
+                        <rect x="13.7" y="5.5" width="3.8" height="13" rx="1.1" />
+                      </svg>
+                    )}
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Flush whisper-thin 60fps gold bottom timeline inside 16:9 viewport */}
             {model && (
-              <div className="flex items-center gap-3 border-t border-line-soft bg-surface/85 px-5 py-2.5 backdrop-blur-md sm:px-6">
-                <button
-                  type="button"
-                  onClick={() => {
-                    haptic.selection();
-                    if (!playing && idx >= maxBar) setIdx(model.startIdx);
-                    setPlaying((p) => !p);
-                  }}
-                  aria-label={playing ? "Pause replay" : "Play mistake replay"}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gold-strong text-on-gold transition-transform active:scale-90"
-                >
-                  {playing ? (
-                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current" aria-hidden>
-                      <rect x="6.5" y="5.5" width="3.8" height="13" rx="1.1" />
-                      <rect x="13.7" y="5.5" width="3.8" height="13" rx="1.1" />
-                    </svg>
-                  ) : (
-                    <Sym name="play" className="h-3.5 w-3.5" />
-                  )}
-                </button>
-
-                <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-ink/[0.08]">
-                  <motion.div
-                    className="h-full rounded-full bg-gold-strong"
-                    style={{ width: `${Math.round(pct * 100)}%` }}
-                    transition={{ duration: 0.18 }}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    haptic.selection();
-                    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
-                    setSpeed(next);
-                  }}
-                  className="num inline-flex h-7 items-center rounded-full bg-ink/[0.06] px-2.5 text-[11.5px] font-semibold text-ink hover:bg-ink/[0.1]"
-                >
-                  {speed}×
-                </button>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[3px] overflow-hidden bg-ink/10 dark:bg-white/[0.08]"
+              >
+                <i
+                  ref={barFillRef}
+                  className="block h-full w-full origin-left bg-[var(--accent)] will-change-transform"
+                  style={{ transform: `scaleX(${pct})` }}
+                />
               </div>
             )}
           </div>
@@ -310,10 +422,10 @@ function MistakeReplayCard({
             <button
               type="button"
               onClick={() => setZoomed(fallbackImg)}
-              className="group relative block max-h-[260px] w-full cursor-zoom-in overflow-hidden rounded-[16px] bg-well"
+              className="group relative aspect-video w-full cursor-zoom-in overflow-hidden rounded-[16px] bg-well"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={fallbackImg} alt={entry.instrument} className="mx-auto max-h-[260px] w-full object-contain transition-transform duration-300 group-hover:scale-[1.01]" />
+              <img src={fallbackImg} alt={entry.instrument} className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.01]" />
             </button>
           </div>
         ) : null}

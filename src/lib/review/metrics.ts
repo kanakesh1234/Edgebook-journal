@@ -163,6 +163,20 @@ export function patternTable(list: JournalEntry[], dates: string[], marks: Recor
 
 /* ───────── equity curve, drawdown clusters, streaks ───────── */
 
+export interface EquityPoint { date: string; equity: number; pnl: number; kind: "start" | "day" }
+/** Maps a period's session curve into cumulative account equity points starting at period open. */
+export function buildReviewEquityPoints(ctx: ReviewContext, startDate: string, curve: CurvePointR[]): { openingEquity: number; currentEquity: number; points: EquityPoint[] } {
+  const startBalance = ctx.challenge?.startingBalance ?? ctx.settings.startingEquity;
+  const priorPnl = sum(ctx.entries.filter((e) => e.date < startDate).map((e) => e.pnl));
+  const openingEquity = startBalance + priorPnl;
+  if (curve.length === 0) return { openingEquity, currentEquity: openingEquity, points: [] };
+  const points: EquityPoint[] = [
+    { date: startDate, equity: openingEquity, pnl: 0, kind: "start" },
+    ...curve.map((p) => ({ date: p.date, equity: openingEquity + p.cum, pnl: p.pnl, kind: "day" as const })),
+  ];
+  return { openingEquity, currentEquity: openingEquity + curve[curve.length - 1]!.cum, points };
+}
+
 export interface CurvePointR { date: string; pnl: number; cum: number; session: number }
 export interface DrawdownMark { date: string; depth: number; session: number }
 export interface Streak { from: number; to: number; length: number; pnl: number }

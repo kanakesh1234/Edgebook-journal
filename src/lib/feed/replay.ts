@@ -8,8 +8,9 @@ import type { ReplayTradeRef } from "../backtesting/types";
 export const CONTEXT_BARS = 18;
 /** Playback itself starts this many bars before the entry. */
 export const LEAD_BARS = 2;
-export const SPEEDS = [1, 2, 4] as const;
+export const SPEEDS = [0.75, 1, 2, 4] as const;
 export type Speed = (typeof SPEEDS)[number];
+export const FEED_SPEED: Speed = 0.75;
 /** Milliseconds per bar at 1× — deliberate, unhurried Apple-grade cadence for smooth 60fps candle formation. */
 export const BASE_BAR_MS = 1200;
 /** Delay (ms) after a card snaps into the active viewport before playback begins so the scroll transition settles. */

@@ -5,7 +5,7 @@ import {
   createChart, CandlestickSeries, createSeriesMarkers, LineStyle, CrosshairMode, TickMarkType,
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time,
 } from "lightweight-charts";
-import { BASE_BAR_MS, endIdx, type ReplayModel } from "@/lib/feed/replay";
+import { BASE_BAR_MS, FEED_SPEED, endIdx, progressOf, type ReplayModel } from "@/lib/feed/replay";
 
 /** Loaded lazily (see reels.tsx) so the charting library is fetched only when a replay card is on screen. */
 
@@ -26,16 +26,20 @@ function windowForBar(model: ReplayModel, barIdx: number): { from: number; to: n
   return { from, to };
 }
 
-/** Apple HIG cubic ease-out curve for fluid camera & candle motion. */
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
-const easeInOutCubic = (t: number) => {
+/** Continuous zero-velocity-at-endpoints cosine curve (`C¹` smooth — zero sharp turns between bars). */
+const easeInOutSine = (t: number) => {
   const x = Math.min(1, Math.max(0, t));
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  return 0.5 * (1 - Math.cos(Math.PI * x));
 };
 
-/** Interpolates intra-bar price action (open -> first extreme -> second extreme -> close) for 60fps candle formation. */
-function interpolateCandle(c: { time: number; open: number; high: number; low: number; close: number }, progress: number) {
-  const p = Math.min(1, Math.max(0, progress));
+/** Gentle settle delay fraction after previous candle closes before the new candle unfurls cleanly. */
+const BAR_SETTLE_DELAY = 0.14;
+
+/** Smoothly interpolates intra-bar price action (delayed open breath -> wick 1 -> wick 2 -> close) without shaking or sharp turns. */
+function interpolateCandle(c: { time: number; open: number; high: number; low: number; close: number }, rawProgress: number) {
+  const r = Math.min(1, Math.max(0, rawProgress));
+  // Hold softly at open right after previous closure so transition feels calm and deliberate
+  const p = r <= BAR_SETTLE_DELAY ? 0 : Math.min(1, (r - BAR_SETTLE_DELAY) / (1 - BAR_SETTLE_DELAY));
   const bullish = c.close >= c.open;
   const firstExtreme = bullish ? c.low : c.high;
   const secondExtreme = bullish ? c.high : c.low;
@@ -44,18 +48,20 @@ function interpolateCandle(c: { time: number; open: number; high: number; low: n
   let high = c.open;
   let low = c.open;
 
-  if (p < 0.28) {
-    const k = easeInOutCubic(p / 0.28);
+  if (p === 0) {
+    price = c.open;
+  } else if (p < 0.3) {
+    const k = easeInOutSine(p / 0.3);
     price = c.open + (firstExtreme - c.open) * k;
     high = Math.max(c.open, price);
     low = Math.min(c.open, price);
-  } else if (p < 0.74) {
-    const k = easeInOutCubic((p - 0.28) / 0.46);
+  } else if (p < 0.72) {
+    const k = easeInOutSine((p - 0.3) / 0.42);
     price = firstExtreme + (secondExtreme - firstExtreme) * k;
     high = Math.max(c.open, firstExtreme, price);
     low = Math.min(c.open, firstExtreme, price);
   } else {
-    const k = easeOutCubic((p - 0.74) / 0.26);
+    const k = easeInOutSine((p - 0.72) / 0.28);
     price = secondExtreme + (c.close - secondExtreme) * k;
     high = c.high;
     low = c.low;
@@ -94,7 +100,19 @@ function useThemeKey(): string {
   return key;
 }
 
-export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: number; label: string }) {
+export function ReplayChart({
+  model,
+  idx,
+  label,
+  stepMs = Math.round(BASE_BAR_MS / FEED_SPEED),
+  progressBarRef,
+}: {
+  model: ReplayModel;
+  idx: number;
+  label: string;
+  stepMs?: number;
+  progressBarRef?: React.RefObject<HTMLElement | null>;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -104,7 +122,12 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
   const rafRef = useRef<number | null>(null);
   const idxRef = useRef(idx);
   idxRef.current = idx;
+  const stepMsRef = useRef(stepMs);
+  stepMsRef.current = stepMs;
+  const barElRef = useRef(progressBarRef);
+  barElRef.current = progressBarRef;
   const followCameraRef = useRef(true);
+  const camRef = useRef<{ from: number; to: number } | null>(null);
   const dragSuppressClickRef = useRef(false);
   const [customView, setCustomView] = useState(false);
 
@@ -318,9 +341,10 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const isSingleStepForward = prevIdx !== null && idx === prevIdx + 1 && idx > model.startIdx && !prefersReducedMotion;
+    const totalSpan = Math.max(1, endIdx(model) - model.startIdx);
 
     if (!isSingleStepForward) {
-      // Initial render or loop reset: draw from viewFrom..idx and frame immediately
+      // Initial render or manual scrub / loop reset: draw from viewFrom..idx and sync timeline bar immediately
       const slice = model.candles.slice(model.viewFrom, idx + 1).map((c) => ({
         time: c.time as Time,
         open: c.open,
@@ -330,43 +354,65 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
       }));
       series.setData(slice);
       markersRef.current?.setMarkers(marks);
-      chart.timeScale().setVisibleLogicalRange(windowForBar(model, idx));
+      const win = windowForBar(model, idx);
+      camRef.current = win;
+      chart.timeScale().setVisibleLogicalRange(win);
+      if (barElRef.current?.current) {
+        barElRef.current.current.style.transform = `scaleX(${progressOf(model, idx)})`;
+      }
       return;
     }
 
-    // Smooth 60fps step: commit bars up to idx - 1, then animate the new forming candle + camera glide
-    const baseSlice = model.candles.slice(model.viewFrom, idx).map((c) => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-    series.setData(baseSlice);
+    // Seal the completed previous candle via incremental update (no setData rebuild = zero jitter/shake)
+    const prevCandle = model.candles[idx - 1];
+    if (prevCandle) {
+      series.update({
+        time: prevCandle.time as Time,
+        open: prevCandle.open,
+        high: prevCandle.high,
+        low: prevCandle.low,
+        close: prevCandle.close,
+      });
+    }
+    if (idx === model.entryIdx || (idx === model.exitIdx && !model.exitEstimated)) {
+      markersRef.current?.setMarkers(marks);
+    }
 
     const targetCandle = model.candles[idx];
-    const fromWin = windowForBar(model, idx - 1);
+    const fromWin = camRef.current ?? windowForBar(model, idx - 1);
     const toWin = windowForBar(model, idx);
-    const duration = Math.round(BASE_BAR_MS * 0.88);
+    const duration = Math.max(240, stepMsRef.current);
     const t0 = performance.now();
 
-    // Seed the forming candle at its open price
+    // Gently seed new bar at open while previous candle closure settles cleanly
     series.update(interpolateCandle(targetCandle, 0));
-    markersRef.current?.setMarkers(marks);
 
     const stepFrame = (now: number) => {
-      const raw = Math.min(1, Math.max(0, (now - t0) / duration));
-      const camEase = easeOutCubic(raw);
+      const linearT = Math.min(1, Math.max(0, (now - t0) / duration));
 
-      series.update(interpolateCandle(targetCandle, raw));
+      // Update candle with delayed soft open + C¹ smooth sine easing
+      series.update(interpolateCandle(targetCandle, linearT));
+
+      // Synchronized delayed camera glide (zero abrupt corner or jump)
       if (followCameraRef.current) {
-        chart.timeScale().setVisibleLogicalRange({
+        const camRaw = linearT <= BAR_SETTLE_DELAY ? 0 : (linearT - BAR_SETTLE_DELAY) / (1 - BAR_SETTLE_DELAY);
+        const camEase = easeInOutSine(camRaw);
+        const curWin = {
           from: fromWin.from + (toWin.from - fromWin.from) * camEase,
           to: fromWin.to + (toWin.to - fromWin.to) * camEase,
-        });
+        };
+        camRef.current = curWin;
+        chart.timeScale().setVisibleLogicalRange(curWin);
       }
 
-      if (raw < 1) {
+      // Continuous 60fps compositor transform for the bottom gold timeline bar
+      const progEl = barElRef.current?.current;
+      if (progEl) {
+        const frac = Math.min(1, Math.max(0, (idx - 1 - model.startIdx + linearT) / totalSpan));
+        progEl.style.transform = `scaleX(${frac})`;
+      }
+
+      if (linearT < 1) {
         rafRef.current = requestAnimationFrame(stepFrame);
       } else {
         rafRef.current = null;
@@ -409,8 +455,10 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
     const chart = chartRef.current;
     if (!chart) return;
     followCameraRef.current = true;
+    const win = windowForBar(model, idxRef.current);
+    camRef.current = win;
     chart.priceScale("right").applyOptions({ autoScale: true });
-    chart.timeScale().setVisibleLogicalRange(windowForBar(model, idxRef.current));
+    chart.timeScale().setVisibleLogicalRange(win);
     setCustomView(false);
   };
 

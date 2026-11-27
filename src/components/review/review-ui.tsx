@@ -211,7 +211,7 @@ export function ChipStagger({ children, className, baseDelay = 0.14, stepDelay =
   );
 }
 
-export function AnimatedNumber({ value, format, decimals, className, delay = 0.12 }: { value: number; format: (n: number) => string; decimals?: number; className?: string; delay?: number }) {
+export function AnimatedNumber({ value, format, decimals, className, delay = 0.04 }: { value: number; format: (n: number) => string; decimals?: number; className?: string; delay?: number }) {
   const reduce = useReducedMotion();
   const ref = useRef<HTMLSpanElement>(null);
   const from = useRef(0);
@@ -305,14 +305,38 @@ export function Section({
   );
 }
 
-export const Card = ({ children, className, pad = true }: { children: ReactNode; className?: string; pad?: boolean }) => (
+const AMBIENT_RADIAL: Record<"profit" | "loss" | "gold" | "neutral", string> = {
+  profit: "radial-gradient(closest-side, color-mix(in srgb, var(--profit) 18%, transparent), transparent 72%)",
+  loss: "radial-gradient(closest-side, color-mix(in srgb, var(--loss) 16%, transparent), transparent 72%)",
+  gold: "radial-gradient(closest-side, color-mix(in srgb, var(--gold) 18%, transparent), transparent 72%)",
+  neutral: "radial-gradient(closest-side, color-mix(in srgb, var(--ink) 7%, transparent), transparent 72%)",
+};
+
+export const Card = ({
+  children,
+  className,
+  pad = true,
+  ambient,
+}: {
+  children: ReactNode;
+  className?: string;
+  pad?: boolean;
+  ambient?: "profit" | "loss" | "gold" | "neutral";
+}) => (
   <div
     className={cn(
-      "rounded-[24px] border border-line-soft bg-surface shadow-panel dark:border-line dark:ring-1 dark:ring-inset dark:ring-white/[0.06]",
+      "relative overflow-hidden rounded-[24px] border border-line-soft bg-surface shadow-panel dark:border-line dark:ring-1 dark:ring-inset dark:ring-white/[0.06] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_40px_-24px_rgba(0,0,0,0.72)]",
       pad && "p-5 sm:p-6",
       className,
     )}
   >
+    {ambient && (
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-24 left-1/2 h-56 w-[88%] -translate-x-1/2 rounded-full opacity-90 blur-3xl transition-colors duration-700"
+        style={{ background: AMBIENT_RADIAL[ambient] }}
+      />
+    )}
     {children}
   </div>
 );
@@ -350,14 +374,14 @@ export function StripCell({ label, value, sub, valueClass, hint }: { label: stri
 
 export function Group({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
   return (
-    <div className={className}>
+    <div className={cn("flex h-full flex-col", className)}>
       {title && <p className="mb-2.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-faint/80">{title}</p>}
-      <div className="space-y-[3px] overflow-hidden rounded-[18px] border border-line/60 bg-well p-[3px] dark:border-line">{children}</div>
+      <div className="flex flex-1 flex-col gap-[3px] overflow-hidden rounded-[18px] border border-line/60 bg-well p-[3px] dark:border-line">{children}</div>
     </div>
   );
 }
 
-export function StatRow({ label, value, sub, valueClass, onClick, hint }: { label: string; value: ReactNode; sub?: string; valueClass?: string; onClick?: () => void; hint?: string }) {
+export function StatRow({ label, value, sub, valueClass, onClick, hint, className }: { label: string; value: ReactNode; sub?: string; valueClass?: string; onClick?: () => void; hint?: string; className?: string }) {
   const body = (
     <>
       <span className="min-w-0 flex-1 text-left">
@@ -368,7 +392,10 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
       {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint/55 transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
     </>
   );
-  const cls = "flex min-h-[42px] w-full items-center gap-3 rounded-[14px] bg-surface px-4 py-2 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]";
+  const cls = cn(
+    "flex min-h-[54px] w-full flex-1 items-center gap-3 rounded-[14px] bg-surface px-4 py-2 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]",
+    className,
+  );
   return onClick ? (
     <button
       type="button"
@@ -384,6 +411,82 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
   ) : (
     <div title={hint} className={cls}>
       {body}
+    </div>
+  );
+}
+
+/** Apple-style progressive disclosure toggle: keeps secondary detail hidden until requested. */
+export function ReviewDisclosure({
+  label,
+  openLabel,
+  summary,
+  open: controlledOpen,
+  onToggle,
+  defaultOpen = false,
+  children,
+  className,
+}: {
+  label: string;
+  openLabel?: string;
+  summary?: string;
+  open?: boolean;
+  onToggle?: (next: boolean) => void;
+  defaultOpen?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const reduce = useReducedMotion();
+  const [innerOpen, setInnerOpen] = useState(defaultOpen);
+  const isOpen = controlledOpen ?? innerOpen;
+  const toggle = () => {
+    haptic.selection();
+    const next = !isOpen;
+    if (controlledOpen === undefined) setInnerOpen(next);
+    onToggle?.(next);
+  };
+
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={toggle}
+        className={cn(
+          "group flex w-full items-center justify-between gap-3 rounded-[18px] border px-4 py-3 text-left transition-all active:scale-[0.995]",
+          isOpen
+            ? "border-line-strong/80 bg-surface/90 shadow-xs dark:border-white/[0.1]"
+            : "border-line-soft bg-well/75 hover:border-line-strong/60 hover:bg-well dark:border-line",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            aria-hidden
+            className={cn(
+              "grid h-7 w-7 shrink-0 place-items-center rounded-full transition-colors duration-200",
+              isOpen ? "bg-gold/[0.16] text-gold-deep dark:text-gold" : "bg-ink/[0.06] text-muted group-hover:text-ink",
+            )}
+          >
+            <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", isOpen && "rotate-180")} strokeWidth={2} />
+          </span>
+          <span className="truncate text-[13.5px] font-semibold tracking-[-0.01em] text-ink">
+            {isOpen ? (openLabel ?? label) : label}
+          </span>
+        </div>
+        {summary && <span className="truncate text-[12px] text-faint">{summary}</span>}
+      </button>
+
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={reduce ? { opacity: 1 } : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1, transition: reduce ? { duration: 0 } : REVIEW_EXPAND }}
+            exit={{ height: 0, opacity: 0, transition: reduce ? { duration: 0 } : REVIEW_COLLAPSE }}
+            className="overflow-hidden"
+          >
+            <div className="pt-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

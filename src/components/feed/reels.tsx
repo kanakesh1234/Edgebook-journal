@@ -13,7 +13,7 @@ import { useReplayTrade } from "@/components/journal/replay-trade";
 import { lessonsPost } from "@/components/lessons/api";
 import { invalidateLessonIndex } from "@/components/lessons/use-lesson-index";
 import {
-  barDelay, endIdx, frameAt, INITIAL_PLAY_DELAY_MS, LOOP_HOLD_MS, progressOf, stepIdx,
+  barDelay, endIdx, FEED_SPEED, frameAt, INITIAL_PLAY_DELAY_MS, LOOP_HOLD_MS, progressOf, stepIdx,
 } from "@/lib/feed/replay";
 import { summarizeTradeMistakeForFeed } from "@/lib/ai-brain";
 import type { EndCard, FeedCard, LessonCard, SetupCard, StarterCard, TradeCard, VideoCard } from "@/lib/feed/types";
@@ -456,6 +456,7 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const played = useRef(false);
   const reported = useRef(false);
   const userPausedRef = useRef(false);
+  const edgeBarRef = useRef<HTMLElement>(null);
 
   const flashHud = useCallback((state: "play" | "pause") => {
     if (hudTimer.current) clearTimeout(hudTimer.current);
@@ -477,11 +478,11 @@ export function TradeReel(props: ReelProps<TradeCard>) {
     }
   }, [model]);
 
-  // Playback clock — advances bar-by-bar with a deliberate hold on the final bar before looping seamlessly
+  // Playback clock — advances bar-by-bar at 0.75× cadence with a calm hold on the final bar before looping seamlessly
   useEffect(() => {
     if (!playing || !model) return;
     const atEnd = idx >= endIdx(model);
-    const delay = atEnd ? LOOP_HOLD_MS : barDelay(1);
+    const delay = atEnd ? LOOP_HOLD_MS : barDelay(FEED_SPEED);
     const id = window.setTimeout(() => {
       setIdx((cur) => {
         if (cur >= endIdx(model)) return model.startIdx;
@@ -578,7 +579,6 @@ export function TradeReel(props: ReelProps<TradeCard>) {
   const isReplayView = mode === "replay" && card.replayable;
   const hasVisualMedia = card.replayable || card.hasImage || Boolean(card.videoUrl);
   const shape: CardShape = hasVisualMedia ? "landscape" : "card";
-  const progressPct = model ? Math.round(progressOf(model, idx) * 1000) / 10 : 0;
 
   return (
     <Frame
@@ -606,7 +606,13 @@ export function TradeReel(props: ReelProps<TradeCard>) {
           data.status === "ready" && model ? (
             <>
               <Suspense fallback={<Skeleton text="Loading chart…" />}>
-                <ReplayChart model={model} idx={idx} label={`${title} replay chart`} />
+                <ReplayChart
+                  model={model}
+                  idx={idx}
+                  stepMs={barDelay(FEED_SPEED)}
+                  progressBarRef={edgeBarRef}
+                  label={`${title} replay chart`}
+                />
               </Suspense>
               {/* Transient play/pause feedback HUD when user clicks anywhere on the chart */}
               {hud && (
@@ -659,10 +665,10 @@ export function TradeReel(props: ReelProps<TradeCard>) {
           </button>
         )}
 
-        {/* Whisper-thin bottom-edge progress line (no visible button clutter) */}
+        {/* Whisper-thin gold bottom-edge progress line driven smoothly at display refresh rate */}
         {isReplayView && model && (
           <div className="fd-edge-bar" aria-hidden="true">
-            <i style={{ width: `${progressPct}%` }} />
+            <i ref={edgeBarRef} style={{ transform: `scaleX(${progressOf(model, idx)})` }} />
           </div>
         )}
       </div>

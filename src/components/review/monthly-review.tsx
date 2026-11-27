@@ -8,9 +8,10 @@ import { haptic } from "@/lib/haptics";
 import { Sym } from "@/components/journal/symbols";
 import { EmptyState } from "@/components/ui/misc";
 import { analyzePeriodThoughts } from "@/lib/ai-brain";
-import { buildMonth, type ReviewContext } from "@/lib/review/metrics";
+import { buildMonth, buildReviewEquityPoints, type ReviewContext } from "@/lib/review/metrics";
 import { addMonths, monthTitle, weekLabel } from "@/lib/review/period";
 import { PSYCH_PATTERNS } from "@/lib/review/mistakes";
+import { EquityCurve } from "@/components/charts/equity-curve";
 import { cn } from "@/lib/utils";
 import {
   AnimatedNumber,
@@ -28,6 +29,8 @@ import {
   Prompt,
   QuestionReveal,
   REVIEW_EXPAND,
+  REVIEW_SMOOTH,
+  ReviewDisclosure,
   ReviewIconTile,
   ReviewScrollBar,
   SaveIndicator,
@@ -43,7 +46,7 @@ import {
   useMoney,
   useReviewSettledReveal,
 } from "./review-ui";
-import { heat, SessionCurve, WinRateRing } from "./review-charts";
+import { heat, WinRateRing } from "./review-charts";
 import { MistakeReplaySpotlight, PeriodTradesList, TradeScreenshotsGallery } from "./review-evidence";
 import { useReviewNotes } from "./use-review-notes";
 import type { ReviewActions } from "./reviews-panel";
@@ -65,6 +68,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
 
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [moreRules, setMoreRules] = useState(false);
+  const [scrub, setScrub] = useState<number | null>(null);
 
   const wonVal = notes.text["won"] ?? notes.text["edge"] ?? "";
   const lostVal = notes.text["lost"] ?? notes.text["curve"] ?? "";
@@ -95,6 +99,13 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const completedQuestions = [wonVal.trim(), lostVal.trim(), commit0.trim()].filter(Boolean).length;
   const hasScreenshots = m.entries.some((e) => e.images.length > 0);
   const weekMax = Math.max(1, ...m.weeks.map((w) => Math.abs(w.net)));
+  const activeWeeksCount = m.weeks.filter((w) => w.totals.trades > 0).length;
+
+  const eq = useMemo(() => buildReviewEquityPoints(ctx, `${month}-01`, m.curve), [ctx, month, m.curve]);
+  const eqTone = t.net > 0 ? "profit" : t.net < 0 ? "loss" : "neutral";
+  const activePt = scrub != null ? (eq.points[scrub] ?? null) : null;
+  const displayNet = activePt != null ? activePt.equity - eq.openingEquity : t.net;
+  const displayBalance = activePt != null ? activePt.equity : (m.balance ?? eq.currentEquity);
 
   return (
     <div className="space-y-10 pb-8">
@@ -106,7 +117,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </SectionReveal>
       )}
 
-      {/* 1 — Monthly Hero Verdict + Full Interactive Session Curve */}
+      {/* 1 — Monthly Hero Verdict + Dynamic Interactive Equity Curve */}
       <SectionReveal index={1}>
         <Section
           id="b1"
@@ -116,35 +127,60 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
             <div className="flex items-center gap-2.5">
               {m.balance != null && (
                 <Chip>
-                  Balance <b className="font-semibold tabular-nums text-ink">{money(m.balance)}</b>
+                  Balance <b className="font-semibold tabular-nums text-ink">{money(displayBalance)}</b>
                 </Chip>
               )}
               <SaveIndicator state={rn.state} />
             </div>
           }
         >
-          <Card pad={false} className="overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
+          <Card pad={false} ambient={eqTone === "neutral" ? "gold" : eqTone}>
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
               <div>
-                <p className="text-[12.5px] font-medium text-muted">Net P&amp;L</p>
-                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[52px]", tone(t.net))}>
-                  <AnimatedNumber value={t.net} format={signed} />
+                <div className="flex items-center gap-2">
+                  <p className="text-[12.5px] font-medium text-muted">
+                    {activePt ? (activePt.kind === "start" ? "Month open" : formatDateMedium(activePt.date)) : "Net P&L"}
+                  </p>
+                  {activePt && activePt.kind === "day" && (
+                    <span className={cn("num rounded-full px-2 py-0.5 text-[11px] font-semibold", activePt.pnl >= 0 ? "bg-profit/12 text-profit" : "bg-loss/12 text-loss")}>
+                      {signed(activePt.pnl)} session
+                    </span>
+                  )}
+                </div>
+                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums transition-colors sm:text-[52px]", tone(displayNet))}>
+                  {activePt != null ? signed(displayNet) : <AnimatedNumber value={t.net} format={signed} />}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
                     {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L` : "No trades"}
                   </Chip>
+                  {ctx.challenge && (
+                    <Chip tone="gold">
+                      <Sym name="target" className="h-3.5 w-3.5" />
+                      {ctx.challenge.name}
+                    </Chip>
+                  )}
                 </div>
               </div>
               <WinRateRing value={t.winRate} size={96} />
             </div>
 
-            {/* Interactive Equity Curve across sessions */}
-            <div className="border-t border-line-soft px-3 pb-3 pt-4 sm:px-6">
-              <SessionCurve curve={m.curve} drawdowns={m.drawdowns} streaks={m.streaks} height={240} />
+            {/* Dynamic animated & interactive scrubbing curve (matches Home dashboard) */}
+            <div className="relative z-10 border-t border-line-soft px-3 pb-3 pt-4 sm:px-6">
+              <EquityCurve
+                points={eq.points}
+                currency={ctx.settings.currency}
+                tone={eqTone}
+                baselineLabel="Month open"
+                emptyLabel="No traded sessions yet this month — log your first trade to trace your curve."
+                rangeKey={`month:${month}:${ctx.challenge?.id ?? "all"}:${m.entries.length}`}
+                onScrub={setScrub}
+                spacious
+                className="h-[245px] sm:h-[305px]"
+              />
             </div>
 
-            <StatStrip count={5} className="border-t border-line-soft">
+            <StatStrip count={5} className="relative z-10 border-t border-line-soft">
               <StripCell label="Win rate" value={fmtPct(t.winRate)} sub={t.trades ? `${t.winners}/${t.trades}` : "—"} />
               <StripCell
                 label="Profit factor"
@@ -169,110 +205,144 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
             </StatStrip>
           </Card>
 
-          {/* Week-by-Week Trajectory Cards */}
-          {m.weeks.some((w) => w.totals.trades > 0) && (
-            <div className="mt-4 grid gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
-              {m.weeks.map((w) => {
-                const clickable = !!actions.openWeek;
-                const fill = w.totals.trades > 0 ? Math.max(10, Math.round((Math.abs(w.net) / weekMax) * 100)) : 0;
-                return (
-                  <button
-                    key={w.monday}
-                    type="button"
-                    disabled={!clickable}
-                    onClick={() => actions.openWeek?.(w.monday)}
-                    className="group rounded-[18px] border border-line-soft bg-surface p-3.5 text-left transition-all hover:border-line-strong hover:bg-raised active:scale-[0.98] disabled:cursor-default dark:border-line"
-                  >
-                    <div className="flex items-center justify-between text-[11.5px] text-faint">
-                      <span>Week {w.label}</span>
-                      <span>{w.totals.trades}T</span>
-                    </div>
-                    <p className={cn("num mt-1 text-[16px] font-semibold tracking-[-0.02em]", w.totals.trades ? tone(w.net) : "text-faint")}>
-                      {w.totals.trades ? signed(w.net) : "—"}
-                    </p>
-                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-ink/[0.06]">
-                      {fill > 0 && (
-                        <div className={cn("h-full rounded-full", w.net >= 0 ? "bg-profit" : "bg-loss")} style={{ width: `${fill}%` }} />
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-3">
-            <Group title="Extremes">
-              <StatRow label="Avg win" value={t.avgWin == null ? "—" : signed(t.avgWin)} valueClass={t.avgWin ? "text-profit" : undefined} />
-              <StatRow label="Avg loss" value={t.avgLoss == null ? "—" : signed(-t.avgLoss)} valueClass={t.avgLoss ? "text-loss" : undefined} />
-              <StatRow label="Best trade" value={t.largestWin == null ? "—" : signed(t.largestWin)} valueClass={t.largestWin ? "text-profit" : undefined} />
-              <StatRow label="Worst trade" value={t.largestLoss == null ? "—" : signed(t.largestLoss)} valueClass={t.largestLoss ? "text-loss" : undefined} />
-            </Group>
-
-            <Group title="Weeks & streaks">
-              <StatRow
-                label="Best week"
-                sub={m.bestWeek ? weekLabel(m.bestWeek.monday) : undefined}
-                value={m.bestWeek ? signed(m.bestWeek.net) : "—"}
-                valueClass={m.bestWeek ? tone(m.bestWeek.net) : undefined}
-                onClick={m.bestWeek && actions.openWeek ? () => actions.openWeek!(m.bestWeek!.monday) : undefined}
-              />
-              <StatRow
-                label="Hardest week"
-                sub={hardest ? weekLabel(hardest.monday) : undefined}
-                value={hardest ? signed(hardest.net) : "—"}
-                valueClass={hardest ? tone(hardest.net) : undefined}
-                onClick={hardest && actions.openWeek ? () => actions.openWeek!(hardest.monday) : undefined}
-              />
-              <StatRow
-                label="Best streak"
-                sub={bestStreak ? `${bestStreak.length} sessions` : undefined}
-                value={bestStreak ? signed(bestStreak.pnl) : "—"}
-                valueClass={bestStreak ? "text-profit" : undefined}
-              />
-              <StatRow
-                label="Max drawdown"
-                sub={maxDrawdown ? formatDateMedium(maxDrawdown.date) : undefined}
-                value={maxDrawdown ? signed(-maxDrawdown.depth) : "—"}
-                valueClass={maxDrawdown ? "text-loss" : undefined}
-              />
-            </Group>
-
-            <Group title="Account &amp; rules">
-              {p.target != null ? (
-                <div className="rounded-[14px] bg-surface px-4 py-3 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]">
-                  <div className="flex items-center justify-between text-[13px]">
-                    <span className="font-medium text-ink">Target progress</span>
-                    <span className={cn("font-semibold tabular-nums", p.targetMet ? "text-profit" : "text-ink")}>
-                      {signed(p.achieved)} / {money(p.target)}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/[0.06]">
-                    <motion.div
-                      initial={reduce ? false : { scaleX: 0 }}
-                      animate={{ scaleX: Math.min(1, Math.max(0, p.achieved / p.target)) }}
-                      transition={{ duration: 0.9, delay: 0.25, ease: REVIEW_EXPAND.ease }}
-                      style={{ transformOrigin: "left" }}
-                      className={cn("h-full w-full rounded-full", p.targetMet ? "bg-profit" : "bg-gold-strong")}
-                    />
-                  </div>
+          {/* Progressive Disclosure for Week-by-Week + Equal-Height Extremes / Streaks / Rules Columns */}
+          <ReviewDisclosure
+            label="Month breakdown"
+            openLabel="Hide breakdown"
+            summary={`${activeWeeksCount} active weeks · Extremes · Rules`}
+            className="mt-4"
+          >
+            <div className="space-y-4">
+              {m.weeks.some((w) => w.totals.trades > 0) && (
+                <div className="grid gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
+                  {m.weeks.map((w, idx) => {
+                    const clickable = !!actions.openWeek;
+                    const fill = w.totals.trades > 0 ? Math.max(10, Math.round((Math.abs(w.net) / weekMax) * 100)) : 0;
+                    return (
+                      <motion.button
+                        key={w.monday}
+                        type="button"
+                        disabled={!clickable}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.04, duration: 0.36, ease: REVIEW_SMOOTH }}
+                        onClick={() => actions.openWeek?.(w.monday)}
+                        className="group rounded-[18px] border border-line-soft bg-surface p-3.5 text-left transition-all hover:border-line-strong hover:bg-raised active:scale-[0.98] disabled:cursor-default dark:border-line"
+                      >
+                        <div className="flex items-center justify-between text-[11.5px] text-faint">
+                          <span>Week {w.label}</span>
+                          <span>{w.totals.trades}T</span>
+                        </div>
+                        <p className={cn("num mt-1 text-[16px] font-semibold tracking-[-0.02em]", w.totals.trades ? tone(w.net) : "text-faint")}>
+                          {w.totals.trades ? signed(w.net) : "—"}
+                        </p>
+                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-ink/[0.06]">
+                          {fill > 0 && (
+                            <div className={cn("h-full rounded-full", w.net >= 0 ? "bg-profit" : "bg-loss")} style={{ width: `${fill}%` }} />
+                          )}
+                        </div>
+                      </motion.button>
+                    );
+                  })}
                 </div>
-              ) : (
-                <StatRow label="Target progress" value="No target set" valueClass="text-faint" />
               )}
-              <StatRow
-                label="Drawdown limit"
-                value={p.maxDrawdown != null ? `${money(p.drawdownUsed ?? 0)} / ${money(p.maxDrawdown)}` : "No limit"}
-                valueClass={p.drawdownBreached ? "text-loss" : p.maxDrawdown == null ? "text-faint" : undefined}
-              />
-              <StatRow
-                label="Plan adherence"
-                value={thoughtAnalysis.plannedTrades > 0 ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades}` : "—"}
-                sub={thoughtAnalysis.topTheme ?? undefined}
-              />
-              <StatRow label="Overtrade days" value={m.forcedTrades ? `${m.forcedTrades} forced` : "Clean"} valueClass={m.forcedTrades ? "text-loss" : "text-profit"} />
-            </Group>
-          </div>
+
+              {/* 3 Equal-Height Columns — `items-stretch` + `Group` flex-1 fills identical row/card heights */}
+              <div className="grid items-stretch gap-4 lg:grid-cols-3">
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.04, duration: 0.44, ease: REVIEW_SMOOTH }}
+                  className="h-full"
+                >
+                  <Group title="Extremes">
+                    <StatRow label="Avg win" value={t.avgWin == null ? "—" : signed(t.avgWin)} valueClass={t.avgWin ? "text-profit" : undefined} />
+                    <StatRow label="Avg loss" value={t.avgLoss == null ? "—" : signed(-t.avgLoss)} valueClass={t.avgLoss ? "text-loss" : undefined} />
+                    <StatRow label="Best trade" value={t.largestWin == null ? "—" : signed(t.largestWin)} valueClass={t.largestWin ? "text-profit" : undefined} />
+                    <StatRow label="Worst trade" value={t.largestLoss == null ? "—" : signed(t.largestLoss)} valueClass={t.largestLoss ? "text-loss" : undefined} />
+                  </Group>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, duration: 0.44, ease: REVIEW_SMOOTH }}
+                  className="h-full"
+                >
+                  <Group title="Weeks & streaks">
+                    <StatRow
+                      label="Best week"
+                      sub={m.bestWeek ? weekLabel(m.bestWeek.monday) : undefined}
+                      value={m.bestWeek ? signed(m.bestWeek.net) : "—"}
+                      valueClass={m.bestWeek ? tone(m.bestWeek.net) : undefined}
+                      onClick={m.bestWeek && actions.openWeek ? () => actions.openWeek!(m.bestWeek!.monday) : undefined}
+                    />
+                    <StatRow
+                      label="Hardest week"
+                      sub={hardest ? weekLabel(hardest.monday) : undefined}
+                      value={hardest ? signed(hardest.net) : "—"}
+                      valueClass={hardest ? tone(hardest.net) : undefined}
+                      onClick={hardest && actions.openWeek ? () => actions.openWeek!(hardest.monday) : undefined}
+                    />
+                    <StatRow
+                      label="Best streak"
+                      sub={bestStreak ? `${bestStreak.length} sessions` : undefined}
+                      value={bestStreak ? signed(bestStreak.pnl) : "—"}
+                      valueClass={bestStreak ? "text-profit" : undefined}
+                    />
+                    <StatRow
+                      label="Max drawdown"
+                      sub={maxDrawdown ? formatDateMedium(maxDrawdown.date) : undefined}
+                      value={maxDrawdown ? signed(-maxDrawdown.depth) : "—"}
+                      valueClass={maxDrawdown ? "text-loss" : undefined}
+                    />
+                  </Group>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.16, duration: 0.44, ease: REVIEW_SMOOTH }}
+                  className="h-full"
+                >
+                  <Group title="Account & rules">
+                    {p.target != null ? (
+                      <div className="flex min-h-[54px] flex-1 flex-col justify-center rounded-[14px] bg-surface px-4 py-2 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]">
+                        <div className="flex items-center justify-between text-[13px]">
+                          <span className="font-medium text-ink">Target progress</span>
+                          <span className={cn("font-semibold tabular-nums", p.targetMet ? "text-profit" : "text-ink")}>
+                            {signed(p.achieved)} / {money(p.target)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-ink/[0.06]">
+                          <motion.div
+                            initial={reduce ? false : { scaleX: 0 }}
+                            animate={{ scaleX: Math.min(1, Math.max(0, p.achieved / p.target)) }}
+                            transition={{ duration: 0.9, delay: 0.25, ease: REVIEW_EXPAND.ease }}
+                            style={{ transformOrigin: "left" }}
+                            className={cn("h-full w-full rounded-full", p.targetMet ? "bg-profit" : "bg-gold-strong")}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <StatRow label="Target progress" value="No target set" valueClass="text-faint" />
+                    )}
+                    <StatRow
+                      label="Drawdown limit"
+                      value={p.maxDrawdown != null ? `${money(p.drawdownUsed ?? 0)} / ${money(p.maxDrawdown)}` : "No limit"}
+                      valueClass={p.drawdownBreached ? "text-loss" : p.maxDrawdown == null ? "text-faint" : undefined}
+                    />
+                    <StatRow
+                      label="Plan adherence"
+                      value={thoughtAnalysis.plannedTrades > 0 ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades}` : "—"}
+                      sub={thoughtAnalysis.topTheme ?? undefined}
+                    />
+                    <StatRow label="Overtrade days" value={m.forcedTrades ? `${m.forcedTrades} forced` : "Clean"} valueClass={m.forcedTrades ? "text-loss" : "text-profit"} />
+                  </Group>
+                </motion.div>
+              </div>
+            </div>
+          </ReviewDisclosure>
         </Section>
       </SectionReveal>
 

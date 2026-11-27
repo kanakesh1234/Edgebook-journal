@@ -9,9 +9,10 @@ import { Sym } from "@/components/journal/symbols";
 import { EmptyState } from "@/components/ui/misc";
 import { toast } from "@/components/ui/toast";
 import { analyzePeriodThoughts } from "@/lib/ai-brain";
-import { buildWeek, type ReviewContext } from "@/lib/review/metrics";
+import { buildReviewEquityPoints, buildWeek, type ReviewContext } from "@/lib/review/metrics";
 import { weekLabel } from "@/lib/review/period";
 import { PSYCH_PATTERNS } from "@/lib/review/mistakes";
+import { EquityCurve } from "@/components/charts/equity-curve";
 import { cn } from "@/lib/utils";
 import {
   AnimatedNumber,
@@ -28,6 +29,8 @@ import {
   Prompt,
   QuestionReveal,
   REVIEW_EXPAND,
+  REVIEW_SMOOTH,
+  ReviewDisclosure,
   ReviewIconTile,
   ReviewScrollBar,
   SaveIndicator,
@@ -42,7 +45,7 @@ import {
   useMoney,
   useReviewSettledReveal,
 } from "./review-ui";
-import { DayBars, heat, Sparkline, WinRateRing } from "./review-charts";
+import { heat, WinRateRing } from "./review-charts";
 import { MistakeReplaySpotlight, PeriodTradesList, TradeScreenshotsGallery } from "./review-evidence";
 import { useReviewNotes } from "./use-review-notes";
 import type { ReviewActions } from "./reviews-panel";
@@ -66,6 +69,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
   const topMistake = week.mistakes[0];
 
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [moreCommitments, setMoreCommitments] = useState(false);
 
@@ -103,7 +107,11 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
   }
 
   const completedQuestions = [workedVal.trim(), leakVal.trim(), commit0.trim()].filter(Boolean).length;
-  const cumSeries = useMemo(() => week.log.map((r) => r.cum), [week.log]);
+  const eq = useMemo(() => buildReviewEquityPoints(ctx, monday, week.curve), [ctx, monday, week.curve]);
+  const eqTone = t.net > 0 ? "profit" : t.net < 0 ? "loss" : "neutral";
+  const activePt = scrub != null ? (eq.points[scrub] ?? null) : null;
+  const displayNet = activePt != null ? activePt.equity - eq.openingEquity : t.net;
+  const displayBalance = activePt != null ? activePt.equity : (week.balance ?? eq.currentEquity);
   const bestDay = useMemo(
     () => week.days.filter((d) => d.state === "traded").sort((a, b) => b.pnl - a.pnl)[0] ?? null,
     [week.days],
@@ -120,7 +128,7 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
         </SectionReveal>
       )}
 
-      {/* 1 — The Verdict Hero & Visual Graph */}
+      {/* 1 — The Verdict Hero & Dynamic Equity Curve */}
       <SectionReveal index={1}>
         <Section
           id="a1"
@@ -130,20 +138,29 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             <div className="flex items-center gap-2.5">
               {week.balance != null && (
                 <Chip>
-                  Balance <b className="font-semibold tabular-nums text-ink">{money(week.balance)}</b>
+                  Balance <b className="font-semibold tabular-nums text-ink">{money(displayBalance)}</b>
                 </Chip>
               )}
               <SaveIndicator state={rn.state} />
             </div>
           }
         >
-          <Card pad={false} className="overflow-hidden">
-            {/* Hero top header + live ring */}
-            <div className="flex flex-wrap items-center justify-between gap-5 px-5 pb-5 pt-5 sm:px-7 sm:pt-6">
+          <Card pad={false} ambient={eqTone === "neutral" ? "gold" : eqTone}>
+            {/* Hero top header + live scrub delta + win rate ring */}
+            <div className="relative z-10 flex flex-wrap items-center justify-between gap-5 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
               <div className="min-w-0">
-                <p className="text-[12.5px] font-medium text-muted">Net P&amp;L</p>
-                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[52px]", tone(t.net))}>
-                  <AnimatedNumber value={t.net} format={signed} />
+                <div className="flex items-center gap-2">
+                  <p className="text-[12.5px] font-medium text-muted">
+                    {activePt ? (activePt.kind === "start" ? "Week open" : formatDateMedium(activePt.date)) : "Net P&L"}
+                  </p>
+                  {activePt && activePt.kind === "day" && (
+                    <span className={cn("num rounded-full px-2 py-0.5 text-[11px] font-semibold", activePt.pnl >= 0 ? "bg-profit/12 text-profit" : "bg-loss/12 text-loss")}>
+                      {signed(activePt.pnl)} session
+                    </span>
+                  )}
+                </div>
+                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums transition-colors sm:text-[52px]", tone(displayNet))}>
+                  {activePt != null ? signed(displayNet) : <AnimatedNumber value={t.net} format={signed} />}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
@@ -158,30 +175,60 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
                 </div>
               </div>
 
-              <div className="flex items-center gap-5">
-                {cumSeries.length >= 2 && (
-                  <div className="hidden w-[160px] sm:block">
-                    <Sparkline values={cumSeries} height={64} />
-                    <p className="mt-1 text-right text-[11px] text-faint">Trade curve</p>
-                  </div>
-                )}
-                <WinRateRing value={t.winRate} size={96} />
-              </div>
+              <WinRateRing value={t.winRate} size={96} />
             </div>
 
-            {/* Interactive Mon–Fri Bar Chart */}
-            <div className="border-t border-line-soft px-4 py-4 sm:px-6">
-              <DayBars
-                days={week.days}
-                selectedDate={selectedDay}
-                onSelect={(d) => {
-                  haptic.selection();
-                  setSelectedDay((cur) => (cur === d ? null : d));
-                }}
+            {/* Dynamic animated & interactive scrubbing curve (matches Home dashboard) */}
+            <div className="relative z-10 border-t border-line-soft px-3 pb-2 pt-3 sm:px-6">
+              <EquityCurve
+                points={eq.points}
+                currency={ctx.settings.currency}
+                tone={eqTone}
+                baselineLabel="Week open"
+                emptyLabel="Log your first trade this week to watch your dynamic curve draw in."
+                rangeKey={`week:${monday}:${ctx.challenge?.id ?? "all"}:${week.entries.length}`}
+                onScrub={setScrub}
+                className="h-[220px] sm:h-[268px]"
               />
             </div>
 
-            <StatStrip count={4} className="border-t border-line-soft">
+            {/* Minimal Mon–Fri tap selector to filter sessions cleanly */}
+            <div className="relative z-10 grid grid-cols-5 divide-x divide-line-soft border-t border-line-soft dark:divide-line">
+              {week.days.slice(0, 5).map((d) => {
+                const selected = selectedDay === d.date;
+                const hasTrades = d.state === "traded";
+                return (
+                  <button
+                    key={d.date}
+                    type="button"
+                    onClick={() => {
+                      haptic.selection();
+                      setSelectedDay((cur) => (cur === d.date ? null : d.date));
+                    }}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-0.5 px-1.5 py-2.5 text-center transition-colors",
+                      selected
+                        ? "bg-gold/[0.12] text-ink"
+                        : "hover:bg-ink/[0.03] text-muted",
+                    )}
+                  >
+                    <span className={cn("text-[11px] font-medium", selected && "font-semibold text-gold-deep dark:text-gold")}>
+                      {weekdayShort(d.date)}
+                    </span>
+                    <span
+                      className={cn(
+                        "num text-[12px] font-semibold leading-tight",
+                        hasTrades ? tone(d.pnl) : d.state === "pass" || d.state === "no-setup" ? "text-profit/80" : "text-faint/70",
+                      )}
+                    >
+                      {hasTrades ? signed(d.pnl) : d.state === "pass" || d.state === "no-setup" ? "Pass" : d.state === "holiday" ? "Holiday" : "—"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <StatStrip count={4} className="relative z-10 border-t border-line-soft">
               <StripCell label="Avg R:R" value={fmtR(t.avgRR)} valueClass={tone(t.avgRR)} />
               <StripCell
                 label="Sessions"
@@ -198,52 +245,95 @@ export function WeeklyReview({ ctx, monday, actions }: { ctx: ReviewContext; mon
             </StatStrip>
           </Card>
 
-          {/* What happened — 3 clean story pills + quick unlogged patience action */}
+          {/* Progressive disclosure for week session breakdown & accountability actions */}
           {week.days.some((d) => d.state === "unlogged" || d.state === "traded") && (
-            <div className="mt-3.5 grid gap-3 sm:grid-cols-3">
-              <Card className="p-4">
-                <p className="text-[11.5px] font-medium text-faint">Best session</p>
-                <p className={cn("mt-1 text-[17px] font-semibold tracking-[-0.02em] tabular-nums", bestDay ? tone(bestDay.pnl) : "text-muted")}>
-                  {bestDay ? `${weekdayShort(bestDay.date)} · ${signed(bestDay.pnl)}` : "No trades yet"}
-                </p>
-                {bestDay && <p className="mt-0.5 text-[12px] text-faint">{bestDay.trades.length} {bestDay.trades.length === 1 ? "trade" : "trades"}</p>}
-              </Card>
-
-              <Card className="p-4">
-                <p className="text-[11.5px] font-medium text-faint">Planned execution</p>
-                <p className="mt-1 text-[17px] font-semibold tracking-[-0.02em] tabular-nums text-ink">
-                  {thoughtAnalysis.plannedTrades > 0
-                    ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades} · ${fmtPct(thoughtAnalysis.plannedWinRate)} won`
-                    : "None logged"}
-                </p>
-                <p className="mt-0.5 truncate text-[12px] text-faint">{thoughtAnalysis.topTheme ?? "Pre-trade plan adherence"}</p>
-              </Card>
-
-              <Card className="p-4">
-                <p className="text-[11.5px] font-medium text-faint">
-                  {week.unloggedDays > 0 ? `${week.unloggedDays} unlogged weekday${week.unloggedDays === 1 ? "" : "s"}` : "Week accountability"}
-                </p>
-                {week.unloggedDays > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {week.days
-                      .filter((d) => d.state === "unlogged")
-                      .map((d) => (
-                        <button
-                          key={d.date}
-                          type="button"
-                          onClick={() => void setPass(d.date, true)}
-                          className="inline-flex h-7 items-center gap-1 rounded-full bg-gold/14 px-2.5 text-[11.5px] font-semibold text-gold-deep transition-colors hover:bg-gold/25 active:scale-95 dark:text-gold"
-                        >
-                          <Sym name="shield" className="h-3 w-3" />
-                          {weekdayShort(d.date)}: No setup
-                        </button>
-                      ))}
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-profit">All days logged</p>
-                )}
-              </Card>
-            </div>
+            <ReviewDisclosure
+              label="Week breakdown"
+              openLabel="Hide breakdown"
+              summary={
+                week.unloggedDays > 0
+                  ? `${week.unloggedDays} unlogged weekday${week.unloggedDays === 1 ? "" : "s"}`
+                  : bestDay
+                    ? `Best ${weekdayShort(bestDay.date)} (${signed(bestDay.pnl)})`
+                    : "Plan adherence"
+              }
+              className="mt-4"
+            >
+              <div className="grid items-stretch gap-3 sm:grid-cols-3">
+                {[
+                  {
+                    k: "best",
+                    body: (
+                      <Card className="h-full p-4">
+                        <p className="text-[11.5px] font-medium text-faint">Best session</p>
+                        <p className={cn("mt-1 text-[17px] font-semibold tracking-[-0.02em] tabular-nums", bestDay ? tone(bestDay.pnl) : "text-muted")}>
+                          {bestDay ? `${weekdayShort(bestDay.date)} · ${signed(bestDay.pnl)}` : "No trades yet"}
+                        </p>
+                        <p className="mt-0.5 text-[12px] text-faint">
+                          {bestDay ? `${bestDay.trades.length} ${bestDay.trades.length === 1 ? "trade" : "trades"}` : "No completed sessions"}
+                        </p>
+                      </Card>
+                    ),
+                  },
+                  {
+                    k: "plan",
+                    body: (
+                      <Card className="h-full p-4">
+                        <p className="text-[11.5px] font-medium text-faint">Planned execution</p>
+                        <p className="mt-1 text-[17px] font-semibold tracking-[-0.02em] tabular-nums text-ink">
+                          {thoughtAnalysis.plannedTrades > 0
+                            ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades} · ${fmtPct(thoughtAnalysis.plannedWinRate)} won`
+                            : "None logged"}
+                        </p>
+                        <p className="mt-0.5 truncate text-[12px] text-faint">{thoughtAnalysis.topTheme ?? "Pre-trade plan adherence"}</p>
+                      </Card>
+                    ),
+                  },
+                  {
+                    k: "account",
+                    body: (
+                      <Card className="h-full p-4">
+                        <p className="text-[11.5px] font-medium text-faint">
+                          {week.unloggedDays > 0 ? `${week.unloggedDays} unlogged weekday${week.unloggedDays === 1 ? "" : "s"}` : "Week accountability"}
+                        </p>
+                        {week.unloggedDays > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {week.days
+                              .filter((d) => d.state === "unlogged")
+                              .map((d) => (
+                                <button
+                                  key={d.date}
+                                  type="button"
+                                  onClick={() => void setPass(d.date, true)}
+                                  className="inline-flex h-7 items-center gap-1 rounded-full bg-gold/14 px-2.5 text-[11.5px] font-semibold text-gold-deep transition-colors hover:bg-gold/25 active:scale-95 dark:text-gold"
+                                >
+                                  <Sym name="shield" className="h-3 w-3" />
+                                  {weekdayShort(d.date)}: No setup
+                                </button>
+                              ))}
+                          </div>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-profit">All days logged</p>
+                            <p className="mt-0.5 text-[12px] text-faint">Consistent daily cadence</p>
+                          </>
+                        )}
+                      </Card>
+                    ),
+                  },
+                ].map((item, i) => (
+                  <motion.div
+                    key={item.k}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.06, duration: 0.42, ease: REVIEW_SMOOTH }}
+                    className="h-full"
+                  >
+                    {item.body}
+                  </motion.div>
+                ))}
+              </div>
+            </ReviewDisclosure>
           )}
         </Section>
       </SectionReveal>
