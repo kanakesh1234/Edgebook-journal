@@ -26,7 +26,6 @@ const setVar = (el: HTMLElement, cache: Map<string, number>, key: string, v: num
 
 function setup(): () => void {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const desktop = window.matchMedia("(min-width: 1280px)").matches;
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   const nav = navigator as Navigator & { deviceMemory?: number };
   const lite =
@@ -35,8 +34,8 @@ function setup(): () => void {
   const root = document.querySelector<HTMLElement>("[data-lp-root]");
   if (root) root.dataset.fx = lite ? "lite" : "full";
 
-  // Reduced motion or mobile/tablet tiers: no scroll-driven 2.5D film engine.
-  if (reduced || !desktop) return () => undefined;
+  // Reduced motion: CSS presents a static, normal-flow page. No engine at all.
+  if (reduced) return () => undefined;
 
   const updaters: Updater[] = [];
   const disposers: Array<() => void> = [];
@@ -220,18 +219,15 @@ function setup(): () => void {
 export function ScrollController() {
   useEffect(() => {
     let dispose = setup();
-    // Rebuild if reduced-motion or desktop viewport tier changes while open.
-    const mqReduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const mqDesktop = window.matchMedia("(min-width: 1280px)");
+    // If the person toggles reduced motion while the page is open, rebuild.
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const onChange = () => {
       dispose();
       dispose = setup();
     };
-    mqReduced.addEventListener("change", onChange);
-    mqDesktop.addEventListener("change", onChange);
+    mq.addEventListener("change", onChange);
     return () => {
-      mqReduced.removeEventListener("change", onChange);
-      mqDesktop.removeEventListener("change", onChange);
+      mq.removeEventListener("change", onChange);
       dispose();
     };
   }, []);

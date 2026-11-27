@@ -195,7 +195,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
               animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
               exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
               transition={{ duration: 0.2, ease: EASE }}
-              className="absolute left-0 top-[calc(100%+8px)] z-50 w-[268px] overflow-hidden rounded-[22px] border border-line-strong bg-surface/95 p-1.5 shadow-overlay backdrop-blur-xl"
+              className="absolute left-0 top-[calc(100%+8px)] z-50 w-[268px] overflow-hidden rounded-[22px] border border-line-strong bg-overlay/95 p-1.5 shadow-overlay backdrop-blur-xl dark:ring-1 dark:ring-inset dark:ring-white/[0.08]"
             >
               {/* Row 1 — Apple iOS Switch Row for No-Setup Day */}
               <button
@@ -204,7 +204,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
                 aria-checked={noSetup}
                 disabled={hasTraded}
                 onClick={() => void handleToggleNoSetup()}
-                className="flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-ink/[0.045] disabled:cursor-default disabled:opacity-45"
+                className="flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-well disabled:cursor-default disabled:opacity-45"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span
@@ -228,7 +228,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
                   aria-hidden
                   className={cn(
                     "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full p-0.5 transition-colors duration-200",
-                    noSetup ? "bg-profit" : "bg-ink/[0.15]",
+                    noSetup ? "bg-profit" : "bg-well-hover dark:bg-white/[0.16]",
                   )}
                 >
                   <motion.span
@@ -250,7 +250,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
                   setMenuOpen(false);
                   setLimitOpen(true);
                 }}
-                className="mt-0.5 flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-ink/[0.045] disabled:cursor-default disabled:opacity-40"
+                className="mt-0.5 flex w-full items-center justify-between gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors hover:bg-well disabled:cursor-default disabled:opacity-40"
               >
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] bg-[#5e5ce6] text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]">
@@ -280,7 +280,7 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
               onClick={dismissLimit}
               variants={{ hidden: { opacity: 0 }, visible: { opacity: 1 } }}
               transition={{ duration: 0.25 }}
-              className="absolute inset-0 cursor-default bg-ink/25 backdrop-blur-sm"
+              className="absolute inset-0 cursor-default bg-ink/25 backdrop-blur-sm dark:bg-black/60"
             />
             <motion.section
               role="dialog"
@@ -291,13 +291,13 @@ export function DailyFocusControl({ currency }: { currency: CurrencyCode }) {
                 visible: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 },
               }}
               transition={{ duration: 0.34, ease: EASE }}
-              className="relative max-h-[calc(100dvh-1.5rem)] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-line-strong bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 shadow-overlay sm:max-w-[380px] sm:rounded-[28px] sm:pb-6"
+              className="relative max-h-[calc(100dvh-1.5rem)] w-full overflow-y-auto overscroll-contain rounded-t-[28px] border border-line-strong bg-surface px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 shadow-overlay dark:ring-1 dark:ring-inset dark:ring-white/[0.08] sm:max-w-[380px] sm:rounded-[28px] sm:pb-6"
             >
               <button
                 type="button"
                 aria-label="Close"
                 onClick={dismissLimit}
-                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-ink/[0.06] text-muted outline-none transition-[background-color,transform] duration-200 hover:rotate-90 hover:bg-ink/[0.1] hover:text-ink focus-visible:ring-2 focus-visible:ring-gold/50 active:scale-95"
+                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-well text-muted outline-none transition-[background-color,transform] duration-200 hover:rotate-90 hover:bg-well-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-gold/50 active:scale-95"
               >
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
               </button>

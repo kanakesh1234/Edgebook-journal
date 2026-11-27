@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import "@fontsource/instrument-serif/400-italic.css";
 import "@/components/landing/landing.css";
 import "@/components/landing/landing-theme.css";
-import { LandingRoot } from "@/components/landing/landing-root";
+import { LandingHeader } from "@/components/landing/header";
+import { LandingShell } from "@/components/landing/shell";
+import { ScrollController } from "@/components/landing/scroll-controller";
+import { Cinema } from "@/components/landing/cinema";
+import { Quotes, Statement } from "@/components/landing/statement";
+import { Finale, LandingFooter } from "@/components/landing/finale";
 
 export const metadata: Metadata = {
   title: { absolute: "Edgebook — Record the decision" },
@@ -17,5 +22,18 @@ export const metadata: Metadata = {
 };
 
 export default function LandingPage() {
-  return <LandingRoot />;
+  return (
+    <div className="lp-root" data-lp-root data-fx="full">
+      <LandingShell />
+      <ScrollController />
+      <LandingHeader />
+      <main>
+        <Cinema />
+        <Statement />
+        <Quotes />
+        <Finale />
+      </main>
+      <LandingFooter />
+    </div>
+  );
 }

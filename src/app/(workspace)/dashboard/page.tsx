@@ -5,13 +5,11 @@ import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
 import { scopeToPrimary } from "@/lib/challenges";
-import { dayRisk } from "@/lib/risk";
 import { PlanTradeFlow } from "@/components/journal/plan-trade-flow";
 import { CalendarView } from "@/components/calendar/calendar-view";
 import { formatDateFull, todayKey } from "@/lib/format";
 import { useUi } from "@/lib/ui-store";
 import { Performance } from "@/components/dashboard/performance";
-import { TodayPanel, type RiskPosture } from "@/components/dashboard/today-panel";
 import { DailyFocusControl } from "@/components/dashboard/daily-focus-control";
 import { EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -24,7 +22,6 @@ export default function DashboardPage() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const [planOpen, setPlanOpen] = useState(false);
   const dayLogs = useApp((st) => st.dayLogs);
-  const plans = useApp((st) => st.plans);
 
   const today = todayKey();
   const isNoSetupToday = useMemo(
@@ -45,45 +42,6 @@ export default function DashboardPage() {
 
   const stats = useMemo(() => computeStats(entries, settings), [entries, settings]);
   const streak = useMemo(() => currentStreak(stats.daily), [stats.daily]);
-
-  const recentToday = useMemo(() => entries.filter((e) => e.date === today), [entries, today]);
-  const tRisk = useMemo(
-    () => dayRisk(today, entries, plans, rawSettings.dayLimits),
-    [today, entries, plans, rawSettings.dayLimits],
-  );
-  const { brokenToday, brokenWeek } = useMemo(() => {
-    const cutoff = new Date(`${today}T00:00:00Z`);
-    cutoff.setUTCDate(cutoff.getUTCDate() - 6);
-    const weekStart = cutoff.toISOString().slice(0, 10);
-    let bToday = 0;
-    let bWeek = 0;
-    for (const e of entries) {
-      if (e.review?.plannedVsActual?.followedChecklist === false) {
-        if (e.date === today) bToday += 1;
-        if (e.date >= weekStart && e.date <= today) bWeek += 1;
-      }
-    }
-    return { brokenToday: bToday, brokenWeek: bWeek };
-  }, [entries, today]);
-
-  const todayIntention = useMemo(() => {
-    const preds = rawSettings.practiceProgress?.futureSelfPredictions ?? [];
-    for (let i = preds.length - 1; i >= 0; i--) {
-      const p = preds[i];
-      if (p?.date === today) return { rule: p.rule, outcome: p.outcome ?? null };
-    }
-    return null;
-  }, [rawSettings.practiceProgress?.futureSelfPredictions, today]);
-
-  const riskPosture: RiskPosture = useMemo(() => {
-    if (tRisk?.status === "over" || stats.drawdownBudgetUsed >= 0.9) {
-      return { label: "Protect capital", tone: "loss" };
-    }
-    if (tRisk?.status === "near" || tRisk?.status === "hit" || stats.drawdownBudgetUsed >= 0.65) {
-      return { label: "Guarded", tone: "gold" };
-    }
-    return { label: "Steady", tone: "profit" };
-  }, [tRisk?.status, stats.drawdownBudgetUsed]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -152,20 +110,6 @@ export default function DashboardPage() {
       </Header>
 
       <div className="space-y-6 md:space-y-8">
-        <TodayPanel
-          risk={riskPosture}
-          drawdownUsed={stats.drawdownBudgetUsed}
-          drawdown={stats.drawdown}
-          drawdownLimit={settings.maxDrawdown ?? 0}
-          currency={settings.currency}
-          brokenToday={brokenToday}
-          brokenWeek={brokenWeek}
-          intention={todayIntention}
-          recent={recentToday}
-          dayRisk={tRisk}
-          onPlanTrade={() => setPlanOpen(true)}
-        />
-
         <Performance
           stats={stats}
           currency={settings.currency}

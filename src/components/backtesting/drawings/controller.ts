@@ -101,7 +101,7 @@ export class DrawingController {
 
   private inPane(p: Pt): boolean {
     const { w, h } = this.d.proj.paneSize();
-    return p.x >= 0 && p.y >= 0 && p.x <= w && p.y <= h;
+    return p.x >= 0 && p.y >= 0 && p.x < w && p.y < h;
   }
 
   private locked(d: DrawingObject): boolean { return !!d.locked || this.st().drawingsLocked; }
@@ -201,8 +201,13 @@ export class DrawingController {
   private release(e?: PointerEvent) {
     this.swallow = false;
     this.d.chart.applyOptions({
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
     });
     if (e) { try { this.d.container.releasePointerCapture(e.pointerId); } catch { /* already released */ } }
   }

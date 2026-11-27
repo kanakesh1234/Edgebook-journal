@@ -389,7 +389,7 @@
   }
   .tv-ticket {
     top: 12px;
-    right: 14px;
+    right: 84px;
     width: 300px;
     max-height: calc(100% - 24px);
     overflow-y: auto;

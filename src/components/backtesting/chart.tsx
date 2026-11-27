@@ -349,8 +349,13 @@ export default function BacktestChart({
         minBarSpacing: 0.4,
         shiftVisibleRangeOnNewBar: false, // EJ: the shift is done below, eased
       },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
     });
 
     const first = candlesRef.current[0]?.close ?? 0;
@@ -435,6 +440,35 @@ export default function BacktestChart({
     });
     ro.observe(el);
 
+    const syncAutoScale = () => {
+      try {
+        const liveAuto = chart.priceScale("right").options().autoScale;
+        const st = useBacktest.getState();
+        if (liveAuto !== st.scale.auto) {
+          st.setScale({ auto: liveAuto });
+        }
+      } catch { /* chart already gone */ }
+    };
+    let axisActive = false;
+    const onAxisDown = (e: Event) => {
+      const pt = "touches" in e ? (e as TouchEvent).touches[0] : (e as MouseEvent);
+      if (!pt) return;
+      const rect = el.getBoundingClientRect();
+      if (pt.clientX - rect.left >= chart.paneSize().width) axisActive = true;
+    };
+    const onAxisEnd = () => {
+      if (!axisActive) return;
+      axisActive = false;
+      requestAnimationFrame(syncAutoScale);
+    };
+    const onAxisDbl = () => requestAnimationFrame(syncAutoScale);
+    el.addEventListener("mousedown", onAxisDown, { passive: true, capture: true });
+    el.addEventListener("touchstart", onAxisDown, { passive: true, capture: true });
+    el.addEventListener("dblclick", onAxisDbl, { passive: true });
+    window.addEventListener("mouseup", onAxisEnd, { passive: true });
+    window.addEventListener("touchend", onAxisEnd, { passive: true });
+    window.addEventListener("touchcancel", onAxisEnd, { passive: true });
+
     chartRef.current = chart;
     seriesRef.current = series;
     primitiveRef.current = primitive;
@@ -449,6 +483,12 @@ export default function BacktestChart({
       try { savedRangeRef.current = chart.timeScale().getVisibleLogicalRange(); } catch { /* chart already gone */ }
       animRef.current?.cancel();
       cancelAnimationFrame(glideRef.current); glideToRef.current = null;
+      el.removeEventListener("mousedown", onAxisDown, true);
+      el.removeEventListener("touchstart", onAxisDown, true);
+      el.removeEventListener("dblclick", onAxisDbl);
+      window.removeEventListener("mouseup", onAxisEnd);
+      window.removeEventListener("touchend", onAxisEnd);
+      window.removeEventListener("touchcancel", onAxisEnd);
       detachController();
       ro.disconnect();
       chart.remove();
@@ -670,8 +710,13 @@ export default function BacktestChart({
 
     const restoreInteractions = (e?: PointerEvent) => {
       chart.applyOptions({
-        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: { time: true, price: true },
+          axisDoubleClickReset: { time: true, price: true },
+        },
       });
       if (e) { try { container.releasePointerCapture(e.pointerId); } catch { /* ignore */ } }
       container.style.cursor = "";
@@ -708,7 +753,7 @@ export default function BacktestChart({
       if (e.button !== 0) return;
       const r = container.getBoundingClientRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
-      if (x > chart.paneSize().width) return;
+      if (x >= chart.paneSize().width) return;
       const hit = near(y);
       if (!hit) return;
       e.preventDefault();
@@ -824,13 +869,19 @@ export default function BacktestChart({
   /* ---------------- price scale (%, log, auto, invert) ---------------- */
   useEffect(() => {
     const chart = chartRef.current;
-    const series = seriesRef.current;
-    if (!chart || !series) return;
-    chart.priceScale("right").applyOptions({
-      mode: scale.mode === "log" ? PriceScaleMode.Logarithmic : scale.mode === "percent" ? PriceScaleMode.Percentage : PriceScaleMode.Normal,
-      invertScale: scale.invert,
-      autoScale: scale.auto,
-    });
+    if (!chart) return;
+    const ps = chart.priceScale("right");
+    const cur = ps.options();
+    const nextMode =
+      scale.mode === "log" ? PriceScaleMode.Logarithmic
+        : scale.mode === "percent" ? PriceScaleMode.Percentage
+          : PriceScaleMode.Normal;
+    // Only pass fields that actually differ — passing `mode` unnecessarily invalidates a user-dragged price range.
+    const opts: { mode?: PriceScaleMode; invertScale?: boolean; autoScale?: boolean } = {};
+    if (cur.mode !== nextMode) opts.mode = nextMode;
+    if (cur.invertScale !== scale.invert) opts.invertScale = scale.invert;
+    if (cur.autoScale !== scale.auto) opts.autoScale = scale.auto;
+    if (Object.keys(opts).length > 0) ps.applyOptions(opts);
   }, [scale, epoch]);
 
   /* ---------------- cursor flavour ---------------- */
@@ -965,6 +1016,9 @@ export default function BacktestChart({
       const tool = useBacktest.getState().activeDrawingTool;
       if (tool !== "cursor" && tool !== "crosshair") return;
       if (dragRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const paneW = projRef.current?.paneSize().w ?? rect.width;
+      if (e.clientX - rect.left >= paneW) { clear(); return; }
       startX = e.clientX;
       startY = e.clientY;
       clear();
