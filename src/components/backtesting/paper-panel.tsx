@@ -50,11 +50,12 @@ export default function PaperPanel() {
     )}
     <div className={`tv-paper${compactDock ? (open ? " is-mobile-open" : " is-mobile-hidden") : ""}`}>
       <div className="tv-paper-bar">
-        {/* Mobile drag handle */}
-        <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "4px auto 0", flexShrink: 0 }} />
-        <button type="button" className="tv-paper-title" aria-expanded={open} aria-controls="ej-paper-body" data-tip={open ? "Collapse panel" : "Expand panel"} style={{ touchAction: "manipulation" }} onClick={() => setOpen(!open)}>
-          <EJMark size={18} title="" />Paper Trading
-          <I name="chevronDown" size={16} className="ej-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }} />
+        {compactDock && (
+          <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "4px auto 0", flexShrink: 0 }} />
+        )}
+        <button type="button" className="tv-paper-title" aria-expanded={open} aria-controls="ej-paper-body" data-tip={open ? "Collapse Paper Trading" : "Open Paper Trading"} style={{ touchAction: "manipulation" }} onClick={() => setOpen(!open)}>
+          <EJMark size={16} title="" />Paper Trading
+          <I name="chevronDown" size={14} className="ej-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }} />
         </button>
         {compactDock && open && (
           <button

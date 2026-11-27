@@ -5,9 +5,11 @@ import { useBacktest } from "@/lib/backtesting/store";
 import { instrumentBySymbol } from "@/lib/backtesting/instruments";
 import type { OrderType } from "@/lib/backtesting/types";
 import { I } from "./tv-icons";
+import { useCompactDock } from "./mobile-sheet";
 
 /** TradingView-style order ticket: market / limit / stop with optional stop loss and take profit. */
 export default function OrderTicket({ onClose }: { onClose: () => void }) {
+  const compactDock = useCompactDock();
   const symbol = useBacktest((s) => s.activeInstrument);
   const status = useBacktest((s) => s.status);
   const qty = useBacktest((s) => s.orderQty);
@@ -36,8 +38,9 @@ export default function OrderTicket({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="tv-ticket" role="dialog" aria-label="Order ticket" onKeyDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-      {/* Mobile drag handle */}
-      <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "0 auto 8px", flexShrink: 0 }} />
+      {compactDock && (
+        <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "0 auto 8px", flexShrink: 0 }} />
+      )}
       <h4>
         <span>{symbol} <small>{spec ? `$${spec.tickValue}/tick` : ""}</small></span>
         <button type="button" className="tv-tbtn" style={{ height: 44, minWidth: 44, touchAction: "manipulation" }} onClick={onClose} aria-label="Close order ticket" data-tip="Close"><I name="close" size={16} /></button>

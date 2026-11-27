@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useApp } from "@/lib/store";
-import { MINATO_MAX_WIDTH, MINATO_MIN_WIDTH, useUi } from "@/lib/ui-store";
+import { useUi } from "@/lib/ui-store";
 import { scopeToPrimary } from "@/lib/challenges";
 import { computeStats } from "@/lib/stats";
 import { disciplineSummary } from "@/lib/discipline";
@@ -91,6 +91,7 @@ const Svg = ({ children, className = "h-[17px] w-[17px]" }: { children: React.Re
   <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{children}</svg>
 );
 const CloseIcon = () => <Svg><path d="M6 6l12 12M18 6 6 18" /></Svg>;
+const BackIcon = () => <Svg><path d="m15 18-6-6 6-6" /></Svg>;
 const ComposeIcon = () => <Svg><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Svg>;
 const SendIcon = () => <Svg className="h-4 w-4"><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
 const PlayIcon = () => (
@@ -146,6 +147,49 @@ function Avatar({ className }: { className?: string }) {
 /* ------------------------------------------------------------------ */
 
 export function Minato() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const open = useUi((s) => s.minatoOpen);
+  const setOpen = useUi((s) => s.setMinatoOpen);
+
+  // On Desktop (>=1280px), Minato lives at /minato (triggered by the top Star icon or ⌘J) with no side dock.
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    if (window.matchMedia("(min-width: 1280px)").matches) {
+      setOpen(false);
+      if (pathname !== "/minato") router.push("/minato");
+    }
+  }, [open, pathname, router, setOpen]);
+
+  // ⌘J anywhere on Desktop toggles /minato cleanly
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || typeof window === "undefined") return;
+      if (!window.matchMedia("(min-width: 1280px)").matches) return;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        if (pathname === "/minato") {
+          if (window.history.length > 1) router.back();
+          else router.push("/dashboard");
+        } else {
+          router.push("/minato");
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pathname, router]);
+
+  if (pathname === "/minato") return <MinatoReminderPopup />;
+  return <MinatoInner mode="overlay" />;
+}
+
+export function MinatoPageView() {
+  return <MinatoInner mode="page" />;
+}
+
+function MinatoInner({ mode }: { mode: "overlay" | "page" }) {
+  const isPage = mode === "page";
   const router = useRouter();
   const allEntries = useApp((s) => s.entries);
   const rawSettings = useApp((s) => s.settings);
@@ -153,13 +197,13 @@ export function Minato() {
   const dayLogs = useApp((s) => s.dayLogs);
   const plans = useApp((s) => s.plans);
 
-  const open = useUi((s) => s.minatoOpen);
+  const storeOpen = useUi((s) => s.minatoOpen);
   const setOpen = useUi((s) => s.setMinatoOpen);
   const width = useUi((s) => s.minatoWidth);
-  const setWidth = useUi((s) => s.setMinatoWidth);
   const focused = useUi((s) => s.minatoFocused);
   const setFocused = useUi((s) => s.setMinatoFocused);
   const focusId = useUi((s) => s.minatoTradeId);
+  const open = isPage ? true : storeOpen;
 
   const reduce = useReducedMotion();
   const dragControls = useDragControls();
@@ -278,7 +322,15 @@ export function Minato() {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const focusReviewed = useRef(false);
-  const resizingRef = useRef(false);
+
+  const handleCloseOrBack = useCallback(() => {
+    if (isPage) {
+      if (typeof window !== "undefined" && window.history.length > 1) router.back();
+      else router.push("/dashboard");
+    } else {
+      setOpen(false);
+    }
+  }, [isPage, router, setOpen]);
 
   /* ------------------------------------------------------------------ */
   /*  Jarvis / Siri / Bixby Action Executor                              */
@@ -456,26 +508,9 @@ export function Minato() {
     [allEntries, entries, settings.startingEquity, settings.currency, rawSettings.rules, rawSettings.challenges, router, setOpen, setFocused],
   );
 
-  // Sync CSS variable `--minato-dock-w` on `document.documentElement` so `.app-main` pushes smoothly on desktop
+  // Mobile visualViewport keyboard-aware composer offset (overlay sheets only)
   useEffect(() => {
-    const root = document.documentElement;
-    if (open) {
-      const effectiveW = focused ? 720 : width;
-      root.style.setProperty("--minato-dock-w", `${effectiveW}px`);
-      root.setAttribute("data-minato-open", "true");
-    } else {
-      root.style.setProperty("--minato-dock-w", "0px");
-      root.removeAttribute("data-minato-open");
-    }
-    return () => {
-      root.style.setProperty("--minato-dock-w", "0px");
-      root.removeAttribute("data-minato-open");
-    };
-  }, [open, width, focused]);
-
-  // Mobile visualViewport keyboard-aware composer offset
-  useEffect(() => {
-    if (!open || typeof window === "undefined" || !window.visualViewport) return;
+    if (isPage || !open || typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
     const onViewport = () => {
       const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
@@ -618,6 +653,14 @@ export function Minato() {
   }, [messages, busy, reduce, open]);
 
   useEffect(() => {
+    if (!isPage) return;
+    return () => {
+      if (useUi.getState().minatoTradeId) useUi.setState({ minatoTradeId: null });
+    };
+  }, [isPage]);
+
+  useEffect(() => {
+    if (isPage) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
       if (open && e.key === "Escape") {
@@ -631,7 +674,7 @@ export function Minato() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, setOpen]);
+  }, [isPage, open, setOpen]);
 
   const fitInput = useCallback(() => {
     const el = inputRef.current;
@@ -682,32 +725,10 @@ export function Minato() {
 
   useEffect(() => {
     if (open && !busy) {
-      const t = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 260);
+      const t = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), isPage ? 120 : 260);
       return () => window.clearTimeout(t);
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Desktop left-edge resize handler (400–640px)
-  const startResize = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      resizingRef.current = true;
-      setFocused(false);
-      const onMove = (ev: PointerEvent) => {
-        if (!resizingRef.current) return;
-        const nextW = window.innerWidth - ev.clientX;
-        setWidth(Math.max(MINATO_MIN_WIDTH, Math.min(MINATO_MAX_WIDTH, nextW)));
-      };
-      const onUp = () => {
-        resizingRef.current = false;
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    },
-    [setWidth, setFocused],
-  );
+  }, [open, isPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ask = useCallback(
     async (text: string) => {
@@ -990,83 +1011,22 @@ export function Minato() {
   };
 
   const empty = messages.length === 0 && !busy;
-  const desktopPanelWidth = focused ? 720 : width;
 
-  return (
+  const panelBody = (
     <>
-
-      {/* Mobile & Tablet Scrim Backdrop */}
-      <AnimatePresence>
-        {open && (
-          <motion.button
-            key="minato-backdrop"
-            type="button"
-            aria-label="Close Minato"
-            tabIndex={-1}
-            onClick={() => setOpen(false)}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.28, ease: SPRING_EASE }}
-            className="fixed inset-0 z-[89] bg-black/45 backdrop-blur-[3px] xl:hidden"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Docked Desktop Panel (xl+), Tablet Right Overlay Drawer (md–lg), Mobile Bottom Sheet (<md) */}
-      <AnimatePresence>
-        {open && (
-          <motion.aside
-            role="dialog"
-            aria-label="Minato"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, x: 32, y: 0 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, x: 0, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 32, y: 0 }}
-            transition={{ duration: 0.32, ease: SPRING_EASE }}
-            drag="y"
-            dragControls={dragControls}
-            dragListener={false}
-            dragConstraints={{ top: 0, bottom: 0 }}
-            dragElastic={{ top: 0, bottom: 0.35 }}
-            onDragEnd={(_, info) => {
-              if (info.offset.y > 100 || info.velocity.y > 650) setOpen(false);
-            }}
-            style={
-              {
-                "--mn-desktop-w": `${desktopPanelWidth}px`,
-                paddingBottom: keyboardOffset > 0 ? `${keyboardOffset}px` : undefined,
-              } as React.CSSProperties
-            }
-            className={cn(
-              "mn-panel fixed z-[90] flex flex-col overflow-hidden",
-              // Mobile (<768px): full-height bottom sheet with rounded top corners and safe-area awareness
-              "inset-x-0 bottom-0 h-[calc(100dvh-var(--safe-top)-0.5rem)] rounded-t-[24px]",
-              // Tablet (768–1279px): overlay right drawer so main content keeps full width
-              "md:inset-y-0 md:left-auto md:right-0 md:h-dvh md:w-[min(420px,82vw)] md:rounded-l-[24px] md:rounded-tr-none md:border-l md:border-line-strong",
-              // Desktop (≥1280px): docked right panel that pushes content smoothly
-              "xl:w-[var(--mn-desktop-w)] xl:rounded-none xl:border-line",
-            )}
-          >
-            {/* Desktop Left-Edge Resize Handle (400px – 640px) */}
-            <div
-              onPointerDown={startResize}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize Minato panel"
-              title="Drag to resize (400–640px)"
-              className="mn-resize-handle hidden xl:block"
-            />
-
-            {/* Mobile Drag Handle */}
-            <div
-              onPointerDown={(e) => dragControls.start(e)}
-              className="flex shrink-0 cursor-grab touch-none justify-center pb-1 pt-2.5 active:cursor-grabbing md:hidden"
-            >
-              <span className="sheet-handle" />
-            </div>
-
-            {/* Header (Single Close Button + Expand-to-Focus + New Chat) */}
+            {/* Header (Back/Close + New Chat) */}
             <div className="mn-head flex shrink-0 items-center gap-3 px-4 py-3.5 md:px-5 md:py-4">
+              {isPage && (
+                <button
+                  type="button"
+                  aria-label="Back"
+                  title="Back"
+                  onClick={handleCloseOrBack}
+                  className="mn-icon-btn group"
+                >
+                  <BackIcon />
+                </button>
+              )}
               <Avatar className="h-9 w-9 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold leading-tight tracking-[-0.01em] text-ink">Minato</p>
@@ -1090,29 +1050,20 @@ export function Minato() {
                 </button>
               )}
 
-              {/* Desktop Expand-to-Focus toggle */}
-              <button
-                type="button"
-                aria-label={focused ? "Restore panel width" : "Expand to focus mode"}
-                title={focused ? "Restore width" : "Expand to focus mode"}
-                onClick={() => setFocused(!focused)}
-                className="mn-icon-btn hidden md:grid"
-              >
-                <ExpandIcon expanded={focused} />
-              </button>
-
-              {/* Single Close Button */}
-              <button
-                type="button"
-                aria-label="Close Minato"
-                title="Close (Esc)"
-                onClick={() => setOpen(false)}
-                className="mn-icon-btn group"
-              >
-                <span className="transition-transform duration-300 ease-out group-hover:rotate-90">
-                  <CloseIcon />
-                </span>
-              </button>
+              {/* Close Button on Overlay Sheet (Phone & Tablet) */}
+              {!isPage && (
+                <button
+                  type="button"
+                  aria-label="Close Minato"
+                  title="Close (Esc)"
+                  onClick={() => setOpen(false)}
+                  className="mn-icon-btn group"
+                >
+                  <span className="transition-transform duration-300 ease-out group-hover:rotate-90">
+                    <CloseIcon />
+                  </span>
+                </button>
+              )}
             </div>
 
             {/* Subtle "Saved to memory" / Task Executed toast bar */}
@@ -1325,6 +1276,83 @@ export function Minato() {
                 </button>
               </div>
             </form>
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <motion.section
+        aria-label="Minato"
+        initial={reduce ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.36, ease: SPRING_EASE }}
+        className="mx-auto flex h-[calc(100dvh-var(--topbar-h)-var(--tabbar-h)-2.5rem)] min-h-[460px] w-full max-w-[780px] flex-col overflow-hidden rounded-[26px] border border-line bg-surface/85 shadow-panel backdrop-blur-2xl md:h-[calc(100dvh-4.75rem)] dark:border-line-strong"
+      >
+        {panelBody}
+      </motion.section>
+    );
+  }
+
+  return (
+    <>
+      {/* Mobile & Tablet Scrim Backdrop */}
+      <AnimatePresence>
+        {open && (
+          <motion.button
+            key="minato-backdrop"
+            type="button"
+            aria-label="Close Minato"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.28, ease: SPRING_EASE }}
+            className="fixed inset-0 z-[89] bg-black/45 backdrop-blur-[3px] xl:hidden"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Tablet Right Overlay Drawer (md–lg) & Mobile Bottom Sheet (<md) */}
+      <AnimatePresence>
+        {open && (
+          <motion.aside
+            role="dialog"
+            aria-label="Minato"
+            initial={reduce ? { opacity: 0 } : { opacity: 0, x: 32, y: 0 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, x: 0, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 32, y: 0 }}
+            transition={{ duration: 0.32, ease: SPRING_EASE }}
+            drag="y"
+            dragControls={dragControls}
+            dragListener={false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0, bottom: 0.35 }}
+            onDragEnd={(_, info) => {
+              if (info.offset.y > 100 || info.velocity.y > 650) setOpen(false);
+            }}
+            style={
+              {
+                paddingBottom: keyboardOffset > 0 ? `${keyboardOffset}px` : undefined,
+              } as React.CSSProperties
+            }
+            className={cn(
+              "mn-panel fixed z-[90] flex flex-col overflow-hidden xl:hidden",
+              // Mobile (<768px): full-height bottom sheet with rounded top corners and safe-area awareness
+              "inset-x-0 bottom-0 h-[calc(100dvh-var(--safe-top)-0.5rem)] rounded-t-[24px]",
+              // Tablet (768–1279px): overlay right drawer so main content keeps full width
+              "md:inset-y-0 md:left-auto md:right-0 md:h-dvh md:w-[min(420px,82vw)] md:rounded-l-[24px] md:rounded-tr-none md:border-l md:border-line-strong",
+            )}
+          >
+            {/* Mobile Drag Handle */}
+            <div
+              onPointerDown={(e) => dragControls.start(e)}
+              className="flex shrink-0 cursor-grab touch-none justify-center pb-1 pt-2.5 active:cursor-grabbing md:hidden"
+            >
+              <span className="sheet-handle" />
+            </div>
+
+            {panelBody}
           </motion.aside>
         )}
       </AnimatePresence>

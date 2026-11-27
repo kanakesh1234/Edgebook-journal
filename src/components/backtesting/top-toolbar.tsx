@@ -353,8 +353,8 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
         </>
       )}
 
-      {/* P&L chip (mobile: opens Paper Trading sheet) / full account stats (desktop/tablet) */}
-      {account && mobile ? (
+      {/* P&L chip on Phone ONLY (opens Paper Trading sheet); Desktop account stats live in the bottom Paper Trading panel */}
+      {account && mobile && (
         <button
           type="button"
           className={`ej-pnl-chip${account.netPnl > 0 ? " is-up" : account.netPnl < 0 ? " is-dn" : ""}`}
@@ -365,22 +365,16 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
         >
           <AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} />
         </button>
-      ) : account ? (
-        <div className="tv-account" aria-label="Account">
-          <div><small>Balance</small><b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></div>
-          <div><small>P&amp;L</small><b className={account.netPnl > 0 ? "tv-up" : account.netPnl < 0 ? "tv-down" : ""}><AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} /></b></div>
-          <div><small>Trades</small><b>{account.totalTrades}</b></div>
-        </div>
-      ) : null}
-      <i className="tv-sep" />
+      )}
+      {mobile && <i className="tv-sep" />}
       <span className="tv-session-name" data-tip={config?.sessionName ?? "Session"}>{config?.sessionName ?? "Session"}</span>
 
-      {!mobile && <button type="button" className="tv-tbtn" data-tip="Settings" aria-label="Settings" onClick={onOpenSettings}><I name="settings" size={20} /></button>}
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Settings" aria-label="Settings" onClick={onOpenSettings}><I name="settings" size={18} /></button>}
       {!mobile && <button type="button" className="tv-tbtn" data-tip="Toggle light / dark" aria-label="Toggle light or dark theme" onClick={() => setThemeChoice(theme === "dark" ? "light" : "dark")}>
-        <I name={theme === "dark" ? "sun" : "moon"} size={20} />
+        <I name={theme === "dark" ? "sun" : "moon"} size={18} />
       </button>}
-      {!mobile && <button type="button" className="tv-tbtn" data-tip="Fullscreen — hide panels (Shift+F)" aria-label="Hide panels" onClick={onToggleFocus}><I name="fullscreen" size={20} /></button>}
-      {!mobile && <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={20} />}>
+      {!mobile && <button type="button" className="tv-tbtn" data-tip="Fullscreen — hide panels (Shift+F)" aria-label="Hide panels" onClick={onToggleFocus}><I name="fullscreen" size={18} /></button>}
+      {!mobile && <Dropdown title="Take a snapshot (Alt+S)" align="right" button={<I name="camera" size={18} />}>
         {(close) => (
           <>
             <button type="button" role="menuitem" className="tv-menu-item" onClick={() => { emitChartCommand({ type: "screenshot", mode: "download" }); toast({ text: "Chart image saved" }); close(); }}><span>Download image</span><kbd>Alt+S</kbd></button>
@@ -388,7 +382,9 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
           </>
         )}
       </Dropdown>}
-      <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} data-tip="Order ticket" aria-pressed={ticketOpen} style={{ touchAction: "manipulation" }}>Trade</button>
+      {(mobile || compactDock) && (
+        <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} data-tip="Order ticket" aria-pressed={ticketOpen} style={{ touchAction: "manipulation" }}>Trade</button>
+      )}
       <button type="button" className="tv-end" onClick={handleEnd} style={{ touchAction: "manipulation" }}>{compactDock ? "End" : "End Session"}</button>
     </div>
   );

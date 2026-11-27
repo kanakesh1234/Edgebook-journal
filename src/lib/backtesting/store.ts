@@ -428,7 +428,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
   scale: { mode: 'normal', auto: true, invert: false },
   historyCandles: {},
   selectingBar: false,
-  tradePanelOpen: true,
+  tradePanelOpen: false,
 
   // Results
   showResults: false,
@@ -468,6 +468,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       alerts: [],
       alertNotice: null,
       tradeScript: config.replayTrade ? 'pending' : 'off',
+      tradePanelOpen: false,
       historyCandles: {},
       accountState: {
         ...INITIAL_ACCOUNT_STATE,
@@ -511,6 +512,7 @@ export const useBacktest = create<BacktestStoreState>((set, get) => ({
       drawHistory: { past: {}, future: {} },
       alerts: session.alerts || [],
       tradeScript: resumeTradeScript(session.config, session.trades.length, session.clockPosition, (session.timeframe || session.config.timeframe) as string),
+      tradePanelOpen: false,
       historyCandles: {},
       timeframe: (session.timeframe || session.config.timeframe) as any,
       speed: (session.playbackSpeed || 1) as PlaybackSpeed,

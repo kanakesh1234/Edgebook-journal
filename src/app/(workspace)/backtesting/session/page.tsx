@@ -11,14 +11,14 @@ import TopToolbar from "@/components/backtesting/top-toolbar";
 import LeftToolbar from "@/components/backtesting/left-toolbar";
 import ReplayToolbar from "@/components/backtesting/replay-toolbar";
 import RangeBar from "@/components/backtesting/range-bar";
-import ReplayTradeBanner from "@/components/backtesting/replay-trade-banner";
 import PaperPanel from "@/components/backtesting/paper-panel";
 import OrderTicket from "@/components/backtesting/order-ticket";
 import SettingsDialog from "@/components/backtesting/settings-dialog";
 import SessionResults from "@/components/backtesting/session-results";
 import { emitChartCommand, onChartCommand } from "@/components/backtesting/chart-bus";
-import FloatingTools from "@/components/backtesting/floating-tools";
 import FavoritesBar from "@/components/backtesting/favorites-bar";
+import { useCompactDock } from "@/components/backtesting/mobile-sheet";
+import { useUiPrefs } from "@/lib/backtesting/ui-prefs";
 import TooltipLayer from "@/components/backtesting/ej-tooltip";
 import ToastHost, { toast } from "@/components/backtesting/ej-toast";
 import EJMark from "@/components/backtesting/ej-mark";
@@ -64,6 +64,11 @@ function BacktestWorkspaceInner() {
   const updatePositionRisk = useBacktest((s) => s.updatePositionRisk);
   const updatePendingOrder = useBacktest((s) => s.updatePendingOrder);
   const speed = useBacktest((s) => s.speed);
+  const tradePanelOpen = useBacktest((s) => s.tradePanelOpen);
+  const setTradePanelOpen = useBacktest((s) => s.setTradePanelOpen);
+  const activeOrdersCount = useBacktest((s) => s.openPositions.length + s.pendingOrders.length);
+  const compactDock = useCompactDock();
+  const favVisible = useUiPrefs((p) => p.fav.visible);
 
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -298,6 +303,11 @@ function BacktestWorkspaceInner() {
         {!panelsHidden && <LeftToolbar symbol={activeInstrument} />}
 
         <div className="tv-main">
+          {/* Favorites bar sits compactly above the chart frame — never inside the chart space; in fullscreen only appears if explicitly toggled */}
+          {favVisible && !compactDock && (
+            <FavoritesBar docked onExitFullscreen={panelsHidden ? showPanels : undefined} />
+          )}
+
           <div className="tv-stage">
             <BacktestChart
               candles={chartCandles}
@@ -309,10 +319,20 @@ function BacktestWorkspaceInner() {
               onUpdatePendingOrderPrice={(id, price) => updatePendingOrder(activeInstrument, id, { price })}
             />
 
-            <ReplayTradeBanner />
-            {panelsHidden ? <FloatingTools onExit={showPanels} /> : <FavoritesBar />}
+            {compactDock && favVisible && !panelsHidden && <FavoritesBar />}
+            {panelsHidden && !favVisible && (
+              <button
+                type="button"
+                className="ej-fs-exit"
+                aria-label="Exit fullscreen (Esc)"
+                data-tip="Exit fullscreen (Esc)"
+                onClick={showPanels}
+              >
+                <I name="fullscreenExit" size={16} />
+              </button>
+            )}
             {replayOpen && <ReplayToolbar shifted={!!selectedDrawingId} onClose={() => setReplayOpen(false)} />}
-            {ticketOpen && <OrderTicket onClose={() => setTicketOpen(false)} />}
+            {ticketOpen && compactDock && <OrderTicket onClose={() => setTicketOpen(false)} />}
 
             {dataLoading && (
               <div className="tv-cover" role="status" aria-live="polite" aria-label="Loading market data">
@@ -357,6 +377,51 @@ function BacktestWorkspaceInner() {
           {!panelsHidden && <RangeBar />}
           {!panelsHidden && <PaperPanel />}
         </div>
+
+        {/* Desktop TradingView Right Panel & Slim Utility Rail */}
+        {!panelsHidden && !compactDock && ticketOpen && (
+          <aside className="tv-right-dock" aria-label="Order ticket panel">
+            <OrderTicket onClose={() => setTicketOpen(false)} />
+          </aside>
+        )}
+        {!panelsHidden && !compactDock && (
+          <aside className="tv-right-rail" aria-label="Workspace panels">
+            <button
+              type="button"
+              className={`ej-lbtn${ticketOpen ? " is-on" : ""}`}
+              data-tip="Order Panel"
+              data-tip-side="left"
+              aria-label="Order Panel"
+              aria-pressed={ticketOpen}
+              onClick={() => setTicketOpen((o) => !o)}
+            >
+              <I name="trade" size={18} filled={ticketOpen} />
+            </button>
+            <button
+              type="button"
+              className={`ej-lbtn${tradePanelOpen ? " is-on" : ""}`}
+              data-tip={tradePanelOpen ? "Hide Paper Trading" : "Paper Trading"}
+              data-tip-side="left"
+              aria-label="Paper Trading panel"
+              aria-pressed={tradePanelOpen}
+              onClick={() => setTradePanelOpen(!tradePanelOpen)}
+            >
+              <I name="list" size={18} />
+              {activeOrdersCount > 0 && <span className="tv-rail-dot" aria-hidden="true" />}
+            </button>
+            <button
+              type="button"
+              className={`ej-lbtn${replayOpen ? " is-on" : ""}`}
+              data-tip="Bar Replay controls"
+              data-tip-side="left"
+              aria-label="Bar Replay controls"
+              aria-pressed={replayOpen}
+              onClick={() => setReplayOpen((o) => !o)}
+            >
+              <I name="replay" size={18} filled={replayOpen} />
+            </button>
+          </aside>
+        )}
       </div>
 
       <TooltipLayer />

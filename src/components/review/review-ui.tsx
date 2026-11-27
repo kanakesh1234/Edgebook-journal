@@ -1,7 +1,7 @@
 "use client";
 
 import { Children, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, animate, motion, useReducedMotion, useScroll, useSpring } from "motion/react";
 import { Sym, type SymName } from "@/components/journal/symbols";
 import { EASE, SPRING } from "@/components/journal/journal-ui";
 import { formatMoney, formatSignedMoney } from "@/lib/format";
@@ -110,16 +110,34 @@ export function useReviewSettledReveal(
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Motion Primitives
+   Motion Primitives (GPU-composited only for 120fps scrolling)
 ───────────────────────────────────────────────────────────── */
+
+export function ReviewScrollBar() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 260, damping: 32, restDelta: 0.001 });
+  return (
+    <motion.div
+      aria-hidden="true"
+      style={{ scaleX, transformOrigin: "left" }}
+      className="pointer-events-none fixed inset-x-0 top-0 z-40 h-[2px] bg-gradient-to-r from-gold via-gold-strong to-profit/80 opacity-85"
+    />
+  );
+}
 
 export function SectionReveal({ index = 0, children, className }: { index?: number; children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
+  const aboveFold = index <= 1;
   return (
     <motion.div
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14, filter: "blur(4px)" }}
-      animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-      transition={{ duration: 0.54, delay: Math.min(index * 0.08, 0.36), ease: REVIEW_SMOOTH }}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.99 }}
+      {...(aboveFold
+        ? { animate: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 } }
+        : {
+            whileInView: reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 },
+            viewport: { once: true, amount: 0.12, margin: "0px 0px -36px 0px" },
+          })}
+      transition={{ duration: 0.56, delay: aboveFold ? Math.min(index * 0.07, 0.16) : 0.04, ease: REVIEW_SMOOTH }}
       className={className}
     >
       {children}
@@ -155,15 +173,14 @@ export function QuestionReveal({ children, delay = 0.08, className }: { children
       className={cn("-mx-2 -mb-2 px-2 pb-2", clip && "overflow-hidden", className)}
     >
       <motion.div
-        initial={reduce ? false : { opacity: 0, y: 14, filter: "blur(6px)" }}
+        initial={reduce ? false : { opacity: 0, y: 12 }}
         animate={
           reduce
             ? undefined
             : {
                 opacity: 1,
                 y: 0,
-                filter: "blur(0px)",
-                transition: { duration: 0.58, delay: delay + 0.14, ease: REVIEW_SMOOTH },
+                transition: { duration: 0.52, delay: delay + 0.12, ease: REVIEW_SMOOTH },
               }
         }
         exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.18 } }}
@@ -527,7 +544,7 @@ export function AutoText({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="group rounded-[18px] border border-line-soft bg-well transition-[box-shadow,background-color,border-color] duration-200 hover:bg-well-hover focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)] dark:border-line">
+      <div className="group rounded-[18px] border border-line-soft bg-well transition-[box-shadow,background-color,border-color] duration-250 hover:bg-well-hover focus-within:border-gold/55 focus-within:bg-raised focus-within:shadow-[0_0_0_3.5px_color-mix(in_srgb,var(--gold-strong)_16%,transparent),0_8px_24px_-12px_rgb(0_0_0/0.18)] dark:border-line">
         <textarea
           ref={ref}
           wrap="soft"

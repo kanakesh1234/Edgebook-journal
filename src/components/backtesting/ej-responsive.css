@@ -377,7 +377,7 @@
 /* ---------- Dedicated Tablet Tier (768px - 1279.98px) ---------- */
 @media (min-width: 768px) and (max-width: 1279.98px) {
   .tv-top {
-    height: 48px;
+    height: 44px;
     padding: 0 10px;
     gap: 4px;
   }
@@ -402,4 +402,119 @@
   .tv-paper {
     max-height: 36dvh;
   }
+}
+
+/* ---------- TradingView Desktop Reorganization (>= 821px) ---------- */
+@media (min-width: 821px) {
+  .tv-top {
+    height: 42px;
+    padding: 0 10px;
+  }
+
+  /* Bar Replay sits cleanly at bottom-center of chart canvas (TradingView style), never colliding with Top Legend or Drawing Toolbar */
+  .tv-replay,
+  .tv-replay.is-shifted {
+    top: auto;
+    bottom: 14px;
+    left: 50%;
+    padding: 4px 5px;
+  }
+  .tv-replay .tv-tbtn {
+    height: 32px;
+    padding: 0 8px;
+  }
+  .tv-replay .tv-play {
+    width: 38px;
+    border-radius: 8px;
+  }
+
+  /* Paper Trading header flush bottom-left, slim & tucked when collapsed */
+  .tv-paper-bar {
+    justify-content: flex-start;
+    height: 34px;
+    padding: 0 10px;
+  }
+  .tv-paper-title {
+    margin-left: 0;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+}
+
+/* ---------- TradingView Right Utility Rail & Docked Order Panel ---------- */
+.tv-right-rail {
+  width: 42px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 3px;
+  background: var(--tv-bg);
+  border-left: 0.5px solid var(--tv-hair);
+}
+.tv-right-rail .ej-lbtn::before {
+  left: auto;
+  right: -3px;
+  border-radius: 2px 0 0 2px;
+}
+.tv-rail-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--tv-active);
+  box-shadow: 0 0 0 1.5px var(--tv-bg);
+}
+
+.tv-right-dock {
+  width: 276px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--tv-panel);
+  border-left: 0.5px solid var(--tv-hair);
+  overflow-y: auto;
+  z-index: 15;
+}
+.tv-right-dock .tv-ticket {
+  position: static !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100%;
+  max-height: none !important;
+  padding: 14px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent;
+  animation: none !important;
+}
+
+/* Fullscreen exit corner trigger when Favorites toolbar is hidden */
+.ej-fs-exit {
+  position: absolute;
+  top: 10px;
+  right: 84px;
+  z-index: 32;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--tv-glass);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  backdrop-filter: saturate(180%) blur(16px);
+  border: 0.5px solid var(--tv-hair);
+  color: var(--tv-muted);
+  opacity: 0.5;
+  transition: opacity 0.2s, color 0.2s, transform 0.2s;
+}
+.ej-fs-exit:hover {
+  opacity: 1;
+  color: var(--tv-text);
+  transform: scale(1.04);
 }

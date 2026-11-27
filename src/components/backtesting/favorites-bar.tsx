@@ -30,8 +30,14 @@ function useMounted(on: boolean, ms: number) {
 
 type Pop = { kind: "menu" | "item"; x: number; y: number; tool?: string };
 
-/** Floating favorites palette: hidden by default, editable, draggable, edge-snapping, auto-dimming. */
-export default function FavoritesBar() {
+/** Favorites toolbar: compact slim strip outside the chart space on Desktop; floating sheet on mobile. */
+export default function FavoritesBar({
+  docked = false,
+  onExitFullscreen,
+}: {
+  docked?: boolean;
+  onExitFullscreen?: () => void;
+}) {
   const visible = useUiPrefs((p) => p.fav.visible);
   const vertical = useUiPrefs((p) => p.fav.vertical);
   const compact = useUiPrefs((p) => p.fav.compact);
@@ -86,14 +92,14 @@ export default function FavoritesBar() {
     apply(a.x, a.y);
   }, [apply, metrics, obstacles]);
 
-  useLayoutEffect(() => { if (mounted) place(); }, [mounted, place, order.length, vertical, compact, pos]);
+  useLayoutEffect(() => { if (mounted && !docked) place(); }, [mounted, docked, place, order.length, vertical, compact, pos]);
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || docked) return;
     const stage = barRef.current?.offsetParent as HTMLElement | null;
     const ro = stage && typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
     if (stage) ro?.observe(stage);
     return () => ro?.disconnect();
-  }, [mounted, place]);
+  }, [mounted, docked, place]);
 
   /* ------------------------------- moving ------------------------------ */
   const move = useRef<{ sx: number; sy: number; x: number; y: number; snapX: number; snapY: number } | null>(null);
@@ -267,14 +273,19 @@ export default function FavoritesBar() {
   };
 
   return (
-    <div ref={barRef} className={`ej-fav${vertical ? " is-v" : " is-h"}${dragging ? " is-dragging" : ""}`} onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+    <div
+      ref={barRef}
+      className={`ej-fav${docked ? " is-docked" : vertical ? " is-v" : " is-h"}${dragging ? " is-dragging" : ""}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div
-        className={`ej-fav-card${shown ? " is-in" : ""}${dim ? " is-dim" : ""}${compact ? " is-compact" : ""}`}
-        role="toolbar" aria-label="Favorite tools" aria-orientation={vertical ? "vertical" : "horizontal"}
+        className={`ej-fav-card${shown ? " is-in" : ""}${!docked && dim ? " is-dim" : ""}${compact || docked ? " is-compact" : ""}`}
+        role="toolbar" aria-label="Favorite tools" aria-orientation={!docked && vertical ? "vertical" : "horizontal"}
         onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}
         onFocus={() => setFocus(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setFocus(false); }}
       >
-        <span className="ej-fav-grip" role="button" tabIndex={0} aria-label="Move favorites bar (arrow keys, Home to reset)" data-tip="Drag to move · double-click to reset" data-tip-side={side} {...gripProps} />
+        {!docked && <span className="ej-fav-grip" role="button" tabIndex={0} aria-label="Move favorites bar (arrow keys, Home to reset)" data-tip="Drag to move · double-click to reset" data-tip-side={side} {...gripProps} />}
         <div ref={listRef} className="ej-fav-list">
           {order.map((t) => {
             const it = ITEM_BY_TOOL.get(t)!;
@@ -283,16 +294,16 @@ export default function FavoritesBar() {
             return (
               <div className="ej-fav-slot" data-fav={t} key={t}>
                 <button
-                  type="button" className={`ej-fav-item${on ? " is-on" : ""}`} aria-pressed={on} aria-label={label} data-tip={label} data-tip-side={side}
+                  type="button" className={`ej-fav-item${on ? " is-on" : ""}`} aria-pressed={on} aria-label={label} data-tip={label} data-tip-side={docked ? "bottom" : side}
                   onPointerDown={(e) => itemDown(e, t)} onPointerMove={itemMove} onPointerUp={itemUp} onPointerCancel={itemUp}
                   onClick={() => runItem(t)}
                   onContextMenu={(e) => { e.preventDefault(); setPop({ kind: "item", x: e.clientX, y: e.clientY, tool: t }); }}
                 >
-                  <I name={it.icon} size={20} filled={on} />
-                  {!compact && <span className="ej-fav-lb">{it.label}</span>}
+                  <I name={it.icon} size={docked ? 15 : 20} filled={on} />
+                  {!docked && !compact && <span className="ej-fav-lb">{it.label}</span>}
                 </button>
-                <button type="button" className="ej-fav-x" aria-label={`Remove ${it.label} from favorites`} data-tip="Remove" data-tip-side={side} onClick={() => toggleFavorite(t)}>
-                  <I name="close" size={10} />
+                <button type="button" className="ej-fav-x" aria-label={`Remove ${it.label} from favorites`} data-tip="Remove" data-tip-side={docked ? "bottom" : side} onClick={() => toggleFavorite(t)}>
+                  <I name="close" size={9} />
                 </button>
               </div>
             );
@@ -300,10 +311,18 @@ export default function FavoritesBar() {
           {order.length === 0 && <span className="ej-fav-empty">Star tools in any flyout to pin them here</span>}
         </div>
         <i className="ej-fav-sep" />
-        <button type="button" className="ej-fav-btn" aria-label="Favorites options" aria-haspopup="menu" aria-expanded={pop?.kind === "menu"} data-tip="Options" data-tip-side={side}
+        <button type="button" className="ej-fav-btn" aria-label="Favorites options" aria-haspopup="menu" aria-expanded={pop?.kind === "menu"} data-tip="Options" data-tip-side={docked ? "bottom" : side}
           onClick={(e) => (pop ? setPop(null) : openMenu(e.currentTarget))}>
-          <I name="more" size={20} />
+          <I name="more" size={docked ? 15 : 20} />
         </button>
+        {onExitFullscreen && (
+          <>
+            <i className="ej-fav-sep" />
+            <button type="button" className="ej-fav-btn" aria-label="Exit fullscreen" data-tip="Show panels (Esc)" data-tip-side="bottom" onClick={onExitFullscreen}>
+              <I name="fullscreenExit" size={15} />
+            </button>
+          </>
+        )}
       </div>
 
       {pop && barRef.current?.closest(".tv-root") && createPortal(

@@ -18,12 +18,10 @@ import {
   CarriedCommitments,
   Card,
   Chip,
-  DirTag,
   DrawCheck,
   EvidenceButton,
   fmtPct,
   fmtR,
-  GradeBadge,
   Group,
   Kpi,
   LineInput,
@@ -31,6 +29,7 @@ import {
   QuestionReveal,
   REVIEW_EXPAND,
   ReviewIconTile,
+  ReviewScrollBar,
   SaveIndicator,
   Section,
   SectionReveal,
@@ -44,7 +43,8 @@ import {
   useMoney,
   useReviewSettledReveal,
 } from "./review-ui";
-import { heat } from "./review-charts";
+import { heat, SessionCurve, WinRateRing } from "./review-charts";
+import { MistakeReplaySpotlight, PeriodTradesList, TradeScreenshotsGallery } from "./review-evidence";
 import { useReviewNotes } from "./use-review-notes";
 import type { ReviewActions } from "./reviews-panel";
 
@@ -64,7 +64,6 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const t = m.totals;
 
   const [matrixOpen, setMatrixOpen] = useState(false);
-  const [showAllTrades, setShowAllTrades] = useState(false);
   const [moreRules, setMoreRules] = useState(false);
 
   const wonVal = notes.text["won"] ?? notes.text["edge"] ?? "";
@@ -81,7 +80,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
       <EmptyState
         icon={<Sym name="calendar" className="h-6 w-6" />}
         title="This month hasn't started"
-        body={`${monthTitle(month)} is still ahead. Complete this review on the last trading day of the month.`}
+        body={`${monthTitle(month)} is still ahead. Complete this review after the close.`}
       />
     );
   }
@@ -94,22 +93,25 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
   const bestStreak = m.streaks[0];
 
   const completedQuestions = [wonVal.trim(), lostVal.trim(), commit0.trim()].filter(Boolean).length;
-  const visibleTrades = showAllTrades ? m.log : m.log.slice(0, 8);
+  const hasScreenshots = m.entries.some((e) => e.images.length > 0);
+  const weekMax = Math.max(1, ...m.weeks.map((w) => Math.abs(w.net)));
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10 pb-8">
+      <ReviewScrollBar />
+
       {prevCommit.length > 0 && (
         <SectionReveal index={0}>
-          <CarriedCommitments title="Last month's commitments" items={prevCommit} done={notes.done} onToggle={(i, v) => rn.setDone(`prev:${i}`, v)} />
+          <CarriedCommitments title="Last month's rule" items={prevCommit} done={notes.done} onToggle={(i, v) => rn.setDone(`prev:${i}`, v)} />
         </SectionReveal>
       )}
 
-      {/* 1 — Scorecard */}
+      {/* 1 — Monthly Hero Verdict + Full Interactive Session Curve */}
       <SectionReveal index={1}>
         <Section
           id="b1"
           icon="gauge"
-          title="Scorecard"
+          title="Month at a glance"
           aside={
             <div className="flex items-center gap-2.5">
               {m.balance != null && (
@@ -122,18 +124,24 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
           }
         >
           <Card pad={false} className="overflow-hidden">
-            <div className="flex flex-wrap items-end justify-between gap-4 px-5 py-5 sm:px-7 sm:py-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
               <div>
                 <p className="text-[12.5px] font-medium text-muted">Net P&amp;L</p>
-                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[50px]", tone(t.net))}>
+                <p className={cn("mt-1 text-[42px] font-semibold leading-none tracking-[-0.04em] tabular-nums sm:text-[52px]", tone(t.net))}>
                   <AnimatedNumber value={t.net} format={signed} />
                 </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
+                    {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L` : "No trades"}
+                  </Chip>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Chip tone={t.trades === 0 ? "neutral" : t.winners > t.losers ? "good" : t.losers > t.winners ? "bad" : "neutral"}>
-                  {t.trades ? `${t.trades} ${t.trades === 1 ? "trade" : "trades"} · ${t.winners}W · ${t.losers}L` : "No trades"}
-                </Chip>
-              </div>
+              <WinRateRing value={t.winRate} size={96} />
+            </div>
+
+            {/* Interactive Equity Curve across sessions */}
+            <div className="border-t border-line-soft px-3 pb-3 pt-4 sm:px-6">
+              <SessionCurve curve={m.curve} drawdowns={m.drawdowns} streaks={m.streaks} height={240} />
             </div>
 
             <StatStrip count={5} className="border-t border-line-soft">
@@ -160,6 +168,38 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               <StripCell label="Grade" value={m.avgGrade ?? "—"} sub={m.avgGrade ? "Avg" : undefined} />
             </StatStrip>
           </Card>
+
+          {/* Week-by-Week Trajectory Cards */}
+          {m.weeks.some((w) => w.totals.trades > 0) && (
+            <div className="mt-4 grid gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
+              {m.weeks.map((w) => {
+                const clickable = !!actions.openWeek;
+                const fill = w.totals.trades > 0 ? Math.max(10, Math.round((Math.abs(w.net) / weekMax) * 100)) : 0;
+                return (
+                  <button
+                    key={w.monday}
+                    type="button"
+                    disabled={!clickable}
+                    onClick={() => actions.openWeek?.(w.monday)}
+                    className="group rounded-[18px] border border-line-soft bg-surface p-3.5 text-left transition-all hover:border-line-strong hover:bg-raised active:scale-[0.98] disabled:cursor-default dark:border-line"
+                  >
+                    <div className="flex items-center justify-between text-[11.5px] text-faint">
+                      <span>Week {w.label}</span>
+                      <span>{w.totals.trades}T</span>
+                    </div>
+                    <p className={cn("num mt-1 text-[16px] font-semibold tracking-[-0.02em]", w.totals.trades ? tone(w.net) : "text-faint")}>
+                      {w.totals.trades ? signed(w.net) : "—"}
+                    </p>
+                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-ink/[0.06]">
+                      {fill > 0 && (
+                        <div className={cn("h-full rounded-full", w.net >= 0 ? "bg-profit" : "bg-loss")} style={{ width: `${fill}%` }} />
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <Group title="Extremes">
@@ -198,96 +238,123 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
               />
             </Group>
 
-            <Group title="Discipline">
+            <Group title="Account &amp; rules">
+              {p.target != null ? (
+                <div className="rounded-[14px] bg-surface px-4 py-3 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]">
+                  <div className="flex items-center justify-between text-[13px]">
+                    <span className="font-medium text-ink">Target progress</span>
+                    <span className={cn("font-semibold tabular-nums", p.targetMet ? "text-profit" : "text-ink")}>
+                      {signed(p.achieved)} / {money(p.target)}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/[0.06]">
+                    <motion.div
+                      initial={reduce ? false : { scaleX: 0 }}
+                      animate={{ scaleX: Math.min(1, Math.max(0, p.achieved / p.target)) }}
+                      transition={{ duration: 0.9, delay: 0.25, ease: REVIEW_EXPAND.ease }}
+                      style={{ transformOrigin: "left" }}
+                      className={cn("h-full w-full rounded-full", p.targetMet ? "bg-profit" : "bg-gold-strong")}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <StatRow label="Target progress" value="No target set" valueClass="text-faint" />
+              )}
               <StatRow
-                label="Profit target"
-                sub={p.target != null ? `Target ${money(p.target)}` : undefined}
-                value={p.achieved == null ? "—" : money(p.achieved)}
-                valueClass={p.target != null && p.achieved != null && p.achieved >= p.target ? "text-profit" : undefined}
+                label="Drawdown limit"
+                value={p.maxDrawdown != null ? `${money(p.drawdownUsed ?? 0)} / ${money(p.maxDrawdown)}` : "No limit"}
+                valueClass={p.drawdownBreached ? "text-loss" : p.maxDrawdown == null ? "text-faint" : undefined}
               />
               <StatRow
-                label="Drawdown used"
-                sub={p.maxDrawdown != null ? `Max ${money(p.maxDrawdown)}` : undefined}
-                value={p.drawdownUsed == null ? "—" : money(p.drawdownUsed)}
-                valueClass={p.drawdownBreached ? "text-loss" : undefined}
+                label="Plan adherence"
+                value={thoughtAnalysis.plannedTrades > 0 ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades}` : "—"}
+                sub={thoughtAnalysis.topTheme ?? undefined}
               />
-              <StatRow
-                label="Daily breaches"
-                sub={p.dailyLossLimit != null ? `${money(p.dailyLossLimit)}/day` : undefined}
-                value={p.dailyLossBreaches == null ? "—" : `${p.dailyLossBreaches}×`}
-                valueClass={p.dailyLossBreaches ? "text-loss" : p.dailyLossBreaches === 0 ? "text-profit" : undefined}
-              />
-              <StatRow
-                label="Forced trades"
-                value={m.forcedTrades}
-                valueClass={m.forcedTrades ? "text-loss" : undefined}
-              />
+              <StatRow label="Overtrade days" value={m.forcedTrades ? `${m.forcedTrades} forced` : "Clean"} valueClass={m.forcedTrades ? "text-loss" : "text-profit"} />
             </Group>
           </div>
         </Section>
       </SectionReveal>
 
-      {/* 2 — Edge & Checkpoint */}
-      <SectionReveal index={2}>
-        <Section
-          id="b4"
-          icon="shield"
-          title="Edge &amp; Checkpoint"
-          aside={
-            <Chip tone={p.status === "pass" ? "good" : p.status === "fail" ? "bad" : "gold"}>
-              {{ pass: "Passed", fail: "Failed", "in-progress": "In progress", none: "No target set" }[p.status]}
-            </Chip>
-          }
-        >
+      {/* 2 — Repeating Mistake Replay Spotlight */}
+      {costly && costly.entryIds.length > 0 && (
+        <SectionReveal index={2}>
+          <Section
+            id="b2-replay"
+            icon="repeat"
+            title="Costliest pattern · Replay"
+            hint="Review the exact setup behind your biggest leak this month."
+          >
+            <MistakeReplaySpotlight
+              mistake={costly}
+              allMistakes={m.mistakes}
+              entries={m.entries}
+              onOpenTrade={actions.openTrade}
+            />
+          </Section>
+        </SectionReveal>
+      )}
+
+      {/* 3 — Chart Screenshots & Trades Taken */}
+      {(hasScreenshots || m.log.length > 0) && (
+        <SectionReveal index={3}>
+          <Section
+            id="b2"
+            icon="photo"
+            title="Trades &amp; chart screenshots"
+            aside={
+              m.log.length > 0 ? (
+                <span className="text-[12.5px] font-medium tabular-nums text-muted">
+                  {m.log.length} {m.log.length === 1 ? "trade" : "trades"}
+                </span>
+              ) : null
+            }
+          >
+            <div className="space-y-4">
+              {hasScreenshots && <TradeScreenshotsGallery entries={m.entries} onOpenTrade={actions.openTrade} />}
+              <PeriodTradesList
+                rows={m.log}
+                actions={actions}
+                initialLimit={8}
+                emptyLabel={`No trades in ${monthTitle(month)}.`}
+              />
+            </div>
+          </Section>
+        </SectionReveal>
+      )}
+
+      {/* 4 — Edge & Matrix (Progressive Disclosure) */}
+      <SectionReveal index={4}>
+        <Section id="b4" icon="shield" title="Edge &amp; checkpoint">
           <Card pad={false} className="overflow-hidden">
             <div className="grid divide-y divide-line-soft sm:grid-cols-3 sm:divide-x sm:divide-y-0">
               <div className="flex items-start gap-3 p-5">
                 <ReviewIconTile tile="bg-profit" icon="arrowUpRight" />
                 <Kpi
-                  label="Strongest edge"
-                  value={topCrit?.label ?? "Confirm checklist rules"}
-                  sub={topCrit ? `${fmtPct(topCrit.winRate)} win rate (${topCrit.wins}/${topCrit.present})` : "Log pre-trade rules"}
-                />
-              </div>
-
-              <div className="flex items-start gap-3 p-5">
-                <ReviewIconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]" icon="sparkles" />
-                <Kpi
-                  label="Pre-trade plan"
-                  value={
-                    thoughtAnalysis.plannedTrades > 0
-                      ? `${thoughtAnalysis.plannedTrades}/${thoughtAnalysis.totalTrades} planned · ${fmtPct(thoughtAnalysis.plannedWinRate)} won`
-                      : thoughtAnalysis.topTheme ?? "Log If → Then thoughts"
-                  }
-                  sub={thoughtAnalysis.topTheme ? `Focus: ${thoughtAnalysis.topTheme}` : thoughtAnalysis.subline}
+                  label="Strongest criterion"
+                  value={topCrit?.label ?? "Record checklist criteria"}
+                  sub={topCrit ? `${fmtPct(topCrit.winRate)} · ${topCrit.wins}/${topCrit.present} won` : "No criteria confirmed yet"}
                 />
               </div>
 
               <div className="flex items-start gap-3 p-5">
                 <ReviewIconTile tile={costly ? "bg-loss" : "bg-gradient-to-b from-gold-strong to-gold-deep"} icon="shield" />
                 <Kpi
-                  label="Costliest leak"
-                  value={costly ? costly.label : "Clean execution"}
-                  sub={costly ? `${costly.count}×${costly.lost > 0 ? ` · ${signed(-costly.lost)}` : ""}` : "Zero recurring mistakes"}
+                  label="Biggest leak"
+                  value={costly ? costly.label : "Zero tagged mistakes"}
+                  sub={costly ? `${costly.count}×${costly.lost ? ` · ${signed(-costly.lost)}` : ""}` : "Clean month"}
+                />
+              </div>
+
+              <div className="flex items-start gap-3 p-5">
+                <ReviewIconTile tile="bg-gradient-to-b from-[#6e6ce8] to-[#5250c9]" icon="checklist" />
+                <Kpi
+                  label="Thresholds passed"
+                  value={`${m.decisions.filter((d) => d.yes === true).length} of ${m.decisions.length}`}
+                  sub="Win rate, R:R, Grade, Target"
                 />
               </div>
             </div>
-
-            {m.decisions.length > 0 && (
-              <div className="grid divide-y divide-line-soft border-t border-line-soft sm:grid-cols-2 lg:grid-cols-4 sm:divide-x sm:divide-y-0">
-                {m.decisions.map((d) => (
-                  <div key={d.id} className="p-4 sm:p-5">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-[13px] font-medium text-muted">{d.label}</p>
-                      <Chip tone={d.yes == null ? "neutral" : d.yes ? "good" : "bad"} className="shrink-0">
-                        {d.yes == null ? "—" : d.yes ? "Yes" : "No"}
-                      </Chip>
-                    </div>
-                    <p className="mt-1 text-[14.5px] font-semibold tabular-nums text-ink">{d.detail}</p>
-                  </div>
-                ))}
-              </div>
-            )}
 
             <div className="border-t border-line-soft px-5 py-2.5 sm:px-6">
               <button
@@ -299,7 +366,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                 }}
                 className="flex w-full items-center justify-between py-0.5 text-left text-[13px] font-medium text-muted outline-none transition-colors hover:text-ink"
               >
-                <span>{matrixOpen ? "Hide breakdown" : "Show breakdown"}</span>
+                <span>{matrixOpen ? "Hide breakdown" : "Inspect criteria heatmap & patterns"}</span>
                 <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", matrixOpen && "rotate-180")} strokeWidth={2} />
               </button>
             </div>
@@ -314,39 +381,53 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                   transition={REVIEW_EXPAND}
                   className="overflow-hidden border-t border-line-soft"
                 >
+                  <div className="grid gap-2.5 border-b border-line-soft px-5 py-4 sm:grid-cols-2 sm:px-6">
+                    {m.decisions.map((d) => (
+                      <div key={d.id} className="flex items-start justify-between gap-3 rounded-2xl bg-well px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-ink">{d.label}</p>
+                          <p className="mt-0.5 text-[12px] text-muted">{d.detail}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold",
+                            d.yes === true ? "bg-profit/12 text-profit" : d.yes === false ? "bg-loss/12 text-loss" : "bg-ink/[0.06] text-faint",
+                          )}
+                        >
+                          {d.yes === true ? "Yes" : d.yes === false ? "Needs work" : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
                   {m.heatmap.length > 0 && (
                     <div className="px-3 pb-3 pt-4">
                       <p className="mb-2 px-3 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Criteria by Week</p>
-                      <TableShell min={Math.max(520, 240 + m.weeks.length * 88)}>
+                      <TableShell min={580}>
                         <thead>
                           <tr>
                             <Th className="pl-4">Criterion</Th>
                             {m.weeks.map((w) => (
                               <Th key={w.monday} className="text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => actions.openWeek?.(w.monday)}
-                                  title={weekLabel(w.monday)}
-                                  className="rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-ink/[0.05] hover:text-ink"
-                                >
-                                  Wk {w.label}
-                                </button>
+                                W{w.label}
                               </Th>
                             ))}
-                            <Th className="text-center">Month</Th>
+                            <Th className="pr-4 text-right">Month total</Th>
                           </tr>
                         </thead>
                         <tbody>
-                          {m.heatmap.map((h, ri) => (
-                            <tr key={h.key}>
-                              <Td className="max-w-[240px] pl-4 font-medium">{h.label}</Td>
-                              {h.perWeek.map((c, ci) => (
-                                <Td key={ci} className="text-center">
-                                  <Cell rate={c.winRate} n={c.present} delay={0.03 + (ri + ci) * 0.015} reduce={!!reduce} />
+                          {m.heatmap.map((row) => (
+                            <tr key={row.key} className="transition-colors hover:bg-ink/[0.025]">
+                              <Td className="max-w-[240px] pl-4 font-medium">{row.label}</Td>
+                              {row.perWeek.map((cell, i) => (
+                                <Td key={m.weeks[i].monday} className="text-center">
+                                  <span className={cn("inline-flex min-w-12 justify-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold tabular-nums", heat(cell.winRate, cell.present))}>
+                                    {cell.present ? fmtPct(cell.winRate) : "·"}
+                                  </span>
                                 </Td>
                               ))}
-                              <Td className="text-center">
-                                <Cell rate={h.total.winRate} n={h.total.present} delay={0.03 + ri * 0.015} reduce={!!reduce} strong onClick={() => actions.openIds(h.total.entryIds, h.label)} />
+                              <Td className="pr-4 text-right">
+                                <EvidenceButton count={row.total.present} label={`Open ${row.total.present} trades with ${row.label}`} onClick={() => actions.openIds(row.total.entryIds, row.label)} />
                               </Td>
                             </tr>
                           ))}
@@ -374,7 +455,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
                             </Td>
                             <Td className="text-right">
                               {r.manual ? (
-                            <span className="font-semibold tabular-nums text-ink">{r.total}</span>
+                                <span className="font-semibold tabular-nums text-ink">{r.total}</span>
                               ) : (
                                 <EvidenceButton count={r.total} label={`Open ${r.total} trades: ${r.label}`} onClick={() => actions.openIds(r.entryIds, r.label)} />
                               )}
@@ -394,81 +475,16 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
 
-      {/* 3 — Session Log */}
-      <SectionReveal index={3}>
-        <Section id="b2" icon="list" title="Session log">
-          {m.log.length === 0 ? (
-            <Card>
-              <p className="text-[14px] text-muted">No trades in {monthTitle(month)}.</p>
-            </Card>
-          ) : (
-            <Card pad={false} className="overflow-hidden">
-              <ul className="divide-y divide-line-soft/80">
-                {visibleTrades.map((r) => (
-                  <li key={r.entry.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        haptic.selection();
-                        actions.openTrade(r.entry.id);
-                      }}
-                      className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left outline-none transition-colors hover:bg-ink/[0.025] active:bg-ink/[0.05] focus-visible:bg-ink/[0.04] sm:px-6"
-                    >
-                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 sm:gap-3">
-                        <span className="w-6 shrink-0 text-[12px] tabular-nums text-faint">#{r.n}</span>
-                        <span className="w-24 shrink-0 text-[13.5px] font-medium tabular-nums text-ink">{formatDateMedium(r.entry.date)}</span>
-                        <DirTag dir={r.entry.direction ?? null} />
-                        {r.entry.instrument && r.entry.instrument !== "—" && (
-                          <span className="text-[13px] font-medium text-ink">{r.entry.instrument}</span>
-                        )}
-                        {r.entry.setup && r.entry.setup !== "—" && <span className="truncate text-[13px] text-muted">{r.entry.setup}</span>}
-                        {r.criteria && <span className="text-[12px] tabular-nums text-faint">{r.criteria.met}/{r.criteria.total} rules</span>}
-                        {r.primary !== "—" && (
-                          <span className={cn("hidden items-center gap-1.5 text-[12px] sm:inline-flex", r.primary === "Correct execution" ? "text-profit" : "text-loss")}>
-                            <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-                            {r.primary}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3.5">
-                        {r.entry.rr != null && <span className={cn("hidden text-[12.5px] font-medium tabular-nums sm:inline", tone(r.entry.rr))}>{fmtR(r.entry.rr)}</span>}
-                        <span className={cn("min-w-[68px] text-right text-[14px] font-semibold tabular-nums", tone(r.entry.pnl))}>{signed(r.entry.pnl)}</span>
-                        <GradeBadge grade={r.grade} />
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {m.log.length > 8 && (
-                <div className="border-t border-line-soft px-5 py-2.5 sm:px-6">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      haptic.selection();
-                      setShowAllTrades((v) => !v);
-                    }}
-                    className="flex w-full items-center justify-between py-0.5 text-left text-[13px] font-medium text-muted outline-none transition-colors hover:text-ink"
-                  >
-                    <span>{showAllTrades ? "Show fewer trades" : `Show all ${m.log.length} trades`}</span>
-                    <Sym name="chevronDown" className={cn("h-4 w-4 transition-transform duration-300", showAllTrades && "rotate-180")} strokeWidth={2} />
-                  </button>
-                </div>
-              )}
-            </Card>
-          )}
-        </Section>
-      </SectionReveal>
-
-      {/* 4 — Reflection */}
-      <SectionReveal index={4}>
+      {/* 5 — Guided Sequenced Reflection & Month Sign-Off */}
+      <SectionReveal index={5}>
         <Section
           id="b6"
           icon="target"
-          title="Reflection"
+          title="Close the month"
           aside={
             <Chip tone={completedQuestions === 3 ? "good" : "gold"}>
               {completedQuestions === 3 ? <DrawCheck className="h-3 w-3" /> : <Sym name="sparkles" className="h-3 w-3" />}
-              {completedQuestions}/3
+              {completedQuestions === 3 ? "Month reviewed" : `${completedQuestions}/3`}
             </Chip>
           }
         >
@@ -491,7 +507,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
 
             <AnimatePresence>
               {q1Reveal.settled && (
-                <QuestionReveal key="mo-q2" delay={0.1}>
+                <QuestionReveal key="mo-q2" delay={0.12}>
                   <Prompt
                     step={2}
                     done={q2Reveal.settled && lostVal.trim().length > 0}
@@ -513,7 +529,7 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
 
             <AnimatePresence>
               {q2Reveal.settled && (
-                <QuestionReveal key="mo-q3" delay={0.1}>
+                <QuestionReveal key="mo-q3" delay={0.12}>
                   <Prompt
                     step={3}
                     done={commit0.trim().length > 0}
@@ -566,21 +582,5 @@ export function MonthlyReview({ ctx, month, actions }: { ctx: ReviewContext; mon
         </Section>
       </SectionReveal>
     </div>
-  );
-}
-
-function Cell({ rate, n, delay, reduce, strong, onClick }: { rate: number | null; n: number; delay: number; reduce: boolean; strong?: boolean; onClick?: () => void }) {
-  const body = n === 0 ? "·" : <>{fmtPct(rate)}<span className="ml-1 text-[10px] font-medium opacity-60">n={n}</span></>;
-  const cls = cn("inline-block min-w-[68px] rounded-[9px] px-2 py-1 text-center text-[12px] font-semibold tabular-nums", heat(rate, n), strong && n > 0 && "ring-1 ring-inset ring-current/25");
-  return (
-    <motion.span initial={reduce ? false : { opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay, type: "spring", stiffness: 420, damping: 32 }} className="inline-block" title={n ? `${n} trade${n === 1 ? "" : "s"} with this criterion` : "Not present"}>
-      {onClick && n > 0 ? (
-        <button type="button" onClick={onClick} className={cn(cls, "outline-none transition-transform hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-95")}>
-          {body}
-        </button>
-      ) : (
-        <span className={cls}>{body}</span>
-      )}
-    </motion.span>
   );
 }

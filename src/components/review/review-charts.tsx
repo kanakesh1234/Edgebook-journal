@@ -153,32 +153,71 @@ export function Sparkline({ values, height = 72, className }: { values: number[]
   );
 }
 
-/** Mon–Fri P&L as soft capsules around a zero line. Non-trading days stay visibly empty; hovering one quiets the rest. */
-export function DayBars({ days }: { days: DayRow[] }) {
+/** Mon–Fri P&L as soft capsules around a zero line. Non-trading days stay visibly empty; hovering or tapping highlights. */
+export function DayBars({
+  days,
+  selectedDate,
+  onSelect,
+}: {
+  days: DayRow[];
+  selectedDate?: string | null;
+  onSelect?: (date: string) => void;
+}) {
   const { signed } = useMoney();
   const reduce = useReducedMotion();
   const [hot, setHot] = useState<number | null>(null);
   const trading = days.slice(0, 5);
   const max = Math.max(1, ...trading.map((d) => Math.abs(d.pnl)));
-  const H = 64;
+  const H = 56;
   return (
-    <div className="grid grid-cols-5 gap-2 sm:gap-4" role="img" aria-label="Net P&L by trading day" onPointerLeave={() => setHot(null)}>
+    <div className="grid grid-cols-5 gap-2 sm:gap-3" role="img" aria-label="Net P&L by trading day" onPointerLeave={() => setHot(null)}>
       {trading.map((d, i) => {
         const traded = d.state === "traded";
-        const h = traded ? Math.max(6, (Math.abs(d.pnl) / max) * H) : 0;
+        const h = traded ? Math.max(7, (Math.abs(d.pnl) / max) * H) : 0;
+        const active = selectedDate === d.date;
+        const faded = (hot != null && hot !== i) || (selectedDate != null && !active);
         return (
-          <div key={d.date} onPointerEnter={() => setHot(i)} className={cn("flex flex-col items-center transition-opacity duration-200", hot != null && hot !== i && "opacity-40")}>
+          <button
+            key={d.date}
+            type="button"
+            disabled={!onSelect}
+            onClick={() => onSelect?.(d.date)}
+            onPointerEnter={() => setHot(i)}
+            className={cn(
+              "flex flex-col items-center rounded-[14px] py-1.5 outline-none transition-all duration-200 focus-visible:ring-2 focus-visible:ring-gold-strong/50",
+              onSelect && "cursor-pointer hover:bg-ink/[0.03] active:scale-[0.97]",
+              active && "bg-ink/[0.05] ring-1 ring-inset ring-gold/40",
+              faded && "opacity-45",
+            )}
+          >
             <div className="relative w-full" style={{ height: H * 2 + 2 }}>
-              <span className="absolute inset-x-0 top-1/2 h-px bg-line" />
+              <span className="absolute inset-x-1 top-1/2 h-px bg-line" />
               {traded && (
-                <motion.span initial={reduce ? false : { height: 0 }} animate={{ height: h }} transition={{ type: "spring", stiffness: 200, damping: 24, delay: 0.2 + i * 0.06 }}
-                  className={cn("absolute left-1/2 w-[52%] max-w-9 -translate-x-1/2 rounded-full", d.pnl >= 0 ? "bottom-1/2 mb-px bg-profit" : "top-1/2 mt-px bg-loss")} />
+                <motion.span
+                  initial={reduce ? false : { height: 0 }}
+                  animate={{ height: h }}
+                  transition={{ type: "spring", stiffness: 220, damping: 24, delay: 0.14 + i * 0.05 }}
+                  className={cn(
+                    "absolute left-1/2 w-[50%] max-w-8 -translate-x-1/2 rounded-full",
+                    d.pnl >= 0 ? "bottom-1/2 mb-px bg-profit" : "top-1/2 mt-px bg-loss",
+                  )}
+                />
               )}
-              {d.state === "holiday" && <span className="absolute inset-0 grid place-items-center"><span className="rounded-full bg-ink/[0.05] px-2 py-0.5 text-[10.5px] font-medium text-faint">Holiday</span></span>}
+              {d.state === "no-setup" || d.state === "pass" ? (
+                <span className="absolute inset-0 grid place-items-center">
+                  <span className="rounded-full bg-gold/12 px-2 py-0.5 text-[10px] font-semibold text-gold-deep dark:text-gold">Patience</span>
+                </span>
+              ) : d.state === "holiday" ? (
+                <span className="absolute inset-0 grid place-items-center">
+                  <span className="rounded-full bg-ink/[0.05] px-2 py-0.5 text-[10px] font-medium text-faint">Holiday</span>
+                </span>
+              ) : null}
             </div>
-            <p className="mt-1 text-[12px] font-medium text-faint">{["Mon", "Tue", "Wed", "Thu", "Fri"][i]}</p>
-            <p className={cn("num text-[12.5px] font-semibold", !traded ? "text-faint" : d.pnl >= 0 ? "text-profit" : "text-loss")}>{traded ? signed(d.pnl) : "·"}</p>
-          </div>
+            <p className="mt-1 text-[11.5px] font-medium text-faint">{["Mon", "Tue", "Wed", "Thu", "Fri"][i]}</p>
+            <p className={cn("num text-[12px] font-semibold", !traded ? "text-faint" : d.pnl >= 0 ? "text-profit" : "text-loss")}>
+              {traded ? signed(d.pnl) : "·"}
+            </p>
+          </button>
         );
       })}
     </div>

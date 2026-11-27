@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { motion } from "motion/react";
 import { useApp } from "@/lib/store";
 import { computeStats, currentStreak } from "@/lib/stats";
@@ -54,6 +55,7 @@ export default function DashboardPage() {
     return (
       <div className="space-y-7">
         <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
+          <MinatoStarLink />
         </Header>
         <EmptyState
           icon={<BookOpenIcon className="h-7 w-7" />}
@@ -84,6 +86,7 @@ export default function DashboardPage() {
     <div className="space-y-6 md:space-y-8">
       <Header greeting={greeting} firstName={firstName} dailyControl={<DailyFocusControl currency={settings.currency} />}>
         <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+          <MinatoStarLink />
           <Button
             variant="outline"
             size="md"
@@ -159,5 +162,18 @@ function Header({ greeting, firstName, dailyControl, children }: { greeting: str
       </div>
       {children}
     </header>
+  );
+}
+
+function MinatoStarLink() {
+  return (
+    <Link
+      href="/minato"
+      aria-label="Open Minato"
+      title="Minato (⌘J)"
+      className="group hidden h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface/85 text-gold transition-all duration-200 hover:-translate-y-0.5 hover:border-gold/45 hover:bg-raised hover:shadow-[0_6px_20px_-6px_rgb(216_179_106/0.45)] active:scale-95 md:inline-flex"
+    >
+      <SparklesIcon className="h-[18px] w-[18px] transition-transform duration-300 group-hover:rotate-12 group-hover:scale-110" />
+    </Link>
   );
 }

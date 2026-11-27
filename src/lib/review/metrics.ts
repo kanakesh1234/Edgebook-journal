@@ -245,6 +245,7 @@ export interface SessionLogRow { n: number; entry: JournalEntry; criteria: { met
 
 export interface WeekReview {
   monday: string; days: DayRow[]; tradingSlots: number; entries: JournalEntry[]; log: SessionLogRow[];
+  curve: CurvePointR[];
   totals: Totals; sessions: number; noSetupDays: number; unloggedDays: number; weekendEntries: number;
   maxDayLoss: number | null; avgGrade: ProcessGrade | null; balance: number | null; startBalance: number;
   criteria: CriterionStat[]; strongest: CriterionStat | null; weakest: CriterionStat | null;
@@ -324,7 +325,7 @@ export function buildWeek(ctx: ReviewContext, monday: string, marks?: Record<str
     };
   });
   return {
-    monday, days, tradingSlots: trading.length, entries: list, log, totals: totalsOf(list), sessions: traded.length,
+    monday, days, tradingSlots: trading.length, entries: list, log, curve: sessionCurve(days), totals: totalsOf(list), sessions: traded.length,
     noSetupDays: days.filter((d) => d.state === "no-setup" || d.state === "pass").length, unloggedDays: days.filter((d) => d.state === "unlogged").length,
     weekendEntries: list.filter((e) => isWeekend(e.date)).length,
     maxDayLoss: traded.length ? Math.min(0, ...traded.map((d) => d.pnl)) : null,

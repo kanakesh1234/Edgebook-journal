@@ -205,8 +205,6 @@ export function Sidebar() {
   const openNewEntry = useUi((s) => s.openNewEntry);
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const toggleSidebar = useUi((s) => s.toggleSidebar);
-  const minatoOpen = useUi((s) => s.minatoOpen);
-  const setMinatoOpen = useUi((s) => s.setMinatoOpen);
   const isNoSetupToday = useIsNoSetupToday();
 
   useEffect(() => {
@@ -254,26 +252,6 @@ export function Sidebar() {
         {NAV_ITEMS.map((item) => (
           <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} collapsed={collapsed} />
         ))}
-        <button
-          type="button"
-          onClick={() => {
-            haptic.selection();
-            setMinatoOpen(!minatoOpen);
-          }}
-          aria-expanded={minatoOpen}
-          title={collapsed ? "Minato (⌘J)" : "Ask Minato (⌘J)"}
-          className={cn(
-            "group relative flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
-            collapsed && "justify-center px-2",
-            minatoOpen
-              ? "border border-line-strong bg-raised text-ink"
-              : "text-faint hover:bg-ink/[0.04] hover:text-muted",
-          )}
-        >
-          <SparklesIcon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", minatoOpen ? "text-gold" : "")} />
-          {!collapsed && <span className="flex-1 text-left">Minato</span>}
-          {!collapsed && <span className="font-mono text-[10px] text-faint">⌘J</span>}
-        </button>
       </nav>
 
       {!collapsed && <JourneyCard className="mx-4 mb-3" />}
