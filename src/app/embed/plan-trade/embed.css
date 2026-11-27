@@ -1,0 +1,100 @@
+/* Apple-inspired compact sizing strictly scoped to `/embed/plan-trade` (~380x560 floating window).
+   Zero impact on normal website pages. */
+
+.eb-embed-flow {
+  font-size: 14px;
+  --shadow-rest: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-lift: 0 8px 20px -10px rgb(0 0 0 / 0.16);
+}
+
+/* Tighten StepTitle hierarchy cleanly for 380px width */
+.eb-embed-flow h2 {
+  font-size: 21px !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.02em;
+}
+
+.eb-embed-flow h2 + p {
+  margin-top: 4px !important;
+  font-size: 12.5px !important;
+}
+
+/* Compress vertical question padding & section stacks without crowding */
+.eb-embed-flow [class*="pt-7"] {
+  padding-top: 16px !important;
+}
+
+.eb-embed-flow [class*="pt-6"] {
+  padding-top: 14px !important;
+}
+
+.eb-embed-flow [class*="space-y-8"] > :not(:first-child) {
+  margin-top: 16px !important;
+}
+
+.eb-embed-flow [class*="space-y-6"] > :not(:first-child) {
+  margin-top: 12px !important;
+}
+
+.eb-embed-flow [class*="space-y-5"] > :not(:first-child) {
+  margin-top: 12px !important;
+}
+
+/* Refine text inputs & auto-grow textareas to prevent vertical bloat */
+.eb-embed-flow textarea[id^="flow-"] {
+  min-height: 70px !important;
+  padding: 9px 12px !important;
+  font-size: 14.5px !important;
+  border-radius: 13px !important;
+}
+
+.eb-embed-flow input[id^="flow-"]:not(#flow-pnl):not(#flow-qty):not([id^="flow-entry"]):not([id^="flow-exit"]):not([id^="flow-sl"]):not([id^="flow-tp"]) {
+  padding: 8px 12px !important;
+  font-size: 14px !important;
+  border-radius: 12px !important;
+}
+
+/* Net P&L hero input */
+.eb-embed-flow #flow-pnl {
+  font-size: 32px !important;
+}
+
+.eb-embed-flow #flow-qty {
+  font-size: 20px !important;
+}
+
+/* Compact chips and toggle pills */
+.eb-embed-flow [role="group"] button,
+.eb-embed-flow [aria-pressed] {
+  min-height: 36px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  font-size: 13.5px !important;
+}
+
+/* Keep Execution TicketCards compact two-up at 348px */
+.eb-embed-flow [id^="flow-entry"],
+.eb-embed-flow [id^="flow-exit"],
+.eb-embed-flow [id^="flow-sl"],
+.eb-embed-flow [id^="flow-tp"] {
+  font-size: 19px !important;
+  margin-top: 8px !important;
+}
+
+/* Compact Done screen */
+.eb-embed-flow .min-h-\[20rem\] {
+  min-height: 15rem !important;
+}
+
+/* Subtle Apple scrollbar inside the floating viewport */
+.eb-embed-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--faint) 40%, transparent) transparent;
+}
+.eb-embed-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.eb-embed-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--faint) 38%, transparent);
+}

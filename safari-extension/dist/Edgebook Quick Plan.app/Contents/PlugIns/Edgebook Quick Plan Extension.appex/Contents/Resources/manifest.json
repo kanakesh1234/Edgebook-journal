@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "Edgebook Quick Plan",
+  "short_name": "Quick Plan",
+  "version": "1.0.0",
+  "description": "Floating Plan Trade companion directly over TradingView for Edgebook on macOS Safari.",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_title": "Edgebook Quick Plan — ⌥⇧P toggle window · ⌥⇧E capture chart"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.tradingview.com/*",
+    "https://edgebook-journal.vercel.app/*"
+  ],
+  "commands": {
+    "toggle-quick-plan": {
+      "suggested_key": {
+        "default": "Alt+Shift+P",
+        "mac": "Alt+Shift+P"
+      },
+      "description": "Toggle floating Quick Plan window (Option+Shift+P)"
+    },
+    "capture-clean-chart": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
+      "description": "Hide Quick Plan, capture clean TradingView chart, restore & attach (Option+Shift+E)"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.tradingview.com/*"
+      ],
+      "js": [
+        "tradingview-overlay.js"
+      ],
+      "css": [
+        "tradingview-overlay.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://edgebook-journal.vercel.app/*"
+      ],
+      "js": [
+        "edgebook-sync.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+* {
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    cursor: default;
+    box-sizing: border-box;
+}
+
+:root {
+    color-scheme: light dark;
+    --bg: #f7f4ee;
+    --surface: #fcfaf5;
+    --border: rgba(38, 34, 26, 0.12);
+    --ink: #26221a;
+    --muted: #6e6657;
+    --gold: #b78e3e;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0b0b0e;
+        --surface: #131317;
+        --border: rgba(255, 255, 255, 0.12);
+        --ink: #f4f1ea;
+        --muted: #a8a399;
+        --gold: #cfa556;
+    }
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+}
+
+body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    padding: 24px 32px;
+    text-align: center;
+}
+
+.icon {
+    border-radius: 20px;
+}
+
+h1 {
+    margin: 2px 0 0;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+p {
+    margin: 0;
+    max-width: 340px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+body:not(.state-on, .state-off) :is(.state-on, .state-off) { display: none; }
+body.state-on :is(.state-off, .state-unknown) { display: none; }
+body.state-off :is(.state-on, .state-unknown) { display: none; }
+
+.card {
+    width: 100%;
+    max-width: 300px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 6px 12px;
+    margin: 4px 0;
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 6px 0;
+}
+
+.row + .row {
+    border-top: 1px solid var(--border);
+}
+
+kbd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    color: var(--ink);
+}
+
+button.open-preferences {
+    margin-top: 2px;
+    border: none;
+    border-radius: 999px;
+    background: var(--gold);
+    color: #18130a;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.hint {
+    font-size: 11px;
+    opacity: 0.78;
+}

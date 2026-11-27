@@ -25,9 +25,9 @@
 /* ------------------------------------------------------------------ */
 
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getGoogleConfig, type GoogleConfig } from "./google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie, type AppSession } from "./session";
+import { APP_SESSION_COOKIE, openAppSession, readCookie, readEmbedBearer, type AppSession } from "./session";
 import { accountRefreshToken, getAccount, upsertAccount } from "./accounts";
 import {
   createFolder, driveFetch, ensureFolder, findAppRoot, refreshAccessTokenDetailed,
@@ -199,7 +199,10 @@ export async function getAuthedDrive(): Promise<Resolution> {
   if (!config) return { ok: false, status: 503, error: "google_not_configured" };
 
   const store = await cookies();
-  const session = openAppSession(store.get(APP_SESSION_COOKIE)?.value, config.tokenSecret);
+  const cookieToken = store.get(APP_SESSION_COOKIE)?.value;
+  const hdrs = await headers();
+  const bearerToken = readEmbedBearer(hdrs.get("authorization"));
+  const session = openAppSession(cookieToken ?? bearerToken, config.tokenSecret);
   if (!session) return { ok: false, status: 401, error: "not_logged_in" };
 
   return resolveDriveForSession(session, config);

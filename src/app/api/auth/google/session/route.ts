@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGoogleConfig } from "@/lib/server/google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie } from "@/lib/server/session";
+import { sessionOf } from "@/lib/server/auth";
 import { verifyDriveConnection } from "@/lib/server/authed-drive";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +19,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const config = getGoogleConfig();
-  const sessionCookie = readCookie(request, APP_SESSION_COOKIE);
-  const session = config && sessionCookie ? openAppSession(sessionCookie, config.tokenSecret) : null;
+  const session = sessionOf(request);
 
   if (!session) {
     return NextResponse.json({

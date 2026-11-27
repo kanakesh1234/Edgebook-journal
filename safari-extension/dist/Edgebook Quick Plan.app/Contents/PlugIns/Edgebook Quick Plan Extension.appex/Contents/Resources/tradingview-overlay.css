@@ -1,0 +1,337 @@
+/* Apple-inspired macOS floating chrome strictly scoped under `.eb-qp-root`. */
+
+.eb-qp-root,
+.eb-qp-root * {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+}
+
+.eb-qp-root {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  overflow: hidden;
+  transition:
+    opacity 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease;
+  color-scheme: light;
+  --eb-bg: rgba(252, 250, 245, 0.94);
+  --eb-bar: rgba(247, 244, 238, 0.86);
+  --eb-border: rgba(38, 34, 26, 0.14);
+  --eb-highlight: rgba(255, 255, 255, 0.75);
+  --eb-ink: #26221a;
+  --eb-muted: #6e6657;
+  --eb-btn-hover: rgba(38, 34, 26, 0.08);
+  --eb-gold: #b78e3e;
+  --eb-gold-deep: #8c6d2e;
+  --eb-profit: #40795b;
+  --eb-loss: #ac5157;
+  background: var(--eb-bg);
+  border: 1px solid var(--eb-border);
+  box-shadow:
+    inset 0 1px 0 var(--eb-highlight),
+    0 24px 60px -16px rgba(38, 34, 26, 0.28),
+    0 4px 16px -4px rgba(38, 34, 26, 0.1);
+}
+
+.eb-qp-root[data-eb-theme="dark"] {
+  color-scheme: dark;
+  --eb-bg: rgba(19, 19, 23, 0.95);
+  --eb-bar: rgba(27, 27, 33, 0.88);
+  --eb-border: rgba(255, 255, 255, 0.12);
+  --eb-highlight: rgba(255, 255, 255, 0.08);
+  --eb-ink: #f4f1ea;
+  --eb-muted: #a8a399;
+  --eb-btn-hover: rgba(255, 255, 255, 0.1);
+  --eb-gold: #d8b36a;
+  --eb-gold-deep: #b28d45;
+  --eb-profit: #49b675;
+  --eb-loss: #e06c75;
+  box-shadow:
+    inset 0 1px 0 var(--eb-highlight),
+    0 28px 72px -16px rgba(0, 0, 0, 0.78),
+    0 6px 20px -4px rgba(0, 0, 0, 0.48);
+}
+
+.eb-qp-root.is-hidden {
+  display: none !important;
+}
+
+.eb-qp-root.is-minimized {
+  height: auto !important;
+  width: auto !important;
+  min-width: 210px;
+  border-radius: 999px;
+}
+
+.eb-qp-root.is-dragging iframe,
+.eb-qp-root.is-resizing iframe {
+  pointer-events: none !important;
+}
+
+.eb-qp-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px 0 12px;
+  background: var(--eb-bar);
+  border-bottom: 1px solid var(--eb-border);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  flex-shrink: 0;
+}
+
+.eb-qp-root.is-minimized .eb-qp-titlebar {
+  border-bottom: none;
+  height: 40px;
+  padding: 0 8px 0 12px;
+}
+
+.eb-qp-root.is-dragging .eb-qp-titlebar {
+  cursor: grabbing;
+}
+
+.eb-qp-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--eb-ink);
+}
+
+.eb-qp-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #d8b36a 0%, #8c6d2e 100%);
+  display: grid;
+  place-items: center;
+  color: #18130a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.eb-qp-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eb-qp-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--eb-gold);
+  background: color-mix(in srgb, var(--eb-gold) 14%, transparent);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.eb-qp-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.eb-qp-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--eb-muted);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+
+.eb-qp-btn:hover {
+  background: var(--eb-btn-hover);
+  color: var(--eb-ink);
+}
+
+.eb-qp-btn:active {
+  transform: scale(0.92);
+}
+
+.eb-qp-btn.is-active {
+  background: color-mix(in srgb, var(--eb-gold) 18%, transparent);
+  color: var(--eb-gold);
+}
+
+.eb-qp-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  pointer-events: none;
+}
+
+.eb-qp-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: transparent;
+}
+
+.eb-qp-root.is-minimized .eb-qp-body,
+.eb-qp-root.is-minimized .eb-qp-resize {
+  display: none;
+}
+
+.eb-qp-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+
+/* Shortcuts & Settings drawer anchored over top of body */
+.eb-qp-popover {
+  position: absolute;
+  top: 46px;
+  right: 10px;
+  left: 10px;
+  z-index: 20;
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--eb-bar);
+  border: 1px solid var(--eb-border);
+  backdrop-filter: blur(26px) saturate(170%);
+  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  box-shadow: 0 18px 42px -12px rgba(0, 0, 0, 0.35);
+  color: var(--eb-ink);
+  font-size: 12px;
+}
+
+.eb-qp-popover[hidden] {
+  display: none;
+}
+
+.eb-qp-pop-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.eb-qp-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--eb-border);
+}
+
+.eb-qp-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--eb-border);
+  background: color-mix(in srgb, var(--eb-ink) 5%, transparent);
+  color: var(--eb-ink);
+  white-space: nowrap;
+}
+
+.eb-qp-pop-sub {
+  display: block;
+  font-size: 10.5px;
+  color: var(--eb-muted);
+  margin-top: 1px;
+}
+
+.eb-qp-pop-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--eb-border);
+}
+
+.eb-qp-pop-btn {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--eb-border);
+  background: transparent;
+  color: var(--eb-ink);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.eb-qp-pop-btn:hover {
+  background: var(--eb-btn-hover);
+}
+
+/* Subtle resize grip in bottom-right corner */
+.eb-qp-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 15;
+  opacity: 0.45;
+  display: grid;
+  place-items: end;
+  padding: 3px;
+}
+
+.eb-qp-resize:hover {
+  opacity: 0.9;
+}
+
+.eb-qp-resize::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 1.75px solid var(--eb-muted);
+  border-bottom: 1.75px solid var(--eb-muted);
+  border-bottom-right-radius: 3px;
+}
+
+.eb-qp-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 54px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.88);
+  color: #f4f1ea;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 25;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}

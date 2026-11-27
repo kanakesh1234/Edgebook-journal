@@ -20,6 +20,9 @@ import { ShieldIcon } from "@/components/ui/icons";
 import { Sym } from "@/components/journal/symbols";
 import { cn, uid } from "@/lib/utils";
 import { haptic } from "@/lib/haptics";
+import { processImageFile } from "@/lib/images";
+import { postToEmbedHost, subscribeEmbedScreenshots } from "@/lib/embed-bridge";
+import { toast } from "@/components/ui/toast";
 import { ImageUploader, type UploadItem } from "./image-uploader";
 import { AutopsyBody, useAutopsy } from "./autopsy";
 import { RiskMeter } from "./risk-meter";
@@ -239,7 +242,7 @@ function useDelayedFlag(flag: boolean, open: boolean, delayMs = REVEAL_AFTER_PIC
   return on;
 }
 
-export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function PlanTradeFlow({ open, onClose, embedded = false }: { open: boolean; onClose: () => void; embedded?: boolean }) {
   const entries = useApp((s) => s.entries);
   const plans = useApp((s) => s.plans);
   const settings = useApp((s) => s.settings);
@@ -249,7 +252,8 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const sym = currencySymbol(settings.currency);
   const syncState = useSyncExternalStore(subscribeSyncState, getSyncState, () => "synced");
 
-  const desktop = useIsDesktop();
+  const desktopScreen = useIsDesktop();
+  const desktop = embedded ? false : desktopScreen;
   const [step, setStep] = useState<StepId>("plan");
   const [dir, setDir] = useState<1 | -1>(1);
   const [restoredFromCache, setRestoredFromCache] = useState(false);
@@ -669,6 +673,40 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
       }
     }
   };
+
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const updateImagesRef = useRef(updateImagesAndCache);
+  updateImagesRef.current = updateImagesAndCache;
+
+  // Accept clean screenshots captured by the Safari Quick Plan extension (Option+Shift+E / camera button)
+  useEffect(() => {
+    if (!embedded || !open) return;
+    return subscribeEmbedScreenshots((file) => {
+      void (async () => {
+        const current = imagesRef.current;
+        if (current.length >= 2) {
+          toast.info("Already 2 charts attached", "Remove one before adding another.");
+          return;
+        }
+        try {
+          const processed = await processImageFile(file);
+          const next = [...imagesRef.current, { meta: processed.meta, blob: processed.blob }].slice(0, 2);
+          imagesRef.current = next;
+          updateImagesRef.current(next);
+          haptic.success();
+          toast.success("Chart captured", `${next.length}/2 attached to this trade.`);
+        } catch {
+          toast.error("Couldn't attach screenshot");
+        }
+      })();
+    });
+  }, [embedded, open]);
+
+  useEffect(() => {
+    if (!embedded || !open) return;
+    postToEmbedHost("edgebook:state", { step, attachedCount: images.length });
+  }, [embedded, open, step, images.length]);
 
   useEffect(() => {
     if (!open || discardingRef.current || createdId || step === "autopsy" || step === "done") return;
@@ -1122,28 +1160,38 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
   const hintText = saveError ?? autopsy.error ?? gate.hint;
   const hintTone = saveError || autopsy.error ? "warn" : "muted";
 
-  return (
-    <>
-      <Modal open={open} onClose={handleAbortAndClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
-        <SheetFrame
-          rail={rail}
-          onClose={handleAbortAndClose}
-          onBack={back ? () => go(back) : undefined}
-          hint={step === "done" ? null : <Hint text={hintText} tone={hintTone} />}
-          actions={
-            <>
-              {step === "chart" && (
-                <QuietButton disabled={saving} onClick={() => go("autopsy")}>
-                  Skip for now
-                </QuietButton>
-              )}
-              <PrimaryButton shortcut disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>
-                {continueLabel}
-              </PrimaryButton>
-            </>
-          }
-        >
-          <StepTransition stepKey={step} dir={dir}>
+  const sheet = (
+    <SheetFrame
+      embedded={embedded}
+      rail={rail}
+      onClose={handleAbortAndClose}
+      onBack={back ? () => go(back) : undefined}
+      hint={
+        step === "done" ? null : (
+          <div className="flex items-center gap-2 min-w-0">
+            <Hint text={hintText} tone={hintTone} />
+            {embedded && images.length > 0 && step !== "chart" && (
+              <span className="shrink-0 rounded-full bg-profit/12 px-2 py-0.5 text-[10.5px] font-semibold text-profit">
+                {images.length}/2 img
+              </span>
+            )}
+          </div>
+        )
+      }
+      actions={
+        <>
+          {step === "chart" && (
+            <QuietButton disabled={saving} onClick={() => go("autopsy")}>
+              Skip for now
+            </QuietButton>
+          )}
+          <PrimaryButton shortcut={!embedded} disabled={!gate.ok} loading={saving || (step === "autopsy" && autopsy.saving)} onClick={onContinue}>
+            {continueLabel}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <StepTransition stepKey={step} dir={dir}>
             {step === "plan" && (
               <div>
                 <StepTitle title="What's the plan?" subtitle="A sentence or two is plenty." />
@@ -1903,6 +1951,29 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
                   title="Add your chart"
                   subtitle={importRows && importRows.length > 1 ? "Up to two screenshots, attached to the first trade." : "Up to two screenshots."}
                 />
+                {embedded && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      haptic.selection();
+                      postToEmbedHost("edgebook:capture-request");
+                    }}
+                    className="flex w-full items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-gold/[0.08] px-3.5 py-2.5 text-left transition-all hover:bg-gold/[0.14] active:scale-[0.99]"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <IconTile tile="bg-gradient-to-b from-gold-strong to-gold-deep" className="h-7 w-7 rounded-[8px]">
+                        <GlyphCamera />
+                      </IconTile>
+                      <span>
+                        <span className="block text-[13px] font-semibold text-ink">Capture TradingView chart</span>
+                        <span className="block text-[11px] text-muted">Temporarily hides Quick Plan cleanly</span>
+                      </span>
+                    </span>
+                    <kbd className="shrink-0 rounded-md border border-line-strong bg-surface/80 px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-muted">
+                      ⌥⇧E
+                    </kbd>
+                  </button>
+                )}
                 <ImageUploader items={images} onChange={updateImagesAndCache} max={2} />
               </div>
             )}
@@ -1951,7 +2022,17 @@ export function PlanTradeFlow({ open, onClose }: { open: boolean; onClose: () =>
             )}
           </StepTransition>
         </SheetFrame>
-      </Modal>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        open ? sheet : null
+      ) : (
+        <Modal open={open} onClose={handleAbortAndClose} size={desktop ? "xl" : "md"} label="Plan and record a trade">
+          {sheet}
+        </Modal>
+      )}
 
       {/* Stop at the plan: a 2nd trade after a loss needs a pause; a 3rd needs a lockout. */}
       <Modal open={lockOpen} onClose={handleAbortAndClose} size="md" label={thirdTrade ? "Third trade lockout" : "Second trade after a loss"}>

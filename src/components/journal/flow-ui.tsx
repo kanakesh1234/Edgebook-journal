@@ -135,18 +135,32 @@ function StepRail({ rail }: { rail: Rail }) {
  * a labelled Back button, and a footer aligned to that column. Below lg it is the same mobile sheet,
  * plus a small "Step 2 of 5" in the top bar.
  */
-export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: { onClose: () => void; onBack?: () => void; hint?: React.ReactNode; actions: React.ReactNode; children: React.ReactNode; rail?: Rail }) {
+export function SheetFrame({ onClose, onBack, hint, actions, children, rail, embedded = false }: { onClose: () => void; onBack?: () => void; hint?: React.ReactNode; actions: React.ReactNode; children: React.ReactNode; rail?: Rail; embedded?: boolean }) {
   const idx = rail ? rail.steps.findIndex((s) => s.id === rail.current) : -1;
   return (
-    <div className={cn("flex min-h-[30rem]", rail ? "flex-col lg:min-h-[36rem] lg:flex-row" : "flex-col")}>
-      {rail && <StepRail rail={rail} />}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn("sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between px-4", rail && "lg:h-16 lg:px-6", glass.bar)}>
-          <div className="flex min-w-11 items-center">
+    <div className={cn("flex", embedded ? "h-dvh min-h-0 flex-col" : "min-h-[30rem]", rail && !embedded ? "flex-col lg:min-h-[36rem] lg:flex-row" : "flex-col")}>
+      {rail && !embedded && <StepRail rail={rail} />}
+      <div className={cn("flex min-w-0 flex-1 flex-col", embedded && "min-h-0")}>
+        <header className={cn("sticky top-0 z-20 flex shrink-0 items-center justify-between", embedded ? "h-11 border-b border-line-soft/80 px-3" : "h-14 px-4", rail && !embedded && "lg:h-16 lg:px-6", glass.bar)}>
+          <div className="flex min-w-9 items-center">
             {onBack && (
               <>
-                <span className={cn(rail && "lg:hidden")}><GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton></span>
-                {rail && (
+                <span className={cn(rail && !embedded && "lg:hidden")}>
+                  {embedded ? (
+                    <button
+                      type="button"
+                      aria-label="Back"
+                      onClick={onBack}
+                      className="inline-flex h-7 items-center gap-1 rounded-full bg-ink/[0.06] px-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-ink/[0.1] active:scale-95"
+                    >
+                      <IconBack />
+                      <span>Back</span>
+                    </button>
+                  ) : (
+                    <GlassIconButton label="Back" onClick={onBack}><IconBack /></GlassIconButton>
+                  )}
+                </span>
+                {rail && !embedded && (
                   <button type="button" onClick={onBack} className="hidden h-9 items-center gap-1 rounded-full pl-2 pr-3.5 text-[14px] font-medium text-muted transition-colors hover:bg-ink/[0.05] hover:text-ink lg:inline-flex">
                     <IconBack /> Back
                   </button>
@@ -154,15 +168,31 @@ export function SheetFrame({ onClose, onBack, hint, actions, children, rail }: {
               </>
             )}
           </div>
-          {rail && idx >= 0 && <p className="text-[12.5px] font-medium tabular-nums text-faint lg:hidden">Step {idx + 1} of {rail.steps.length}</p>}
-          <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
+          {rail && idx >= 0 && (
+            <p className={cn("text-[12px] font-medium tabular-nums text-faint", !embedded && "text-[12.5px] lg:hidden")}>
+              Step {idx + 1} of {rail.steps.length}
+            </p>
+          )}
+          {embedded ? (
+            <button
+              type="button"
+              aria-label="Discard draft and hide"
+              title="Discard draft and hide"
+              onClick={onClose}
+              className="grid h-7 w-7 place-items-center rounded-full text-faint transition-colors hover:bg-ink/[0.07] hover:text-ink active:scale-90"
+            >
+              <IconClose />
+            </button>
+          ) : (
+            <GlassIconButton label="Close" onClick={onClose}><IconClose /></GlassIconButton>
+          )}
         </header>
-        <div className={cn("min-w-0 flex-1 overflow-x-clip px-7 pb-8 pt-2 sm:px-10", rail && "lg:px-14 lg:pb-12 lg:pt-4")}>
-          <div className={cn("min-w-0", rail && "lg:mx-auto lg:max-w-[34rem]")}>{children}</div>
+        <div className={cn("min-w-0 flex-1 overflow-x-clip", embedded ? "eb-embed-scroll overflow-y-auto px-4 pb-5 pt-3" : "px-7 pb-8 pt-2 sm:px-10", rail && !embedded && "lg:px-14 lg:pb-12 lg:pt-4")}>
+          <div className={cn("min-w-0", rail && !embedded && "lg:mx-auto lg:max-w-[34rem]")}>{children}</div>
         </div>
-        <footer className={cn("sticky bottom-0 z-20 shrink-0 border-t border-line/60 px-5 py-3.5", rail && "lg:px-14 lg:py-4", glass.bar)}>
-          <div className={cn("flex items-center justify-between gap-4", rail && "lg:mx-auto lg:max-w-[34rem]")}>
-            <div className="min-w-0 flex-1 text-[12.5px] text-faint">{hint}</div>
+        <footer className={cn("sticky bottom-0 z-20 shrink-0 border-t border-line/60", embedded ? "px-3.5 py-2.5" : "px-5 py-3.5", rail && !embedded && "lg:px-14 lg:py-4", glass.bar)}>
+          <div className={cn("flex items-center justify-between gap-3", rail && !embedded && "lg:mx-auto lg:max-w-[34rem]")}>
+            <div className="min-w-0 flex-1 text-[12px] text-faint">{hint}</div>
             <div className="flex shrink-0 items-center gap-2">{actions}</div>
           </div>
         </footer>

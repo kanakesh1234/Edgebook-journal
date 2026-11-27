@@ -10,7 +10,7 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 const isDev = process.env.NODE_ENV !== "production";
 
-const CSP = [
+const CSP_DIRECTIVES = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
@@ -25,7 +25,14 @@ const CSP = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
-].join("; ");
+];
+
+const CSP = CSP_DIRECTIVES.join("; ");
+const EMBED_PLAN_CSP = CSP_DIRECTIVES.map((d) =>
+  d.startsWith("frame-ancestors ")
+    ? "frame-ancestors https://*.tradingview.com https://tradingview.com"
+    : d,
+).join("; ");
 
 function extractHost(urlOrOrigin: string | null): string {
   if (!urlOrOrigin) return "";
@@ -40,13 +47,6 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith("/api/") && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
-    // 1. Modern Fetch Metadata defense: block cross-site state-changing requests immediately
-    const fetchSite = request.headers.get("sec-fetch-site");
-    if (fetchSite === "cross-site") {
-      return NextResponse.json({ error: "cross_site_request_blocked" }, { status: 403 });
-    }
-
-    // 2. Origin / Referer host verification against active host headers
     const allowedHosts = [
       request.headers.get("host"),
       request.headers.get("x-forwarded-host"),
@@ -58,7 +58,16 @@ export async function middleware(request: NextRequest) {
     const originHeader = request.headers.get("origin");
     const refererHeader = request.headers.get("referer");
     const sourceHost = extractHost(originHeader) || extractHost(refererHeader);
+    const hasBearer = /^Bearer\s+\S+/i.test(request.headers.get("authorization") ?? "");
 
+    // 1. Modern Fetch Metadata defense: block cross-site mutations immediately, except verified
+    // same-origin iframe fetches carrying our cryptographic Bearer session token.
+    const fetchSite = request.headers.get("sec-fetch-site");
+    if (fetchSite === "cross-site" && !(hasBearer && sourceHost && allowedHosts.includes(sourceHost))) {
+      return NextResponse.json({ error: "cross_site_request_blocked" }, { status: 403 });
+    }
+
+    // 2. Origin / Referer host verification against active host headers
     if (originHeader || refererHeader) {
       if (!sourceHost || !allowedHosts.includes(sourceHost)) {
         return NextResponse.json({ error: "cross_site_request_blocked" }, { status: 403 });
@@ -71,20 +80,23 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  const isEmbedPlanRoute = pathname === "/embed/plan-trade" || pathname.startsWith("/embed/plan-trade/");
   const res = NextResponse.next({ request: { headers: request.headers } });
 
   res.headers.set("X-Content-Type-Options", "nosniff");
-  res.headers.set("X-Frame-Options", "DENY");
+  if (!isEmbedPlanRoute) {
+    res.headers.set("X-Frame-Options", "DENY");
+  }
   res.headers.set("X-DNS-Prefetch-Control", "off");
   res.headers.set("X-Permitted-Cross-Domain-Policies", "none");
   res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()");
   res.headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  res.headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  res.headers.set("Cross-Origin-Resource-Policy", isEmbedPlanRoute ? "cross-origin" : "same-origin");
 
   if (!isDev) {
     res.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
-    res.headers.set("Content-Security-Policy", CSP);
+    res.headers.set("Content-Security-Policy", isEmbedPlanRoute ? EMBED_PLAN_CSP : CSP);
   }
   if (pathname.startsWith("/api/")) {
     res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");

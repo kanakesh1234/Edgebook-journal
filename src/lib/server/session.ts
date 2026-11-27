@@ -90,6 +90,13 @@ export function readCookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
+/** Extract an HMAC-sealed embed session token from an Authorization Bearer header. */
+export function readEmbedBearer(authHeader: string | null | undefined): string | undefined {
+  if (!authHeader) return undefined;
+  const match = /^Bearer\s+(\S+)$/i.exec(authHeader.trim());
+  return match?.[1];
+}
+
 /**
  * Only same-site relative paths are allowed as a post-login destination.
  * `//evil.com` and `/\\evil.com` start with "/" but are treated by browsers as another host (open redirect).

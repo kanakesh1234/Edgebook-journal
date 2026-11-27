@@ -1,12 +1,15 @@
 /* SERVER-ONLY helpers shared by every API route: who is calling, and how often. */
 import { getGoogleConfig } from "./google-config";
-import { APP_SESSION_COOKIE, openAppSession, readCookie, type AppSession } from "./session";
+import { APP_SESSION_COOKIE, openAppSession, readCookie, readEmbedBearer, type AppSession } from "./session";
 
-/** The signed-in user for this request, or null. Expired / tampered cookies return null. */
+/** The signed-in user for this request, or null. Expired / tampered cookies or bearer tokens return null. */
 export function sessionOf(request: Request): AppSession | null {
   const config = getGoogleConfig();
+  if (!config) return null;
   const cookie = readCookie(request, APP_SESSION_COOKIE);
-  return config && cookie ? openAppSession(cookie, config.tokenSecret) : null;
+  const bearer = readEmbedBearer(request.headers.get("authorization"));
+  const raw = cookie ?? bearer;
+  return raw ? openAppSession(raw, config.tokenSecret) : null;
 }
 
 export function sessionEmail(request: Request): string | null {
