@@ -104,6 +104,18 @@ export default function RangeBar() {
       <button type="button" className={`tv-tbtn${scale.mode === "percent" ? " is-on" : ""}`} data-tip="Percentage scale (Alt+P)" aria-label="Percentage scale" aria-pressed={scale.mode === "percent"} onClick={() => setScale({ mode: scale.mode === "percent" ? "normal" : "percent" })}>%</button>
       <button type="button" className={`tv-tbtn${scale.mode === "log" ? " is-on" : ""}`} data-tip="Logarithmic scale (Alt+L)" aria-label="Logarithmic scale" aria-pressed={scale.mode === "log"} onClick={() => setScale({ mode: scale.mode === "log" ? "normal" : "log" })}>log</button>
       <button type="button" className={`tv-tbtn${scale.auto ? " is-on" : ""}`} data-tip="Auto-fit price scale" aria-label="Auto-fit price scale" aria-pressed={scale.auto} onClick={() => setScale({ auto: !scale.auto })}>auto</button>
+      <button
+        type="button"
+        className="tv-tbtn"
+        data-tip="Refresh scale to normal (Alt+R)"
+        aria-label="Refresh scale to normal"
+        onClick={() => {
+          setScale({ mode: "normal", auto: true, invert: false });
+          emitChartCommand({ type: "reset" });
+        }}
+      >
+        <I name="reset" size={15} />
+      </button>
     </div>
   );
 }

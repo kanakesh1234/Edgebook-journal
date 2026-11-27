@@ -102,6 +102,11 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
   const linesRef = useRef<IPriceLine[]>([]);
   const prevIdxRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
+  const idxRef = useRef(idx);
+  idxRef.current = idx;
+  const followCameraRef = useRef(true);
+  const dragSuppressClickRef = useRef(false);
+  const [customView, setCustomView] = useState(false);
 
   const themeKey = useThemeKey();
   const pal = useMemo(readPalette, [themeKey]);
@@ -162,9 +167,19 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
         fixRightEdge: false,
         tickMarkFormatter: (t: Time, type: TickMarkType) => (type === TickMarkType.DayOfMonth ? F.day : F.time).format(toDate(t)),
       },
-      // Vertical swipes must scroll the Feed, never the chart.
-      handleScroll: false,
-      handleScale: false,
+      // Vertical swipes scroll Feed/Review; right price axis drag shrinks/expands candles cleanly across mouse & touch.
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        mouseWheel: false,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
     });
     const series = chart.addSeries(CandlestickSeries, {
       upColor: p.up,
@@ -186,7 +201,55 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
     prevIdxRef.current = null;
+    followCameraRef.current = true;
+    setCustomView(false);
+
+    // Sync custom scale/pan detection + suppress accidental Feed play/pause click after drag
+    let downPt: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      downPt = { x: e.clientX, y: e.clientY };
+      dragSuppressClickRef.current = false;
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!downPt) return;
+      if (Math.hypot(e.clientX - downPt.x, e.clientY - downPt.y) > 5) {
+        dragSuppressClickRef.current = true;
+        const rect = el.getBoundingClientRect();
+        if (e.clientX - rect.left < chart.paneSize().width) {
+          followCameraRef.current = false;
+          setCustomView(true);
+        }
+      }
+    };
+    const syncScaleFlag = () => {
+      requestAnimationFrame(() => {
+        try {
+          const isAuto = chart.priceScale("right").options().autoScale;
+          setCustomView(!isAuto || !followCameraRef.current);
+        } catch { /* chart unmounted */ }
+      });
+    };
+    const onUp = () => {
+      downPt = null;
+      syncScaleFlag();
+    };
+    const onDblClick = () => {
+      followCameraRef.current = true;
+      chart.priceScale("right").applyOptions({ autoScale: true });
+      syncScaleFlag();
+    };
+    el.addEventListener("pointerdown", onDown, { passive: true, capture: true });
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
+    el.addEventListener("dblclick", onDblClick, { passive: true });
+
     return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("dblclick", onDblClick);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       markersRef.current?.detach();
       chart.remove();
@@ -296,10 +359,12 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
       const camEase = easeOutCubic(raw);
 
       series.update(interpolateCandle(targetCandle, raw));
-      chart.timeScale().setVisibleLogicalRange({
-        from: fromWin.from + (toWin.from - fromWin.from) * camEase,
-        to: fromWin.to + (toWin.to - fromWin.to) * camEase,
-      });
+      if (followCameraRef.current) {
+        chart.timeScale().setVisibleLogicalRange({
+          from: fromWin.from + (toWin.from - fromWin.from) * camEase,
+          to: fromWin.to + (toWin.to - fromWin.to) * camEase,
+        });
+      }
 
       if (raw < 1) {
         rafRef.current = requestAnimationFrame(stepFrame);
@@ -339,11 +404,31 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
     mk(model.target, pal.up, "Target", 1, LineStyle.Dashed);
   }, [model, levelsOn, pal]);
 
+  const resetScale = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const chart = chartRef.current;
+    if (!chart) return;
+    followCameraRef.current = true;
+    chart.priceScale("right").applyOptions({ autoScale: true });
+    chart.timeScale().setVisibleLogicalRange(windowForBar(model, idxRef.current));
+    setCustomView(false);
+  };
+
   const activeCandle = model.candles[Math.min(model.lastIdx, Math.max(model.viewFrom, idx))];
   const barUp = activeCandle ? activeCandle.close >= activeCandle.open : true;
 
   return (
-    <div className="absolute inset-0" style={{ touchAction: "pan-y" }}>
+    <div
+      data-replay-chart="true"
+      className="absolute inset-0"
+      style={{ touchAction: "pan-y" }}
+      onClickCapture={(e) => {
+        if (dragSuppressClickRef.current) {
+          dragSuppressClickRef.current = false;
+          e.stopPropagation();
+        }
+      }}
+    >
       <div ref={host} role="img" aria-label={label} className="absolute inset-0" style={{ touchAction: "pan-y" }} />
       {activeCandle && (
         <div className="fd-ohlc-bar fd-num" aria-hidden="true">
@@ -352,6 +437,20 @@ export function ReplayChart({ model, idx, label }: { model: ReplayModel; idx: nu
           <span><b>L</b>{fmtPrice(activeCandle.low)}</span>
           <span className={barUp ? "fd-up" : "fd-down"}><b>C</b>{fmtPrice(activeCandle.close)}</span>
         </div>
+      )}
+      {customView && (
+        <button
+          type="button"
+          onClick={resetScale}
+          aria-label="Reset chart scale to normal"
+          title="Reset scale to auto"
+          className="absolute bottom-8 right-[70px] z-10 inline-flex h-6 items-center gap-1 rounded-full border border-line bg-surface/85 px-2.5 text-[11px] font-semibold text-ink shadow-sm backdrop-blur-md transition-all hover:bg-raised active:scale-95"
+        >
+          <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M4.5 12a7.5 7.5 0 1 0 7.5-7.5c-2.3 0-4.3.9-5.8 2.4L4.5 8.5M4.5 4.5v4h4" />
+          </svg>
+          Auto
+        </button>
       )}
     </div>
   );

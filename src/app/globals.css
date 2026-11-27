@@ -618,6 +618,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: none;
 }
 
+/* Inline replay charts (Feed + Weekly/Monthly Review): allow vertical swipe page scroll over candles,
+   while letting mouse & touch drag vertically on the right price axis to shrink/expand candles. */
+[data-replay-chart] td:last-child,
+[data-replay-chart] td:last-child canvas {
+  touch-action: none !important;
+  cursor: ns-resize;
+}
+
 /* Touch devices: guarantee a 44px hit area on icon buttons and
    suppress hover-only affordances that stick after a tap. */
 @media (pointer: coarse) {

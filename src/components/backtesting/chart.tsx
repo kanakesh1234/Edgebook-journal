@@ -921,8 +921,8 @@ export default function BacktestChart({
         const w = chart.paneSize().width || 900;
         const bars = Math.max(30, Math.floor(w / 8));
         chart.timeScale().setVisibleLogicalRange({ from: lastIdx - bars * 0.72, to: lastIdx + bars * 0.28 });
-        useBacktest.getState().setScale({ auto: true, invert: false });
-        seriesRef.current?.priceScale().setAutoScale(true);
+        useBacktest.getState().setScale({ mode: "normal", auto: true, invert: false });
+        chart.priceScale("right").applyOptions({ mode: PriceScaleMode.Normal, invertScale: false, autoScale: true });
       } else if (cmd.type === "scroll-latest") {
         chart.timeScale().scrollToRealTime();
       } else if (cmd.type === "range") {
