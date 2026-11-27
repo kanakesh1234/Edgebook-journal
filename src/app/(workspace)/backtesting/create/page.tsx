@@ -74,7 +74,7 @@ const Chevron = ({ dir }: { dir: "l" | "r" }) => (
 /** Apple-style segmented control: quiet inset track, a raised white pill that glides to the choice. */
 function Seg<T extends string>({ value, options, onChange, layoutId, label }: { value: T; options: { id: T; label: string }[]; onChange: (id: T) => void; layoutId: string; label: string }) {
   return (
-    <div role="tablist" aria-label={label} className="grid h-[50px] w-full rounded-[16px] bg-ink/[0.06] p-[3px] shadow-[inset_0_1px_2px_rgb(0_0_0/0.06)]" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+    <div role="tablist" aria-label={label} className="grid h-[50px] w-full rounded-[16px] border border-line/60 bg-well p-[3px] shadow-[inset_0_1px_2px_rgb(0_0_0/0.06)] dark:border-line" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
       {options.map((o) => {
         const on = value === o.id;
         return (
@@ -348,7 +348,7 @@ export default function CreateBacktestPage() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: FLOW_EASE }}
-        className="rounded-[28px] border border-line bg-surface shadow-lift"
+        className="rounded-[28px] border border-line bg-surface shadow-lift dark:border-line-strong dark:ring-1 dark:ring-inset dark:ring-white/[0.06]"
       >
         <div className="mx-auto max-w-[32rem] px-4 pb-8 pt-7 sm:px-8 sm:pb-10 sm:pt-10 lg:max-w-none lg:px-12 lg:pb-12 lg:pt-12">
           <motion.div {...rise(0)}>

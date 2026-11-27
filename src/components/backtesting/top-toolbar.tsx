@@ -14,7 +14,7 @@ import { toast } from "./ej-toast";
 import AnimatedNumber from "./ej-number";
 import IndicatorsMenu from "./indicators-menu";
 import EJMark from "./ej-mark";
-import MobileSheet from "./mobile-sheet";
+import MobileSheet, { useCompactDock, useMobileUI } from "./mobile-sheet";
 
 const QUICK_TF: Timeframe[] = ["30s", "1m", "3m", "5m", "15m", "1h", "4h"];
 const TF_GROUPS: Array<{ title: string; items: Timeframe[] }> = [
@@ -34,19 +34,6 @@ const CHART_TYPES: Array<{ id: ChartType; label: string; icon: string }> = [
   { id: "area", label: "Area", icon: "area" },
   { id: "baseline", label: "Baseline", icon: "baseline" },
 ];
-
-/** Returns true when we should use sheet UI instead of inline dropdown. */
-function useMobileUI() {
-  const [mobile, setMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(pointer: coarse), (max-width: 820px)");
-    setMobile(mq.matches);
-    const h = () => setMobile(mq.matches);
-    mq.addEventListener("change", h);
-    return () => mq.removeEventListener("change", h);
-  }, []);
-  return mobile;
-}
 
 function Dropdown({
   button, children, align = "left", title, active, sheetTitle, searchable,
@@ -134,6 +121,17 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
   const curType = CHART_TYPES.find((c) => c.id === chartType) ?? CHART_TYPES[1];
 
   const mobile = useMobileUI();
+  const compactDock = useCompactDock();
+  const [compactTf, setCompactTf] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1180px)");
+    setCompactTf(mq.matches);
+    const onChange = () => setCompactTf(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const tradePanelOpen = useBacktest((s) => s.tradePanelOpen);
+  const setTradePanelOpen = useBacktest((s) => s.setTradePanelOpen);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const handleEnd = async () => {
@@ -167,16 +165,20 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       </Dropdown>
       <i className="tv-sep" />
 
-      {/* Timeframes */}
-      {QUICK_TF.map((tf) => (
-        <button key={tf} type="button" data-tip={tfName(tf)} aria-label={tfName(tf)} aria-pressed={timeframe === tf} className={`tv-tbtn ej-num${timeframe === tf ? " tv-tf-active" : ""}`} onClick={() => changeTimeframe(tf)}>
+      {/* Timeframes: compact pill <=1180px (phone + tablet), quick strip + dropdown on desktop */}
+      {!compactTf && QUICK_TF.map((tf) => (
+        <button key={tf} type="button" data-tip={tfName(tf)} aria-label={tfName(tf)} aria-pressed={timeframe === tf} className={`tv-tbtn ej-num tv-tf-quick${timeframe === tf ? " tv-tf-active" : ""}`} onClick={() => changeTimeframe(tf)}>
           {tf.replace("1D", "D")}
         </button>
       ))}
-      {!QUICK_TF.includes(timeframe) && (
-        <button type="button" className="tv-tbtn ej-num tv-tf-active" aria-pressed="true" aria-label={tfName(timeframe)}>{timeframe.replace("1D", "D")}</button>
+      {!compactTf && !QUICK_TF.includes(timeframe) && (
+        <button type="button" className="tv-tbtn ej-num tv-tf-active tv-tf-quick" aria-pressed="true" aria-label={tfName(timeframe)}>{timeframe.replace("1D", "D")}</button>
       )}
-      <Dropdown title="Time interval" button={<I name="chevronDown" size={16} />}>
+      <Dropdown
+        title="Time interval"
+        sheetTitle="Select timeframe"
+        button={compactTf ? <span className="ej-num" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>{timeframe.replace("1D", "D")}<I name="chevronDown" size={14} /></span> : <I name="chevronDown" size={16} />}
+      >
         {(close) => (
           <>
             {TF_GROUPS.map((g) => (
@@ -194,66 +196,73 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       </Dropdown>
       <i className="tv-sep" />
 
-      {/* Chart type */}
-      <Dropdown title={`Chart type: ${curType.label}`} button={<I name={curType.icon} size={20} />}>
-        {(close) => (
-          <>
-            {CHART_TYPES.map((c) => (
-              <button key={c.id} type="button" role="menuitemradio" aria-checked={c.id === chartType} className={`tv-menu-item${c.id === chartType ? " is-active" : ""}`} onClick={() => { setChartType(c.id); close(); }}>
-                <span><I name={c.icon} size={20} />{c.label}</span>{c.id === chartType && <I name="check" size={16} />}
-              </button>
-            ))}
-          </>
-        )}
-      </Dropdown>
-      <i className="tv-sep" />
+      {/* Chart type (moved inside ••• sheet on phone dock to keep top bar single-screen) */}
+      {!compactDock && (
+        <>
+          <Dropdown title={`Chart type: ${curType.label}`} button={<I name={curType.icon} size={20} />}>
+            {(close) => (
+              <>
+                {CHART_TYPES.map((c) => (
+                  <button key={c.id} type="button" role="menuitemradio" aria-checked={c.id === chartType} className={`tv-menu-item${c.id === chartType ? " is-active" : ""}`} onClick={() => { setChartType(c.id); close(); }}>
+                    <span><I name={c.icon} size={20} />{c.label}</span>{c.id === chartType && <I name="check" size={16} />}
+                  </button>
+                ))}
+              </>
+            )}
+          </Dropdown>
+          <i className="tv-sep" />
+        </>
+      )}
 
       {/* Indicators */}
       <IndicatorsMenu />
-      <i className="tv-sep" />
+      {!compactDock && <i className="tv-sep" />}
 
-      {/* Alert */}
-      <Dropdown title="Create alert" active={myAlerts.length > 0} button={<><I name="alert" size={20} filled={myAlerts.length > 0} /><span className="tv-hide-sm">Alert{myAlerts.length ? ` ${myAlerts.length}` : ""}</span></>}>
-        {(close) => (
-          <div className="ej-alertpop">
-            <div className="tv-menu-head">{active} crossing</div>
-            <div className="tv-row ej-alertrow">
-              <input
-                className="ej-input" aria-label="Alert price" onKeyDown={(e) => e.stopPropagation()}
-                type="number" inputMode="decimal" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
-                value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)} style={{ fontSize: 16 }}
-              />
-              <button
-                type="button" className="tv-btn primary" style={{ flex: "none" }}
-                disabled={lastClose === null || !(parseFloat(alertPrice) > 0)}
-                onClick={() => {
-                  const p = parseFloat(alertPrice);
-                  if (lastClose === null || !(p > 0)) return;
-                  addAlert(active, p, p >= lastClose ? "up" : "down");
-                  toast({ text: `Alert set · ${active} ${p >= lastClose ? "above" : "below"} ${fmtPrice(p)}` });
-                  setAlertPrice(""); close();
-                }}
-              >
-                Create
-              </button>
-            </div>
-            {myAlerts.length === 0 ? (
-              <div className="ej-empty-inline"><EJMark size={18} />No active alerts. Replay pauses when one is hit.</div>
-            ) : myAlerts.map((a) => (
-              <div key={a.id} className="tv-setrow">
-                <span className="ej-num">{a.direction === "up" ? "▲" : "▼"} {fmtPrice(a.price)}</span>
-                <button type="button" className="tv-linkbtn" onClick={() => { removeAlert(a.id); toast({ kind: "info", text: `Alert removed · ${fmtPrice(a.price)}`, action: { label: "Undo", run: () => addAlert(a.symbol, a.price, a.direction) } }); }}>Remove</button>
+      {/* Alert & Replay (moved inside ••• sheet on phone dock to keep all primary controls visible) */}
+      {!compactDock && (
+        <>
+          <Dropdown title="Create alert" active={myAlerts.length > 0} button={<><I name="alert" size={20} filled={myAlerts.length > 0} /><span className="tv-hide-sm">Alert{myAlerts.length ? ` ${myAlerts.length}` : ""}</span></>}>
+            {(close) => (
+              <div className="ej-alertpop">
+                <div className="tv-menu-head">{active} crossing</div>
+                <div className="tv-row ej-alertrow">
+                  <input
+                    className="ej-input" aria-label="Alert price" onKeyDown={(e) => e.stopPropagation()}
+                    type="number" inputMode="decimal" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
+                    value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)} style={{ fontSize: 16 }}
+                  />
+                  <button
+                    type="button" className="tv-btn primary" style={{ flex: "none" }}
+                    disabled={lastClose === null || !(parseFloat(alertPrice) > 0)}
+                    onClick={() => {
+                      const p = parseFloat(alertPrice);
+                      if (lastClose === null || !(p > 0)) return;
+                      addAlert(active, p, p >= lastClose ? "up" : "down");
+                      toast({ text: `Alert set · ${active} ${p >= lastClose ? "above" : "below"} ${fmtPrice(p)}` });
+                      setAlertPrice(""); close();
+                    }}
+                  >
+                    Create
+                  </button>
+                </div>
+                {myAlerts.length === 0 ? (
+                  <div className="ej-empty-inline"><EJMark size={18} />No active alerts. Replay pauses when one is hit.</div>
+                ) : myAlerts.map((a) => (
+                  <div key={a.id} className="tv-setrow">
+                    <span className="ej-num">{a.direction === "up" ? "▲" : "▼"} {fmtPrice(a.price)}</span>
+                    <button type="button" className="tv-linkbtn" onClick={() => { removeAlert(a.id); toast({ kind: "info", text: `Alert removed · ${fmtPrice(a.price)}`, action: { label: "Undo", run: () => addAlert(a.symbol, a.price, a.direction) } }); }}>Remove</button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </Dropdown>
+            )}
+          </Dropdown>
 
-      {/* Replay */}
-      <button type="button" className={`tv-tbtn${replayOpen ? " is-on" : ""}`} data-tip="Bar replay controls" aria-label="Bar replay controls" aria-pressed={replayOpen} onClick={onToggleReplay}>
-        <I name="replay" size={20} filled={replayOpen} /><span className="tv-hide-sm">Replay</span>
-      </button>
-      <i className="tv-sep" />
+          <button type="button" className={`tv-tbtn${replayOpen ? " is-on" : ""}`} data-tip="Bar replay controls" aria-label="Bar replay controls" aria-pressed={replayOpen} onClick={onToggleReplay}>
+            <I name="replay" size={20} filled={replayOpen} /><span className="tv-hide-sm">Replay</span>
+          </button>
+          <i className="tv-sep" />
+        </>
+      )}
 
       {!mobile && <button type="button" className="tv-tbtn" data-tip="Undo (Ctrl+Z)" aria-label="Undo" disabled={!canUndo} onClick={() => undo(active)}><I name="undo" size={20} /></button>}
       {!mobile && <button type="button" className="tv-tbtn" data-tip="Redo (Ctrl+Y)" aria-label="Redo" disabled={!canRedo} onClick={() => redo(active)}><I name="redo" size={20} /></button>}
@@ -261,15 +270,66 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
       <span className="tv-grow" />
 
       {/* Mobile: ••• overflow sheet */}
-      {mobile && (
+      {(mobile || compactDock) && (
         <>
           <button
             type="button" className="ej-more-btn tv-tbtn" aria-label="More options"
             style={{ touchAction: "manipulation" }}
             onClick={() => setMoreOpen(true)}
           >•••</button>
-          <MobileSheet open={moreOpen} onClose={() => setMoreOpen(false)} title="More options">
+          <MobileSheet open={moreOpen} onClose={() => setMoreOpen(false)} title="Workspace options">
             <div role="menu">
+              <button type="button" role="menuitem" className={`ej-sheet-row${tradePanelOpen ? " is-on" : ""}`} onClick={() => { setTradePanelOpen(!tradePanelOpen); setMoreOpen(false); }}>
+                <I name="wallet" size={20} />{tradePanelOpen ? "Hide Paper Trading" : "Paper Trading panel"}
+              </button>
+              <button type="button" role="menuitem" className={`ej-sheet-row${replayOpen ? " is-on" : ""}`} onClick={() => { onToggleReplay(); setMoreOpen(false); }}>
+                <I name="replay" size={20} filled={replayOpen} />{replayOpen ? "Hide replay bar" : "Show replay bar"}
+              </button>
+
+              <div style={{ padding: "8px 16px 4px", fontSize: 11.5, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Chart style</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, padding: "4px 14px 8px" }}>
+                {CHART_TYPES.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`ej-sheet-row${c.id === chartType ? " is-on" : ""}`}
+                    style={{ justifyContent: "center", minHeight: 38, fontSize: 12.5, padding: "4px 8px", border: "0.5px solid var(--tv-hair)" }}
+                    onClick={() => { setChartType(c.id); setMoreOpen(false); }}
+                  >
+                    <I name={c.icon} size={16} />{c.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ padding: "8px 16px 4px", fontSize: 11.5, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Price alert ({active})</div>
+              <div style={{ display: "flex", gap: 8, padding: "4px 14px 8px" }}>
+                <input
+                  className="ej-input" aria-label="Alert price" onKeyDown={(e) => e.stopPropagation()}
+                  type="number" inputMode="decimal" step={spec?.tickSize ?? 0.25} placeholder={lastClose !== null ? fmtPrice(lastClose) : "Price"}
+                  value={alertPrice} onChange={(e) => setAlertPrice(e.target.value)} style={{ fontSize: 16, flex: 1 }}
+                />
+                <button
+                  type="button" className="tv-btn primary" style={{ flex: "none", padding: "0 14px", height: 36 }}
+                  disabled={lastClose === null || !(parseFloat(alertPrice) > 0)}
+                  onClick={() => {
+                    const p = parseFloat(alertPrice);
+                    if (lastClose === null || !(p > 0)) return;
+                    addAlert(active, p, p >= lastClose ? "up" : "down");
+                    toast({ text: `Alert set · ${active} ${p >= lastClose ? "above" : "below"} ${fmtPrice(p)}` });
+                    setAlertPrice("");
+                  }}
+                >
+                  Set
+                </button>
+              </div>
+              {myAlerts.map((a) => (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 16px" }}>
+                  <span className="ej-num">{a.direction === "up" ? "▲" : "▼"} {fmtPrice(a.price)}</span>
+                  <button type="button" className="tv-linkbtn" onClick={() => removeAlert(a.id)}>Remove</button>
+                </div>
+              ))}
+
+              <div style={{ height: 1, background: "var(--tv-hair)", margin: "6px 0" }} />
               <button type="button" role="menuitem" className="ej-sheet-row" onClick={() => { emitChartCommand({ type: "screenshot", mode: "download" }); toast({ text: "Chart image saved" }); setMoreOpen(false); }}>
                 <I name="camera" size={20} />Screenshot
               </button>
@@ -293,16 +353,15 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
         </>
       )}
 
-      {/* P&L chip (mobile) / full account stats (desktop) */}
+      {/* P&L chip (mobile: opens Paper Trading sheet) / full account stats (desktop/tablet) */}
       {account && mobile ? (
         <button
           type="button"
           className={`ej-pnl-chip${account.netPnl > 0 ? " is-up" : account.netPnl < 0 ? " is-dn" : ""}`}
-          aria-label={`Net P&L ${fmtPnl(account.netPnl)}`}
+          aria-label={`Paper trading · Net P&L ${fmtPnl(account.netPnl)}`}
+          aria-expanded={tradePanelOpen}
           style={{ touchAction: "manipulation" }}
-          onClick={() => {
-            toast({ kind: account.netPnl >= 0 ? "info" : "warn", text: `Balance ${formatMoney(account.balance)} · P&L ${fmtPnl(account.netPnl)} · ${account.totalTrades} trade${account.totalTrades === 1 ? "" : "s"}`, ms: 4000 });
-          }}
+          onClick={() => setTradePanelOpen(!tradePanelOpen)}
         >
           <AnimatedNumber tau={320} value={account.netPnl} format={fmtPnl} />
         </button>
@@ -330,7 +389,7 @@ export default function TopToolbar({ onBack, replayOpen, onToggleReplay, ticketO
         )}
       </Dropdown>}
       <button type="button" className={`tv-trade-btn${ticketOpen ? " is-on" : ""}`} onClick={onToggleTicket} data-tip="Order ticket" aria-pressed={ticketOpen} style={{ touchAction: "manipulation" }}>Trade</button>
-      <button type="button" className="tv-end" onClick={handleEnd} style={{ touchAction: "manipulation" }}>End Session</button>
+      <button type="button" className="tv-end" onClick={handleEnd} style={{ touchAction: "manipulation" }}>{compactDock ? "End" : "End Session"}</button>
     </div>
   );
 }

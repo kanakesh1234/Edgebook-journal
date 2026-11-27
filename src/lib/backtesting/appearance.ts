@@ -86,12 +86,12 @@ export function useChartAppearance(): ChartAppearance {
   return useSyncExternalStore(subscribe, () => { load(); return snapshot; }, () => DEFAULT_APPEARANCE);
 }
 
-/** Site surface colours (globals.css --raised / dark surface). */
-export const DEFAULT_BG = { light: "#fffefb", dark: "#1c1813" };
+/** Site surface colours (globals.css Obsidian dark & ivory light). */
+export const DEFAULT_BG = { light: "#fffefb", dark: "#131317" };
 
 const DEFAULT_CANDLES = {
   light: { up: "#2e8b57", down: "#15130f" },
-  dark: { up: "#5fb47f", down: "#e9e4d8" },
+  dark: { up: "#49b675", down: "#e9e4d8" },
 };
 
 /** Resolved candle colours: the user's pick, else the Edgebook default for the theme. */
@@ -115,9 +115,9 @@ export function paletteFor(theme: "light" | "dark", a: ChartAppearance) {
   return {
     bg,
     darkBg,
-    text: darkBg ? "#e9e4d8" : "#26221a",
-    grid: darkBg ? "rgba(233,228,216,0.07)" : "rgba(38,34,26,0.07)",
-    border: darkBg ? "#3a342a" : "#e7e1d4",
+    text: darkBg ? "#f4f1ea" : "#26221a",
+    grid: darkBg ? "rgba(244,241,234,0.06)" : "rgba(38,34,26,0.07)",
+    border: darkBg ? "#2a2a35" : "#e7e1d4",
     crosshair: darkBg ? "#9598A1" : "#9598A1",
     crosshairLabel: darkBg ? "#363A45" : "#131722",
   };

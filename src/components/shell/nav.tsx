@@ -217,7 +217,7 @@ export function Sidebar() {
   }, [collapsed]);
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] flex-col border-r border-line bg-surface/85 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] xl:flex">
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-[var(--sidebar-w)] flex-col border-r border-line bg-surface/85 backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] dark:border-line-strong/75 dark:bg-surface/92 xl:flex">
       <div className={cn("flex h-16 items-center justify-between border-b border-line px-4", collapsed && "justify-center px-2")}>
         {!collapsed && (
           <Link href="/dashboard" aria-label="Edgebook dashboard">
@@ -351,7 +351,7 @@ export function TabletRail() {
     <aside
       aria-label="Sidebar"
       className={cn(
-        "fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto [@media(max-height:520px)]:*:shrink-0",
+        "fixed inset-y-0 left-0 z-40 hidden w-[var(--rail-w)] flex-col border-r border-line bg-surface/85 pb-[max(0.75rem,var(--safe-bottom))] pl-[var(--safe-left)] pt-[max(1rem,var(--safe-top))] backdrop-blur-xl transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] dark:border-line-strong/75 dark:bg-surface/92 md:flex xl:hidden [@media(max-height:520px)]:no-scrollbar [@media(max-height:520px)]:overflow-y-auto [@media(max-height:520px)]:*:shrink-0",
         expanded ? "items-stretch px-3" : "items-center",
       )}
     >
@@ -631,7 +631,7 @@ export function BottomTabs() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-40 grid h-[var(--tabbar-h)] grid-cols-5 border-t border-line bg-surface/90 pb-[var(--safe-bottom)] pl-[var(--safe-left)] pr-[var(--safe-right)] backdrop-blur-xl md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 grid h-[var(--tabbar-h)] grid-cols-5 border-t border-line bg-surface/90 pb-[var(--safe-bottom)] pl-[var(--safe-left)] pr-[var(--safe-right)] backdrop-blur-xl dark:border-line-strong/75 dark:bg-surface/94 md:hidden"
     >
       <TabLink item={home} active={isActive(pathname, home.href)} />
       <TabLink item={feed} active={isActive(pathname, feed.href)} />
@@ -646,7 +646,7 @@ export function BottomTabs() {
             openNewEntry();
           }}
           aria-label="Add trade"
-          className="-mt-4 grid h-14 w-14 place-items-center rounded-full border-4 border-canvas bg-gold-strong text-on-gold shadow-lift transition-transform active:scale-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="-mt-4 grid h-14 w-14 place-items-center rounded-full border-4 border-canvas bg-gold-strong text-on-gold shadow-lift transition-transform active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 dark:shadow-[0_10px_28px_-8px_rgb(207_165_86/0.45)]"
         >
           <PlusIcon className="h-6 w-6" />
         </button>

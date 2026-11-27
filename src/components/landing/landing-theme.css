@@ -1,0 +1,340 @@
+/* ==========================================================================
+   Landing Responsive Tiers & Dual-Theme Surface Harmonies
+   Loaded after landing.css so both Light (Ivory Dawn) and Dark (Obsidian & Champagne)
+   work cleanly across Desktop (>=1280px), Tablet (768-1279px), and Mobile (<768px).
+   ========================================================================== */
+
+/* Responsive tier isolation (no SSR hydration mismatch) */
+.lp-tier-mobile {
+  display: block;
+}
+.lp-tier-tablet,
+.lp-tier-desktop {
+  display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1279.98px) {
+  .lp-tier-mobile {
+    display: none;
+  }
+  .lp-tier-tablet {
+    display: block;
+  }
+}
+
+@media (min-width: 1280px) {
+  .lp-tier-mobile,
+  .lp-tier-tablet {
+    display: none;
+  }
+  .lp-tier-desktop {
+    display: block;
+  }
+}
+
+/* ---------- Obsidian & Champagne Dark Mode ---------- */
+[data-theme="dark"] .lp-root {
+  --lp-bg: #0b0b0e;
+  --lp-ink: #f4f1ea;
+  --lp-ink-2: #b4afa5;
+  --lp-gold: #d8b36a;
+  --lp-gold-hi: #ebcd8c;
+  --lp-gold-fill: #cfa556;
+  --lp-on-gold: #18130a;
+  --lp-surface: #131317;
+  --lp-raised: #1b1b21;
+  --lp-border: rgb(255 255 255 / 0.1);
+  background: #0b0b0e;
+  color: #f4f1ea;
+}
+
+[data-theme="dark"] .lp-header[data-solid="true"] {
+  background: rgb(11 11 14 / 0.78);
+  border-bottom-color: rgb(255 255 255 / 0.08);
+}
+
+[data-theme="dark"] .lp-pill {
+  background: var(--lp-gold-fill);
+  color: var(--lp-on-gold);
+  box-shadow:
+    inset 0 1px 0 rgb(255 248 225 / 0.45),
+    0 10px 30px -10px rgb(207 165 86 / 0.45);
+}
+
+[data-theme="dark"] .lp-pill:hover {
+  background: #dfba70;
+}
+
+[data-theme="dark"] .cx-world {
+  background: #0b0b0e;
+}
+
+[data-theme="dark"] .cx-shade {
+  background:
+    radial-gradient(115% 95% at 50% 52%, transparent 50%, rgb(6 6 9 / 0.62) 100%),
+    radial-gradient(
+      95% 58% at 50% 60%,
+      rgb(216 179 106 / calc(0.18 + var(--sunrise, 0) * 0.36)),
+      transparent 74%
+    );
+}
+
+[data-theme="dark"] .cx-card {
+  background: linear-gradient(165deg, #1b1b21, #131317);
+  border-color: rgb(255 255 255 / 0.11);
+  box-shadow:
+    0 30px 70px -20px rgb(0 0 0 / 0.85),
+    inset 0 1px 0 rgb(255 255 255 / 0.09);
+  color: #f4f1ea;
+}
+
+[data-theme="dark"] .cx-card::before {
+  background: linear-gradient(90deg, transparent, rgb(235 205 140 / 0.55), transparent);
+}
+
+[data-theme="dark"] .st {
+  background:
+    radial-gradient(75% 26% at 80% 94%, rgb(216 179 106 / 0.32), transparent 72%),
+    radial-gradient(60% 16% at 14% 46%, rgb(216 179 106 / 0.09), transparent 75%),
+    linear-gradient(180deg, #0b0b0e 0%, #121218 55%, #1b1815 100%);
+}
+
+[data-theme="dark"] .st-card {
+  background: linear-gradient(165deg, #1b1b21, #131317);
+  border-color: rgb(255 255 255 / 0.12);
+  color: #f4f1ea;
+  box-shadow:
+    0 24px 60px -18px rgb(0 0 0 / 0.8),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+[data-theme="dark"] .st-card pre {
+  color: #e9e4da;
+}
+
+[data-theme="dark"] .qs {
+  background:
+    radial-gradient(80% 20% at 50% 62%, rgb(216 179 106 / 0.24), transparent 75%),
+    radial-gradient(40% 12% at 50% 30%, rgb(216 179 106 / 0.08), transparent 75%),
+    linear-gradient(180deg, #1b1815 0%, #101015 45%, #0b0b0e 100%);
+}
+
+[data-theme="dark"] .fin {
+  background:
+    radial-gradient(80% 45% at 50% 68%, rgb(216 179 106 / 0.22), transparent 70%),
+    linear-gradient(180deg, #0b0b0e 0%, #131317 65%, #18161a 100%);
+}
+
+[data-theme="dark"] .lp-footer {
+  background: #0d0d11;
+  border-top-color: rgb(255 255 255 / 0.08);
+  color: rgb(244 241 234 / 0.62);
+}
+
+/* ---------- Ivory & Warm Brass Light Mode ---------- */
+[data-theme="light"] .lp-root {
+  --lp-bg: #f7f4ee;
+  --lp-ink: #221d15;
+  --lp-ink-2: #605749;
+  --lp-gold: #8c6d2e;
+  --lp-gold-hi: #b78e3e;
+  --lp-gold-fill: #b78e3e;
+  --lp-on-gold: #1f1708;
+  --lp-paper: #fffefb;
+  --lp-paper-ink: #26221a;
+  --lp-paper-ink-2: #625849;
+  --lp-surface: #fcfaf5;
+  --lp-raised: #fffefb;
+  --lp-border: rgb(38 34 26 / 0.11);
+  background: #f7f4ee;
+  color: #221d15;
+}
+
+[data-theme="light"] .lp-header[data-solid="true"] {
+  background: rgb(247 244 238 / 0.84);
+  border-bottom-color: rgb(38 34 26 / 0.1);
+}
+
+[data-theme="light"] .lp-links a,
+[data-theme="light"] .lp-actions .lp-text-link {
+  color: #4f4638;
+}
+
+[data-theme="light"] .lp-links a:hover,
+[data-theme="light"] .lp-actions .lp-text-link:hover,
+[data-theme="light"] .lp-text-link:hover {
+  color: #1f1a12;
+}
+
+[data-theme="light"] .lp-text-link {
+  color: #4f4638;
+}
+
+[data-theme="light"] .lp-pill {
+  background: #b78e3e;
+  color: #1c1406;
+  box-shadow:
+    inset 0 1px 0 rgb(255 250 232 / 0.55),
+    0 10px 26px -10px rgb(140 109 46 / 0.38);
+}
+
+[data-theme="light"] .lp-pill:hover {
+  background: #a88136;
+}
+
+[data-theme="light"] .lp-root :focus-visible {
+  outline-color: #8c6d2e;
+}
+
+/* Engraved atmospheric light-mode silhouette for Desktop 2.5D Cinema */
+[data-theme="light"] .cx-world {
+  background: radial-gradient(95% 65% at 50% 42%, #fffcf5 0%, #f5eedf 56%, #ece1c9 100%);
+}
+
+[data-theme="light"] .cx-world .cx-layer svg {
+  opacity: 0.34;
+  filter: sepia(0.25) contrast(0.9) brightness(1.18);
+}
+
+[data-theme="light"] .cx-shade {
+  background:
+    radial-gradient(125% 95% at 50% 52%, rgb(252 250 245 / 0.35) 36%, rgb(235 224 202 / 0.78) 100%),
+    radial-gradient(90% 55% at 50% 54%, rgb(255 247 224 / 0.72), transparent 72%);
+}
+
+[data-theme="light"] .cx-intro h1,
+[data-theme="light"] .cx-quote blockquote,
+[data-theme="light"] .cx-cat-hd h2,
+[data-theme="light"] .st-text,
+[data-theme="light"] .qs-q blockquote,
+[data-theme="light"] .fin h2 {
+  color: #221d15;
+  text-shadow: 0 1px 18px rgb(255 253 248 / 0.9);
+}
+
+[data-theme="light"] .cx-intro h1 em,
+[data-theme="light"] .st-gold,
+[data-theme="light"] .fin h2 em,
+[data-theme="light"] .lp-eyebrow {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: #8c6d2e;
+}
+
+[data-theme="light"] .cx-sub,
+[data-theme="light"] .cx-cue {
+  color: #5b5142;
+}
+
+[data-theme="light"] .cx-cat-item {
+  background: rgb(255 254 251 / 0.9);
+  border-color: rgb(38 34 26 / 0.12);
+  color: #221d15;
+  box-shadow: 0 12px 32px -18px rgb(48 40 24 / 0.18);
+}
+
+[data-theme="light"] .cx-cat-item p {
+  color: #5b5142;
+}
+
+[data-theme="light"] .cx-cat-item svg {
+  color: #8c6d2e;
+}
+
+[data-theme="light"] .cx-card {
+  background: #fffefb;
+  border-color: rgb(38 34 26 / 0.13);
+  color: #26221a;
+  box-shadow: 0 24px 60px -22px rgb(48 40 24 / 0.2);
+}
+
+[data-theme="light"] .cx-pop,
+[data-theme="light"] .cx-bubble {
+  background: #fcfaf5;
+  border-color: rgb(38 34 26 / 0.12);
+  color: #26221a;
+}
+
+[data-theme="light"] .st {
+  background:
+    radial-gradient(75% 26% at 80% 94%, rgb(183 142 62 / 0.16), transparent 72%),
+    radial-gradient(60% 16% at 14% 46%, rgb(183 142 62 / 0.08), transparent 75%),
+    linear-gradient(180deg, #f5efe4 0%, #f7f4ee 55%, #efe7d6 100%);
+}
+
+[data-theme="light"] .st-card {
+  background: #fffefb;
+  border-color: rgb(38 34 26 / 0.12);
+  color: #26221a;
+  box-shadow: 0 24px 56px -20px rgb(48 40 24 / 0.2);
+}
+
+[data-theme="light"] .st-card pre {
+  color: #3a3327;
+}
+
+[data-theme="light"] .st-note {
+  background: #fffefb;
+  border-color: rgb(38 34 26 / 0.12);
+  color: #26221a;
+}
+
+[data-theme="light"] .qs {
+  background:
+    radial-gradient(80% 20% at 50% 62%, rgb(183 142 62 / 0.14), transparent 75%),
+    linear-gradient(180deg, #efe7d6 0%, #f7f4ee 45%, #f5efe4 100%);
+}
+
+[data-theme="light"] .qs-rule {
+  background: linear-gradient(90deg, transparent, rgb(140 109 46 / 0.5), transparent);
+}
+
+[data-theme="light"] .fin {
+  background:
+    radial-gradient(80% 45% at 50% 68%, rgb(183 142 62 / 0.15), transparent 70%),
+    linear-gradient(180deg, #f5efe4 0%, #f7f4ee 65%, #f0e8d7 100%);
+}
+
+[data-theme="light"] .fin-horizon {
+  background: radial-gradient(ellipse at 50% 50%, rgb(183 142 62 / 0.22), transparent 68%);
+}
+
+[data-theme="light"] .lp-footer {
+  background: #f0e9db;
+  border-top-color: rgb(38 34 26 / 0.12);
+  color: #5b5142;
+}
+
+[data-theme="light"] .lp-foot-row a {
+  color: #4f4638;
+}
+
+[data-theme="light"] .lp-foot-row a:hover {
+  color: #1f1a12;
+}
+
+/* ---------- Mobile & Tablet Dedicated Surface Helpers ---------- */
+.lp-card-surface {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow-rest);
+}
+
+[data-theme="dark"] .lp-card-surface {
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgb(255 255 255 / 0.03), transparent 62%),
+    #131317;
+  border-color: #282833;
+  box-shadow:
+    0 18px 46px -22px rgb(0 0 0 / 0.8),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+.lp-no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.lp-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

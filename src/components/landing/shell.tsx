@@ -1,22 +1,24 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTheme } from "@/lib/theme";
 
 /**
- * The landing is a night-to-dawn film, so it keeps its own palette regardless of the app
- * theme. Match the document background while mounted so overscroll never flashes the
- * light theme, and restore it on leave.
+ * Matches the document canvas behind overscroll to the active theme on the landing page,
+ * and restores the previous values when leaving.
  */
 export function LandingShell() {
+  const { resolved } = useTheme();
+
   useEffect(() => {
     const html = document.documentElement;
     const prev = { bg: html.style.backgroundColor, scheme: html.style.colorScheme };
-    html.style.backgroundColor = "#0e0b08";
-    html.style.colorScheme = "dark";
+    html.style.backgroundColor = resolved === "dark" ? "#0b0b0e" : "#f7f4ee";
+    html.style.colorScheme = resolved;
     return () => {
       html.style.backgroundColor = prev.bg;
       html.style.colorScheme = prev.scheme;
     };
-  }, []);
+  }, [resolved]);
   return null;
 }

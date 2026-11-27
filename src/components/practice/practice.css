@@ -12,7 +12,7 @@
   border: 1px solid var(--line); border-radius: 22px; background: var(--surface);
   box-shadow: 0 1px 2px rgb(48 40 24 / .04), 0 8px 24px -16px rgb(48 40 24 / .12);
 }
-[data-theme="dark"] .pr-surface { box-shadow: 0 1px 2px rgb(0 0 0 / .35); }
+[data-theme="dark"] .pr-surface { box-shadow: 0 1px 2px rgb(0 0 0 / .45), inset 0 1px 0 var(--edge-top, rgb(255 255 255 / 0.08)); }
 
 .pr-section-title { font-size: 22px; font-weight: 640; letter-spacing: -.028em; line-height: 1.15; color: var(--ink); }
 .pr-heading { font-size: 17px; font-weight: 620; letter-spacing: -.02em; color: var(--ink); }
@@ -71,7 +71,7 @@
 .pr-card:nth-child(4) { animation-delay: .22s; }
 .pr-card:nth-child(5) { animation-delay: .28s; }
 @keyframes pr-folder-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-[data-theme="dark"] .pr-card { box-shadow: 0 1px 2px rgb(0 0 0 / .35); }
+[data-theme="dark"] .pr-card { box-shadow: 0 1px 2px rgb(0 0 0 / .45), inset 0 1px 0 var(--edge-top, rgb(255 255 255 / 0.08)); }
 @media (hover: hover) {
   .pr-card:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgb(48 40 24 / .04), 0 28px 48px -24px color-mix(in srgb, var(--pr-accent) 45%, rgb(48 40 24 / .2)); }
   [data-theme="dark"] .pr-card:hover { box-shadow: 0 24px 48px -24px rgb(0 0 0 / .65); }

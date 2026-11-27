@@ -338,8 +338,8 @@ export default function JournalPage() {
       <AnimatePresence>
         {mobileNav && !wide && (
           <div className="fixed inset-0 z-50">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNav(false)} className="absolute inset-0 bg-black/30" />
-            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ duration: 0.35, ease: EASE }} className="absolute inset-y-0 left-0 w-[280px] overflow-y-auto bg-surface/95 pt-4 shadow-2xl backdrop-blur-2xl">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setMobileNav(false)} className="absolute inset-0 bg-black/35 backdrop-blur-[2px] dark:bg-black/60" />
+            <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} transition={{ duration: 0.35, ease: EASE }} className="absolute inset-y-0 left-0 w-[280px] overflow-y-auto border-r border-line bg-surface/95 pt-4 shadow-2xl backdrop-blur-2xl dark:border-line-strong dark:bg-overlay/95">
               {sidebar}
             </motion.div>
           </div>

@@ -92,8 +92,8 @@ export function Modal({ open, onClose, title, description, size = "md", children
             }}
             transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              "relative flex max-h-[92dvh] w-full flex-col overflow-hidden border border-line-strong/80 bg-surface shadow-overlay outline-none",
-              "ring-1 ring-inset ring-white/55 dark:ring-white/[0.06]",
+              "relative flex max-h-[92dvh] w-full flex-col overflow-hidden border border-line-strong/80 bg-surface shadow-overlay outline-none dark:border-line-strong",
+              "ring-1 ring-inset ring-white/55 dark:ring-white/[0.08]",
               "rounded-t-[26px] pb-[var(--safe-bottom)] sm:rounded-[24px] sm:pb-0",
               sizes[size],
             )}

@@ -26,7 +26,7 @@ export const pnlClass = (v: number) =>
   v > 0 ? "text-profit" : v < 0 ? "text-loss" : "text-muted";
 
 export const pnlBgClass = (v: number) =>
-  v > 0 ? "bg-profit/10 text-profit border-profit/20" : v < 0 ? "bg-loss/10 text-loss border-loss/25" : "bg-ink/[0.05] text-muted border-line";
+  v > 0 ? "bg-profit/10 text-profit border-profit/20" : v < 0 ? "bg-loss/10 text-loss border-loss/25" : "bg-well text-muted border-line";
 
 export function EmptyState({
   icon,

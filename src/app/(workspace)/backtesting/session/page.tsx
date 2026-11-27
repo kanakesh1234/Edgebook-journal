@@ -26,6 +26,7 @@ import { I } from "@/components/backtesting/tv-icons";
 import "@/components/backtesting/tv.css";
 import "@/components/backtesting/ej.css";
 import "@/components/backtesting/ej-tools.css";
+import "@/components/backtesting/ej-responsive.css";
 
 const ALT_TOOLS: Record<string, "trend-line" | "horizontal-line" | "horizontal-ray" | "vertical-line" | "cross-line" | "fib-retracement"> = {
   KeyT: "trend-line", KeyH: "horizontal-line", KeyJ: "horizontal-ray", KeyV: "vertical-line", KeyC: "cross-line", KeyF: "fib-retracement",

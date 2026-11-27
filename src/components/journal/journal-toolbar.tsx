@@ -63,7 +63,7 @@ export function JournalToolbar(p: {
 
       <div className="flex items-center gap-1">
         {/* View switcher */}
-        <div role="radiogroup" aria-label="View" className="mr-1 flex h-8 items-center rounded-[10px] bg-ink/[0.06] p-0.5">
+        <div role="radiogroup" aria-label="View" className="mr-1 flex h-8 items-center rounded-[10px] border border-line/60 bg-well p-0.5 dark:border-line">
           {VIEWS.map((v) => {
             const on = p.view === v.id;
             return (
@@ -71,7 +71,7 @@ export function JournalToolbar(p: {
                 key={v.id} type="button" role="radio" aria-checked={on} aria-label={v.label} title={v.label} onClick={() => p.onView(v.id)}
                 className={cn("relative grid h-7 w-8 place-items-center sm:w-9 rounded-[8px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-gold-strong/50", on ? "text-ink" : "text-muted hover:text-ink")}
               >
-                {on && <motion.span layoutId="journal-view-thumb" transition={SPRING} className="absolute inset-0 rounded-[8px] bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.14),0_0_0_0.5px_rgb(0_0_0/0.06)]" />}
+                {on && <motion.span layoutId="journal-view-thumb" transition={SPRING} className="absolute inset-0 rounded-[8px] bg-surface shadow-[0_1px_3px_rgb(0_0_0/0.14),0_0_0_0.5px_rgb(0_0_0/0.06)] dark:bg-raised dark:shadow-[0_1px_4px_rgb(0_0_0/0.5),inset_0_1px_0_rgb(255_255_255/0.08)]" />}
                 <Sym name={v.icon} className="relative h-[17px] w-[17px]" />
               </button>
             );
@@ -141,8 +141,8 @@ export function JournalToolbar(p: {
 
       <label
         className={cn(
-          "group order-last flex h-8 w-full items-center rounded-[10px] bg-ink/[0.06] pl-2.5 pr-1.5 transition-[width,background-color] duration-300 md:order-none md:w-48 md:focus-within:w-72",
-          "focus-within:bg-ink/[0.08] focus-within:ring-2 focus-within:ring-gold-strong/40",
+          "group order-last flex h-8 w-full items-center rounded-[10px] border border-line/60 bg-well pl-2.5 pr-1.5 transition-[width,background-color,border-color] duration-300 dark:border-line md:order-none md:w-48 md:focus-within:w-72",
+          "focus-within:border-gold/45 focus-within:bg-raised focus-within:ring-2 focus-within:ring-gold-strong/30",
         )}
       >
         <Sym name="search" className="h-4 w-4 text-faint" />

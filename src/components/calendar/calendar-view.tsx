@@ -479,7 +479,7 @@ export function CalendarView({
                             animate={{ opacity: 1 }}
                             transition={{ duration: 0.36, delay: staggerDelay, ease: SPRING_EASE }}
                             className={cn(
-                              "rounded-[12px] border border-transparent bg-ink/[0.015] sm:rounded-[14px]",
+                              "rounded-[12px] border border-transparent bg-well/40 dark:bg-well/25 sm:rounded-[14px]",
                               cellHeight,
                             )}
                           />
@@ -531,7 +531,7 @@ export function CalendarView({
                                   ? "border-profit/25 hover:border-profit/55"
                                   : pnl !== null && pnl < 0
                                     ? "border-loss/25 hover:border-loss/55"
-                                    : "border-line-soft bg-surface/75 hover:border-line-strong hover:bg-surface",
+                                    : "border-line-soft bg-surface/75 hover:border-line-strong hover:bg-surface dark:border-line dark:bg-raised/40 dark:hover:bg-raised/70",
                           )}
                         >
                           {/* Top Row: Day number top-left (filled circle on Today) + review status indicator */}
@@ -576,7 +576,7 @@ export function CalendarView({
                               />
                               <span
                                 className={cn(
-                                  "num block max-w-full truncate font-mono text-[10px] font-semibold leading-none tracking-[-0.02em] sm:text-[14px]",
+                                  "num block max-w-full truncate font-mono text-[9.5px] font-semibold leading-none tracking-[-0.02em] sm:text-[14px]",
                                   pnl > 0 ? "text-profit" : "text-loss",
                                 )}
                               >
@@ -595,7 +595,7 @@ export function CalendarView({
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ duration: 0.42, delay: reduce ? 0 : rowIdx * 0.042 + 0.09, ease: SPRING_EASE }}
                       className={cn(
-                        "hidden flex-col justify-between rounded-[14px] border border-line-soft bg-raised/45 px-3 py-2.5 text-right lg:flex",
+                        "hidden flex-col justify-between rounded-[14px] border border-line-soft bg-raised/45 px-3 py-2.5 text-right dark:border-line dark:bg-raised/65 lg:flex",
                         spacious ? "h-[96px]" : "h-[84px]",
                       )}
                     >
@@ -630,6 +630,28 @@ export function CalendarView({
             </motion.div>
           </AnimatePresence>
         </div>
+
+        {/* Tablet & Mobile Weekly Summary Strip (hidden on lg+ where column 8 appears) */}
+        {monthStats.weeklySummaries.some((w) => w.trades > 0) && (
+          <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+            {monthStats.weeklySummaries.map((w) =>
+              w.trades > 0 ? (
+                <div
+                  key={`m-wk-${w.weekIndex}`}
+                  className="flex shrink-0 items-center gap-2 rounded-xl border border-line bg-raised/60 px-3 py-1.5 dark:bg-raised/80"
+                >
+                  <span className="text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+                    Wk {w.weekIndex + 1}
+                  </span>
+                  <span className={cn("num font-mono text-xs", w.pnl > 0 ? "text-profit" : w.pnl < 0 ? "text-loss" : "text-muted")}>
+                    {w.pnl > 0 ? "+" : w.pnl < 0 ? "−" : ""}${Math.abs(w.pnl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                  </span>
+                  <span className="text-[10.5px] text-faint">· {w.trades}</span>
+                </div>
+              ) : null,
+            )}
+          </div>
+        )}
 
         {/* Subtle Footer Legend */}
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft pt-3.5 text-[11.5px] text-faint">

@@ -18,10 +18,10 @@ const variants: Record<Variant, string> = {
   primary:
     "bg-gold-strong text-on-gold font-semibold hover:bg-gold-strong-hover shadow-sm",
   gold: "bg-gold-strong text-on-gold font-semibold hover:bg-gold-strong-hover shadow-sm",
-  ghost: "text-muted hover:text-ink hover:bg-ink/[0.05]",
-  outline: "border border-line-strong text-ink bg-transparent hover:bg-ink/[0.04] hover:border-faint",
+  ghost: "text-muted hover:text-ink hover:bg-well-hover",
+  outline: "border border-line-strong text-ink bg-transparent hover:bg-well hover:border-faint",
   danger: "border border-loss/35 text-loss bg-loss/[0.06] hover:bg-loss/[0.14]",
-  subtle: "bg-raised border border-line text-muted hover:text-ink hover:border-line-strong",
+  subtle: "bg-raised border border-line text-muted hover:text-ink hover:border-line-strong dark:shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]",
 };
 
 const sizes: Record<Size, string> = {

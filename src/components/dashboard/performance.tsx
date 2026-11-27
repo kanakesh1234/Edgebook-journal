@@ -156,7 +156,7 @@ export function Performance({
         />
       </div>
 
-      <dl className="grid grid-cols-2 gap-px border-t border-line bg-line lg:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-px border-t border-line bg-line md:grid-cols-4">
         <Cell label="Win rate">
           <Value className={stats.winRate >= 0.5 ? "text-profit" : "text-ink"}>{Math.round(stats.winRate * 100)}%</Value>
           <Sub>

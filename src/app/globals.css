@@ -51,6 +51,11 @@
   --road-base: #dcd5c4;
   --road-surface: #f0ebe1;
 
+  /* Wells & highlights */
+  --well: rgb(38 34 26 / 0.035);
+  --well-hover: rgb(38 34 26 / 0.06);
+  --edge-top: rgb(255 255 255 / 0.65);
+
   /* Scrim behind sheets / modals */
   --scrim: rgb(38 34 26 / 0.32);
 
@@ -63,49 +68,52 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* Surfaces */
-  --canvas: #15120d;
-  --surface: #1c1813;
-  --raised: #272219;
-  --overlay: #2c261d;
+  /* Surfaces — Obsidian depth separation */
+  --canvas: #0b0b0e;
+  --surface: #131317;
+  --raised: #1b1b21;
+  --overlay: #222229;
+  --well: rgb(255 255 255 / 0.04);
+  --well-hover: rgb(255 255 255 / 0.075);
+  --edge-top: rgb(255 255 255 / 0.08);
 
   /* Lines */
-  --line: #2e281f;
-  --line-soft: #251f18;
-  --line-strong: #453b2b;
+  --line: #26262f;
+  --line-soft: #1d1d24;
+  --line-strong: #3a3a47;
 
   /* Ink */
-  --ink: #f0eae0;
-  --muted: #a69d8c;
-  --faint: #746c5b;
+  --ink: #f4f1ea;
+  --muted: #a8a399;
+  --faint: #78736a;
 
-  /* Trading states */
-  --profit: #74b08c;
-  --profit-deep: #4e8a66;
-  --loss: #cd8484;
-  --loss-deep: #af5f63;
+  /* Trading states — crisp emerald & coral */
+  --profit: #49b675;
+  --profit-deep: #2c7a4d;
+  --loss: #e06c75;
+  --loss-deep: #b2434c;
 
-  /* Restrained gold */
-  --gold: #cba76b;
-  --gold-deep: #a88549;
-  --gold-strong: #c09b57;
-  --gold-strong-hover: #cfae71;
-  --on-gold: #231a09;
+  /* Champagne gold */
+  --gold: #d8b36a;
+  --gold-deep: #b28d45;
+  --gold-strong: #cfa556;
+  --gold-strong-hover: #dfba70;
+  --on-gold: #18130a;
   --nav-active: var(--gold);
 
-  --info: #8faed6;
+  --info: #6ea8fe;
 
   /* Journey road (SVG layers) */
-  --road-shadow: #100d09;
-  --road-base: #262017;
-  --road-surface: #191510;
+  --road-shadow: #09090c;
+  --road-base: #1e1e26;
+  --road-surface: #121216;
 
-  --scrim: rgb(0 0 0 / 0.55);
+  --scrim: rgb(0 0 0 / 0.68);
 
   /* Depth */
-  --shadow-rest: 0 1px 2px rgb(0 0 0 / 0.35);
-  --shadow-lift: 0 16px 40px -18px rgb(0 0 0 / 0.55);
-  --shadow-overlay: 0 28px 72px -24px rgb(0 0 0 / 0.65);
+  --shadow-rest: 0 1px 2px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.02);
+  --shadow-lift: 0 18px 42px -18px rgb(0 0 0 / 0.72), 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-overlay: 0 30px 80px -20px rgb(0 0 0 / 0.85), 0 0 0 1px rgb(255 255 255 / 0.07);
 }
 
 /* ---------- Tailwind theme mapping ---------- */
@@ -121,6 +129,8 @@
   --color-surface: var(--surface);
   --color-raised: var(--raised);
   --color-overlay: var(--overlay);
+  --color-well: var(--well);
+  --color-well-hover: var(--well-hover);
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
   --color-line-strong: var(--line-strong);
@@ -377,9 +387,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 /* A faint top highlight gives dark panels physical edge without glow */
 [data-theme="dark"] .panel {
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgb(255 255 255 / 0.025), transparent 60%),
+    var(--surface);
   box-shadow:
     var(--shadow-rest),
-    inset 0 1px 0 rgb(255 255 255 / 0.03);
+    inset 0 1px 0 var(--edge-top);
 }
 
 .panel-hover {
@@ -392,6 +405,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .panel-hover:hover {
     border-color: var(--line-strong);
     box-shadow: var(--shadow-lift);
+  }
+  [data-theme="dark"] .panel-hover:hover {
+    box-shadow:
+      var(--shadow-lift),
+      inset 0 1px 0 rgb(255 255 255 / 0.12);
   }
 }
 
@@ -579,7 +597,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 @media (min-width: 768px) {
   .app-main {
     padding-top: 1.75rem;
-    padding-right: calc(var(--minato-dock-w, 0px) + var(--gutter) + var(--safe-right));
+    padding-right: calc(var(--gutter) + var(--safe-right));
     padding-left: calc(var(--rail-w) + var(--gutter) + var(--safe-left));
     padding-bottom: 3rem;
   }

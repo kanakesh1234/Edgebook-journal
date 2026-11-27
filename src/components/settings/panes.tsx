@@ -497,7 +497,7 @@ function AccountPane() {
 
 const PREVIEW = {
   light: { bg: "#f7f4ee", card: "#fffefb", line: "#e7e1d4", ink: "#26221a" },
-  dark: { bg: "#15120d", card: "#272219", line: "#2e281f", ink: "#f0eae0" },
+  dark: { bg: "#0b0b0e", card: "#1b1b21", line: "#26262f", ink: "#f4f1ea" },
 } as const;
 
 function ThemeThumb({ mode }: { mode: "light" | "dark" }) {

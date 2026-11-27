@@ -4,19 +4,19 @@
 /* ------------------------------------------------------------------ */
 
 .tv-root {
-  --tv-bg: #1c1813;
-  --tv-panel: #25201a;
-  --tv-border: #3a342a;
-  --tv-text: #e9e4d8;
-  --tv-muted: #9a9182;
-  --tv-hover: #2f2921;
+  --tv-bg: #0b0b0e;
+  --tv-panel: #131317;
+  --tv-border: #2a2a35;
+  --tv-text: #f4f1ea;
+  --tv-muted: #9b958a;
+  --tv-hover: #1e1e26;
   --tv-active: #5b9dff;
   --tv-active-bg: rgba(91, 157, 255, 0.16);
-  --tv-up: #089981;
-  --tv-down: #f23645;
+  --tv-up: #49b675;
+  --tv-down: #e06c75;
   --tv-buy: #2f6bff;
-  --tv-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-  --tv-input: #1c1813;
+  --tv-shadow: 0 10px 30px rgba(0, 0, 0, 0.65);
+  --tv-input: #17171d;
   display: flex;
   flex-direction: column;
   height: 100dvh;

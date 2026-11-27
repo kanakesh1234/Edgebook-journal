@@ -8,6 +8,7 @@ import { emitChartCommand } from "./chart-bus";
 import { fmtPrice } from "./drawings/render";
 import { focusFirstItem, onMenuKeyDown } from "./tv-ui";
 import { toast } from "./ej-toast";
+import MobileSheet, { useMobileUI } from "./mobile-sheet";
 
 export interface ContextTarget {
   price: number;
@@ -24,16 +25,18 @@ interface Props {
   onClose: () => void;
 }
 
-/** Right-click menu: place orders at the clicked price, add alerts/lines, manage drawings. */
+/** Right-click / touch long-press menu: place orders at price, add alerts/lines, manage drawings. */
 export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const mobile = useMobileUI();
   const st = useBacktest.getState();
   const qty = st.orderQty;
   const canTrade = st.status === "paused" || st.status === "running";
   const drawing = target.drawingId ? (st.drawings[symbol] || []).find((d) => d.id === target.drawingId) : null;
 
-  useEffect(() => { focusFirstItem(ref.current); }, []);
+  useEffect(() => { if (!mobile) focusFirstItem(ref.current); }, [mobile]);
   useEffect(() => {
+    if (mobile) return;
     const away = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("pointerdown", away, true);
@@ -44,7 +47,7 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
       window.removeEventListener("keydown", key);
       window.removeEventListener("wheel", onClose);
     };
-  }, [onClose]);
+  }, [onClose, mobile]);
 
   const run = (fn: () => void) => () => { fn(); onClose(); };
   const p = target.price;
@@ -103,6 +106,23 @@ export default function ChartContextMenu({ target, x, y, symbol, lastPrice, onCl
   const drawCount = (st.drawings[symbol] || []).length;
   if (drawCount > 0) items.push({ label: `Remove ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, danger: true, onClick: run(() => { st.clearDrawings(symbol); toast({ kind: "info", text: `Removed ${drawCount} drawing${drawCount === 1 ? "" : "s"}`, action: { label: "Undo", run: () => useBacktest.getState().undoDrawing(symbol) } }); }) });
   items.push("sep", { label: "Settings…", onClick: run(() => emitChartCommand({ type: "settings" })) });
+
+  if (mobile) {
+    return (
+      <MobileSheet open onClose={onClose} title={`${symbol} @ ${price}`}>
+        <div role="menu" aria-label="Chart actions">
+          {items.map((it, i) =>
+            it === "sep" ? <div key={i} className="tv-menu-sep" role="separator" /> : (
+              <button key={i} type="button" role="menuitem" className={`ej-sheet-row${it.danger ? " is-danger" : ""}`} disabled={it.disabled} onClick={it.onClick}>
+                <span style={{ flex: 1 }}>{it.label}</span>
+                {it.hint && <kbd style={{ fontSize: 11, color: "var(--tv-muted)" }}>{it.hint}</kbd>}
+              </button>
+            ),
+          )}
+        </div>
+      </MobileSheet>
+    );
+  }
 
   // Keep the menu on screen.
   const left = Math.min(x, (ref.current?.parentElement?.clientWidth ?? 1200) - 300);

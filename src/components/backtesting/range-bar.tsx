@@ -5,6 +5,7 @@ import { useBacktest } from "@/lib/backtesting/store";
 import { emitChartCommand } from "./chart-bus";
 import { I } from "./tv-icons";
 import { nyOffsetLabel, useOutside } from "./tv-ui";
+import MobileSheet, { useCompactDock, useMobileUI } from "./mobile-sheet";
 
 const DAY = 86400;
 const RANGES: Array<{ label: string; seconds: number | "all" | "ytd"; title: string }> = [
@@ -28,12 +29,17 @@ export default function RangeBar() {
   const playing = useBacktest((s) => s.playing);
   const scale = useBacktest((s) => s.scale);
   const setScale = useBacktest((s) => s.setScale);
+  const tradePanelOpen = useBacktest((s) => s.tradePanelOpen);
+  const setTradePanelOpen = useBacktest((s) => s.setTradePanelOpen);
+  const activeCount = useBacktest((s) => s.openPositions.length + s.pendingOrders.length);
 
   const [goOpen, setGoOpen] = useState(false);
   const [goVal, setGoVal] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setGoOpen(false), []);
-  useOutside(ref, goOpen, close);
+  const mobile = useMobileUI();
+  const compactDock = useCompactDock();
+  useOutside(ref, goOpen && !mobile, close);
 
   const d = new Date(currentTime * 1000);
   const statusCls = status === "completed" ? "done" : status === "breached" ? "bad" : playing ? "live" : "paused";
@@ -58,17 +64,36 @@ export default function RangeBar() {
       <i className="tv-sep" />
       <div className="tv-dd" ref={ref}>
         <button type="button" className={`tv-tbtn${goOpen ? " is-on" : ""}`} data-tip="Go to date" aria-label="Go to date" aria-expanded={goOpen} onClick={() => setGoOpen((o) => !o)}><I name="calendar" size={18} /></button>
-        {goOpen && (
+        {!mobile && goOpen && (
           <div className="tv-menu tv-goto" role="dialog" aria-label="Go to date" style={{ top: "auto" }} onKeyDown={(e) => e.stopPropagation()}>
             <div className="tv-menu-head">Go to · New York time</div>
             <input type="datetime-local" value={goVal} onChange={(e) => setGoVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && goto()} />
             <button type="button" className="tv-btn primary" style={{ marginTop: 8, width: "100%" }} onClick={goto}>Go to</button>
           </div>
         )}
+        {mobile && (
+          <MobileSheet open={goOpen} onClose={close} title="Go to date · New York time">
+            <div style={{ padding: "8px 16px 18px", display: "grid", gap: 12 }}>
+              <input type="datetime-local" className="ej-input" value={goVal} onChange={(e) => setGoVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && goto()} style={{ fontSize: 16 }} />
+              <button type="button" className="tv-btn primary" style={{ width: "100%", height: 44 }} onClick={goto}>Jump to date</button>
+            </div>
+          </MobileSheet>
+        )}
       </div>
       <button type="button" className="tv-tbtn" data-tip="Scroll to the replay position (Alt+R)" aria-label="Reset view" onClick={() => emitChartCommand({ type: "reset" })}>Reset view</button>
 
       <span className="tv-grow" />
+      {compactDock && (
+        <button
+          type="button"
+          className={`ej-range-paper-btn${tradePanelOpen ? " is-on" : ""}`}
+          style={{ touchAction: "manipulation" }}
+          onClick={() => setTradePanelOpen(!tradePanelOpen)}
+        >
+          <span>Paper</span>
+          {activeCount > 0 && <em>{activeCount}</em>}
+        </button>
+      )}
       <span className={`tv-status ${statusCls}`}>{statusTxt}</span>
       <span className="tv-clock ej-num">
         {currentTime > 0

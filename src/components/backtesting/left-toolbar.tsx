@@ -8,7 +8,7 @@ import { haptic } from "@/lib/haptics";
 import { I } from "./tv-icons";
 import { toast } from "./ej-toast";
 import { GROUPS, ITEM_BY_TOOL, SECTION_ORDER, SECTION_TITLES, isCursorTool, type ToolGroup, type ToolItem } from "./tool-catalog";
-import MobileSheet from "./mobile-sheet";
+import MobileSheet, { useCompactDock } from "./mobile-sheet";
 
 type Fly = { id: string; top: number; left: number; oy: number };
 
@@ -63,14 +63,7 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
   const close = useCallback(() => setOpen(null), []);
 
   const [dockMoreOpen, setDockMoreOpen] = useState(false);
-  const [mobile, setMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(pointer: coarse) and (max-width: 820px), (max-width: 480px)");
-    setMobile(mq.matches);
-    const h = () => setMobile(mq.matches);
-    mq.addEventListener("change", h);
-    return () => mq.removeEventListener("change", h);
-  }, []);
+  const mobile = useCompactDock();
 
   // Outside-press closes the flyout — except on its own trigger (that click toggles it).
   useEffect(() => {
@@ -360,22 +353,103 @@ export default function LeftToolbar({ symbol }: { symbol: string }) {
         <button type="button" className="ej-dock-btn" aria-label="More drawing tools" style={{ touchAction: "manipulation" }} onClick={() => { haptic.selection(); setDockMoreOpen(true); }}>
           <I name="more" size={22} />
         </button>
-        <MobileSheet open={dockMoreOpen} onClose={() => setDockMoreOpen(false)} title="Drawing tools">
+        <MobileSheet open={dockMoreOpen} onClose={() => setDockMoreOpen(false)} title="Drawing & tools">
           <div role="menu">
+            <div style={{ padding: "6px 16px 4px", fontSize: 11.5, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Utilities</div>
+            <button
+              type="button" role="menuitem" className={`ej-sheet-row${magnet !== "off" ? " is-on" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => {
+                haptic.selection();
+                const next = magnet === "off" ? "weak" : magnet === "weak" ? "strong" : "off";
+                setMagnet(next);
+              }}
+            >
+              <I name="magnet" size={20} filled={magnet !== "off"} />
+              <span style={{ flex: 1 }}>Magnet mode</span>
+              <span style={{ fontSize: 12, color: "var(--tv-muted)", textTransform: "capitalize" }}>{magnet}</span>
+            </button>
+            <button
+              type="button" role="menuitem" className={`ej-sheet-row${stay ? " is-on" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => { haptic.selection(); setStay(!stay); }}
+            >
+              <I name="stayDraw" size={20} filled={stay} />
+              <span style={{ flex: 1 }}>Stay in drawing mode</span>
+              {stay && <I name="check" size={16} />}
+            </button>
+            <button
+              type="button" role="menuitem" className={`ej-sheet-row${locked ? " is-on" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => { haptic.selection(); setLocked(!locked); }}
+            >
+              <I name={locked ? "lock" : "unlock"} size={20} filled={locked} />
+              <span style={{ flex: 1 }}>{locked ? "Unlock all drawings" : "Lock all drawings"}</span>
+              {locked && <I name="check" size={16} />}
+            </button>
+            <button
+              type="button" role="menuitem" className={`ej-sheet-row${hidden ? " is-on" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => { haptic.selection(); setHidden(!hidden); }}
+            >
+              <I name={hidden ? "eyeOff" : "eye"} size={20} filled={hidden} />
+              <span style={{ flex: 1 }}>{hidden ? "Show all drawings" : "Hide all drawings"}</span>
+              {hidden && <I name="check" size={16} />}
+            </button>
+            <button
+              type="button" role="menuitem" className={`ej-sheet-row${favVisible ? " is-on" : ""}`}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => { haptic.selection(); setFavUI({ visible: !favVisible }); setDockMoreOpen(false); }}
+            >
+              <I name="star" size={20} filled={favVisible} />
+              <span style={{ flex: 1 }}>{favVisible ? "Hide favorites bar" : "Show favorites bar"}</span>
+              {favVisible && <I name="check" size={16} />}
+            </button>
+            <button
+              type="button" role="menuitem" className="ej-sheet-row is-danger" disabled={count === 0}
+              style={{ touchAction: "manipulation" }}
+              onClick={() => {
+                const n = count;
+                haptic.selection();
+                clearDrawings(symbol);
+                setDockMoreOpen(false);
+                toast({ kind: "info", text: `Removed ${n} drawing${n === 1 ? "" : "s"}`, action: { label: "Undo", run: () => undoDrawing(symbol) } });
+              }}
+            >
+              <I name="trash" size={20} />
+              <span style={{ flex: 1 }}>Remove all drawings{count > 0 ? ` (${count})` : ""}</span>
+            </button>
+
+            <div style={{ height: 1, background: "var(--tv-hair)", margin: "6px 0" }} />
+
             {SECTION_ORDER.map((sec) => {
               const sectionGroups = GROUPS.filter((g) => g.section === sec);
               if (!sectionGroups.length) return null;
               return (
                 <div key={sec}>
-                  <div style={{ padding: "8px 16px 4px", fontSize: 12, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{SECTION_TITLES[sec]}</div>
-                  {sectionGroups.flatMap((g) => g.items).map((it: ToolItem) => (
-                    <button key={it.tool} type="button" role="menuitem" className={`ej-sheet-row${tool === it.tool ? " is-on" : ""}`} style={{ touchAction: "manipulation" }}
-                      onClick={() => { haptic.selection(); setTool(it.tool); setDockMoreOpen(false); }}>
-                      <I name={it.icon} size={20} />
-                      <span style={{ flex: 1 }}>{it.label}</span>
-                      {tool === it.tool && <I name="check" size={16} />}
-                    </button>
-                  ))}
+                  <div style={{ padding: "8px 16px 4px", fontSize: 11.5, color: "var(--tv-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{SECTION_TITLES[sec]}</div>
+                  {sectionGroups.flatMap((g) => g.items).map((it: ToolItem) => {
+                    const fav = favTools.includes(it.tool);
+                    return (
+                      <div key={it.tool} style={{ display: "flex", alignItems: "center", paddingRight: 6 }}>
+                        <button type="button" role="menuitem" className={`ej-sheet-row${tool === it.tool ? " is-on" : ""}`} style={{ touchAction: "manipulation", flex: 1 }}
+                          onClick={() => { haptic.selection(); setTool(it.tool); setDockMoreOpen(false); }}>
+                          <I name={it.icon} size={20} />
+                          <span style={{ flex: 1 }}>{it.label}</span>
+                          {tool === it.tool && <I name="check" size={16} />}
+                        </button>
+                        <button
+                          type="button"
+                          className={`ej-sheet-star${fav ? " is-on" : ""}`}
+                          aria-pressed={fav}
+                          aria-label={fav ? `Remove ${it.label} from favorites` : `Add ${it.label} to favorites`}
+                          onClick={() => toggleFavorite(it.tool)}
+                        >
+                          <I name="star" size={18} filled={fav} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}

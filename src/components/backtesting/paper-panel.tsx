@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBacktest } from "@/lib/backtesting/store";
 import { formatMoney } from "@/lib/format";
 import { fmtDuration, fmtPrice } from "./drawings/render";
 import { I } from "./tv-icons";
 import AnimatedNumber from "./ej-number";
 import EJMark from "./ej-mark";
+import { useCompactDock } from "./mobile-sheet";
 
 type Tab = "summary" | "positions" | "orders" | "history";
 
@@ -26,12 +27,28 @@ export default function PaperPanel() {
   const closePosition = useBacktest((s) => s.closePositionForSymbol);
   const cancelOrder = useBacktest((s) => s.cancelPendingOrder);
   const [tab, setTab] = useState<Tab>("positions");
+  const compactDock = useCompactDock();
+  const prevCompactRef = useRef(false);
+
+  // On phone / compact dock viewports, start collapsed so the chart isn't obscured at launch.
+  useEffect(() => {
+    if (compactDock && !prevCompactRef.current) {
+      setOpen(false);
+    }
+    prevCompactRef.current = compactDock;
+  }, [compactDock, setOpen]);
 
   const lastOf = (sym: string) => (candleData[sym] || []).at(-1)?.close;
   const pick = (t: Tab) => { setTab(t); setOpen(true); };
 
+  if (compactDock && !open) return null;
+
   return (
-    <div className="tv-paper">
+    <>
+    {compactDock && open && (
+      <div className="tv-paper-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
+    )}
+    <div className={`tv-paper${compactDock ? (open ? " is-mobile-open" : " is-mobile-hidden") : ""}`}>
       <div className="tv-paper-bar">
         {/* Mobile drag handle */}
         <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 2, background: "var(--tv-hair)", margin: "4px auto 0", flexShrink: 0 }} />
@@ -39,6 +56,16 @@ export default function PaperPanel() {
           <EJMark size={18} title="" />Paper Trading
           <I name="chevronDown" size={16} className="ej-chev" style={{ transform: open ? "none" : "rotate(-90deg)" }} />
         </button>
+        {compactDock && open && (
+          <button
+            type="button"
+            className="tv-linkbtn"
+            style={{ marginLeft: "auto", marginRight: 8, minHeight: 36, padding: "0 10px" }}
+            onClick={() => setOpen(false)}
+          >
+            Done
+          </button>
+        )}
         {account && (
           <div className="tv-paper-stats">
             <span>Balance<b><AnimatedNumber tau={320} value={account.balance} format={formatMoney} /></b></span>
@@ -144,5 +171,6 @@ export default function PaperPanel() {
         </>
       )}
     </div>
+    </>
   );
 }

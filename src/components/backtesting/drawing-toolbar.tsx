@@ -6,6 +6,7 @@ import { SWATCHES, TOOLS } from "@/lib/backtesting/drawings/tools";
 import type { DrawingLineStyle } from "@/lib/backtesting/types";
 import { I } from "./tv-icons";
 import { toast } from "./ej-toast";
+import MobileSheet, { useMobileUI } from "./mobile-sheet";
 
 /** Floating properties bar shown when a drawing is selected (colour, width, style, lock, clone, delete). */
 export default function DrawingToolbar({ symbol }: { symbol: string }) {
@@ -17,6 +18,7 @@ export default function DrawingToolbar({ symbol }: { symbol: string }) {
   const setToolStyle = useBacktest((s) => s.setToolStyle);
   const globalLock = useBacktest((s) => s.drawingsLocked);
   const [open, setOpen] = useState<null | "color" | "width" | "style">(null);
+  const mobile = useMobileUI();
 
   const d = (drawings || []).find((x) => x.id === selectedId);
   if (!d) return null;
@@ -41,7 +43,7 @@ export default function DrawingToolbar({ symbol }: { symbol: string }) {
         <button type="button" className="tv-tbtn" data-tip="Color" aria-label="Color" aria-haspopup="menu" aria-expanded={open === "color"} disabled={locked} onClick={() => setOpen(open === "color" ? null : "color")}>
           <span className="tv-swatch" style={{ background: d.color }} />
         </button>
-        {open === "color" && (
+        {!mobile && open === "color" && (
           <div className="tv-menu tv-pop tv-swatches" role="menu" aria-label="Color">
             {SWATCHES.map((c) => (
               <button key={c} type="button" role="menuitemradio" aria-checked={d.color.toLowerCase() === c.toLowerCase()} className={`tv-swatch-btn${d.color.toLowerCase() === c.toLowerCase() ? " is-on" : ""}`} style={{ background: c }} onClick={() => patch({ color: c })} aria-label={c} />
@@ -64,7 +66,7 @@ export default function DrawingToolbar({ symbol }: { symbol: string }) {
               <span className="tv-width-preview" style={{ height: Math.min(6, d.lineWidth) }} />
               <span className="tv-tbtn-num ej-num">{d.lineWidth}px</span>
             </button>
-            {open === "width" && (
+            {!mobile && open === "width" && (
               <div className="tv-menu tv-pop" role="menu" aria-label="Line width">
                 {[1, 2, 3, 4].map((w) => (
                   <button key={w} type="button" role="menuitemradio" aria-checked={d.lineWidth === w} className={`tv-menu-item${d.lineWidth === w ? " is-active" : ""}`} onClick={() => patch({ lineWidth: w })}>
@@ -78,7 +80,7 @@ export default function DrawingToolbar({ symbol }: { symbol: string }) {
             <button type="button" className="tv-tbtn" data-tip="Line style" aria-label="Line style" aria-haspopup="menu" aria-expanded={open === "style"} disabled={locked} onClick={() => setOpen(open === "style" ? null : "style")}>
               <I name="lineStyle" size={20} />
             </button>
-            {open === "style" && (
+            {!mobile && open === "style" && (
               <div className="tv-menu tv-pop" role="menu" aria-label="Line style">
                 {(["solid", "dashed", "dotted"] as DrawingLineStyle[]).map((s) => (
                   <button key={s} type="button" role="menuitemradio" aria-checked={(d.lineStyle ?? "solid") === s} className={`tv-menu-item${(d.lineStyle ?? "solid") === s ? " is-active" : ""}`} onClick={() => patch({ lineStyle: s })}>
@@ -89,6 +91,61 @@ export default function DrawingToolbar({ symbol }: { symbol: string }) {
             )}
           </div>
         </>
+      )}
+
+      {mobile && (
+        <MobileSheet
+          open={open !== null}
+          onClose={() => setOpen(null)}
+          title={open === "color" ? "Color & fill" : open === "width" ? "Line width" : open === "style" ? "Line style" : undefined}
+        >
+          {open === "color" && (
+            <div style={{ padding: "8px 16px 20px", display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+                {SWATCHES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={c}
+                    className={`tv-swatch-btn${d.color.toLowerCase() === c.toLowerCase() ? " is-on" : ""}`}
+                    style={{ background: c, width: "100%", height: 42 }}
+                    onClick={() => patch({ color: c })}
+                  />
+                ))}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14 }}>
+                <span>Custom color</span>
+                <input type="color" className="tv-color-input" style={{ width: 64, height: 38 }} aria-label="Custom color" value={/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : "#2962ff"} onChange={(e) => patch({ color: e.target.value })} />
+              </label>
+              {hasFill && (
+                <label className="tv-opacity" style={{ display: "grid", gap: 6, fontSize: 14 }}>
+                  <span>Fill opacity ({Math.round((d.fillOpacity ?? def.fillOpacity ?? 0.15) * 100)}%)</span>
+                  <input type="range" aria-label="Fill opacity" min={0} max={0.6} step={0.05} value={d.fillOpacity ?? def.fillOpacity ?? 0.15} onChange={(e) => patch({ fillOpacity: Number(e.target.value) })} />
+                </label>
+              )}
+            </div>
+          )}
+          {open === "width" && (
+            <div role="menu">
+              {[1, 2, 3, 4].map((w) => (
+                <button key={w} type="button" role="menuitemradio" aria-checked={d.lineWidth === w} className={`ej-sheet-row${d.lineWidth === w ? " is-on" : ""}`} onClick={() => patch({ lineWidth: w })}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 12, flex: 1 }}><span className="tv-width-preview" style={{ height: w, width: 64, background: "currentColor", display: "inline-block" }} /><span className="ej-num">{w}px</span></span>
+                  {d.lineWidth === w && <I name="check" size={16} />}
+                </button>
+              ))}
+            </div>
+          )}
+          {open === "style" && (
+            <div role="menu">
+              {(["solid", "dashed", "dotted"] as DrawingLineStyle[]).map((s) => (
+                <button key={s} type="button" role="menuitemradio" aria-checked={(d.lineStyle ?? "solid") === s} className={`ej-sheet-row${(d.lineStyle ?? "solid") === s ? " is-on" : ""}`} onClick={() => patch({ lineStyle: s })}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 12, flex: 1 }}><span className="tv-style-preview" style={{ borderTopStyle: s, borderTopColor: "currentColor", width: 64, display: "inline-block" }} /><span style={{ textTransform: "capitalize" }}>{s}</span></span>
+                  {(d.lineStyle ?? "solid") === s && <I name="check" size={16} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </MobileSheet>
       )}
 
       {isText && (

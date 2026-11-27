@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Wordmark } from "./logo";
 import { NAV_LINKS } from "./scene-config";
 
@@ -76,6 +77,7 @@ export function LandingHeader() {
           ))}
         </ul>
         <div className="lp-actions">
+          <ThemeToggle className="rounded-full" />
           <Link href="/login" className="lp-text-link">
             Log in
           </Link>

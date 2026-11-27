@@ -289,7 +289,15 @@ export function Section({
 }
 
 export const Card = ({ children, className, pad = true }: { children: ReactNode; className?: string; pad?: boolean }) => (
-  <div className={cn("rounded-[24px] border border-line-soft bg-surface shadow-panel", pad && "p-5 sm:p-6", className)}>{children}</div>
+  <div
+    className={cn(
+      "rounded-[24px] border border-line-soft bg-surface shadow-panel dark:border-line dark:ring-1 dark:ring-inset dark:ring-white/[0.06]",
+      pad && "p-5 sm:p-6",
+      className,
+    )}
+  >
+    {children}
+  </div>
 );
 
 export function Kpi({ label, value, sub, valueClass, hint, className }: { label: string; value: ReactNode; sub?: string; valueClass?: string; hint?: string; className?: string }) {
@@ -305,7 +313,7 @@ export function Kpi({ label, value, sub, valueClass, hint, className }: { label:
 export function StatStrip({ children, count, className }: { children: ReactNode; count: number; className?: string }) {
   return (
     <div
-      className={cn("divide-y divide-line-soft sm:grid sm:divide-x sm:divide-y-0", className)}
+      className={cn("divide-y divide-line-soft dark:divide-line sm:grid sm:divide-x sm:divide-y-0", className)}
       style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
     >
       {children}
@@ -326,8 +334,8 @@ export function StripCell({ label, value, sub, valueClass, hint }: { label: stri
 export function Group({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
   return (
     <div className={className}>
-      {title && <p className="mb-2.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-faint/70">{title}</p>}
-      <div className="space-y-[3px] overflow-hidden rounded-[18px] bg-ink/[0.025] p-[3px]">{children}</div>
+      {title && <p className="mb-2.5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-faint/80">{title}</p>}
+      <div className="space-y-[3px] overflow-hidden rounded-[18px] border border-line/60 bg-well p-[3px] dark:border-line">{children}</div>
     </div>
   );
 }
@@ -337,13 +345,13 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
     <>
       <span className="min-w-0 flex-1 text-left">
         <span className="block truncate text-[13px] font-medium text-ink">{label}</span>
-        {sub && <span className="block truncate text-[11px] text-faint/70">{sub}</span>}
+        {sub && <span className="block truncate text-[11px] text-faint/75">{sub}</span>}
       </span>
       <span className={cn("shrink-0 text-[14px] font-semibold tracking-[-0.01em] tabular-nums text-ink", valueClass)}>{value}</span>
-      {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint/50 transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
+      {onClick && <Sym name="chevronRight" className="h-4 w-4 text-faint/55 transition-transform duration-200 group-hover:translate-x-0.5" strokeWidth={2} />}
     </>
   );
-  const cls = "flex min-h-[42px] w-full items-center gap-3 rounded-[14px] bg-surface px-4 py-2";
+  const cls = "flex min-h-[42px] w-full items-center gap-3 rounded-[14px] bg-surface px-4 py-2 dark:ring-1 dark:ring-inset dark:ring-white/[0.04]";
   return onClick ? (
     <button
       type="button"
@@ -352,7 +360,7 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
         haptic.selection();
         onClick();
       }}
-      className={cn(cls, "group outline-none transition-colors hover:bg-ink/[0.02] focus-visible:bg-ink/[0.04] active:bg-ink/[0.06]")}
+      className={cn(cls, "group outline-none transition-colors hover:bg-well focus-visible:bg-well-hover active:bg-well-hover")}
     >
       {body}
     </button>
@@ -365,7 +373,7 @@ export function StatRow({ label, value, sub, valueClass, onClick, hint }: { labe
 
 export function Chip({ children, tone: t = "neutral", className }: { children: ReactNode; tone?: "neutral" | "good" | "bad" | "gold" | "info"; className?: string }) {
   const c = {
-    neutral: "bg-ink/[0.055] text-muted",
+    neutral: "bg-well text-muted border border-line/60 dark:border-line",
     good: "bg-profit/12 text-profit",
     bad: "bg-loss/12 text-loss",
     gold: "bg-gold/[0.14] text-gold-deep dark:text-gold",
@@ -377,7 +385,7 @@ export function Chip({ children, tone: t = "neutral", className }: { children: R
 export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: { id: T; label: string; icon?: SymName }[]; label: string }) {
   const gid = useId();
   return (
-    <div role="tablist" aria-label={label} className="inline-flex rounded-full bg-ink/[0.06] p-1">
+    <div role="tablist" aria-label={label} className="inline-flex rounded-full border border-line/60 bg-well p-1 dark:border-line">
       {options.map((o) => {
         const on = o.id === value;
         return (
@@ -519,7 +527,7 @@ export function AutoText({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="group rounded-[18px] border border-line-soft bg-ink/[0.03] transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.045] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)]">
+      <div className="group rounded-[18px] border border-line-soft bg-well transition-[box-shadow,background-color,border-color] duration-200 hover:bg-well-hover focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)] dark:border-line">
         <textarea
           ref={ref}
           wrap="soft"
@@ -547,7 +555,7 @@ export function AutoText({
 
 export function LineInput({ value, onChange, placeholder, label, index }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; index?: number }) {
   return (
-    <label className="flex items-center gap-3 rounded-[16px] border border-line-soft bg-ink/[0.03] px-3.5 transition-[box-shadow,background-color,border-color] duration-200 hover:bg-ink/[0.045] focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)]">
+    <label className="flex items-center gap-3 rounded-[16px] border border-line-soft bg-well px-3.5 transition-[box-shadow,background-color,border-color] duration-200 hover:bg-well-hover focus-within:border-gold/45 focus-within:bg-raised focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--gold-strong)_16%,transparent)] dark:border-line">
       {index != null && (
         <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-gold/[0.15] text-[12px] font-semibold tabular-nums text-gold-deep dark:text-gold">
           {index}
@@ -574,7 +582,7 @@ const GRADE_TONE: Record<ProcessGrade, string> = {
 
 export function GradePicker({ value, auto, onChange, compact }: { value: ProcessGrade | null; auto?: boolean; onChange: (g: ProcessGrade | null) => void; compact?: boolean }) {
   return (
-    <div role="radiogroup" aria-label="Process grade" className="inline-flex gap-0.5 rounded-[10px] bg-ink/[0.045] p-0.5">
+    <div role="radiogroup" aria-label="Process grade" className="inline-flex gap-0.5 rounded-[10px] border border-line/60 bg-well p-0.5 dark:border-line">
       {(["A", "B", "C", "D"] as ProcessGrade[]).map((g) => {
         const on = value === g;
         return (
@@ -591,7 +599,7 @@ export function GradePicker({ value, auto, onChange, compact }: { value: Process
             className={cn(
               "grid place-items-center rounded-[8px] font-semibold outline-none transition-[background-color,color,transform] focus-visible:ring-2 focus-visible:ring-gold-strong/50 active:scale-90",
               compact ? "h-6 w-6 text-[12px]" : "h-7 w-7 text-[13px]",
-              on ? GRADE_TONE[g] : "text-faint hover:bg-ink/[0.06] hover:text-ink",
+              on ? GRADE_TONE[g] : "text-faint hover:bg-well-hover hover:text-ink",
               on && auto && "ring-1 ring-inset ring-current/30",
             )}
           >

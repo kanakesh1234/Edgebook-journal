@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 export { nearestSnapPoint, loupeOffset, isWithinHitArea } from "./mobile-utils";
 
 interface MobileSheetProps {
@@ -84,11 +85,12 @@ export default function MobileSheet({
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
   const content = typeof children === "function" ? children(query) : children;
+  const portalHost = document.querySelector(".tv-root") ?? document.body;
 
-  return (
+  return createPortal(
     <div
       className="ej-sheet-back"
       onClick={onClose}
@@ -125,7 +127,8 @@ export default function MobileSheet({
           {content}
         </div>
       </div>
-    </div>
+    </div>,
+    portalHost,
   );
 }
 
@@ -133,4 +136,30 @@ export default function MobileSheet({
 export function isMobileContext(): boolean {
   if (typeof window === "undefined") return false;
   return window.matchMedia("(pointer: coarse), (max-width: 820px)").matches;
+}
+
+/** Reactive hook matching `isMobileContext()` across resizes and pointer capabilities. */
+export function useMobileUI(): boolean {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse), (max-width: 820px)");
+    setMobile(mq.matches);
+    const onChange = () => setMobile(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return mobile;
+}
+
+/** Matches the compact mobile dock media query in ej-responsive.css. */
+export function useCompactDock(): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767.98px), (pointer: coarse) and (max-width: 820px)");
+    setCompact(mq.matches);
+    const onChange = () => setCompact(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return compact;
 }

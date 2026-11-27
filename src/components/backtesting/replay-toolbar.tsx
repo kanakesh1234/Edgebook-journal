@@ -7,7 +7,7 @@ import { I } from "./tv-icons";
 import { focusFirstItem, onMenuKeyDown, useOutside } from "./tv-ui";
 import { useDraggable } from "./use-draggable";
 import { setFormationMode, useFormationMode, type FormationMode } from "@/lib/backtesting/playback-fx";
-import MobileSheet from "./mobile-sheet";
+import MobileSheet, { useMobileUI } from "./mobile-sheet";
 
 const FORMATION: Array<{ id: FormationMode; label: string; hint: string }> = [
   { id: "natural", label: "Natural", hint: "wicks + pauses" },
@@ -33,24 +33,17 @@ export default function ReplayToolbar({ shifted, onClose }: { shifted: boolean; 
   const dataLoading = useBacktest((s) => s.dataLoading);
 
   const formation = useFormationMode();
+  const mobile = useMobileUI();
   const [speedOpen, setSpeedOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (speedOpen) focusFirstItem(menuRef.current); }, [speedOpen]);
+  useEffect(() => { if (speedOpen && !mobile) focusFirstItem(menuRef.current); }, [speedOpen, mobile]);
   const closeSpeed = useCallback(() => setSpeedOpen(false), []);
-  useOutside(ref, speedOpen, closeSpeed);
+  useOutside(ref, speedOpen && !mobile, closeSpeed);
 
   const { ref: barRef, gripProps } = useDraggable("replay");
   const finished = status === "completed" || status === "breached";
   const [moreOpen, setMoreOpen] = useState(false);
-  const [mobile, setMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(pointer: coarse), (max-width: 820px)");
-    setMobile(mq.matches);
-    const h = () => setMobile(mq.matches);
-    mq.addEventListener("change", h);
-    return () => mq.removeEventListener("change", h);
-  }, []);
 
   return (
     <div ref={barRef} role="toolbar" aria-label="Replay controls" className={`tv-replay${shifted ? " is-shifted" : ""}`} onPointerDown={(e) => e.stopPropagation()}>

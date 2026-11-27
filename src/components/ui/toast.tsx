@@ -76,7 +76,7 @@ function ToastCard({ item }: { item: ToastItem }) {
       exit={{ opacity: 0, x: 40, transition: { duration: 0.2 } }}
       transition={{ type: "spring", stiffness: 420, damping: 32 }}
       className={cn(
-        "pointer-events-auto relative flex w-[340px] max-w-[calc(100vw-2rem)] items-start gap-3 overflow-hidden rounded-panel border bg-overlay/95 py-3 pl-4 pr-9 shadow-overlay backdrop-blur-md",
+        "pointer-events-auto relative flex w-[340px] max-w-[calc(100vw-2rem)] items-start gap-3 overflow-hidden rounded-panel border bg-overlay/95 py-3 pl-4 pr-9 shadow-overlay backdrop-blur-md dark:ring-1 dark:ring-inset dark:ring-white/[0.08]",
         style.ring,
       )}
       role="status"
@@ -112,7 +112,7 @@ export function Toaster() {
   if (!mounted || typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="pointer-events-none fixed bottom-24 right-5 z-[100] flex flex-col-reverse gap-2.5">
+    <div className="pointer-events-none fixed bottom-[calc(var(--chrome-bottom)+1rem)] right-4 z-[100] flex flex-col-reverse gap-2.5 sm:right-6">
       <AnimatePresence mode="popLayout">
         {toasts.map((t) => (
           <ToastCard key={t.id} item={t} />

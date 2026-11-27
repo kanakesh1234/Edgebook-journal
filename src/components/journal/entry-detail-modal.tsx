@@ -97,15 +97,15 @@ export function EntryDetailModal({
           key="sheet" role="dialog" aria-modal="true" aria-label="Trade"
           initial={{ opacity: 0 }} animate={{ opacity: covered ? 0 : 1 }} exit={{ opacity: 0, transition: { duration: 0.15 } }}
           transition={{ duration: 0.18 }}
-          className={cn("fixed inset-0 z-50 grid place-items-center p-3 sm:p-8", covered && "pointer-events-none")}
+          className={cn("fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6 md:p-8", covered && "pointer-events-none")}
         >
-          <div onClick={onClose} className="absolute inset-0 bg-black/25 backdrop-blur-[18px] backdrop-saturate-150" />
+          <div onClick={onClose} className="absolute inset-0 bg-black/25 backdrop-blur-[18px] backdrop-saturate-150 dark:bg-black/60" />
           <motion.div
             initial={{ opacity: 0, scale: 0.97, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 6, transition: { duration: 0.14 } }}
             transition={SPRING}
             className={cn(
-              "relative flex max-h-full w-full flex-col overflow-hidden rounded-[32px] bg-surface shadow-[0_60px_150px_-30px_rgb(0_0_0/0.5),0_16px_40px_-18px_rgb(0_0_0/0.2),0_0_0_0.5px_rgb(0_0_0/0.14)] dark:shadow-[0_60px_150px_-30px_rgb(0_0_0/0.8),0_0_0_0.5px_rgb(255_255_255/0.12)]",
-              hasImg ? "h-[min(88dvh,820px)] max-w-[1160px]" : "max-w-[520px]",
+              "relative flex max-h-[94dvh] w-full flex-col overflow-hidden rounded-t-[28px] bg-surface shadow-[0_60px_150px_-30px_rgb(0_0_0/0.5),0_16px_40px_-18px_rgb(0_0_0/0.2),0_0_0_0.5px_rgb(0_0_0/0.14)] dark:border dark:border-line-strong dark:shadow-[0_60px_150px_-30px_rgb(0_0_0/0.85),inset_0_1px_0_rgb(255_255_255/0.08)] sm:max-h-full sm:rounded-[32px]",
+              hasImg ? "h-[min(92dvh,820px)] max-w-[1160px] sm:h-[min(88dvh,820px)]" : "max-w-[520px]",
             )}
           >
             {/* Toolbar floats over the content, so the sheet has no header bar. */}

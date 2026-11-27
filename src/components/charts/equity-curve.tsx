@@ -286,9 +286,9 @@ export function EquityCurve({
         <svg width={w} height={h} className="absolute inset-0 overflow-visible" aria-hidden>
           <defs>
             <linearGradient id={`eq-fill-${tone}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.18} />
-              <stop offset="55%" stopColor={color} stopOpacity={0.05} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
+              <stop offset="0%" style={{ stopColor: color }} stopOpacity={0.22} />
+              <stop offset="55%" style={{ stopColor: color }} stopOpacity={0.06} />
+              <stop offset="100%" style={{ stopColor: color }} stopOpacity={0} />
             </linearGradient>
           </defs>
 

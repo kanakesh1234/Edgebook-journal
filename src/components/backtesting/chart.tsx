@@ -923,17 +923,16 @@ export default function BacktestChart({
     return () => { el.removeEventListener("pointermove", move); line.style.opacity = "0"; };
   }, [selectingBar]);
 
-  /* ---------------- right-click ---------------- */
-  const onContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
+  /* ---------------- right-click + touch long-press ---------------- */
+  const openContextAt = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current, proj = projRef.current, series = seriesRef.current;
-    if (!el || !proj || !series) return;
+    if (!el || !proj || !series) return false;
     const r = el.getBoundingClientRect();
-    const x = e.clientX - r.left, y = e.clientY - r.top;
+    const x = clientX - r.left, y = clientY - r.top;
     const { w, h } = proj.paneSize();
-    if (x < 0 || y < 0 || x > w || y > h) return;
+    if (x < 0 || y < 0 || x > w || y > h) return false;
     const raw = series.coordinateToPrice(y);
-    if (raw === null) return;
+    if (raw === null) return false;
     const hit = controllerRef.current?.hitAt({ x, y });
     if (hit) useBacktest.getState().selectDrawing(hit.d.id);
     const tk = tickRef.current || 0.25;
@@ -941,10 +940,56 @@ export default function BacktestChart({
       price: Math.round(raw / tk) * tk,
       time: proj.xToTime(x) ?? 0,
       drawingId: hit?.d.id ?? null,
-      clientX: e.clientX - (wrapRef.current?.getBoundingClientRect().left ?? 0),
-      clientY: e.clientY - (wrapRef.current?.getBoundingClientRect().top ?? 0),
+      clientX: clientX - (wrapRef.current?.getBoundingClientRect().left ?? 0),
+      clientY: clientY - (wrapRef.current?.getBoundingClientRect().top ?? 0),
     });
+    return true;
   }, []);
+
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    openContextAt(e.clientX, e.clientY);
+  }, [openContextAt]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let timer = 0;
+    let startX = 0;
+    let startY = 0;
+    const clear = () => {
+      if (timer) { window.clearTimeout(timer); timer = 0; }
+    };
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !e.isPrimary) { clear(); return; }
+      const tool = useBacktest.getState().activeDrawingTool;
+      if (tool !== "cursor" && tool !== "crosshair") return;
+      if (dragRef.current) return;
+      startX = e.clientX;
+      startY = e.clientY;
+      clear();
+      timer = window.setTimeout(() => {
+        timer = 0;
+        if (dragRef.current) return;
+        openContextAt(startX, startY);
+      }, 520);
+    };
+    const move = (e: PointerEvent) => {
+      if (!timer) return;
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) clear();
+    };
+    el.addEventListener("pointerdown", down, { passive: true });
+    el.addEventListener("pointermove", move, { passive: true });
+    el.addEventListener("pointerup", clear, { passive: true });
+    el.addEventListener("pointercancel", clear, { passive: true });
+    return () => {
+      clear();
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", clear);
+      el.removeEventListener("pointercancel", clear);
+    };
+  }, [openContextAt]);
 
   /* ---------------- legend ---------------- */
   const bar = useMemo(() => {

@@ -12,9 +12,9 @@
   background: var(--wr-bg); color: var(--wr-ink); font-family: var(--wr-ui);
 }
 [data-theme="dark"] .wr {
-  --wr-bg: #161616; --wr-ink: #ededed; --wr-icon: #d0d0d0; --wr-muted: #9a9a9a;
-  --wr-line: #2c2c2c; --wr-chip: #262626; --wr-chip-hover: #303030; --wr-hover: #202020;
-  --wr-title-ph: #8a8a8a; --wr-sub-ph: #686868; --wr-body-ph: #565656;
+  --wr-bg: var(--canvas, #0b0b0e); --wr-ink: var(--ink, #f4f1ea); --wr-icon: #d8d3c9; --wr-muted: var(--muted, #a8a399);
+  --wr-line: var(--line, #26262f); --wr-chip: var(--raised, #1b1b21); --wr-chip-hover: #25252e; --wr-hover: #17171d;
+  --wr-title-ph: #8a847a; --wr-sub-ph: #6a655d; --wr-body-ph: #56524b;
 }
 .wr *, .wr *::before, .wr *::after { box-sizing: border-box; }
 .wr button { font-family: inherit; cursor: pointer; }

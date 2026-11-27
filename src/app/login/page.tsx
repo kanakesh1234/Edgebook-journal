@@ -122,8 +122,22 @@ function LoginView() {
         <ThemeToggle className="rounded-full" />
       </header>
 
-      <div className="relative z-10 mx-auto grid max-w-[1200px] items-center gap-12 px-5 pb-16 pt-4 sm:px-8 lg:min-h-[calc(100dvh-4rem)] lg:grid-cols-[1.05fr_1fr] lg:gap-20 lg:pb-10 lg:pt-0">
-        {/* ------------------------------ editorial side ------------------------------ */}
+      <div className="relative z-10 mx-auto grid max-w-[1200px] items-center gap-8 px-5 pb-16 pt-4 sm:px-8 md:gap-10 lg:min-h-[calc(100dvh-4rem)] lg:grid-cols-[1.05fr_1fr] lg:gap-20 lg:pb-10 lg:pt-0">
+        {/* ------------------------------ tablet editorial strip ------------------------------ */}
+        <div className="mx-auto hidden w-full max-w-[560px] text-center md:block lg:hidden">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gold">Edgebook</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.03em] text-ink">
+            Every session sharpens{" "}
+            <span className="font-serif font-normal italic text-gold">your personal edge.</span>
+          </h1>
+          <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs text-muted">
+            <span className="rounded-full border border-line bg-surface px-3 py-1">Google Drive owned</span>
+            <span className="rounded-full border border-line bg-surface px-3 py-1">Replay & Paper Simulator</span>
+            <span className="rounded-full border border-line bg-surface px-3 py-1">Minato AI coach</span>
+          </div>
+        </div>
+
+        {/* ------------------------------ desktop editorial side ------------------------------ */}
         <aside className="hidden lg:block">
           <motion.h1
             initial={reduce ? false : { opacity: 0, y: 22 }}
@@ -196,7 +210,7 @@ function LoginView() {
             initial={reduce ? false : { opacity: 0, y: 28, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.1, ease: EASE }}
-            className="w-full max-w-[440px] rounded-[32px] border border-line-strong/70 bg-surface p-7 shadow-[0_40px_90px_-40px_rgba(0,0,0,0.5)] [corner-shape:squircle] sm:p-9"
+            className="w-full max-w-[440px] rounded-[32px] border border-line-strong/70 bg-surface p-7 shadow-[0_40px_90px_-40px_rgba(0,0,0,0.5)] [corner-shape:squircle] dark:border-line-strong dark:ring-1 dark:ring-inset dark:ring-white/[0.08] dark:shadow-[0_36px_90px_-30px_rgb(0_0_0/0.85)] sm:p-9"
           >
             <h2 className="font-display text-[30px] font-semibold tracking-[-0.035em] text-ink">
               {mode === "signin" ? "Welcome back." : "Create your journal."}

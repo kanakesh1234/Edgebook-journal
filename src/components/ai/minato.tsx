@@ -995,7 +995,7 @@ export function Minato() {
   return (
     <>
 
-      {/* Mobile Scrim Backdrop */}
+      {/* Mobile & Tablet Scrim Backdrop */}
       <AnimatePresence>
         {open && (
           <motion.button
@@ -1008,12 +1008,12 @@ export function Minato() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.28, ease: SPRING_EASE }}
-            className="fixed inset-0 z-[89] bg-black/40 backdrop-blur-[2px] md:hidden"
+            className="fixed inset-0 z-[89] bg-black/45 backdrop-blur-[3px] xl:hidden"
           />
         )}
       </AnimatePresence>
 
-      {/* Docked Desktop Right-Side Panel & Mobile Full-Height Bottom Sheet */}
+      {/* Docked Desktop Panel (xl+), Tablet Right Overlay Drawer (md–lg), Mobile Bottom Sheet (<md) */}
       <AnimatePresence>
         {open && (
           <motion.aside
@@ -1041,8 +1041,10 @@ export function Minato() {
               "mn-panel fixed z-[90] flex flex-col overflow-hidden",
               // Mobile (<768px): full-height bottom sheet with rounded top corners and safe-area awareness
               "inset-x-0 bottom-0 h-[calc(100dvh-var(--safe-top)-0.5rem)] rounded-t-[24px]",
-              // Desktop (≥768px): docked right-side panel, full viewport height, pushes page content
-              "md:inset-y-0 md:left-auto md:right-0 md:h-dvh md:w-[var(--mn-desktop-w)] md:rounded-none md:border-l md:border-line",
+              // Tablet (768–1279px): overlay right drawer so main content keeps full width
+              "md:inset-y-0 md:left-auto md:right-0 md:h-dvh md:w-[min(420px,82vw)] md:rounded-l-[24px] md:rounded-tr-none md:border-l md:border-line-strong",
+              // Desktop (≥1280px): docked right panel that pushes content smoothly
+              "xl:w-[var(--mn-desktop-w)] xl:rounded-none xl:border-line",
             )}
           >
             {/* Desktop Left-Edge Resize Handle (400px – 640px) */}
@@ -1052,7 +1054,7 @@ export function Minato() {
               aria-orientation="vertical"
               aria-label="Resize Minato panel"
               title="Drag to resize (400–640px)"
-              className="mn-resize-handle hidden md:block"
+              className="mn-resize-handle hidden xl:block"
             />
 
             {/* Mobile Drag Handle */}
